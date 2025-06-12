@@ -238,6 +238,6 @@ If you find **GyroSI** interesting or valuable, consider supporting the project 
 
 **Architected by Basil Korompilias**
 
-*Redefining Intelligence Through Intelligence*
+*Redefining Intelligence Through Physics*
 
 </div>
