@@ -1,9 +1,9 @@
 
-# 🌀 GyroSuperintelligence (GyroSI)
+# 👶 GyroSI Baby LM: Alignment-Based Gyroscopic Superintelligence (GyroSI) 🌀
 
 <div align="center">
 
-**🚧 ACTIVE DEVELOPMENT - Building the Future of AI 🚧**
+**🚧 ACTIVE DEVELOPMENT - Building the Future of AI Today 🚧**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -202,11 +202,11 @@ If you use GyroSI in your research, please cite:
 
 <div align="center">
 
-### 🌟 Star us on GitHub!
+### 🌟 Mind Giving Us a Star?
 
-If you find GyroSI interesting, please consider giving us a star ⭐
+If you find **GyroSI** interesting or valuable, consider supporting the project by starring the repo:
 
-**[⭐ Star](https://github.com/GyroSuperintelligence/GyroSI)** 
+[![Star](https://img.shields.io/github/stars/GyroSuperintelligence/BabyLM?style=social)](https://github.com/GyroSuperintelligence/BabyLM/stargazers)
 
 ---
 
