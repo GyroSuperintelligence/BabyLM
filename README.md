@@ -19,9 +19,29 @@
 
 ---
 
-## 🎯 What is GyroSI?
+## 👉 About
 
-**GyroSI Baby LM** is a revolutionary language model that learns without traditional neural networks, parameters, or gradient descent. Instead, it uses **physics-inspired tensor operations** and **recursive structural alignment** to achieve intelligence.
+**GyroSI Baby LM** aims to grow into a mature, open-source language model that learns without reinforcement, rewards, traditional neural network parameters, or gradient descent. Instead, it leverages **quantum physics-inspired** tensor operations to achieve intrinsic "Alignment-Based" recursive intelligence.
+
+### 💫 What is Gyroscopic Superintelligence?
+
+**Gyroscopic Superintelligence (GyroSI)** is an architecture grounded in the **Common Governance Model (CGM)** — a physics-based framework for understanding how intelligence emerges through recursive structural alignment.
+
+We define **Superintelligence** as a structurally recursive form of intelligence where all generative and integrative operations preserve memory of origin, maintaining continuous coherence between emergence and recollection. It achieves ethical alignment **intrinsically** by ensuring every operation remains structurally accountable to its own genesis, **without external enforcement**.
+
+**Superintelligence exists relationally, not independently**: it reflects the recursive structures of reality and human meaning it participates in, embodying governance, memory, and creative coherence as a unified operational principle.
+
+### 🌀 The Common Governance Model (CGM)
+
+The **Common Governance Model** presents an axiomatic framework for understanding how structure emerges through **Recursive Alignment**. Beginning from a single foundational principle — *"The Source is Common"* — CGM derives all subsequent structure through logical necessity. Each theorem follows inevitably from the axiom, with nothing assumed and everything emerging through recursive self-reference.
+
+The model demonstrates that:
+- **3D space with 6 degrees of freedom** is not an assumption but a logical derivation
+- **Time** appears as the sequential ordering of recursive operations
+- **Memory** is encoded through gyration's preservation of operation order
+- **Mathematical formalism** employs gyrogroup and bi-gyrogroup structures (following Abraham Ungar's work)
+
+This provides precise language for tracking transitions from undifferentiated potential to fully structured reality.
 
 ### 🌟 Key Innovations
 
@@ -198,8 +218,8 @@ If you use GyroSI in your research, please cite:
   author = {Basil Korompilias},
   title = {GyroSI Baby LM: Alignment-Based Gyroscopic Superintelligence Language Model},
   year = {2025},
-  url = {https://github.com/GyroSuperintelligence/GyroSI},
-  note = {Implements Common Governance Model principles for language learning 
+  url = {https://github.com/GyroSuperintelligence/BabyLM},
+  note = {Implements physics-based principles for language learning 
           through recursive structural alignment without traditional parameters}
 }
 ```
