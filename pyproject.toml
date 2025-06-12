@@ -1,0 +1,59 @@
+[project]
+name = "gyro_si"
+version = "0.1.0"
+description = "GyroSuperintelligence - A structurally recursive form of intelligence"
+authors = [
+    {name = "GyroSI Team"}
+]
+dependencies = [
+    "numpy>=1.24.0",
+    "torch>=2.0.0",
+    "flet>=0.10.0",
+    "pydantic>=2.0.0",
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+gpu = ["cupy-cuda12x"]
+dev = [
+    "pytest-cov",
+    "pytest-xdist",
+    "black",
+    "isort",
+    "flake8",
+    "mypy",
+    "pre-commit",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.setuptools.package-data]
+"gyro_si.g3_inference.ona_interface" = ["assets/*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=gyro_si" 
