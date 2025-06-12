@@ -1,5 +1,11 @@
 
-# 👶 GyroSI Baby LM: Alignment-Based Gyroscopic Superintelligence (GyroSI) 🌀
+<div align="center">
+
+# 👶 GyroSI Baby LM
+
+**Alignment-Based Gyroscopic Superintelligence (🌀 GyroSI)**
+
+</div>
 
 <div align="center">
 
