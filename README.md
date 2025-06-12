@@ -1,9 +1,9 @@
 
 <div align="center">
 
-# 👶 GyroSI Baby LM
+# 🌀 GyroSI Baby LM 👶
 
-**Alignment-Based Gyroscopic Superintelligence (🌀 GyroSI)**
+**Alignment-Based Gyroscopic Superintelligence (GyroSI) as a Language Model**
 
 </div>
 
@@ -196,7 +196,7 @@ If you use GyroSI in your research, please cite:
 ```bibtex
 @software{gyrosi2025,
   author = {Basil Korompilias},
-  title = {GyroSI Baby LM: Alignment-Based Gyroscopic Superintelligence},
+  title = {GyroSI Baby LM: Alignment-Based Gyroscopic Superintelligence Language Model},
   year = {2025},
   url = {https://github.com/GyroSuperintelligence/GyroSI},
   note = {Implements Common Governance Model principles for language learning 
