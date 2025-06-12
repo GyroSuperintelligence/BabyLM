@@ -1,8 +1,9 @@
+Here's the improved README with your requested changes:
 
+```markdown
 # 🌀 GyroSuperintelligence (GyroSI)
 
 <div align="center">
-
 
 **🚧 ACTIVE DEVELOPMENT - Building the Future of AI 🚧**
 
@@ -31,31 +32,26 @@
 
 ## 🏗️ Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    🌀 GyroSI Core                       │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  CS → UNA → ONA → BU_In → BU_En → ONA → UNA → CS     │
-│   ↑                                            ↓       │
-│   └────────────── Helical Cycle ───────────────┘      │
-│                                                         │
-├─────────────────────────────────────────────────────────┤
-│ G1: 🎯 GyroAlignment    │ G4: 🌍 Intelligence-IN      │
-│ G2: 📚 GyroInformation  │ G5: 🚀 Intelligence-EN      │
-│ G3: 🧠 GyroInference    │ G6: 🔄 GyroCirculation     │
-└─────────────────────────────────────────────────────────┘
-```
+### Core G-Systems
 
-### 🧬 Five Memory Types
+- **G1: 🎯 GyroAlignment** - Pattern recognition and tensor operations
+- **G2: 📚 GyroInformation** - Information processing and storage  
+- **G3: 🧠 GyroInference** - Logical reasoning and interaction
+- **G4: 🌍 GyroIntelligence-IN** - Environmental integration
+- **G5: 🚀 GyroIntelligence-EN** - Policy execution and adaptation
+- **G6: 🔄 GyroCirculation** - System-wide coordination
 
-| Memory | Icon | Purpose | Maintained By |
-|--------|------|---------|---------------|
-| **Genetic** | 🧬 | Core patterns | G1 (Alignment) |
-| **Epigenetic** | 🔄 | Adaptive modifications | G2 (Information) |
-| **Structural** | 🏗️ | Session traces | G3 (Inference) |
-| **Somatic** | 🌍 | Environmental state | G4 (Intelligence-IN) |
-| **Immunity** | 🛡️ | Policy decisions | G5 (Intelligence-EN) |
+### Memory Architecture
+
+Each G-system maintains its own memory type:
+
+| G-System | Memory Type | Icon | Purpose |
+|----------|-------------|------|---------|
+| G1 | **Genetic** | 🧬 | Core structural patterns |
+| G2 | **Epigenetic** | 🔄 | Adaptive data modifications |
+| G3 | **Structural** | 🏗️ | Session and inference traces |
+| G4 | **Somatic** | 🌍 | Environmental state |
+| G5 | **Immunity** | 🛡️ | Policy decisions |
 
 ---
 
@@ -91,22 +87,23 @@ python -m gyro_si.demo
 
 <div align="center">
 
-| Component | Status | Progress |
-|-----------|--------|----------|
-| G1 Core Tensor Ops | 🟡 In Progress | ████████░░ 80% |
-| G2 Information Pipeline | 🟡 In Progress | ██████░░░░ 60% |
-| G3 Inference Engine | 🔴 Planning | ██░░░░░░░░ 20% |
-| G4/G5 Intelligence | 🔴 Design Phase | █░░░░░░░░░ 10% |
-| Frontend UI | 🟡 In Progress | █████░░░░░ 50% |
+| Component | Status | Progress | Notes |
+|-----------|--------|----------|-------|
+| G1 Core Tensor Ops | 🟢 Implemented | ██████████ 100% | Core operations complete |
+| G2 Information Pipeline | 🟡 In Progress | ████████░░ 80% | Building lexicon system |
+| G3 Inference Engine | 🟡 In Progress | ██████░░░░ 60% | API layer development |
+| G4 Intelligence-IN | 🟡 In Progress | ████░░░░░░ 40% | Environmental sensors |
+| G5 Intelligence-EN | 🟡 In Progress | ████░░░░░░ 40% | Policy framework |
+| G6 Circulation | 🟢 Implemented | ██████████ 100% | Coordination complete |
+| Frontend UI | 🟡 In Progress | █████░░░░░ 50% | Flet-based interface |
 
 </div>
 
 ### 🎯 Current Focus
 
-- Implementing core tensor operations (G1)
-- Building the quantization engine
-- Developing the Hebbian learning mechanism
-- Creating the audit system
+- Completing G2-G5 implementations based on published guides
+- Praying any of this will actually work
+- Testing
 
 ---
 
@@ -154,39 +151,29 @@ git commit -m "Add: Description of your amazing feature"
 git push origin feature/amazing-feature
 ```
 
-### 📋 Development Guidelines
-
-- ✅ Follow the alignment-based architecture
-- ✅ Add tests for new features
-- ✅ Update documentation
-- ✅ Ensure all tests pass
-- ❌ No external ML frameworks
-- ❌ No gradient descent
-- ❌ No traditional parameters
-
 ---
 
 ## 📚 Documentation
 
-- 📖 [Theoretical Foundation (CGM)](docs/cgm_theory.md)
-- 🔧 [Implementation Guide](docs/implementation.md)
-- 🧪 [API Reference](docs/api.md)
-- 🎓 [Tutorial: Your First Tensor](docs/tutorial.md)
+- 📖 [ＧＹＲ⊕ SuperIntelligence: Development Guides](https://korompilias.notion.site/SuperIntelligence-Development-Guides-1fc9ff44f4368022a2bad40a97bd7462)
+- 📖 [Common Governance Model (CGM): Foundations](https://korompilias.notion.site/Common-Governance-Model-Foundations-1ee9ff44f4368050af28d1c0f8aae89a)
 
 ---
 
-## 📊 Performance
+## 📊 Predicted Performance
 
 <div align="center">
 
-| Platform | Tokens/sec | Memory | Response Time |
-|----------|------------|--------|---------------|
+| Platform | Tokens/sec* | Memory* | Response Time* |
+|----------|-------------|---------|----------------|
 | 🥧 Raspberry Pi 5 | 8-12k | 400MB | 200ms |
 | 💻 2015 MacBook | 20-30k | 1GB | 100ms |
 | 📱 iPhone 15 Pro | 50-70k | 2GB | 50ms |
 | 🚀 M4 MacBook | 100k+ | 4GB | 30ms |
 
-*No GPU required - Runs on CPU efficiently!*
+**Predicted based on theoretical calculations and architecture design*
+
+*No GPU required - Designed for CPU efficiency!*
 
 </div>
 
@@ -221,25 +208,12 @@ If you use GyroSI in your research, please cite:
 
 If you find GyroSI interesting, please consider giving us a star ⭐
 
-**[⭐ Star](https://github.com/GyroSuperintelligence/GyroSI)** | **[🐛 Issues](https://github.com/GyroSuperintelligence/GyroSI/issues)** | **[💬 Discussions](https://github.com/GyroSuperintelligence/GyroSI/discussions)**
+**[⭐ Star](https://github.com/GyroSuperintelligence/GyroSI)** 
 
 ---
 
-**Built with 🧠 by the GyroSI Team**
+**Architected by Basil Korompilias**
 
-*Redefining Intelligence Through Structure*
+*Redefining Intelligence Through Intelligence*
 
 </div>
-```
-
-This enhanced README:
-
-1. **Visual Appeal**: ASCII art header, emojis throughout, progress bars, and tables
-2. **Clear Status**: Prominently shows it's under active development with progress indicators
-3. **Better Organization**: Sections flow logically from concept → installation → development
-4. **Engaging Content**: Highlights unique features upfront (zero parameters, runs anywhere)
-5. **Professional Look**: Badges, centered elements, and consistent formatting
-6. **Developer-Friendly**: Clear contribution guidelines and project structure
-7. **Performance Focus**: Shows it runs on various hardware without GPUs
-
-The design balances professionalism with visual interest, making it immediately clear what makes GyroSI unique while acknowledging its development status.
