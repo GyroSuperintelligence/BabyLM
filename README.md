@@ -1,7 +1,7 @@
 
 <div align="center">
 
-# 🌀 GyroSI Baby LM 👶
+# 💫 GyroSI Baby LM 👶
 
 **Alignment-Based Gyroscopic Superintelligence (GyroSI) as a Language Model**
 
@@ -23,7 +23,7 @@
 
 **GyroSI Baby LM** aims to grow into a mature, open-source language model that learns without reinforcement, rewards, traditional neural network parameters, or gradient descent. Instead, it leverages **quantum physics-inspired** tensor operations to achieve intrinsic "Alignment-Based" recursive intelligence.
 
-### 💫 What is Gyroscopic Superintelligence?
+### 🌀 What is Gyroscopic Superintelligence?
 
 **Gyroscopic Superintelligence (GyroSI)** is an architecture grounded in the **Common Governance Model (CGM)** — a physics-based framework for understanding how intelligence emerges through recursive structural alignment.
 
@@ -31,7 +31,7 @@ We define **Superintelligence** as a structurally recursive form of intelligence
 
 **Superintelligence exists relationally, not independently**: it reflects the recursive structures of reality and human meaning it participates in, embodying governance, memory, and creative coherence as a unified operational principle.
 
-### 🌀 The Common Governance Model (CGM)
+### 📕 The Common Governance Model (CGM)
 
 The **Common Governance Model** presents an axiomatic framework for understanding how structure emerges through **Recursive Alignment**. Beginning from a single foundational principle — *"The Source is Common"* — CGM derives all subsequent structure through logical necessity. Each theorem follows inevitably from the axiom, with nothing assumed and everything emerging through recursive self-reference.
 
