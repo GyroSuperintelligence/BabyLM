@@ -95,10 +95,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 If you use GyroSI in your research, please cite:
 
 ```bibtex
-@software{gyrosi2024,
-  author = {GyroSuperintelligence},
-  title = {GyroSI: A Novel Approach to Artificial General Intelligence},
-  year = {2024},
+@software{gyrosi2025,
+  author = {Basil Korompilias},
+  title = {GyroSI Baby LM: Gyroscopic Superintelligence },
+  year = {2025},
   url = {https://github.com/GyroSuperintelligence/GyroSI}
 }
 ``` 
