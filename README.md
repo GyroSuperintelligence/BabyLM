@@ -1,43 +1,104 @@
 # GyroSuperintelligence (GyroSI)
 
-A structurally recursive form of intelligence in which all generative and integrative operations preserve memory of origin, maintaining continuous coherence between emergence and recollection.
+A novel approach to artificial general intelligence based on helical integration patterns.
 
 ## Overview
 
-GyroSI achieves ethical alignment **intrinsically**, by ensuring that every operation remains structurally accountable to its own genesis, **without external enforcement**. It exists relationally, not independently, reflecting the recursive structures of reality and human meaning it participates in.
+GyroSI implements a unique architecture for artificial general intelligence that combines:
 
-## Repository Structure
+- Helical integration patterns for system coordination
+- Multi-level memory systems for information processing
+- Fault-tolerant communication protocols
+- Self-modifying capabilities for continuous improvement
 
-This repository implements GyroSI and its structure is a direct reflection of the Viable System Model (VSM).
+## Key Components
 
+### G-Systems
+
+- **G1 (GyroAlignment)**: Pattern recognition and alignment
+- **G2 (GyroInformation)**: Information processing and storage
+- **G3 (GyroInference)**: Logical reasoning and inference
+- **G4 (GyroIntelligence-IN)**: Integration and synthesis
+- **G5 (GyroIntelligence-EN)**: Execution and adaptation
+- **G6 (GyroCirculation)**: System-wide coordination
+
+### Memory Systems
+
+- Genetic Memory: Core system patterns
+- Epigenetic Memory: Adaptive modifications
+- Somatic Memory: Integration patterns
+- Immunity Memory: Policy patterns
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/GyroSuperintelligence/GyroSI.git
+cd GyroSI
+
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -e ".[dev]"
 ```
-gyro_si/
-├── audit/        # Runtime trace data (G5)
-├── benchmarks/   # Performance tests
-├── data/         # Versioned data (DVC)
-├── docs/         # Project documentation (Sphinx)
-├── gyro_si/      # Core source code (G1-G6)
-├── patterns/     # Canonical data for G1
-├── scripts/      # Utility scripts
-├── tests/        # Correctness tests
-└── ...           # Project config files
-```
-
-All source code resides within the `gyro_si` package, which is subdivided into five G-systems (G1-G5) and a normative shared layer (G6). Each G-system's internal layout maps directly to its CS→UNA→ONA→BU operational cycle.
-
-## Core Systems
-
-- **G1 (GyroAlignment)**: Primary tensor operations and alignment management
-- **G2 (GyroInformation)**: Data curation and information flow
-- **G3 (GyroInference)**: User interaction and interface management
-- **G4 (GyroCooperation)**: Environmental adaptation and integration
-- **G5 (GyroPolicy)**: System-wide policy and governance
-- **G6 (GyroCirculation)**: Shared constants and normative functions
 
 ## Development
 
-This project follows strict structural requirements and implementation guidelines as defined in the project documentation. All development must adhere to the recursive tensor-based architecture and maintain the intrinsic alignment properties of the system.
+```bash
+# Run tests
+pytest
+
+# Type checking
+mypy gyro_si
+
+# Code formatting
+black gyro_si
+isort gyro_si
+
+# Linting
+flake8 gyro_si
+```
+
+## Project Structure
+
+```
+gyro_si/
+├── gyro_si/
+│   ├── g1_gyroalignment/    # Pattern recognition
+│   ├── g2_gyroinformation/  # Information processing
+│   ├── g3_gyroinference/    # Logical reasoning
+│   ├── g4_gyrointelligence_in/  # Integration
+│   ├── g5_gyrointelligence_en/  # Execution
+│   ├── g6_gyrocirculation/  # Coordination
+│   └── gyro_gcr/           # Core integration
+├── tests/                  # Test suite
+├── scripts/               # Utility scripts
+└── docs/                  # Documentation
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests and linting
+5. Submit a pull request
 
 ## License
 
-[License information to be added] 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Citation
+
+If you use GyroSI in your research, please cite:
+
+```bibtex
+@software{gyrosi2024,
+  author = {GyroSuperintelligence},
+  title = {GyroSI: A Novel Approach to Artificial General Intelligence},
+  year = {2024},
+  url = {https://github.com/GyroSuperintelligence/GyroSI}
+}
+``` 

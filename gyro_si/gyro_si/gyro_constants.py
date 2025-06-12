@@ -15,6 +15,24 @@ G4_NAME = "GyroCooperation"
 G5_NAME = "GyroPolicy"
 G6_NAME = "GyroCirculation"
 
+# Message field definitions
+STANDARD_FIELDS = [
+    "type",           # Message type identifier
+    "source",         # Originating G-system
+    "destination",    # Target G-system or "broadcast"
+    "cycle_index",    # Monotonic cycle counter
+    "tensor_context", # Helical state information
+    "payload",        # Message-specific data
+    "timestamp"       # ISO 8601 timestamp
+]
+
+HELICAL_CONTEXT_FIELDS = [
+    "cumulative_phase",    # Total helical progress [0, 4π)
+    "chirality_phase",     # Position within forward/return [0, 2π)
+    "helical_position",    # Normalized fraction [0, 1)
+    "spinor_cycle_count"   # Number of completed 720° revolutions
+]
+
 # Operational constants
 DEFAULT_BATCH_SIZE = 32
 DEFAULT_LEARNING_RATE = 1e-4
@@ -48,6 +66,8 @@ __all__ = [
     "G4_NAME",
     "G5_NAME",
     "G6_NAME",
+    "STANDARD_FIELDS",
+    "HELICAL_CONTEXT_FIELDS",
     "DEFAULT_BATCH_SIZE",
     "DEFAULT_LEARNING_RATE",
     "DEFAULT_SEQUENCE_LENGTH",

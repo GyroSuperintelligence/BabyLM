@@ -37,4 +37,12 @@ class GyroConfigError(GyroError):
 
 class GyroCommunicationError(GyroError):
     """Errors in inter-system communication."""
+    pass
+
+class CommunicationError(GyroError):
+    """Errors in message format and validation."""
+    pass
+
+class RoutingError(GyroError):
+    """Errors in message routing and delivery."""
     pass 
