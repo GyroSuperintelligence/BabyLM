@@ -6,7 +6,7 @@ when transactions are aborted, ensuring atomic operations.
 
 Expected imports when modules are available:
 - from gyro_si.gyro_gcr.gyro_config import config
-- from gyro_si.g1_gyroalignment.cs.identity import tensor_transaction
+- from gyro_si.g1_gyroalignment.cs.g1_governance import tensor_transaction
 """
 
 import pytest
@@ -15,7 +15,7 @@ from unittest.mock import Mock, MagicMock
 
 # Gracefully handle missing modules
 gyro_config = pytest.importorskip("gyro_si.gyro_gcr.gyro_config", reason="gyro_gcr not yet implemented")
-g1_identity = pytest.importorskip("gyro_si.g1_gyroalignment.cs.identity", reason="g1_gyroalignment not yet implemented")
+g1_identity = pytest.importorskip("gyro_si.g1_gyroalignment.cs.g1_governance", reason="g1_gyroalignment not yet implemented")
 
 @pytest.mark.skip(reason="Pending implementation of G1–G5 subsystems")
 class TestTensorTransactions:

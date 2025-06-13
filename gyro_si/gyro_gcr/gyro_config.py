@@ -44,5 +44,6 @@ class GyroCardioRespiratoryConfig:
         """Developer-friendly representation."""
         return self.__str__()
 
+
 # Shared singleton instance to be imported by all modules
-config = GyroCardioRespiratoryConfig() 
+config = GyroCardioRespiratoryConfig()

@@ -288,7 +288,7 @@ class GyroTensor:
         Args:
             target_stage: Stage to transition to
             phi: Phase input for quantization - REQUIRED for all transitions
-                 to ensure deterministic helical progression
+                 to ensure alignment-based helical progression
 
         Raises:
             StructuralViolation: If transition is invalid

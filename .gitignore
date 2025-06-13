@@ -165,4 +165,10 @@ $RECYCLE.BIN/
 .fuse_hidden*
 .directory
 .Trash-*
-.nfs* 
+.nfs*
+
+# pytest cache
+.pytest_cache/
+
+# Python build artefacts
+gyro_si.egg-info/ 
