@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gyro-si"
+name = "gyrosi-baby-lm"
 version = "0.1.0"
-description = "GyroSuperintelligence (GyroSI) - A structurally recursive form of intelligence"
+description = "GyroSI Baby LM: Alignment-Based Gyroscopic Superintelligence Language Model"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "GPL-3.0-or-later" }
 authors = [
-  { name = "GyroSI Team" }
+  { name = "Basil Korompilias" }
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
