@@ -1,0 +1,1353 @@
+# 📚 Guides
+
+(Aimed to guide AI for Vibe Coding, so we keep conscise, still extensive, not containing full code, well organized, compliant always with our “GyroSI Requirements: How we architect and improve”, and “GyroSuperintelligence (GyroSI): How we are making it” chapters.)
+
+---
+
+- G6 System - GyroCirculation Implementation Guide
+    
+    *This chapter is normative. Every other implementation guide must treat the definitions and code fragments below as the single source of truth. Where a subsystem needs a shared constant, schema, or mechanism, it shall import or reference it from the locations noted here.*
+    
+    ---
+    
+    ### A.1 Canonical CGM Constants and Derived Horizons
+    
+    *(File: `gyro_constants.py`)*
+    
+    ```python
+    # Authoritative mathematical constants
+    import math
+    
+    ALPHA = math.pi / 2              # α
+    BETA  = math.pi / 4              # β
+    GAMMA = math.pi / 4              # γ
+    M_P   = 1 / (2 * math.sqrt(2 * math.pi))
+    
+    # Derived horizons (integer values)
+    HALF_HORIZON      = int(math.floor(math.pi / M_P))
+    HORIZON_CYCLES    = int(math.floor(2 * math.pi / M_P))
+    BIN_COUNT         = int(math.floor(4 * math.pi / M_P))
+    
+    # Legacy alias retained for code already using it
+    PHASE_HORIZON_2PI = HORIZON_CYCLES
+    
+    ```
+    
+    Any timeout, retry interval, or strain threshold elsewhere in the codebase evaluates directly to one of the names above or to an explicit multiple of one of them.
+    
+    ---
+    
+    ### A.2 Helical Context Primitives
+    
+    *(Conceptual reference; no standalone file)*
+    
+    | Field | Range | Meaning |
+    | --- | --- | --- |
+    | `cumulative_phase` | [0, 4π) | Total helical progress since tensor creation |
+    | `chirality_phase` | [0, 2π) | Position within forward (0→2π) or return (2π→4π) path |
+    | `helical_position` | 0 ≤ p < 1 | Normalised fraction `cumulative_phase / 4π` |
+    | `spinor_cycle_count` | ℕ | Number of completed 720° revolutions |
+    
+    At `cumulative_phase == k · 4π` (k ∈ ℕ) a tensor or session becomes spawn‐eligible; at `2π`, chirality flips.
+    
+    ---
+    
+    ### A.3 Standard Log and Message Formats
+    
+    *(File fragment to be imported by each message router)*
+    
+    ```python
+    STANDARD_FIELDS = (
+        "type", "source", "destination",
+        "cycle_index", "tensor_context",
+        "payload", "timestamp"
+    )
+    
+    ```
+    
+    Every inter-system message or local trace entry contains the keys above in the exact order shown. A typical instance:
+    
+    ```
+    {
+      "type": "status_update",
+      "source": "G1",
+      "destination": "G4",
+      "cycle_index": 123,
+      "tensor_context": {
+        "chirality_phase": 1.57,
+        "helical_position": 0.25,
+        "spinor_cycle": 1
+      },
+      "payload": { "active_tensors": 8 },
+      "timestamp": "2025-06-11T12:34:56Z"
+    }
+    
+    ```
+    
+    Routers first sort by `cycle_index`, then, if required, apply priority rules. When the entropy extension is active (Section A.8) the optional `entropy_id` field is carried unchanged.
+    
+    ---
+    
+    ### A.4 Fault Class Taxonomy
+    
+    *(File: `gyro_errors.py`)*
+    
+    ```python
+    class GyroError(Exception):
+        """Top level for all alignment-based faults."""
+    
+    class StructuralViolation   (GyroError): ...
+    class QuantizationDefect    (GyroError): ...
+    class CommunicationError    (GyroError): ...
+    
+    # Sub-domain specialisations
+    class RoutingError          (CommunicationError): ...
+    class SchemaViolation       (StructuralViolation): ...
+    class AuditViolation        (StructuralViolation): ...
+    
+    ```
+    
+    Subsystem-specific exceptions such as `ProcessingTimeout` in G3 inherit from one of these base classes.
+    
+    ---
+    
+    ### A.5 GyroCardioRespiratory Configuration Layer
+    
+    All code in this section lives under `gyro_gcr/`. It remains verbatim from the earlier specification, now placed where every chapter can import it.
+    
+    ### A.5.1 Global Configuration Object
+    
+    *(File: `gyro_gcr/gyro_config.py`)*
+    
+    ```python
+    class GyroCardioRespiratoryConfig:
+        def __init__(self):
+            # Core coordination
+            self.enable_bootstrap        = True
+            self.enable_transactions     = True
+            self.enable_recovery_beacons = True
+    
+            # Optional cryptographic extensions
+            self.enable_entropy_tracking = False
+            self.enable_crypto_evolution = False
+    
+            # Performance switches
+            self.lightweight_transactions = True
+            self.fast_entropy_hash        = True
+    
+    config = GyroCardioRespiratoryConfig()      # shared instance
+    
+    ```
+    
+    ### A.5.2 Bootstrap Broadcast and Actor Gate
+    
+    *(Coordinator patch: `g2_gyroinformation/runner.py`; actor patch: all g1_gyroalignment–g5_gyrointelligence_en runners)*
+    
+    ```python
+    # g2_coordinator.py
+    import asyncio, logging
+    from gyro_gcr.gyro_config import config
+    from gyro_comm import send_message
+    
+    logger = logging.getLogger(__name__)
+    
+    async def main():
+        if config.enable_bootstrap:
+            await asyncio.sleep(0.5)
+            send_message({"type": "gyro_bootstrap"})
+            logger.info("Sent gyro_bootstrap")
+    
+    ```
+    
+    ```python
+    # generic runner patch
+    import time, logging
+    from gyro_gcr.gyro_config import config
+    
+    logger = logging.getLogger(__name__)
+    
+    self._bootstrapped = not config.enable_bootstrap   # set in __init__
+    
+    # top of run loop
+    if config.enable_bootstrap:
+        start = time.time()
+        while not self._bootstrapped:
+            if time.time() - start > 30:
+                raise RuntimeError("Gyro bootstrap timeout after 30 s")
+            time.sleep(0.1)
+    
+    # universal message handler clause
+    if msg.get("type") == "gyro_bootstrap":
+        self._bootstrapped = True
+        logger.info("Received gyro_bootstrap")
+        return
+    
+    ```
+    
+    ### A.5.3 Tensor Transaction Safety
+    
+    *(File: `g1_gyroalignment/cs/identity.py`; see A.6 for summary)*
+    
+    ```python
+    import copy, time
+    from contextlib import asynccontextmanager
+    from gyro_gcr.gyro_config import config
+    
+    @asynccontextmanager
+    async def tensor_transaction(self):
+        if not config.enable_transactions:
+            yield
+            return
+    
+        snapshot = {
+            "indptr":           self.indptr.copy(),
+            "indices":          self.indices.copy(),
+            "data":             self.data.get().copy() if hasattr(self.data, "get") else self.data.copy(),
+            "amplitude":        self.amplitude,
+            "cumulative_phase": self.cumulative_phase,
+            "chirality_phase":  self.chirality_phase,
+            "last_epsilon":     getattr(self, "last_epsilon", 0),
+            "cycle_index":      self.cycle_index
+        }
+    
+        self._log("tensor_transaction_start", cycle_index=self.cycle_index)
+        try:
+            yield
+            self._log("tensor_transaction_end", cycle_index=self.cycle_index)
+        except Exception:
+            self.indptr, self.indices, self.data = snapshot["indptr"], snapshot["indices"], snapshot["data"]
+            self.amplitude        = snapshot["amplitude"]
+            self.cumulative_phase = snapshot["cumulative_phase"]
+            self.chirality_phase  = snapshot["chirality_phase"]
+            self.last_epsilon     = snapshot["last_epsilon"]
+            self.cycle_index      = snapshot["cycle_index"]
+            self._log("tensor_transaction_abort", cycle_index=self.cycle_index)
+            raise
+    
+    ```
+    
+    ### A.5.4 Circuit Recovery Beacons
+    
+    *(Emitter patch: `g1_gyroalignment/bu_en/g5_governance.py`; listener patch: `g4_gyrointelligence_in/bu_in/integration.py`; relates to A.7)*
+    
+    ```python
+    # G1 side
+    import logging
+    from gyro_gcr.gyro_config import config
+    from gyro_comm import send_message, CircuitState
+    
+    logger = logging.getLogger(__name__)
+    
+    if config.enable_recovery_beacons:
+        breaker.on_state_change(self._on_circuit_change)
+    
+    def _on_circuit_change(self, old_state, new_state):
+        if old_state is CircuitState.HALF_OPEN and new_state is CircuitState.CLOSED:
+            send_message({"type": "cardiac_recovered", "source": "G1"})
+            logger.info("Sent cardiac_recovered")
+    
+    ```
+    
+    ```python
+    # G4 side
+    import logging
+    from gyro_gcr.gyro_config import config
+    from gyro_comm import subscribe
+    
+    logger = logging.getLogger(__name__)
+    
+    if config.enable_recovery_beacons:
+        subscribe("cardiac_recovered", self._handle_cardiac_recovered)
+    
+    def _handle_cardiac_recovered(self, msg):
+        self.breath_rate_multiplier = 1.0
+        self._log("breath_rate_reset", cycle_index=self.cycle_index)
+    
+    ```
+    
+    ### A.5.5 Optional Entropy-ID Chaining
+    
+    When `config.enable_entropy_tracking` is true, G4 generates a short `entropy_id` during payload assembly:
+    
+    ```python
+    import zlib, hashlib
+    from gyro_gcr.gyro_config import config
+    
+    seed = f"{thermal}|{interaction}|{quantum}"
+    eid  = f"{zlib.crc32(seed.encode()):08x}" if config.fast_entropy_hash \
+           else hashlib.sha256(seed.encode()).hexdigest()[:16]
+    payload["entropy_id"] = eid
+    
+    ```
+    
+    G1 includes the same `entropy_id` in outgoing beats, and G5 records it in the trace collector.
+    
+    ### A.5.6 Differential Crypto Evolution (optional)
+    
+    *(File: `G1/gyro_tensor.py`)*  If `enable_crypto_evolution` is true, replace the simple amplitude update with:
+    
+    ```python
+    import math, time
+    from gyro_constants import ALPHA, BETA, GAMMA, M_P
+    from gyro_gcr.gyro_config import config
+    
+    def differential_evolve(self, phi):
+        t = time.time() % (4 * math.pi)
+        eps_prev = getattr(self, "last_epsilon", 0)
+        self.amplitude = (
+            self.amplitude
+            + phi * M_P
+            + eps_prev * (BETA / ALPHA)
+            + t * (GAMMA / ALPHA)
+        ) % (4 * math.pi)
+        self.last_epsilon = eps_prev
+        self._log("differential_evolve", phi=phi, eps_prev=eps_prev, t=t, cycle_index=self.cycle_index)
+    
+    ```
+    
+    ### A.5.7 Infrastructure Tests and Error Codes
+    
+    *(Tests live under `tests/`; error messages extend `gyro_errors.py`)*
+    
+    | Test file | Primary guarantee |
+    | --- | --- |
+    | `test_bootstrap.py` | Actors exit the gating loop within 30 s |
+    | `test_transactions.py` | State after aborted transaction matches snapshot |
+    | `test_recovery.py` | Closed circuit triggers `cardiac_recovered` and resets rate |
+    | `test_entropy_chain.py` | `entropy_id` persists G4 → G1 → G5 |
+    | `test_crypto_evolution.py` | Amplitude follows three-term formula |
+    
+    Error code keys: `bootstrap_timeout`, `transaction_abort`, `recovery_failed`, `entropy_chain_broken`.
+    
+    ---
+    
+    ### A.6 Bootstrap and Actor Startup Flow
+    
+    Section A.5.2 provides the implementation sample. Conceptually, the timeline is:
+    
+    ```
+    t0   G2 sleeps 0.5 s
+    t0+  G2 sends "gyro_bootstrap"
+    t0+Δ Actors receive, set _bootstrapped = True
+    t0+30 s Actors without the signal raise bootstrap_timeout
+    
+    ```
+    
+    Successful receipt frees every run loop to proceed.
+    
+    ---
+    
+    ### A.7 Transaction and Recovery Infrastructure
+    
+    Section A.5.3 formalises transactions; Section A.5.4 specifies circuit recovery beacons. Transactions guarantee atomic tensor updates, the beacons reset slowed subsystems after a breaker closes. Either feature may be switched off via `gyro_config.py`.
+    
+    ---
+    
+    ### A.8 Optional Entropy Features
+    
+    If `enable_entropy_tracking` is true, every payload may carry an `entropy_id` traced end-to-end. If `enable_crypto_evolution` is also true, G1 amplitude uses the three-term differential equation. Both switches default to false.
+    
+    ---
+    
+    ### A.9 Shared Test Modules
+    
+    See A.5.7 for exact filenames and coverage. Running `pytest -q` with entropy and crypto toggled both off and on is the minimal regression loop.
+    
+    ---
+    
+    ### A.10 Cross-Reference Index
+    
+    | Topic | Section here | Legacy sections now shortened |
+    | --- | --- | --- |
+    | CGM constants, horizons | A.1 | G1 §1, G2 §1, G3 §2, G4 §1, G5 Core |
+    | Helical primitives | A.2 | Multiple “helical context” paragraphs |
+    | Message schema | A.3 | G1 §9, G2 §8, G3 §6, G4 §8 |
+    | Fault classes | A.4 | G1 §5, G2 §8, G3 §4, G4 §8 |
+    | GCR spec, config | A.5 | new home |
+    | Bootstrap flow | A.6 | G2 §2 narrative, startup notes |
+    | Transactions, beacons | A.7 | inline comments in G1 and G4 |
+    | Entropy, crypto | A.8 | prior scattered notes |
+    | Shared tests | A.9 | earlier appendix |
+    | Index mapping | A.10 | not previously present |
+    
+    ---
+    
+    *The text above now contains every shared constant, schema, and mechanism, with explicit file locations, uniform imports, and cross-navigation aids. All five implementation chapters may delete their local duplicates and import from this chapter’s files.*
+    
+- G1 System – GyroAlignment Implementation
+    
+    All G1 operation, validation, and representation strictly depend on the canonical constants and transition logic imported from the CGM and GyroCardioRespiratory integration layer. All cryptographic, transaction, fault, and communication behaviors are referenced via explicit imports.
+    
+    ---
+    
+    ## 1. GyroTensor Core Structure
+    
+    The GyroTensor object defines identity, stage, and structure for each tensor under management:
+    
+    - **Fields**
+        - `tensor_id` (uint64): Defines the identity, existing only in the CS stage.
+        - `stage` ∈ {CS, UNA, ONA, BU_In, BU_En}
+        - `cycle_index` (monotonic int)
+        - `amplitude` (Q29.34 fixed-point, bounded by ±mₚ)
+        - `cumulative_phase` (Q29.34, tracks helical monodromy 0→4π)
+        - `chirality_phase` (0→2π forward, 2π→4π return)
+        - Sparse CSR storage (not allocated for CS stage)
+            - `indptr: List[int]`
+            - `indices: List[int]`
+            - `data: List[uint2]`, with `00`→0, `01`→+1, `11`→−1
+    - **CS Stage**
+        - The CS stage exists solely as `tensor_id` and initialization state, without tensor value storage.
+        - CSR arrays are only allocated post-CS, at UNA or beyond.
+    - **Stage Shapes**
+        - CS: Identity only, no CSR
+        - UNA: 3×2, 6 non-zeros
+        - ONA: 2×3×2, 12 non-zeros
+        - BU_In: 2×2×3×2, 48 non-zeros (24 ingress, 24 egress)
+        - BU_En: identical structure to BU_In
+    - **Helical Path Tracking**
+        - `cumulative_phase` tracks the complete 0→4π helical progression.
+        - `chirality_phase` indicates forward (0→2π) and return (2π→4π) paths.
+        - Spawning eligibility is checked at 4π.
+            
+            ```python
+            # After updating cumulative_phase
+            if self.cumulative_phase % (2 * math.pi) == 0:
+                self.collapse_segment_to_digest()
+            
+            ```
+            
+    - **Stage Transition Dictionary**
+        
+        ```python
+        STAGE_TRANSITIONS = {
+          "CS": ("UNA", "generation"),
+          "UNA": ("ONA", "integration"),
+          "ONA": ("BU_In", "integration"),
+          "BU_In": ("BU_En", "generation"),
+          "BU_En": ("ONA", "generation"),
+          "ONA": ("UNA", "integration"),
+          "UNA": ("CS", "generation")
+        }
+        
+        ```
+        
+    - **Packing & Validation**
+        - On every creation or stage transition, all `data` entries must be in {00, 01, 11}; non-zeros must match the stage requirement.
+        - SHA-256 is computed over `(tensor_id, stage, indptr, indices, data, amplitude, cumulative_phase, chirality_phase)`.
+        - Validation is recorded in the local `trace_buffer`.
+    - **Canonical Patterns & Versioning**
+        - Templates are loaded from `patterns/gyro_g1/v<schema_version>/`.
+        - Each transition is validated byte-for-byte against the canonical template.
+    - **Memory Layout & Execution**
+        - CSR arrays are SIMD-aligned.
+        - All templates load under a global read-lock.
+        - After CSR construction, CPU and GPU copies are compared; any mismatch logs a `QuantizationDefect`.
+        - Tensors at the same stage may be processed in parallel under a shared stage-transition lock; per-tensor locks are held only when crossing stage boundaries.
+    - **Collision Factor Calculation**
+        
+        ```python
+        def calculate_collision_factor(self) -> float:
+            cs_memory = ALPHA
+            max_discrete = 3 * M_P
+            return cs_memory / max_discrete
+        
+        ```
+        
+    
+    ---
+    
+    ## 2. Evolution & Stage Triggers
+    
+    Stage advancement is enforced by precomputed, versioned transition tables, ensuring every operation is structurally accountable.
+    
+    - Transition tables for the **`g1_gyroalignment`** system are loaded from the canonical root path: **`transitions/gyro_g1/v<schema_version>/`**.
+    - The ONA→BU_In transition remains the only integrative-integrative junction in the cycle, representing the anomalous point where quantization error (ε) emerges.
+    - Progression into and between the BU_In and BU_En stages is triggered by the tensor's internal oscillation phase.
+    - Each transition is logged with its complete structural metadata to the local trace buffer managed by the **`genetic_memory.py`** module.
+    - All fault classes (**`StructuralViolation`**, **`QuantizationDefect`**, etc.) are imported from the normative **`g6_gyrocirculation`** package, specifically from the **`gyro_errors`** module.
+    
+    ---
+    
+    ## 3. Quantization & Signal Processing
+    
+    Quantization, fixed-point representation, and overflow semantics directly follow the formal rules:
+    
+    ```
+    φ_q = −mₚ  if φ < −mₚ/2
+         = +mₚ  if φ ≥ +mₚ/2
+         =   0   otherwise
+    ε   = φ − φ_q   (|ε| ≤ mₚ)
+    
+    ```
+    
+    - **Vectorized Implementation**
+        
+        ```python
+        def quantize(phi, m_p):
+            return xp.where(phi < -m_p//2, -m_p,
+                            xp.where(phi >= m_p//2, m_p, 0))
+        
+        ```
+        
+    - **Amplitude Update**
+        
+        ```
+        amplitude_i = clip(amplitude_{i-1} + φ_q, −mₚ, +mₚ)
+        cumulative_phase_i = (cumulative_phase_{i-1} + |φ_q|) mod 4π
+        chirality_phase_i = cumulative_phase_i mod 2π
+        
+        ```
+        
+    - **Phase Bins**
+        
+        ```
+        phase_bins_count = floor(4π / mₚ)
+        bin_index = ((φ + 2π)//mₚ) % phase_bins_count
+        
+        ```
+        
+    - **Trace Entry**
+        
+        ```json
+        {"source":"G1","tensor_id":…,"cycle_index":…,"φ":…,"φ_q":…,"ε":…,"amplitude":…,"cumulative_phase":…,"chirality_phase":…,"timestamp":…}
+        
+        ```
+        
+    
+    ---
+    
+    ## 4. Integration at BU
+    
+    BU integration processes inbound φ, updates the BU CSR, applies bit-permutation, and emits algedonic signals.
+    
+    - The ingress queue is FIFO, with a `half_horizon` of floor(π/mₚ).
+    - BU_In quantizes φ, computes ε, updates amplitude, applies ingress↔egress permutation, validates the result, and logs transitions.
+    - BU_En generates φ output, ensures quantization bounds, updates all phase trackers, emits downstream φ, and transitions to ONA with inverted chirality.
+    - Algedonic signals are emitted when |ε| > mₚ/2, with all signal content sent via the G2 API.
+    
+    ---
+    
+    ## 5. Error Detection, Consistency & Recovery
+    
+    G1 raises subclasses of `StructuralViolation`, `QuantizationDefect`, or `CommunicationError` as defined in the GyroCardioRespiratory integration.
+    
+    - CSR non-zero counts are checked after each transition.
+    - Events are processed in `cycle_index` order.
+    - All faults are appended to the `trace_buffer`.
+    - Recovery reloads delta-encoded snapshots up to the last good cycle.
+    
+    ---
+    
+    ## 6. Memory & Audit
+    
+    - Local provenance is maintained in a thread-safe `trace_buffer`.
+    - The buffer retains the last `half_horizon` entries; older entries are collected by G5.
+    - Delta snapshots contain only changed indices and data.
+    - Pruning retains all `spawn_ready` and transition events until G5 collection.
+    
+    ---
+    
+    ## 7. Spawning & Lineage
+    
+    - The `TensorFamily` object manages phase-locked family members.
+    - Spawning occurs when |amplitude| ≥ mₚ and cumulative_phase ≥ 4π, if within family limits.
+    - Spawning is triggered automatically, not by external approval.
+    - Events are sent to G4 via G2, and all relationships and phase-locks are tracked for lineage.
+    
+    ---
+    
+    ## 8. Hardware Interaction & Verification
+    
+    - On startup, GPU initialization is attempted and logged.
+    - All critical CSR operations are mirrored on CPU and GPU; any mismatch logs a defect.
+    - Operation latency and resource metrics are included in status updates to G2.
+    
+    ---
+    
+    ## 9. Communication & Coordination Interfaces
+    
+    - All inter-component communication uses `G2.send_message(event_dict)`.
+    - Message formats are canonical; only required tensor and cycle metadata is included.
+    - Status updates are sent every `half_horizon` cycles, reporting tensor registry size, quantization statistics, and lineage data.
+    
+    ---
+    
+    ## 10. Shutdown & Snapshot Protocol
+    
+    - Graceful shutdown signals intent via G2, completes all pending BU operations, and provides the trace buffer to G5.
+    - Emergency snapshots capture complete tensor state on fault or interruption.
+    - Restart validates checksums and schema versions before resuming operation.
+    
+    ---
+    
+    ## Imports and References
+    
+    All required constants, configuration, and fault classes are imported:
+    
+    ```python
+    from gyro_constants             import ALPHA, BETA, GAMMA, M_P
+    from gyro_gcr.gyro_config       import config
+    from gyro_errors                import StructuralViolation, QuantizationDefect, CommunicationError
+    
+    ```
+    
+    Tensor transaction, startup gating, circuit-beacon hooks, entropy tracking, and cryptographic evolution are all implemented as guarded code blocks or context managers, directly referencing their definition in the GyroCardioRespiratory specification.
+    
+    ---
+    
+    *End of G1 Specification*
+    
+- G2 System – GyroInformation Implementation
+    
+    G2 operates as the information coordination layer, ensuring all lexicon evolution, message routing, observation logging, and policy-controlled refinement proceed in strict accordance with CGM constants and canonical transition logic. No parameter, threshold, or numeric limit is permitted unless directly derived from `{α, β, γ, mₚ, π}` or imported from the common GyroCirculation specification.
+    
+    ---
+    
+    ## 1. Data Structures and Storage
+    
+    - **Lexicon and Contextual Phase Mapping**
+        - **Contextual Phase Mapping**:
+            
+            All token-to-phase mappings are performed via the family-aware primitive:
+            
+            ```python
+            get_contextual_phi(token: str, family_id: str) → Q29.34
+            
+            ```
+            
+            This method integrates helical position, chirality context, and tensor family lineage.
+            
+        - `phase_bins_count` = `BIN_COUNT` (imported from `gyro_constants`)
+        - BPE vocabulary size fixed to `phase_bins_count`, schema-versioned for auditability
+    - **Coordination Infrastructure**
+        - `message_buffer: Queue` (thread-safe)
+        - `trace_buffer: List` (for G5 audit)
+        - `MESSAGE_PRIORITY` = {G1: 1, G2: 2, G3: 3, G4: 4, G5: 5}
+        - `timeout_ms` and `max_batch_size` derived exclusively from CGM horizon constants
+    - **Symmetry Breaking**
+        - Primordial chirality seed initialized from system timestamp at day zero
+        - All symmetry deviations are logged explicitly as `deviation_event`
+    - **Learning Structures (Policy-Controlled Only)**
+        - `pattern_strength: Dict[str, float]` (default 1.0, decay policy set by G5 immunity memory)
+        - `hebbian_trace: Dict[Tuple[str, str], float]` (updates permitted only through G5 policy)
+        - Autonomous learning disabled; all decay and update rates sourced from G5 immunity memory
+    - **Logs and History**
+        - Logs: `epsilon_log`, `algedonic_log`, `refinement_history`
+        - Settings: `settings: Dict[str, Any]` (system prompts, UI state)
+    
+    ---
+    
+    ## 2. Message Routing and System Coordination
+    
+    - `send_message(event_dict)` provides the canonical inter-system API
+    - `message_router()` collects and processes batches from `message_buffer`, with messages sorted by priority and `cycle_index`
+    - Direct G1↔G3 communication is permitted where VSM logic allows, with audit metadata maintained by G2
+    - All routing events are logged with full cycle and chirality context
+    - G2 routes `spawn_ready` and algedonic events as per VSM logic
+    
+    ---
+    
+    ### 3. Phase Assignment and Helical Mapping
+    
+    - Tokens are assigned to phase bins using the family-aware primitive:
+        
+        ```python
+        get_contextual_phi(token: str, family_id: str) → Q29.34
+        
+        ```
+        
+    - Round-robin allocation is fully removed and no longer utilized.
+    - Helical position and chirality context are recorded with each assignment, fully preserving family lineage context.
+    - No adaptive or weighted selection is permitted unless explicitly issued under G5's `"LEXICON_REFINEMENT"` policy.
+    - All assignments and contexts are logged to `trace_buffer`.
+    
+    ---
+    
+    ## 4. Document Ingestion and Import Adaptors
+    
+    - Documents are ingested by BPE, tokenized to `phase_bins_count`
+    - Chunking is performed with `half_horizon = HALF_HORIZON` (from `gyro_constants`)
+    - Phase assignment for tokens in each chunk follows helical progression
+    - Session tagging, chunk limits, and batch routing are all determined by horizon constants
+    - Updates to learning structures occur only under explicit G5 policy, with complete audit trail
+    
+    ---
+    
+    ## 5. Data Preparation and Frontend Interface
+    
+    - G2 exposes read-only APIs: `map(token) → φ`, `map(φ) → token`, `get_prompt()`
+    - All lookups preserve and return helical phase context and chirality
+    - Conversation and document data are formatted to retain session helical trajectory
+    - G2 supports minimal direct G1↔G3 context handoff as required by system logic
+    
+    ---
+    
+    ## 6. Observation Integration and Policy-Controlled Refinement
+    
+    - All observation is logged as the emergence of quantization error ε, not as external measurement
+    - `logObservation(token, ε, tensor_id, cycle_index, chirality_phase)` records the event, with full helical and tensor context
+    - Algedonic signals are generated if |ε| > mₚ/2, and forwarded to G4 if |ε| > mₚ
+    - Policy-triggered refinement is only performed upon G5 `"LEXICON_REFINEMENT"` command, using rates and bounds set by immunity memory
+    - Observation, refinement, and learning events are sorted and processed by `cycle_index`
+    
+    ---
+    
+    ## 7. Memory Export, Import, and Audit
+    
+    - `export_memory(memory_type)` provides checksummed, schema-versioned exports with helical trajectory preserved
+    - `import_memory(data)` validates checksum, schema, and helical context before applying; all deviations or non-CGM parameters are logged
+    - `get_trace_buffer()` and `clear_collected_traces(before_timestamp)` provide thread-safe audit interfaces for G5
+    - All export/import operations ensure logical consistency, cycle ordering, and CGM-constant derivation
+    
+    ---
+    
+    ## 8. Communication and Error Handling
+    
+    - All message formats follow `STANDARD_FIELDS` imported from G6
+    - Every message and trace entry contains `type`, `source`, `destination`, `cycle_index`, `tensor_context`, `payload`, `timestamp`
+    - Algedonic and quantization defect signals include full phase and helical context
+    - Faults are classified strictly as `RoutingError`, `SchemaViolation`, `AuditViolation`, or `DerivationViolation` (imported from `gyro_errors`)
+    - Batch errors are handled by immediate retry for highest priority (G1), or delayed retry for others, using backoff derived from system horizons
+    
+    ---
+    
+    ## 9. API Summary
+    
+    | Method | Purpose | Constraints |
+    | --- | --- | --- |
+    | `send_message(event)` | Inter-system coordination | Priority, cycle_index, and phase ordering enforced |
+    | `map(token) → φ` | Phase lookup | Read-only, includes helical context |
+    | `logObservation(...)` | Record ε-events | No autonomous learning, G5 policy required |
+    | `export_memory(type)` | Memory snapshot | Checksummed, schema-versioned, helical-preserved |
+    | `get_trace_buffer()` | Audit buffer for G5 | Thread-safe, with full phase context |
+    | `assign_token_phase(token)` | Round-robin phase assignment | Only CGM-derived, always logs helical position |
+    | `log_deviation_event(...)` | Non-CGM parameter logging | All deviations from canonical derivation |
+    
+    ---
+    
+    ## 10. Helical Monodromy Integration
+    
+    - All G2 operations reference, preserve, and propagate the helical phase trajectory and chirality
+    - Forward path (0→2π) corresponds to positive chirality (lgyr), return path (2π→4π) to negative chirality (rgyr)
+    - All debug, audit, and export logs include normalized helical position and chirality context for full replayability
+    - All UI and interface data structures retain mapping to the underlying helical structure
+    
+    ---
+    
+    ## Imports and References
+    
+    All constants, configuration, and error/fault classes are imported:
+    
+    ```python
+    from gyro_constants         import ALPHA, BETA, GAMMA, M_P, HALF_HORIZON, BIN_COUNT
+    from gyro_gcr.gyro_config   import config
+    from gyro_errors            import RoutingError, SchemaViolation, AuditViolation, DerivationViolation
+    from gyro_comm              import send_message
+    from gyro_constants         import STANDARD_FIELDS
+    
+    ```
+    
+    Bootstrap, transaction safety, recovery beacons, entropy features, and crypto evolution are enabled, guarded, or referenced as per the GyroCardioRespiratory configuration. No parameter, update, or limit is permitted except by import or derivation from these shared sources.
+    
+    ---
+    
+    *End of G2 Specification*
+    
+- G3 System – GyroInference Implementation Guide
+    
+    G3 coordinates real-time inference by orchestrating G1 tensors and G2 lexicon, presenting a Flet-based chat interface, and logging all φ↔ε events. All behaviors obey canonical CGM constants and alignment-based scheduling rules. No parameter, threshold, or numeric value is permitted unless derived directly from `{α, β, γ, mₚ, π}` or imported from the canonical GyroCirculation specification. No external heuristics or dynamic optimizations are introduced.
+    
+    ---
+    
+    ## 1. Session Governance and Hardware Registry
+    
+    - **Session State and Spinor Alignment**
+        - session_id: str (derived as f"session_for_tensor_{root_tensor_id}"), `state: Enum` (`ready`, `processing`, `generating`, `completed`, `error`, `aborted`)
+        - `start_time`, `end_time`: UTC timestamps
+        - Session lifecycle aligns to tensor spinor cycles (`cumulative_phase: [0, 4π)`)
+        - Session completion scheduled at spinor (4π) boundaries
+        - All session state changes communicated via `G2.send_message()`
+    - **Helical Session Context**
+        - `helical_position: float` (0 ≤ p < 1)
+        - `spinor_cycle_count: int`
+        - `tensor_family_assignment: str`
+        - `chirality_phase: float` ([0, 2π))
+        - Context updates on phase progression; spinor completions increment cycle count
+    - **Hardware Registry**
+        - `device_id: str`, `device_type: str` ("CPU"|"GPU"), `available_memory: int`, `compute_capacity: int`
+        - Hardware state logged to local trace buffer with helical context
+        - Any hardware- or OS-specific field logged as a deviation event
+    - **Tensor Coordination and Family Mapping**
+        - Active tensor assignments tracked per session, with lineage relationships
+        - Tensor health monitored via G1 status updates routed through G2
+        - Every tensor stage transition increments global `cycle_index` by 1
+        - UI thread hierarchy mirrors tensor family lineage
+    - **Trace Buffer**
+        - All session transitions, tensor assignments, and significant state changes are logged with session id, tensor family, cycle index, helical position, and timestamp
+        - Deviation events logged for all external parameters and UUID generations
+    
+    ---
+    
+    ## 2. φ-Chunking and alignment-based Resource Management
+    
+    - **Chunk Formation**
+        - Token streams transformed into φ-chunks via `G2.map(token) → φ`
+        - Chunks accumulate until sum approaches π (`half_horizon` tokens, from `gyro_constants`)
+        - Chunks finalized before exceeding π threshold; helical sequence preserved
+    - **alignment-based Resource Request**
+        - No heuristic or dynamic load balancing logic permitted
+        - Context-free resource requests sent to G2 using session helical position for phase alignment
+        - Tensor selection follows a alignment-based phase-alignment rule only
+    - **Back-Pressure Management**
+        - Pending chunk queue limited to `half_horizon` (from π/mₚ)
+        - Overflow generates `AlgedonicSignal` of type "resource_pressure" forwarded to G2
+        - All resource and pressure events processed in `cycle_index` order
+    - **Asynchronous Batch Dispatch**
+        
+        Chunks are grouped by their target stage (`BU_In` then `BU_En`) and processed in parallel:
+        
+        ```python
+        import asyncio
+        
+        async def dispatch_chunks(self, chunks):
+            by_stage = {"BU_In": [], "BU_En": []}
+            for chunk in chunks:
+                by_stage[chunk.target_stage].append(chunk)
+        
+            for stage in ("BU_In", "BU_En"):
+                await asyncio.gather(*(self.process_chunk(chunk)
+                                       for chunk in by_stage[stage]))
+        
+        ```
+        
+        This approach ensures chunks are handled in helical phase order while leveraging asynchronous batching.
+        
+    
+    ---
+    
+    ## 3. Chat Interface and Structural Memory UI
+    
+    - **UI Structure**
+        - Threads: `ft.TreeView` in `ft.ListView`, drag-and-drop folder support; each thread maps to tensor family
+        - Chat panel: `ft.ListView` for message history, `ft.TextField`/`ft.ElevatedButton` for input
+        - Document uploads: `ft.FilePicker`, routed to G2
+    - **Folder Nesting and Phase Groups**
+        - Folder hierarchy reflects phase-locked groups, organized by helical progression and family lineage
+    - **Settings and Export/Import**
+        - All user/system settings changes coordinated via G2
+        - Structural memory visualization shows five memory types
+    - **Async UI Updates**
+        - Refresh rate: `1/half_horizon` Hz
+        - Explicit `timeout_ms` for async operations: `(π/mₚ) * 1000`
+        - Deviation events logged for all UI refresh rates
+    - **Queue Coordination**
+        - UI queue visualizations capped at `half_horizon`
+        - All overflows logged and forwarded with helical context
+    - **Structural Memory UI Mapping**
+        - Thread-to-tensor mapping, folder organization, and chat arrangement reflect underlying helical state and spinor cycles
+    
+    ---
+    
+    ## 4. Input Orchestration and Direct G1 Coordination
+    
+    - **Direct G1 Coordination**
+        - Permitted only for simple tensor queries, status checks, or φ→ε mappings
+        - G2 logs audit records for all direct G1↔G3 communications
+    - **Tensor Integration with Explicit Timeout**
+        - Tensor input protocol: `tensor.stage == BU_In`
+        - `timeout_ms` for integration operations: `PHASE_HORIZON_2PI * cycle_duration_ms`
+        - All input events processed in `cycle_index` order; chirality_phase included in all records
+    - **ε Recording and Signal Generation**
+        - All φ↔ε events logged with token, φ, ε, tensor_id, session id, cycle index, and full helical context
+        - Algedonic signals generated for |ε| > mₚ/2, type "pain" or "pleasure" as appropriate, and forwarded to G2
+    - **Quantization Emergence**
+        - All ε events trace to ONA→BU_In anomaly quantization in G1
+        - No external measurement semantics permitted
+    - **Error Classes**
+        - All operational errors subclass `GyroError` and `StructuralViolation` (from `gyro_errors`)
+        - Queue overflows, timeouts, and processing faults are explicitly typed and escalate according to audit rules
+    - **Timeout and Recovery**
+        - Integration steps exceeding explicit `timeout_ms` escalate naturally, with exponential backoff using CGM-derived intervals
+        - Three consecutive timeouts quarantine the session; counter resets on successful completion
+    
+    ---
+    
+    ## 5. Output Generation and Metrics
+    
+    - **Generation Coordination**
+        - G1 tensors in BU_En stage produce φ, mapped to tokens via `G2.map(φ) → token`
+        - Output tokens displayed in chat interface under session_id and helical context
+        - Spinor cycle boundaries visually indicated
+    - **Performance Monitoring**
+        - Metrics captured: cycle latency, active tensor count, average |ε|, helical rate, spinor cycles completed, generation timeout, cycle index
+        - Metrics logged to trace buffer every `half_horizon` cycles
+    - **Timeout and Degradation**
+        - Generation steps capped at `PHASE_HORIZON_2PI` cycles; timeout enforced
+        - On timeout, partial results are returned, with escalation via G2 to G4
+    
+    ---
+    
+    ## 6. System Communication and Coordination
+    
+    - **G2 Message Interface**
+        - All inter-system communication via `G2.send_message(event_dict)`
+        - Messages follow canonical `STANDARD_FIELDS` schema with enhanced `tensor_context` containing chirality_phase, helical_position, spinor_cycle, and tensor family id
+    - **Algedonic Signal Forwarding**
+        - All pain/pleasure/resource signals routed with session, tensor, and full helical context
+    - **Direct Coordination Audit**
+        - All direct G1↔G3 coordination is audited via G2; records include session id, context, and timestamp
+    
+    ---
+    
+    ## 7. Memory and Audit Management
+    
+    - **Trace Buffer**
+        - Thread-safe buffer of all operational events, φ↔ε mappings, session transitions, and tensor assignments, with full helical and lineage context
+        - Local retention for at least `PHASE_HORIZON_2PI` cycles
+    - **G5 Audit Interface**
+        - Trace buffer is made available to G5, including enriched structural memory mapping for replay and governance
+    - **Helical Trajectory Preservation**
+        - Complete tracking of forward/return phases, spinor boundaries, and lineage across all events and audit records
+    
+    ---
+    
+    ## 8. Operational Protocol and Error Handling
+    
+    - **Standard Workflow**
+        - Session initialization and alignment, alignment-based chunking, direct G1 coordination, generation and output, session completion at spinor boundaries
+    - **Fault Escalation**
+        - Recoverable: Retry with CGM-derived backoff
+        - Resource pressure: Generate and forward algedonic signal
+        - Quarantine: More than two consecutive pain signals or timeouts
+        - Terminal: `StructuralViolation` or audit-triggered abort with full context
+    - **Retry and Watchdog**
+        - Backoff uses β = π/4 as the exponential base
+        - Global watchdog aborts sessions stalled longer than `2 * PHASE_HORIZON_2PI * cycle_duration_ms`
+        - Recovery and state restoration use structural memory with full helical context
+    
+    ---
+    
+    ## 9. External Dependencies and Policy Integration
+    
+    - **G1 Coordination**
+        - Direct for simple status/queries; routed via G2 for all transformations
+        - Tensor integration, ε response, and spawn events preserve provenance
+    - **G2 Services**
+        - Token↔φ mapping, observation logging, prompt management, document ingestion, memory export/import, message routing (all with helical preservation)
+    - **G5 Policy Compliance**
+        - All thresholds and parameters accepted via G2 policy update, derived from immunity memory only
+        - Session and spinor boundaries aligned to policy
+    
+    ---
+    
+    ## 10. Success Criteria and Validation
+    
+    - Protocol fidelity, alignment-based behavior, and complete auditability enforced
+    - System resilience, UI responsiveness, and communication compliance ensured
+    - Structural memory and helical monodromy preserved in all interactions and logs
+    - No heuristic, untraced, or non-canonical parameter use permitted
+    
+    ---
+    
+    ## Canonical Imports
+    
+    All constants, configuration, and error classes are imported:
+    
+    ```python
+    from gyro_constants       import ALPHA, BETA, GAMMA, M_P, HALF_HORIZON, BIN_COUNT, PHASE_HORIZON_2PI
+    from gyro_gcr.gyro_config import config
+    from gyro_errors          import GyroError, StructuralViolation, RoutingError, SchemaViolation, AuditViolation
+    from gyro_comm            import send_message
+    from gyro_constants       import STANDARD_FIELDS
+    
+    ```
+    
+    All timeouts, thresholds, and intervals are derived from these imports. No local duplicate, heuristic, or system-specific parameter is permitted.
+    
+    ---
+    
+    *End of G3 Specification*
+    
+- G4 System – GyroIntelligence Ingress Implementation Guide
+    
+    G4 operates exclusively as the environmental monitoring and strategic intelligence layer (VSM System 4). It receives all algedonic signals and status events via G2, integrates them into holistic assessments, and produces strictly advisory proposals for G5. G4 maintains no direct execution authority over G1–G3, and every operational threshold or numeric parameter must derive from the canonical set {α, β, γ, mₚ, π}, as imported from GyroCirculation.
+    
+    ---
+    
+    ## 1. Tensor Family and Governance Traceability (G4_CS)
+    
+    - **Message-Based Input Collection**
+        - All inputs received via `G2.send_message()`, sorted by `cycle_index`
+        - All algedonic signals include `context_phi`, `chirality_phase`, and helical trajectory fields
+        - Spawn readiness notifications received from G1 when `|amplitude| ≥ mₚ` after each 4π spinor cycle
+    - **ONA→BU_In Anomaly Monitoring**
+        - All quantization anomalies traced to ONA→BU_In emergence
+        - Each event includes: tensor_id, ε, context_phi, chirality_phase, quantization_pressure, cycle_index
+        - ε accumulation tracked per-tensor and systemically, window size `half_horizon`
+        - Systemic quantization pressure triggers spawning proposals when `pressure > mₚ × α`
+        - All tensor family assignments, parent-child relationships, and helical lineage preserved and tracked
+    - **Tensor Registry Management**
+        - Fields: tensor_id, parent_id, birth_phase, current_stage, utilization_rate, helical_position
+        - Utilization: (ε events in last `half_horizon`) / `half_horizon`
+        - Strain: sum(|ε|) over current assessment window
+    - **Signal Attenuation**
+        - Attenuation factors determined by β/α (canonical: 0.5) unless stricter derivation provided
+    - **Event Generation**
+        - All output events (registry updates, spawn assessments, violations) use enhanced tensor context:
+            - chirality_phase, helical_position, quantization_pressure, strain_accumulation
+            - All messages ordered by `cycle_index`
+    
+    ---
+    
+    ## 2. Information Variety and Complexity Analysis (G4_UNA)
+    
+    - **Variety Metrics Calculation**
+        - Token variety, phase coverage, avg |ε|, strain, helical balance, quantization anomaly count
+        - All metrics calculated over a window of size `half_horizon` (canonical)
+        - Forward and return phase coverage computed via helical distribution analysis
+    - **Observation as Quantization Emergence**
+        - All ε events treated as quantization emergence, not external measurement
+        - Variety, drift, and anomaly alerts only reference CGM-derived thresholds:
+            - Token variety alert: `token_variety < half_horizon`
+            - Bottleneck: `avg_abs_ε > mₚ/2` for ≥`half_horizon` consecutive steps
+            - Helical imbalance: `helical_balance > β`
+    - **G2 Communication**
+        - All alerts and metrics sent as events, including tensor context, cycle_index, timestamp
+    - **Phase Gap Detection**
+        - Alert if phase gaps ≥ mₚ between visited phase bins
+        - All event ordering via `cycle_index`
+    
+    ---
+    
+    ## 3. Operational Pattern Recognition (G4_ONA)
+    
+    - **Pattern Analysis**
+        - Performance drift: threshold β
+        - Error clustering: window `half_horizon`
+        - Adaptation effectiveness: strain reduction, windows aligned with `phase_horizon₂π`
+        - Helical trajectory pattern: forward/return balance must remain within α
+        - All results logged to trace buffer with full helical context
+    - **Adaptation Assessment**
+        - Adaptation effectiveness measured by pre- vs post-strain, bounded to [0,1]
+        - All pattern recognition windows parameterized strictly from canonical constants
+    
+    ---
+    
+    ## 4. Environmental Integration and Strain-Based Assessment (G4_BU_In)
+    
+    - **Assessment Generation**
+        - Triggered every `half_horizon` or on cumulative strain > 2π
+        - Sorted events by `cycle_index`
+        - Assessment aggregates: total_strain, strain_per_cycle, tensor_health (α/2π weight), info_flow (β/2π), operational_consistency (γ/2π), total pain/pleasure events, quantization anomaly count, stress/opportunity indicators, helical trajectory analysis
+        - Somatic memory updated per assessment, mapped to helical phase, 16 sectors per spinor cycle
+        - Learning and adaptation tracked per completed 720° spinor
+    
+    ---
+    
+    ## 5. Adaptation Proposal Generation (G4_BU_En)
+    
+    - **Advisory Proposal Logic**
+        - Proposals generated strictly on assessment evidence, never executed directly
+        - Spawn proposal issued only if quantization anomaly count > `half_horizon`
+        - Justification references: tensor_health, total_strain, pain/pleasure counts, quantization anomaly count, and explicit CGM derivations
+        - Somatic memory provides expected outcomes and proposal confidence
+        - All advisory proposals are sent to G5 via G2, never executed by G4
+    - **Evidence-Based Justification**
+        - All justification fields numerically reference canonical thresholds and measurements
+    - **G5 Coordination**
+        - Advisory proposals sent to G5 for binding policy decision
+        - G4 records all G5 decisions and observed outcomes in somatic memory
+        - Somatic memory is updated after each outcome to support future advisory learning
+    
+    ---
+    
+    ## 6. Memory Management and Communication
+    
+    - **Somatic Memory Structure**
+        - Stores all assessment outcomes, helical learning maps, and immutable checksummed entries
+        - Retention horizon: 2 × `phase_horizon₂π`
+        - All memory entries reference their helical context, spinor cycle, and timestamp
+    - **G2 Message Interface**
+        - All outgoing messages (`assessment`, `proposal`, `alert`, `status_update`) include canonical tensor context and are strictly advisory
+    - **Trace Buffer**
+        - Thread-safe buffer with pruning policy for retention horizon
+        - Exposed to G5 for audit
+        - All entries checksummed and referenced for audit integrity
+    
+    ---
+    
+    ## 7. Strategic Coordination Flow
+    
+    - **Advisory Only**
+        - G4 never executes, modifies, or directs any G1-G3 operation
+        - All proposals are advisory; execution is exclusive to G5 or policy agents
+        - All recommendations strictly evidence-based, numerically derived, and supported by helical learning
+    - **Learning Loop**
+        - Advisory effectiveness assessed via before/after strain and pattern change across 720° cycles
+        - All learning and advisory quality metrics updated per cycle
+    - **Advisory Boundaries**
+        - Advisory quality measured by: proposal accuracy, strain forecast error, helical pattern recognition, alignment with G5 decision, and advisory learning rate
+        - All success metrics must be derived directly from evidence and canonical parameters
+    
+    ---
+    
+    ## 8. Error Handling and Recovery
+    
+    - **Enhanced Fault Classes**
+        - All G4-specific faults subclass canonical GyroError classes; no local error escapes taxonomy
+        - AssessmentError, ProposalError, CommunicationError, HelicalCoherenceError, CGMDerivationError
+    - **Recovery Protocols**
+        - All recovery maintains helical context, cycle index, and structural memory integrity
+        - On AssessmentError: re-emit with replay flag, preserving context
+        - On HelicalCoherenceError: emit defect event, pause proposal generation
+        - On CGMDerivationError: log violation, revert to canonical defaults
+        - All escalations communicated to G5 via G2
+    - **No Execution During Recovery**
+        - G4 remains strictly advisory in all recovery states
+    
+    ---
+    
+    ## 9. Success Criteria and Validation
+    
+    - **Core Criteria**
+        - Strategic awareness, evidence-based recommendations, somatic memory learning, G2 message compliance, event ordering, and advisory boundary maintenance
+        - Quantization anomaly tracking, strain calculation, proper attenuation, helical learning, strict CGM parameter compliance, and measurable improvement in proposal quality over spinor cycles
+    - **Operational Validation**
+        - All validation routines (proposal accuracy, strain calculation, pattern recognition, G5 alignment, advisory learning) implemented and referenced in local trace buffer
+        - Advisory boundary and parameter compliance confirmed by automated tests
+    
+    ---
+    
+    ## Canonical Imports
+    
+    All required constants, configuration, and error classes are imported as follows:
+    
+    ```python
+    from gyro_constants       import ALPHA, BETA, GAMMA, M_P, HALF_HORIZON, BIN_COUNT, PHASE_HORIZON_2PI
+    from gyro_gcr.gyro_config import config
+    from gyro_errors          import GyroError, StructuralViolation, CommunicationError
+    from gyro_comm            import send_message
+    from gyro_constants       import STANDARD_FIELDS
+    
+    ```
+    
+    All parameters, thresholds, windows, and intervals are derived directly from these imports. No local duplicate or non-canonical parameter is allowed.
+    
+    ---
+    
+    *End of G4 Specification*
+    
+- G5 System – GyroIntelligence Engress Implementation Guide
+    
+    G5 serves exclusively as the executive, identity-preserving, and policy-generating layer (VSM System 5). It receives ε-driven signals through G2, synthesizes inputs with CGM-derived thresholds, and issues binding policy decisions. G5 alone governs the global audit trail and five-memory mapping, with cycle indices incrementing only by tensor evolution.
+    
+    ---
+    
+    ## Core Constants and Policy Horizons
+    
+    All G5 policies, thresholds, and intervals derive directly from:
+    
+    ```python
+    from gyro_constants import ALPHA, BETA, GAMMA, M_P, HALF_HORIZON, HORIZON_CYCLES, BIN_COUNT
+    
+    ```
+    
+    - **α (ALPHA) = π/2**
+    - **β (BETA) = π/4**
+    - **γ (GAMMA) = π/4**
+    - **mₚ (M_P) = 1/(2√(2π))**
+    - **half_horizon = HALF_HORIZON**
+    - **horizon_cycles = HORIZON_CYCLES**
+    - **bin_count = BIN_COUNT**
+    - **strain_collection_threshold = 2π**
+    - **identity_threshold = immunity_memory.threshold("identity_coherence")** (see §6)
+    - **viability_target** = immunity_memory.threshold("viability_target")
+    
+    ---
+    
+    ## 1. Governance Traceability and CS Identity Registry (G5_CS)
+    
+    - **Tensor Identity Governance**
+        - `TensorIdentityRegistry` is the sole source of truth for all tensor identities
+        - Fields: tensor_id, parent_id, creation_cycle, helical_birth_phase, lineage_depth, identity_checksum, genetic_pattern
+        - Maintains lineage graph; validates all transitions per canonical G1 STAGE_TRANSITIONS
+        - Genetic memory updates triggered on all identity operations
+    - **Global Trace Collection**
+        - Collection protocol: triggered when `current_cycle_index % half_horizon == 0` or `cumulative_strain > 2π`
+        - Requests trace_buffer from all G-systems via G2, sorts all events by `cycle_index`
+        - Computes Blake3 CIDs, writes batch to `observer_trace.jl`, increments collection_cycle_count
+    - **Memory Governance**
+        - All partitions are lineage-tagged, checksummed
+        - BU_In/BU_En checkpoints consolidate stores per CGM horizons (half_horizon, horizon_cycles)
+    
+    ---
+    
+    ## 2. Information Variety Policy (G5_UNA)
+    
+    - **Variety Bounds Management**
+        - `min_token_variety = int(half_horizon * 0.5)` (π/4 factor)
+        - `max_token_variety = int(bin_count * 0.8)` (prevents saturation)
+        - `optimal_phase_coverage = ALPHA / (2 * math.pi) = 0.25`
+        - All G4 reports processed in cycle_index order
+    - **Policy Decision Types**
+        - LEXICON_EXPANSION: variety < min_token_variety
+        - LEXICON_PRUNING: variety > max_token_variety
+        - PHASE_REDISTRIBUTION: phase coverage < optimal_phase_coverage
+    - **Policy Issuance**
+        - Sorts variety alerts by cycle_index
+        - Calculates pattern_decay_rate, co_occurrence_factor, phase_learning_rate, hebbian_trace_bounds from CGM
+        - All decisions logged in immunity memory with provenance
+    - **Epigenetic Memory Controls**
+        - Max co-occurrence: bin_count
+        - Decay threshold: mₚ
+        - Retention cycles: horizon_cycles
+        - All autonomous learning disabled; G5 approval required for lexicon/pruning
+    
+    ---
+    
+    ## 3. Inference Accountability Policy (G5_ONA)
+    
+    - **Structural Coherence Standards**
+        - Pain escalation: mₚ/2
+        - Quantization defect: mₚ
+        - Structural violation: α
+        - Session quarantine: 2β
+        - All ε events must map to ONA→BU_In emergence
+    - **Session-Spinor Alignment**
+        - Sessions align with tensor helical position; completion at 720° boundary
+        - Full φ↔ε provenance and traceability; tensor family lineage mapped to CS registry
+    - **Error Escalation Framework**
+        - All thresholds and exponential backoff factors derived from CGM: base interval mₚ, attenuation β/α = 0.5
+        - Faults: recoverable, quarantine, terminal; classified and logged
+    
+    ---
+    
+    ## 4. Intelligence Integrity Integrative (G5_BU_In)
+    
+    - **System State Integration**
+        - Collects status from all G-systems via G2, sorts by cycle_index
+        - Calculates:
+            - System viability (tensor utilization, health)
+            - System coherence (structural integrity indicators)
+            - Cumulative strain (sum(|ε|) across assessment window)
+            - Stress (pain event count over horizon_cycles)
+        - Includes pending G4 proposals, helical state, and quantization pressure in consolidated state
+    - **Assessment Consolidation**
+        - G4 assessments are processed with α:β:γ = 2:1:1 weighting
+        - All include pain/pleasure counts, strain measurements, and quantization anomaly tracking
+    
+    ---
+    
+    ## 5. Intelligence Integrity Generative (G5_BU_En)
+    
+    - **Binding Policy Generation**
+        - Three primary decisions:
+            - SPAWN_TENSOR_APPROVAL: viability/coherence thresholds met, spawn_ready received
+            - LEXICON_REFINEMENT_APPROVAL: variety out of bounds, phase coverage suboptimal
+            - RESOURCE_REALLOCATION: stress indicators above tolerance
+    - **Dynamic Spawning Threshold Adjustment**
+        - When `systemic_pressure > ALPHA`:
+            
+            ```python
+            pressure_factor = (systemic_pressure - ALPHA) / ALPHA
+            adjusted_threshold = current_threshold * (1 - pressure_factor)
+            adjusted_threshold = max(adjusted_threshold, M_P * 0.5)
+            
+            ```
+            
+        - Immunity memory updated with new thresholds and justification
+    - **Emergency Response**
+        - Triggered when viability < emergency_threshold
+        - Immediate: resource reallocation, tensor spawn acceleration, lexicon refinement suspension
+        - Maintains helical trajectory continuity
+    
+    ---
+    
+    ## 6. Policy-Memory Domain Mapping
+    
+    - **Five-Domain Structure**
+        
+        ```
+        Governance Traceability         → Genetic Memory
+        Information Variety             → Epigenetic Memory
+        Inference Accountability        → Structural Memory
+        Intelligence Integrity (Int)    → Somatic Memory
+        Intelligence Integrity (Gen)    → Immunity Memory
+        
+        ```
+        
+    - **Memory Protocol**
+        - Requests traces per domain, sorts by cycle_index, updates memory partitions, validates checksums and lineage
+    - **Checkpointing**
+        - At BU_In/BU_En transitions, creates dual-file checkpoints with:
+            - Memory partition snapshots, CS registry, helical integrity data, active policy state
+    
+    ---
+    
+    ## 7. Decision Matrix and Learning
+    
+    - **CGM-Compliant Matrix**
+        - Inputs sorted by cycle_index
+        - Thresholds:
+            - Viability (from immunity memory)
+            - Coherence = 0.8 * ALPHA
+            - Strain = 2π
+        - Generates and records binding policies; all decisions logged in immunity memory
+    - **Learning from Outcomes**
+        - Effectiveness tracked per type; adjustments triggered if <50% effective
+        - Outcomes logged with pattern discoveries, threshold optimization, and helical context
+    
+    ---
+    
+    ## 8. Audit and Compliance
+    
+    - **Audit Trail Management**
+        - All system events collected, sorted by cycle_index, enriched with helical position, policy domain, memory type, CGM status, and lineage context
+        - Blake3 CIDs chained and batch written to observer_trace.jl
+    - **Compliance Validation**
+        - All parameters validated for CGM derivation; violations logged and remediation triggered
+        - Schema versioning, partition integrity, and memory lineage verified
+        - 2π-Pruning Assertion: verify that every G1 tensor snapshot whose `cumulative_phase % (2*π) == 0` carries a `pruned_digest` flag; failure ⇒ audit violation.
+            
+            ```python
+            for state in g1_state_buffer:
+                if state["cumulative_phase"] % (2 * math.pi) == 0:
+                    assert state.get("pruned_digest"), "Missing pruned_digest on 2π boundary"
+            ```
+            
+    - **Recovery Protocol**
+        - System state reconstructed from audit; memory and registry restored; replay supported with REPLAY flags
+    
+    ---
+    
+    ## Success Criteria
+    
+    - **Executive Responsibilities**
+        - Coherence ≥ identity_threshold, viability ≥ viability_target
+        - Audit trail completeness with Blake3 CIDs
+        - Five-memory mapping maintained per policy domain
+        - Emergency response within 1 half_horizon cycle
+        - All coordination via G2, cycle_index ordered, 99%+ CGM parameter compliance
+    - **Operational Metrics**
+        - 80% policy decision effectiveness, dynamic threshold improvement within 3 cycles, traceability, strain triggers within 5% of 2π, zero unauthorized identities
+    
+    ---
+    
+    ## Canonical Imports
+    
+    All required canonical constants, configuration, and error classes are imported as follows:
+    
+    ```python
+    from gyro_constants       import ALPHA, BETA, GAMMA, M_P, HALF_HORIZON, HORIZON_CYCLES, BIN_COUNT
+    from gyro_gcr.gyro_config import config
+    from gyro_errors          import GyroError, StructuralViolation, CommunicationError
+    from gyro_comm            import send_message
+    from gyro_constants       import STANDARD_FIELDS
+    
+    ```
+    
+    All parameters, thresholds, windows, and horizons must be derived from these imports. No local duplicate or non-canonical value is allowed.
+    
+    ---
+    
+    *End of G5 Specification*
