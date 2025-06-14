@@ -1413,6 +1413,8 @@ I will give you first the whole context - you dont have to comment - and after t
         - ONA: 2×3×2, 24 non-zeros
         - BU_In: 2×2×3×2, 48 non-zeros (24 ingress, 24 egress)
         - BU_En: identical structure to BU_In
+        - At any given time, the BU_In and BU_En tensors each store exactly 24 non-zero entries, in a 2×2×3×2 block structure (flattened as 4×6 for the CSR matrix). The ‘48’ value refers to the combined total for ingress+egress blocks over a full cycle, not for a single tensor instance.
+        - All code and validation must expect NONZEROS = 24 for these stages.
     - **Helical Path Tracking**
         - `cumulative_phase` tracks the complete 0→4π helical progression.
         - `chirality_phase` indicates forward (0→2π) and return (2π→4π) paths.
