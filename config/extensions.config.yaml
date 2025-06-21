@@ -1,0 +1,12 @@
+# GyroSI Extension Footprint Validation
+
+extensions:
+  # List of allowed extension module names
+  allowed:
+    - gyro_extension_example
+
+  # Maximum disk footprint per extension (in MB)
+  max_footprint_mb: 50
+
+  # Validation: enable or disable strict checking
+  strict_validation: true
