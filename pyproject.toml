@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gyrosi-babylm"
+version = "0.1.0"
+description = "GyroSI Baby LM: Alignment-Based Gyroscopic Superintelligence Language Model"
+authors = [
+    { name = "Basil Korompilias", email = "basil@gyrosi.org" }
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = [
+    "superintelligence", "gyrogroup", "tensor", "alignment", "AI", "language-model", "governance", "physics"
+]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+
+dependencies = [
+    "torch>=2.2.0",
+    "flet>=0.18.0",
+    "pyyaml>=6.0",
+    "msgpack>=1.0.7",
+    "sqlite-utils>=3.36.0",
+    "click>=8.1.7",
+    "tqdm>=4.66.2",
+    "zstandard>=0.22.0",
+    "cryptography>=42.0.0",
+    "typing-extensions>=4.11.0",
+    "filelock>=3.13.4"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "black>=24.4.2",
+    "flake8>=7.0.0",
+    "mypy>=1.10.0",
+    "isort>=5.13.2",
+    "pre-commit>=3.7.1"
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.18"
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+python_version = 3.11
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+
+[tool.flake8]
+max-line-length = 100
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+    "env",
+    ".eggs",
+    "*.egg-info",
+    "docs/_build",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}

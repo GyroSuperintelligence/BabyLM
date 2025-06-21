@@ -13,7 +13,7 @@ help:
 	@echo "  import-example Import example knowledge"
 
 install:
-	pip install -r requirements/dev.txt
+	pip install -r requirements.txt
 	pre-commit install
 
 test:
@@ -43,4 +43,4 @@ export-example:
 	python -m gyro_tools.gyro_knowledge_manager export --knowledge-id example --output examples/example_knowledge.gyro
 
 import-example:
-	python -m gyro_tools.gyro_knowledge_manager import --input examples/example_knowledge.gyro --new-session 
+	python -m gyro_tools.gyro_knowledge_manager import --input examples/example_knowledge.gyro --new-session

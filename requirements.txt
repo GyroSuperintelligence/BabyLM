@@ -1,0 +1,46 @@
+# Core Python version
+python_version >=3.11
+
+# Core scientific stack
+torch>=2.2.0
+
+# UI framework
+flet>=0.18.0
+
+# Data and serialization
+pyyaml>=6.0
+msgpack>=1.0.7
+
+# Database for UI state/session
+sqlite-utils>=3.36.0
+
+# CLI and tools
+click>=8.1.7
+
+# Compression and packaging
+tqdm>=4.66.2
+zstandard>=0.22.0
+
+# Testing and linting
+pytest>=8.2.0
+black>=24.4.2
+flake8>=7.0.0
+mypy>=1.10.0
+isort>=5.13.2
+pre-commit>=3.7.1
+
+# Optional: For UUID, path, and typing (standard in Python 3.11+)
+# No need to specify
+
+# For cryptographic integrity
+cryptography>=42.0.0
+
+# For documentation
+mkdocs>=1.6.0
+mkdocs-material>=9.5.18
+
+# For type hints and static analysis
+typing-extensions>=4.11.0
+
+# For file locking (thread/process safety)
+filelock>=3.13.4

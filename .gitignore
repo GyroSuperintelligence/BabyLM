@@ -1,46 +1,3 @@
-# Rust
-/target/
-**/*.rs.bk
-Cargo.lock
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-
-# Build artifacts
-/dist/
-/build/
-*.app
-*.exe
-*.dll
-*.so
-*.dylib
-
-# Dependencies
-/node_modules/
-/.pnp
-.pnp.js
-
-# Testing
-/coverage/
-.nyc_output
-
-# Environment
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-*.log
-
 # Python
 __pycache__/
 *.py[cod]
@@ -59,116 +16,40 @@ parts/
 sdist/
 var/
 wheels/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
-pip-log.txt
-pip-delete-this-directory.txt
 
 # Virtual environments
 venv/
 env/
 ENV/
-env.bak/
-venv.bak/
-.python-version
+.venv/
 
-# IDE files
+# IDE
+.vscode/settings.json
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
-.project
-.pydevproject
-.settings/
+
+# GyroSI specific - sessions and logs only
+data/sessions/*/
+logs/*.log
+config/local.yaml
+
+# Keep knowledge packages in git for examples
+!data/knowledge/example_*/
+
+# OS
 .DS_Store
-
-# Testing and coverage
-.coverage
-.coverage.*
-htmlcov/
-.pytest_cache/
-.tox/
-.nox/
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-
-# Type checking
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pyre/
-.pytype/
-
-# Project-specific
-audit/*.jl
-audit/*.cid
-data/*.txt
-data/*.json
-data/*.csv
-*.log
-*.pid
-*.seed
-*.pid.lock
-
-# DVC
-.dvc/cache
-.dvc/tmp
-.dvc/plots
-dvc.lock
-
-# Jupyter
-.ipynb_checkpoints
-*.ipynb
-
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-Icon
-._*
-.DocumentRevisions-V100
-.fseventsd
-.Spotlight-V100
-.TemporaryItems
-.Trashes
-.VolumeIcon.icns
-.com.apple.timemachine.donotpresent
-.AppleDB
-.AppleDesktop
-Network Trash Folder
-Temporary Items
-.apdisk
-
-# Windows
 Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
-*.stackdump
-[Dd]esktop.ini
-$RECYCLE.BIN/
-*.cab
-*.msi
-*.msix
-*.msm
-*.msp
-*.lnk
 
-# Linux
-*~
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
-
-# pytest cache
+# Testing
 .pytest_cache/
+.coverage
+htmlcov/
+.tox/
 
-# Python build artefacts
-gyro_si.egg-info/ 
+# Documentation
+docs/_build/
