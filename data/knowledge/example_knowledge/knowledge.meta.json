@@ -1,0 +1,24 @@
+{
+  "knowledge_id": "550e8400-e29b-41d4-a716-446655440000",
+  "gyro_version": "0.8.8",
+  "gene_checksum": "sha256:c1a7b3d9e0f1a2b3c4d5e6f7...",
+  "step_count": 123456,
+  "created_ts": 1750531200.0,
+  "source": "session 79e2f1a8... on host A4F9E1C8",
+  "parent_knowledge_id": "440e8400-e29b-41d4-a716-446655440001",
+  "fork_reason": "new_learning_session",
+  "learning_sources": [
+    "document_sha256:abc123...",
+    "conversation_thread:def456..."
+  ],
+  "extension_versions": {
+    "ext_coset_knowledge": "0.9.1",
+    "ext_bloom_filter": "1.2.0",
+    "ext_multi_resolution": "1.0.0",
+    "ext_spin_piv": "0.8.8"
+  },
+  "compatibility": {
+    "min_gyro_version": "0.8.0",
+    "max_gyro_version": "0.9.x"
+  }
+} 

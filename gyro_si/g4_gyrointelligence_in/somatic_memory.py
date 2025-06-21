@@ -1,1 +1,0 @@
-"""Somatic memory for G4 intelligence.""" 

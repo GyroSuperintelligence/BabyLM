@@ -1,1 +1,0 @@
-"""Structural memory for G3 inference.""" 

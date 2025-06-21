@@ -1,1 +1,0 @@
-"""Epigenetic memory for G2 information.""" 
