@@ -3,6 +3,7 @@
 
 # Core scientific stack
 torch>=2.2.0
+numpy>=1.26.0
 
 # UI framework
 flet>=0.18.0
