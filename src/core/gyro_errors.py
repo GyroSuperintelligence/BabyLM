@@ -1,7 +1,8 @@
 """
 gyro_errors.py - GyroSI Error Hierarchy
 
-Defines all custom exceptions used throughout the system.
+Defines all custom exceptions used throughout the system, as specified in
+CORE-SPEC-06. All errors inherit from a base GyroError.
 """
 
 
@@ -9,6 +10,8 @@ class GyroError(Exception):
     """Base exception for all GyroSI errors."""
     pass
 
+
+# --- Core System Errors ---
 
 class GyroTagError(GyroError):
     """TAG expression violations per CORE-SPEC-04."""
@@ -25,18 +28,15 @@ class GyroNoResonanceError(GyroError):
     pass
 
 
+class GyroIntegrityError(GyroError):
+    """Structural integrity failures (e.g., checksum mismatch)."""
+    pass
+
+
+# --- Knowledge & Session Errors ---
+
 class GyroImmutabilityError(GyroError):
     """Knowledge modification attempts on immutable packages."""
-    pass
-
-
-class GyroIntegrityError(GyroError):
-    """Structural integrity failures."""
-    pass
-
-
-class GyroExtensionError(GyroError):
-    """Extension operation failures."""
     pass
 
 
@@ -51,5 +51,22 @@ class GyroForkError(GyroError):
 
 
 class GyroSessionError(GyroError):
-    """Session management failures."""
+    """Session management failures (e.g., session not found)."""
+    pass
+
+
+# --- Extension & I/O Errors ---
+
+class GyroExtensionError(GyroError):
+    """Generic extension operation failures."""
+    pass
+
+
+class GyroStorageError(GyroError):
+    """File I/O and persistence failures."""
+    pass
+
+
+class GyroConfigError(GyroError):
+    """Configuration file errors."""
     pass

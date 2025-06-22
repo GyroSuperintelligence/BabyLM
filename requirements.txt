@@ -3,7 +3,7 @@
 
 # Core scientific stack
 torch>=2.2.0
-numpy>=1.26.0
+numpy>=1.26.0,<2.0
 
 # UI framework
 flet>=0.18.0
@@ -45,3 +45,6 @@ typing-extensions>=4.11.0
 
 # For file locking (thread/process safety)
 filelock>=3.13.4
+
+# For system monitoring
+psutil>=5.9.0
