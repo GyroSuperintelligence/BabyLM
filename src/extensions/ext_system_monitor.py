@@ -12,6 +12,7 @@ from collections import deque
 
 from extensions.base import GyroExtension
 
+# Unused variables for future debug: (none listed)
 
 class ext_SystemMonitor(GyroExtension):
     """

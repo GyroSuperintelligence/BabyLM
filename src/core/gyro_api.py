@@ -152,11 +152,11 @@ def process_byte(session_id: str, input_byte: int) -> Optional[Tuple[int, int]]:
         GyroSessionError: If the session is not active.
         ValueError: If byte is not in range 0-255.
     """
-    if not (0 <= byte <= 255):
-        raise ValueError(f"Byte must be in range 0-255, got {byte}")
+    if not (0 <= input_byte <= 255):
+        raise ValueError(f"Byte must be in range 0-255, got {input_byte}")
 
     manager = _get_manager(session_id)
-    return manager.gyro_operation(byte)
+    return manager.gyro_operation(input_byte)
 
 
 def process_byte_stream(session_id: str, byte_stream: Iterable[int]) -> int:

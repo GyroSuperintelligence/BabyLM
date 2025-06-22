@@ -21,6 +21,7 @@ from core.alignment_nav import NavigationLog
 from core.gyro_errors import GyroStorageError, GyroIntegrityError
 from extensions.base import GyroExtension
 
+# Unused variables for future debug: (none listed)
 
 class ext_StorageManager(GyroExtension):
     """
