@@ -16,7 +16,7 @@ References:
 - CORE-SPEC-07: Baseline Implementation Specifications
 """
 
-from typing import Optional, Dict, List, Iterable, Union, Tuple
+from typing import Optional, Dict, List, Iterable, Union, Tuple, Any
 from pathlib import Path
 
 # The ExtensionManager is the workhorse orchestrated by this API
@@ -448,14 +448,14 @@ def get_navigation_history(
 # ============================================================================
 
 
-def validate_system_integrity() -> Dict[str, bool]:
+def validate_system_integrity() -> Tuple[bool, Dict[str, Any]]:
     """
     Performs system-wide integrity validation.
 
     This checks all active sessions and the overall system configuration.
 
     Returns:
-        Dictionary of validation results.
+        Tuple of (system_valid, results dictionary).
     """
     results = {"system_valid": True, "active_sessions": len(_active_sessions), "sessions": {}}
 
@@ -468,7 +468,7 @@ def validate_system_integrity() -> Dict[str, bool]:
             results["sessions"][session_id] = {"valid": False, "error": str(e)}
             results["system_valid"] = False
 
-    return results
+    return results["system_valid"], results
 
 
 def cleanup_inactive_sessions() -> int:
