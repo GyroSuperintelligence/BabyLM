@@ -25,6 +25,7 @@ classifiers = [
 
 dependencies = [
     "torch>=2.2.0",
+    "numpy>=1.26.0",
     "flet>=0.18.0",
     "pyyaml>=6.0",
     "msgpack>=1.0.7",
