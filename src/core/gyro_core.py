@@ -17,8 +17,12 @@ References:
 - CORE-SPEC-08: Operational Walkthrough
 """
 
+import os
 import torch
-from typing import Optional, Tuple, Dict
+import numpy as np
+import hashlib
+from typing import Tuple, Dict, Optional
+from .gyro_errors import GyroIntegrityError
 
 
 # ============================================================================
@@ -48,24 +52,13 @@ _OP_CODES = {
 
 class GyroEngine:
     """
-    A pure navigation engine. It holds no direct file handles or complex state,
-    only the invariant Gene and the current session's phase.
-
-    This class implements the core computational mechanics of GyroSI:
-    - Phase advancement (CS→UNA transition)
-    - Structural resonance checking (UNA→ONA transition)
-    - Operator code selection (BU_In→BU_Eg transition)
-
-    All operations are deterministic and side-effect free.
+    Provably mechanical navigation engine.
+    Every input byte ALWAYS produces operator codes via matrix lookup.
+    No heuristics, no branching, no None returns.
     """
 
-    def __init__(self):
-        """
-        Initializes the engine with its immutable structural components.
-
-        The Gene is created once and never modified. It represents the
-        invariant tensor substrate through which all navigation occurs.
-        """
+    def __init__(self, matrix_path: Optional[str] = None):
+        """Initialize with operator matrix and Gene validation"""
         # The Gene is an immutable constant, part of the engine's identity.
         # It is defined once and never changed.
         self.gene: Dict[str, torch.Tensor] = self._get_gene_constant()
@@ -73,6 +66,43 @@ class GyroEngine:
         # The phase is the ONLY piece of mutable state the engine tracks directly.
         # It represents the current position in the 48-step navigation cycle.
         self.phase: int = 0
+
+        # Load and validate operator matrix
+        if matrix_path is None:
+            matrix_path = os.path.join(os.path.dirname(__file__), "operator_matrix.dat")
+
+        self._load_and_validate_matrix(matrix_path)
+
+    def _load_and_validate_matrix(self, matrix_path: str) -> None:
+        """Load operator matrix and validate against current Gene"""
+        try:
+            with open(matrix_path, "rb") as f:
+                stored_header = f.read(32)  # SHA-256 is 32 bytes
+                matrix_data = f.read()
+        except FileNotFoundError:
+            raise GyroIntegrityError(
+                f"CRITICAL: operator_matrix.dat not found at {matrix_path}. "
+                f"Run: python gyro_tools/build_operator_matrix.py"
+            )
+
+        # Validate matrix was built for current Gene
+        current_header = self._compute_gene_checksum()
+        if stored_header != current_header:
+            raise GyroIntegrityError(
+                "Operator matrix Gene checksum mismatch. "
+                "Matrix was built for different Gene version. "
+                "Rebuild with: python gyro_tools/build_operator_matrix.py"
+            )
+
+        # Load matrix
+        self._operator_matrix = np.frombuffer(matrix_data, dtype=np.uint8).reshape(48, 256)
+
+    def _compute_gene_checksum(self) -> bytes:
+        """Compute SHA-256 checksum of current Gene"""
+        hasher = hashlib.sha256()
+        hasher.update(self.gene["id_0"].numpy().tobytes())
+        hasher.update(self.gene["id_1"].numpy().tobytes())
+        return hasher.digest()
 
     def load_phase(self, phase: int) -> None:
         """
@@ -88,6 +118,25 @@ class GyroEngine:
         if not (0 <= phase < 48):
             raise ValueError(f"Phase must be between 0 and 47, got {phase}")
         self.phase = phase
+
+    def execute_cycle(self, input_byte: int) -> Tuple[int, int]:
+        """
+        Execute one mechanical navigation cycle.
+        ALWAYS returns operator codes - never None.
+        This is the key change from your heuristic version.
+        """
+        # 1. Advance phase (same as your version)
+        self.phase = (self.phase + 1) % 48
+
+        # 2. Mechanical operator lookup (replaces all your heuristic logic)
+        clamped_byte = max(0, min(255, input_byte))
+        operator_type = int(self._operator_matrix[self.phase, clamped_byte])
+
+        # 3. Pack into 4-bit codes for both tensors
+        op_code_0 = (operator_type << 1) | 0  # For id_0 tensor
+        op_code_1 = (operator_type << 1) | 1  # For id_1 tensor
+
+        return (op_code_0, op_code_1)
 
     def _get_gene_constant(self) -> Dict[str, torch.Tensor]:
         """
@@ -122,132 +171,6 @@ class GyroEngine:
 
         # Return both tensors as independent clones
         return {"id_0": base_tensor.clone(), "id_1": base_tensor.clone()}
-
-    def _structural_resonance(self, input_byte: int) -> bool:
-        """
-        Pure computational check for structural alignment per CORE-SPEC-08.
-        Determines if an input byte's bit pattern aligns with the Gene
-        topology at the current phase.
-
-        The resonance check maps the input byte to a specific position in
-        the Gene tensor based on the current phase, then tests if the bit
-        patterns align with the tensor values at that position.
-
-        Args:
-            input_byte: The input byte (0-255) to test.
-
-        Returns:
-            True if resonance occurs, False otherwise.
-        """
-        # Validate input
-        if not (0 <= input_byte <= 255):
-            return False
-
-        # Phase-to-tensor mapping: determine which tensor and position to check
-        tensor_id = self.phase % 2  # Alternates between id_0 and id_1
-        position_in_tensor = (self.phase // 2) % 24  # 24 positions per tensor
-
-        # Map position to tensor coordinates
-        outer_idx = position_in_tensor // 6  # 4 outer positions
-        inner_idx = (position_in_tensor // 3) % 2  # 2 inner positions
-        spatial_idx = position_in_tensor % 3  # 3 spatial dimensions (X, Y, Z)
-
-        # Access the specific slice of the immutable Gene
-        tensor_key = f"id_{tensor_id}"
-        current_slice = self.gene[tensor_key][outer_idx][inner_idx][spatial_idx]
-
-        # Bit pattern alignment test per CORE-SPEC-08
-        # High nibble (bits 7-4) maps to first element
-        # Low nibble (bits 3-0) maps to second element
-        high_nibble = (input_byte >> 4) & 0x0F
-        low_nibble = input_byte & 0x0F
-
-        # Alignment: nibble >= 8 maps to 1, < 8 maps to -1
-        high_alignment = 1 if high_nibble >= 8 else -1
-        low_alignment = 1 if low_nibble >= 8 else -1
-
-        # Check if both alignments match the tensor values
-        return (
-            high_alignment == current_slice[0].item() and low_alignment == current_slice[1].item()
-        )
-
-    def _select_operator_codes(self) -> Optional[Tuple[int, int]]:
-        """
-        Pure computational selection of operator codes based on phase.
-        It does NOT call the operators; it only determines which ones should fire.
-
-        The selection follows the precise phase boundaries defined in CORE-SPEC-08:
-        - CS boundaries (0,12,24,36): Stable operator (Identity/Inverse)
-        - UNA/ONA transitions (3,9,15,21,27,33,39,45): Unstable operator (Forward/Backward)
-        - Nesting boundaries (6,18,30,42): Neutral operator (Backward)
-
-        Returns:
-            A tuple of (op_code_id0, op_code_id1) if an operator resonates,
-            otherwise None.
-        """
-        op_code_0 = None
-        op_code_1 = None
-
-        if self.phase in _CS_BOUNDARIES:
-            # Stable Operator (gyro_curation) resonance
-            # id_0 gets Identity, id_1 gets Inverse
-            op_code_0 = (_OP_CODES["IDENTITY"] << 1) | 0  # Bits: 000|0
-            op_code_1 = (_OP_CODES["INVERSE"] << 1) | 1  # Bits: 001|1
-
-        elif self.phase in _UNA_ONA_BOUNDARIES:
-            # Unstable Operator (gyro_interaction) resonance
-            # Alternates between Forward and Backward based on position in cycle
-            if (self.phase % 24) < 12:
-                base_op = _OP_CODES["FORWARD"]
-            else:
-                base_op = _OP_CODES["BACKWARD"]
-
-            op_code_0 = (base_op << 1) | 0  # Tensor id 0
-            op_code_1 = (base_op << 1) | 1  # Tensor id 1
-
-        elif self.phase in _NESTING_BOUNDARIES:
-            # Neutral Operator (gyro_cooperation) resonance
-            # Both tensors get Backward gyration
-            op_code_0 = (_OP_CODES["BACKWARD"] << 1) | 0  # Bits: 011|0
-            op_code_1 = (_OP_CODES["BACKWARD"] << 1) | 1  # Bits: 011|1
-
-        # Return the codes if any operator resonated
-        if op_code_0 is not None:
-            return (op_code_0, op_code_1)
-
-        return None
-
-    def execute_cycle(self, input_byte: int) -> Optional[Tuple[int, int]]:
-        """
-        Executes one full, atomic navigation cycle step. This is the primary
-        method called by the ExtensionManager.
-
-        The cycle implements the complete CS→UNA→ONA→BU navigation path:
-        1. Phase advance (CS→UNA): Moves to the next position in the 48-step cycle
-        2. Structural resonance (UNA→ONA): Tests input alignment with Gene
-        3. Operator selection (ONA→BU): Determines which operators should fire
-
-        Args:
-            input_byte: The byte being processed (0-255).
-
-        Returns:
-            A tuple of (op_code_id0, op_code_id1) if a navigation event was
-            generated, otherwise None.
-        """
-        # 1. Advance Phase (CS→UNA transition)
-        # The engine is the only component that can modify the phase
-        self.phase = (self.phase + 1) % 48
-
-        # 2. Structural Resonance Check (UNA→ONA transition)
-        if not self._structural_resonance(input_byte):
-            return None
-
-        # 3. Operator Selection (ONA→BU transition)
-        operator_codes = self._select_operator_codes()
-
-        # Return the generated operator codes to the caller (ExtensionManager)
-        # These will be recorded in the navigation log if not None
-        return operator_codes
 
 
 # ============================================================================

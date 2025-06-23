@@ -29,6 +29,8 @@ from core.gyro_api import (
     validate_system_integrity,
 )
 
+from extensions.ext_storage_manager import ext_StorageManager
+
 
 class TestCompleteSystemIntegration:
     """Test the complete GyroSI system end-to-end."""
@@ -241,7 +243,6 @@ def test_system_components_exist():
 
     # Test extensions exist
     from extensions.base import GyroExtension
-    from extensions.ext_storage_manager import ext_StorageManager
     from extensions.ext_fork_manager import ext_ForkManager
 
     # All imports successful

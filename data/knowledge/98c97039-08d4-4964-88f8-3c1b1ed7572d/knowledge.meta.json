@@ -1,0 +1,12 @@
+{
+  "knowledge_id": "98c97039-08d4-4964-88f8-3c1b1ed7572d",
+  "gyro_version": "0.8.8",
+  "gene_checksum": "sha256:placeholder_gene_checksum",
+  "step_count": 0,
+  "created_ts": 1750632297.141505,
+  "source": "session d4a2dcb2-afb3-402e-9454-537f7da2a684",
+  "parent_knowledge_id": null,
+  "learning_sources": [],
+  "extension_versions": {},
+  "immutable": false
+}

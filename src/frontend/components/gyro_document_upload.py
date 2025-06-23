@@ -1,15 +1,12 @@
 # src/frontend/components/gyro_document_upload.py
 import flet as ft
-import asyncio
+import time
 from typing import Callable, Optional
-from pathlib import Path
 from ..assets.styles.theme import GyroTheme
 
 
 class GyroDocumentUpload(ft.UserControl):
     """Document upload area with Apple-like design"""
-
-    # Unused variables for future debug: (none listed)
 
     def __init__(self, on_upload: Callable):
         super().__init__()
@@ -97,7 +94,7 @@ class GyroDocumentUpload(ft.UserControl):
             allowed_extensions=["txt", "pdf", "docx"], dialog_title="Select a document to upload"
         )
 
-    async def _handle_file_pick(self, e: ft.FilePickerResultEvent):
+    def _handle_file_pick(self, e: ft.FilePickerResultEvent):
         """Handle file selection"""
         if not e.files:
             return
@@ -108,26 +105,26 @@ class GyroDocumentUpload(ft.UserControl):
         # Show progress
         self.progress_bar.visible = True
         self.upload_area.visible = False
-        await self.update_async()
+        self.update()
 
         # Simulate upload progress
         for i in range(101):
             self.progress_bar.value = i / 100
-            await self.update_async()
-            await asyncio.sleep(0.01)
+            self.update()
+            time.sleep(0.01)
 
         # Show file info
         self.file_info.content.controls[1].value = file.name
         self.file_info.visible = True
         self.progress_bar.visible = False
-        await self.update_async()
+        self.update()
 
         # Notify parent
-        await self.on_upload(file.path)
+        self.on_upload(file.path)
 
-    async def _clear_file(self, e):
+    def _clear_file(self, e):
         """Clear uploaded file"""
         self.current_file = None
         self.file_info.visible = False
         self.upload_area.visible = True
-        await self.update_async()
+        self.update()

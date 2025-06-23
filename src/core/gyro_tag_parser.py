@@ -25,7 +25,11 @@ def validate_tag(tag: str) -> bool:
         return False
 
     # TAG pattern: temporal.invariant[.context]
-    pattern = r"^(previous|current|next)\.(gyrotensor_id|gyrotensor_com|gyrotensor_nest|gyrotensor_add|gyrotensor_quant)(?:\.[\w_]+)?$"
+    pattern = (
+        r"^(previous|current|next)\."
+        r"(gyrotensor_id|gyrotensor_com|gyrotensor_nest|gyrotensor_add|gyrotensor_quant)"
+        r"(?:\.[\w_]+)?$"
+    )
 
     return bool(re.match(pattern, tag))
 

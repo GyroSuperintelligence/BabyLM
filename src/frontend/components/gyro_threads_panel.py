@@ -1,17 +1,18 @@
 # src/frontend/components/gyro_threads_panel.py
 import flet as ft
-from typing import Callable, Optional, List, Dict
+from typing import Callable, Optional, Dict
 import uuid
 from datetime import datetime
 from ..assets.styles.theme import GyroTheme
 
 
-class GyroThreadsPanel(ft.Control):
+class GyroThreadsPanel(ft.UserControl):
     """Thread list with folder support and Apple-like design"""
 
-    def __init__(self, on_thread_select: Callable):
+    def __init__(self, on_thread_select: Callable, extension_manager=None):
         super().__init__()
         self.on_thread_select = on_thread_select
+        self.extension_manager = extension_manager
         self.threads: Dict[str, ThreadItem] = {}
         self.folders: Dict[str, FolderItem] = {}
         self.selected_thread_id: Optional[str] = None
@@ -66,10 +67,40 @@ class GyroThreadsPanel(ft.Control):
         # Thread list container
         self.thread_list = ft.ListView(spacing=2, padding=ft.padding.all(10), expand=True)
 
-        # Add sample threads
-        self._add_sample_threads()
+        # Load existing sessions if extension manager is available
+        if self.extension_manager:
+            self._load_existing_sessions()
+        else:
+            # Add sample threads for demonstration
+            self._add_sample_threads()
 
         return ft.Column(controls=[header, self.thread_list], spacing=0, expand=True)
+
+    def _load_existing_sessions(self):
+        """Load existing GyroSI sessions from storage"""
+        try:
+            # Get current session info
+            current_session_id = self.extension_manager.get_session_id()
+            knowledge_id = self.extension_manager.get_knowledge_id()
+
+            # Create thread for current session
+            thread_item = ThreadItem(
+                thread_id=current_session_id,
+                title="Current Session",
+                preview=f"Knowledge: {knowledge_id[:8]}...",
+                timestamp=datetime.now(),
+                on_click=self._on_thread_click,
+                on_delete=self._on_thread_delete,
+            )
+            self.threads[current_session_id] = thread_item
+            self.thread_list.controls.append(thread_item)
+
+            # Select current session
+            self._on_thread_click(current_session_id)
+
+        except Exception as e:
+            # Fallback to sample threads if loading fails
+            self._add_sample_threads()
 
     def _add_sample_threads(self):
         """Add sample threads for demonstration"""
@@ -92,46 +123,88 @@ class GyroThreadsPanel(ft.Control):
             self.threads[thread_id] = thread_item
             self.thread_list.controls.append(thread_item)
 
-    async def _create_new_thread(self, e):
-        """Create a new conversation thread"""
-        thread_id = str(uuid.uuid4())
-        thread_item = ThreadItem(
-            thread_id=thread_id,
-            title="New Conversation",
-            preview="Start typing...",
-            timestamp=datetime.now(),
-            on_click=self._on_thread_click,
-            on_delete=self._on_thread_delete,
-        )
+    def _create_new_thread(self, e):
+        """Create a new conversation thread with GyroSI session"""
+        try:
+            if self.extension_manager:
+                # Create new GyroSI session
+                from core.gyro_api import initialize_session
 
-        self.threads[thread_id] = thread_item
-        self.thread_list.controls.insert(0, thread_item)
-        await self.update_async()
+                new_session_id = initialize_session()
 
-        # Select the new thread
-        await self._on_thread_click(thread_id)
+                thread_item = ThreadItem(
+                    thread_id=new_session_id,
+                    title="New Conversation",
+                    preview="Start typing...",
+                    timestamp=datetime.now(),
+                    on_click=self._on_thread_click,
+                    on_delete=self._on_thread_delete,
+                )
 
-    async def _on_thread_click(self, thread_id: str):
+                self.threads[new_session_id] = thread_item
+                self.thread_list.controls.insert(0, thread_item)
+                self.update()
+
+                # Select the new thread
+                self._on_thread_click(new_session_id)
+            else:
+                # Fallback for demo mode
+                thread_id = str(uuid.uuid4())
+                thread_item = ThreadItem(
+                    thread_id=thread_id,
+                    title="New Conversation",
+                    preview="Start typing...",
+                    timestamp=datetime.now(),
+                    on_click=self._on_thread_click,
+                    on_delete=self._on_thread_delete,
+                )
+
+                self.threads[thread_id] = thread_item
+                self.thread_list.controls.insert(0, thread_item)
+                self.update()
+
+                # Select the new thread
+                self._on_thread_click(thread_id)
+
+        except Exception as e:
+            # Show error in UI
+            print(f"Error creating new thread: {e}")
+
+    def _on_thread_click(self, thread_id: str):
         """Handle thread selection"""
         # Update selection state
-        if self.selected_thread_id:
+        if self.selected_thread_id and self.selected_thread_id in self.threads:
             self.threads[self.selected_thread_id].selected = False
 
         self.selected_thread_id = thread_id
-        self.threads[thread_id].selected = True
-
-        await self.update_async()
-        await self.on_thread_select(thread_id)
-
-    async def _on_thread_delete(self, thread_id: str):
-        """Handle thread deletion"""
         if thread_id in self.threads:
-            thread_item = self.threads[thread_id]
-            self.thread_list.controls.remove(thread_item)
-            del self.threads[thread_id]
-            await self.update_async()
+            self.threads[thread_id].selected = True
 
-    async def _on_search(self, e):
+        self.update()
+        self.on_thread_select(thread_id)
+
+    def _on_thread_delete(self, thread_id: str):
+        """Handle thread deletion"""
+        try:
+            if thread_id in self.threads:
+                thread_item = self.threads[thread_id]
+                self.thread_list.controls.remove(thread_item)
+                del self.threads[thread_id]
+
+                # If this was the selected thread, clear selection
+                if self.selected_thread_id == thread_id:
+                    self.selected_thread_id = None
+
+                self.update()
+
+                # TODO: Implement proper session cleanup via gyro_api
+                # from core.gyro_api import shutdown_session
+                # shutdown_session(thread_id)
+
+        except Exception as e:
+            print(f"Error deleting thread: {e}")
+
+    def _on_search(self, e):
         """Filter threads based on search query"""
         query = e.control.value.lower()
 
@@ -142,7 +215,13 @@ class GyroThreadsPanel(ft.Control):
             else:
                 thread_item.visible = True
 
-        await self.update_async()
+        self.update()
+
+    def update_thread_preview(self, thread_id: str, preview: str):
+        """Update the preview text for a thread"""
+        if thread_id in self.threads:
+            self.threads[thread_id].update_preview(preview)
+            self.update()
 
 
 class ThreadItem(ft.UserControl):
@@ -177,24 +256,32 @@ class ThreadItem(ft.UserControl):
         )
 
         # Thread content
+        self.content_text = ft.Text(
+            self.title,
+            size=14,
+            weight=ft.FontWeight.W_500,
+            color=GyroTheme.TEXT_PRIMARY,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
+
+        self.preview_text = ft.Text(
+            self.preview,
+            size=12,
+            color=GyroTheme.TEXT_SECONDARY,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
+
+        self.timestamp_text = ft.Text(
+            self._format_timestamp(), size=11, color=GyroTheme.TEXT_TERTIARY
+        )
+
         content = ft.Column(
             controls=[
-                ft.Text(
-                    self.title,
-                    size=14,
-                    weight=ft.FontWeight.W_500,
-                    color=GyroTheme.TEXT_PRIMARY,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                ),
-                ft.Text(
-                    self.preview,
-                    size=12,
-                    color=GyroTheme.TEXT_SECONDARY,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                ),
-                ft.Text(self._format_timestamp(), size=11, color=GyroTheme.TEXT_TERTIARY),
+                self.content_text,
+                self.preview_text,
+                self.timestamp_text,
             ],
             spacing=2,
         )
@@ -202,32 +289,38 @@ class ThreadItem(ft.UserControl):
         # Container with hover effects
         self.container = ft.Container(
             content=ft.Row(
-                controls=[content, self.delete_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                controls=[
+                    ft.Container(content=content, expand=True),
+                    self.delete_btn,
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             ),
             padding=ft.padding.all(12),
             border_radius=8,
-            on_hover=self._on_hover,
             on_click=lambda _: self.on_click(self.thread_id),
-            animate=ft.animation.Animation(200, ft.AnimationCurve.EASE_IN_OUT),
+            on_hover=self._on_hover,
         )
 
         self._update_style()
         return self.container
 
     def _update_style(self):
-        """Update container style based on selection state"""
+        """Update visual style based on selection state"""
         if self.selected:
             self.container.bgcolor = GyroTheme.ACCENT
-            self.container.border = ft.border.all(1, GyroTheme.ACCENT)
+            self.content_text.color = GyroTheme.TEXT_ON_ACCENT
+            self.preview_text.color = "#FFFFFF80"
+            self.timestamp_text.color = "#FFFFFF60"
         else:
             self.container.bgcolor = None
-            self.container.border = None
+            self.content_text.color = GyroTheme.TEXT_PRIMARY
+            self.preview_text.color = GyroTheme.TEXT_SECONDARY
+            self.timestamp_text.color = GyroTheme.TEXT_TERTIARY
 
     def _on_hover(self, e):
-        """Handle hover state"""
-        if e.data == "true":
-            if not self.selected:
-                self.container.bgcolor = GyroTheme.HOVER_BG
+        """Handle hover effect"""
+        if e.data == "true" and not self.selected:
+            self.container.bgcolor = GyroTheme.HOVER_BG
             self.delete_btn.visible = True
         else:
             if not self.selected:
@@ -236,156 +329,50 @@ class ThreadItem(ft.UserControl):
         self.update()
 
     def _format_timestamp(self):
-        """Format timestamp in Apple style"""
+        """Format timestamp for display"""
         now = datetime.now()
         diff = now - self.timestamp
 
-        if diff.days > 7:
-            return self.timestamp.strftime("%b %d")
-        elif diff.days > 0:
+        if diff.days > 0:
             return f"{diff.days}d ago"
         elif diff.seconds > 3600:
-            return f"{diff.seconds // 3600}h ago"
+            hours = diff.seconds // 3600
+            return f"{hours}h ago"
         elif diff.seconds > 60:
-            return f"{diff.seconds // 60}m ago"
+            minutes = diff.seconds // 60
+            return f"{minutes}m ago"
         else:
             return "Just now"
 
+    def update_preview(self, preview: str):
+        """Update the preview text"""
+        self.preview = preview
+        self.preview_text.value = preview
+        self.update()
+
+    @property
+    def selected(self):
+        return self._selected
+
+    @selected.setter
+    def selected(self, value: bool):
+        self._selected = value
+        if hasattr(self, "container"):
+            self._update_style()
+
 
 class FolderItem(ft.UserControl):
-    """Folder item with nesting support"""
+    """Folder item for organizing threads"""
 
-    def __init__(self, folder_id: str, name: str, parent_id: Optional[str] = None):
+    def __init__(self, folder_id: str, name: str):
         super().__init__()
         self.folder_id = folder_id
         self.name = name
-        self.parent_id = parent_id
-        self.expanded = True
-        self.children: List[ThreadItem] = []
-        self.subfolders: List[FolderItem] = []
 
     def build(self):
-        # Folder header
-        self.expand_icon = ft.Icon(
-            ft.icons.KEYBOARD_ARROW_DOWN if self.expanded else ft.icons.KEYBOARD_ARROW_RIGHT,
-            size=16,
-            color=GyroTheme.TEXT_SECONDARY,
-        )
-
-        header = ft.Container(
-            content=ft.Row(
-                controls=[
-                    self.expand_icon,
-                    ft.Icon(ft.icons.FOLDER, size=16, color=GyroTheme.ACCENT),
-                    ft.Text(
-                        self.name, size=13, weight=ft.FontWeight.W_500, color=GyroTheme.TEXT_PRIMARY
-                    ),
-                ],
-                spacing=5,
-            ),
-            padding=ft.padding.symmetric(horizontal=12, vertical=8),
-            on_click=self._toggle_expand,
-            on_hover=self._on_hover,
-            border_radius=6,
-        )
-
-        # Children container
-        self.children_container = ft.Column(
-            controls=self.children + self.subfolders, visible=self.expanded, spacing=2
-        )
-
-        # Add indentation for nested items
-        if self.parent_id:
-            self.children_container.controls = [
-                ft.Container(content=child, padding=ft.padding.only(left=20))
-                for child in self.children_container.controls
-            ]
-
-        return ft.Column(controls=[header, self.children_container], spacing=0)
-
-    def _toggle_expand(self, e):
-        """Toggle folder expansion"""
-        self.expanded = not self.expanded
-        self.expand_icon.name = (
-            ft.icons.KEYBOARD_ARROW_DOWN if self.expanded else ft.icons.KEYBOARD_ARROW_RIGHT
-        )
-        self.children_container.visible = self.expanded
-        self.update()
-
-    def _on_hover(self, e):
-        """Handle hover state"""
-        container = e.control
-        if e.data == "true":
-            container.bgcolor = GyroTheme.HOVER_BG
-        else:
-            container.bgcolor = None
-        container.update()
-
-
-class DraggableThreadItem(ThreadItem):
-    """Thread item with drag and drop support"""
-
-    def build(self):
-        base_control = super().build()
-
-        return ft.Draggable(
-            group="thread",
-            content=base_control,
-            content_feedback=ft.Container(
-                content=ft.Text(self.title, size=14),
-                bgcolor=GyroTheme.ACCENT,
-                padding=10,
-                border_radius=8,
-                opacity=0.8,
-            ),
-        )
-
-
-class DroppableFolder(FolderItem):
-    """Folder with drop target support"""
-
-    def build(self):
-        base_control = super().build()
-
-        return ft.DragTarget(
-            group="thread",
-            content=base_control,
-            on_accept=self._on_drop,
-            on_hover=self._on_drag_hover,
-        )
-
-    def _on_drop(self, e):
-        """Handle dropped thread"""
-        # Move thread to this folder
-        thread_id = e.data
-        # Implementation for moving thread
-
-    def _on_drag_hover(self, e):
-        """Visual feedback during drag"""
-        if e.data == "true":
-            self.container.border = ft.border.all(2, GyroTheme.ACCENT)
-        else:
-            self.container.border = None
-        self.update()
-
-
-class ThreadContextMenu(ft.PopupMenuButton):
-    """Context menu for thread operations"""
-
-    def __init__(self, thread_id: str, on_rename: Callable, on_delete: Callable):
-        super().__init__(
-            items=[
-                ft.PopupMenuItem(
-                    text="Rename", icon=ft.icons.EDIT, on_click=lambda _: on_rename(thread_id)
-                ),
-                ft.PopupMenuItem(
-                    text="Move to Folder",
-                    icon=ft.icons.FOLDER,
-                    on_click=lambda _: self._show_folder_dialog(thread_id),
-                ),
-                ft.PopupMenuItem(),  # Divider
-                ft.PopupMenuItem(
-                    text="Delete", icon=ft.icons.DELETE, on_click=lambda _: on_delete(thread_id)
-                ),
-            ]
+        return ft.Container(
+            content=ft.Text(self.name, size=14, weight=ft.FontWeight.W_500),
+            padding=ft.padding.all(12),
+            bgcolor=GyroTheme.SURFACE,
+            border_radius=8,
         )

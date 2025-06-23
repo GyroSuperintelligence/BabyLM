@@ -1,4 +1,4 @@
-# src/frontend/styles/theme.py
+# src/frontend/assets/styles/theme.py
 class GyroTheme:
     """Apple-like dark theme colors and styles"""
 

@@ -3,14 +3,12 @@
 import flet as ft
 from typing import Optional, List
 from datetime import datetime
-import asyncio
 from ..assets.styles.theme import GyroTheme
 
+
 class ChatMessage(ft.UserControl):
-    """
-    Individual chat message with Apple-like design.
-    May require Flet >=0.13 for animation and border features.
-    """
+    """Individual chat message with Apple-like design"""
+
     def __init__(self, content: str, is_user: bool, timestamp: datetime, is_system: bool = False):
         super().__init__()
         self.content = content
@@ -19,7 +17,7 @@ class ChatMessage(ft.UserControl):
         self.is_system = is_system
 
     def build(self):
-        # Determine style and alignment
+        # [Same as before - no changes needed]
         if self.is_system:
             bgcolor = GyroTheme.BORDER
             border = ft.border.all(1, GyroTheme.BORDER)
@@ -31,7 +29,7 @@ class ChatMessage(ft.UserControl):
             border = None
             alignment = ft.alignment.center_right
             text_color = GyroTheme.TEXT_ON_ACCENT
-            timestamp_color = ft.colors.WHITE70  # May require compatible Flet version
+            timestamp_color = "#FFFFFF70"
         else:
             bgcolor = GyroTheme.ASSISTANT_MESSAGE_BG
             border = ft.border.all(1, GyroTheme.BORDER)
@@ -39,21 +37,11 @@ class ChatMessage(ft.UserControl):
             text_color = GyroTheme.TEXT_PRIMARY
             timestamp_color = GyroTheme.TEXT_TERTIARY
 
-        # Message content
         message_bubble = ft.Container(
             content=ft.Column(
                 controls=[
-                    ft.Text(
-                        self.content,
-                        size=14,
-                        color=text_color,
-                        selectable=True,
-                    ),
-                    ft.Text(
-                        self.timestamp.strftime("%I:%M %p"),
-                        size=11,
-                        color=timestamp_color,
-                    ),
+                    ft.Text(self.content, size=14, color=text_color, selectable=True),
+                    ft.Text(self.timestamp.strftime("%I:%M %p"), size=11, color=timestamp_color),
                 ],
                 spacing=5,
             ),
@@ -61,22 +49,18 @@ class ChatMessage(ft.UserControl):
             border_radius=ft.border_radius.all(16),
             bgcolor=bgcolor,
             border=border,
-            max_width=500,
+            width=500,
         )
 
-        return ft.Container(
-            content=message_bubble,
-            alignment=alignment,
-            animate=ft.animation.Animation(300, ft.AnimationCurve.EASE_OUT),  # Animation may require Flet >=0.13
-        )
+        return ft.Container(content=message_bubble, alignment=alignment)
+
 
 class GyroChatInterface(ft.UserControl):
-    """
-    Main chat interface with Apple-like design.
-    Uses Flet ListView, TextField, and IconButton components.
-    """
-    def __init__(self):
+    """Chat interface integrated with ExtensionManager"""
+
+    def __init__(self, extension_manager):
         super().__init__()
+        self.extension_manager = extension_manager
         self.session_id: Optional[str] = None
         self.messages: List[ChatMessage] = []
         self.is_processing = False
@@ -103,18 +87,11 @@ class GyroChatInterface(ft.UserControl):
         )
 
         self.send_button = ft.IconButton(
-            icon=ft.icons.SEND_ROUNDED,  # May require compatible Flet version
+            icon=ft.icons.SEND,
             icon_color=GyroTheme.ACCENT,
             icon_size=20,
             on_click=self._send_message,
             disabled=False,
-            style=ft.ButtonStyle(
-                shape=ft.CircleBorder(),
-                bgcolor={
-                    ft.ControlState.DISABLED: GyroTheme.BORDER,
-                    ft.ControlState.DEFAULT: GyroTheme.ACCENT,
-                },  # These states may require Flet >=0.12
-            ),
         )
 
         self.processing_indicator = ft.ProgressRing(
@@ -151,74 +128,223 @@ class GyroChatInterface(ft.UserControl):
             expand=True,
         )
 
-    async def load_session(self, session_id: str):
-        """
-        Load chat history for a session.
-        """
+    def load_session(self, session_id: str):
+        """Load chat history for a session"""
         self.session_id = session_id
         self.messages.clear()
         self.message_list.controls.clear()
 
-        welcome_msg = ChatMessage(
-            content="Hello! I'm GyroSI Baby ML. I'm ready to learn and chat with you.",
-            is_user=False,
-            timestamp=datetime.now(),
-        )
-        self.messages.append(welcome_msg)
-        self.message_list.controls.append(welcome_msg)
+        try:
+            # Get current system state using correct memory tags
+            phase = self.extension_manager.engine.phase
+            knowledge_id = self.extension_manager.get_knowledge_id()
 
-        await self.update_async()
+            # Get system health for additional info
+            extension_count = len(self.extension_manager.extensions)
 
-    async def _send_message(self, e):
-        """
-        Send a message through G3_BU_In.
-        """
+            welcome_msg = ChatMessage(
+                content=f"Hello! I'm GyroSI Baby ML.\n"
+                f"Phase: {phase}/47\n"
+                f"Knowledge: {knowledge_id[:8]}...\n"
+                f"Extensions: {extension_count} loaded\n"
+                f"Ready to learn through navigation!",
+                is_user=False,
+                timestamp=datetime.now(),
+            )
+            self.messages.append(welcome_msg)
+            self.message_list.controls.append(welcome_msg)
+            self.update()
+        except Exception as e:
+            error_msg = ChatMessage(
+                content=f"Error loading session: {str(e)}",
+                is_user=False,
+                is_system=True,
+                timestamp=datetime.now(),
+            )
+            self.messages.append(error_msg)
+            self.message_list.controls.append(error_msg)
+            self.update()
+
+    def _send_message(self, e):
+        """Send message through G3→G2→G4→G5 cycle"""
         if not self.input_field.value or self.is_processing:
             return
 
         message_text = self.input_field.value.strip()
         self.input_field.value = ""
 
+        # Add user message
         user_msg = ChatMessage(content=message_text, is_user=True, timestamp=datetime.now())
         self.messages.append(user_msg)
         self.message_list.controls.append(user_msg)
 
-        await self._set_processing(True)
-        await self.update_async()
+        self._set_processing(True)
+        self.update()
 
-        # Simulate processing
-        await asyncio.sleep(1)
+        # Process through real GyroSI system
+        response_text = self._process_with_gyro_system(message_text)
 
+        # Add assistant response
         assistant_msg = ChatMessage(
-            content="I'm processing your message through my navigation cycle. This is where the GyroSI learning happens!",
+            content=response_text,
             is_user=False,
             timestamp=datetime.now(),
         )
         self.messages.append(assistant_msg)
         self.message_list.controls.append(assistant_msg)
 
-        await self._set_processing(False)
-        await self.update_async()
+        self._set_processing(False)
+        self.update()
 
-    async def _set_processing(self, processing: bool):
-        """
-        Update processing state.
-        """
+    def _process_with_gyro_system(self, text: str) -> str:
+        """Process text through the complete GyroSI system"""
+        try:
+            # Store as G2 epigenetic event (user input)
+            self.extension_manager.gyro_epigenetic_memory(
+                "current.gyrotensor_com",
+                {
+                    "text": text,
+                    "timestamp": datetime.now().isoformat(),
+                    "session_id": self.session_id,
+                },
+            )
+
+            # Process text byte-by-byte through navigation cycle
+            text_bytes = text.encode("utf-8")
+            navigation_events = []
+
+            initial_phase = self.extension_manager.engine.phase
+
+            for byte_val in text_bytes:
+                # Execute complete gyro_operation cycle
+                result = self.extension_manager.gyro_operation(byte_val)
+                if result:
+                    navigation_events.append(result)
+
+            final_phase = self.extension_manager.engine.phase
+
+            # Get navigation log info
+            nav_log_size = self.extension_manager.navigation_log.step_count
+
+            # Generate intelligent response based on system state
+            if navigation_events:
+                response = f"🧠 Processed '{text}' through GyroSI navigation cycle.\n\n"
+                response += f"📊 Navigation Events: {len(navigation_events)}\n"
+                response += f"🔄 Phase: {initial_phase} → {final_phase}\n"
+                response += f"📝 Navigation Log: {nav_log_size} total steps\n"
+                response += (
+                    f"🎯 Structural Resonance: {len(navigation_events)}/{len(text_bytes)} bytes\n\n"
+                )
+
+                # Show some recent navigation events
+                if len(navigation_events) > 0:
+                    recent_events = (
+                        navigation_events[-3:] if len(navigation_events) >= 3 else navigation_events
+                    )
+                    response += f"Recent events: {recent_events}\n"
+
+                response += "The system has learned from your input through structural resonance!"
+            else:
+                response = f"📝 Processed '{text}' ({len(text_bytes)} bytes)\n\n"
+                response += f"🔄 Phase: {initial_phase} → {final_phase}\n"
+                response += f"⚡ No structural resonance detected\n"
+                response += f"📊 Navigation Log: {nav_log_size} total steps\n\n"
+                response += "Input processed but no learning events generated."
+
+            # Store response in structural memory
+            self.extension_manager.gyro_structural_memory(
+                "current.gyrotensor_nest",
+                {
+                    "input": text,
+                    "response": response,
+                    "navigation_events": len(navigation_events),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
+            return response
+
+        except Exception as e:
+            error_response = f"❌ Error processing input: {str(e)}\n\nThe GyroSI system encountered an issue during navigation."
+
+            # Store error in immunity memory
+            self.extension_manager.gyro_immunity_memory(
+                "current.gyrotensor_quant",
+                {"error": str(e), "input": text, "timestamp": datetime.now().isoformat()},
+            )
+
+            return error_response
+
+    def _set_processing(self, processing: bool):
+        """Update processing state"""
         self.is_processing = processing
         self.send_button.visible = not processing
         self.processing_indicator.visible = processing
         self.input_field.disabled = processing
 
-    async def process_document(self, file_path: str):
-        """
-        Process uploaded document through G2_BU_In.
-        """
-        doc_msg = ChatMessage(
-            content=f"Processing document: {file_path}",
-            is_user=False,
-            is_system=True,
-            timestamp=datetime.now(),
-        )
-        self.messages.append(doc_msg)
-        self.message_list.controls.append(doc_msg)
-        await self.update_async()
+    def process_document(self, file_path: str):
+        """Process document through G2_BU_In import adaptors"""
+        try:
+            doc_msg = ChatMessage(
+                content=f"📄 Processing document: {file_path}",
+                is_user=False,
+                is_system=True,
+                timestamp=datetime.now(),
+            )
+            self.messages.append(doc_msg)
+            self.message_list.controls.append(doc_msg)
+            self.update()
+
+            # Read and process document through GyroSI
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+
+            # Store document in G2 epigenetic memory
+            self.extension_manager.gyro_epigenetic_memory(
+                "current.gyrotensor_com",
+                {
+                    "file_path": file_path,
+                    "content_length": len(content),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
+
+            # Process document content through navigation
+            initial_phase = self.extension_manager.engine.phase
+            navigation_events = []
+
+            # Process first 1000 bytes for demo (full document would be processed in chunks)
+            sample_content = content[:1000].encode("utf-8")
+
+            for byte_val in sample_content:
+                result = self.extension_manager.gyro_operation(byte_val)
+                if result:
+                    navigation_events.append(result)
+
+            final_phase = self.extension_manager.engine.phase
+            nav_log_size = self.extension_manager.navigation_log.step_count
+
+            result_msg = ChatMessage(
+                content=f"✅ Document processed through GyroSI!\n\n"
+                f"📊 Content: {len(content)} characters\n"
+                f"🧠 Navigation Events: {len(navigation_events)}\n"
+                f"🔄 Phase: {initial_phase} → {final_phase}\n"
+                f"📝 Total Navigation Steps: {nav_log_size}\n\n"
+                f"The document has been integrated into the knowledge system through structural resonance.",
+                is_user=False,
+                timestamp=datetime.now(),
+            )
+            self.messages.append(result_msg)
+            self.message_list.controls.append(result_msg)
+            self.update()
+
+        except Exception as e:
+            error_msg = ChatMessage(
+                content=f"❌ Error processing document: {str(e)}",
+                is_user=False,
+                is_system=True,
+                timestamp=datetime.now(),
+            )
+            self.messages.append(error_msg)
+            self.message_list.controls.append(error_msg)
+            self.update()

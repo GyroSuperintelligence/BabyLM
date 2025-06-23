@@ -73,19 +73,19 @@ class ext_MultiResolution(GyroExtension):
 
         # Check for character boundary
         if self.char_defect >= self.CHAR_THRESHOLD:
-            self._record_boundary("char", self.char_defect, byte)
+            self._record_boundary("char", self.char_defect, input_byte)
             self.char_defect = 0
 
         # Check for word boundary (with whitespace hint)
-        if byte is not None and byte in [32, 9, 10, 13]:  # Space, tab, newline, return
+        if input_byte is not None and input_byte in [32, 9, 10, 13]:  # Space, tab, newline, return
             if self.word_defect >= self.WORD_THRESHOLD:
-                self._record_boundary("word", self.word_defect, byte)
+                self._record_boundary("word", self.word_defect, input_byte)
                 self.word_defect = 0
 
         # Check for sentence boundary (with punctuation hint)
-        if byte is not None and byte in [46, 33, 63]:  # Period, exclamation, question
+        if input_byte is not None and input_byte in [46, 33, 63]:  # Period, exclamation, question
             if self.sent_defect >= self.SENT_THRESHOLD:
-                self._record_boundary("sentence", self.sent_defect, byte)
+                self._record_boundary("sentence", self.sent_defect, input_byte)
                 self.sent_defect = 0
 
     def _record_boundary(
@@ -95,8 +95,8 @@ class ext_MultiResolution(GyroExtension):
         boundary_record = {
             "type": boundary_type,
             "defect": defect_value,
-            "byte": byte,
-            "char": chr(byte) if byte and 32 <= byte <= 126 else None,
+            "byte": input_byte,
+            "char": chr(input_byte) if input_byte and 32 <= input_byte <= 126 else None,
         }
 
         self.ui_boundaries.append(boundary_record)
@@ -168,6 +168,31 @@ class ext_MultiResolution(GyroExtension):
             "total_words": self._boundary_stats["word_count"],
             "total_sentences": self._boundary_stats["sent_count"],
         }
+
+    def process_navigation_event(self, nav_event: int, input_byte: int = None):
+        """Process navigation event for boundary detection (new API)"""
+        # Extract operation and accumulate defects
+        op_code = (nav_event & 0x0F) >> 1
+        weight = self.OPERATION_WEIGHTS[op_code]
+
+        self.char_defect += weight
+        self.word_defect += weight
+        self.sent_defect += weight
+
+        # Check thresholds and detect boundaries
+        if self.char_defect >= self.CHAR_THRESHOLD:
+            self.ui_boundaries.append(('char', self.char_defect))
+            self.char_defect = 0
+
+        if input_byte and input_byte in [32, 9, 10, 13] and self.word_defect >= self.WORD_THRESHOLD:
+            self.ui_boundaries.append(('word', self.word_defect))
+            self.word_defect = 0
+
+        if input_byte and input_byte in [46, 33, 63] and self.sent_defect >= self.SENT_THRESHOLD:
+            self.ui_boundaries.append(('sentence', self.sent_defect))
+            self.sent_defect = 0
+
+        return None
 
     # --- GyroExtension Interface Implementation ---
 

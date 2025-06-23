@@ -1,18 +1,18 @@
 # src/frontend/gyro_app.py
 import flet as ft
 from typing import Optional
-import asyncio
-from pathlib import Path
 
 from .components.gyro_threads_panel import GyroThreadsPanel
 from .components.gyro_chat_interface import GyroChatInterface
 from .components.gyro_document_upload import GyroDocumentUpload
-from .styles.theme import GyroTheme
+from .assets.styles.theme import GyroTheme
 
-# Unused variables for future debug: (none listed)
+# Import the real system
+from core.extension_manager import ExtensionManager
+
 
 class GyroApp:
-    """Main GyroSI Baby ML application with Apple-like design"""
+    """Main GyroSI Baby ML application integrated with ExtensionManager"""
 
     def __init__(self):
         self.page: Optional[ft.Page] = None
@@ -21,35 +21,60 @@ class GyroApp:
         self.document_upload: Optional[GyroDocumentUpload] = None
         self.current_session_id: Optional[str] = None
 
-    async def main(self, page: ft.Page):
+        # Initialize the real GyroSI system
+        self.extension_manager: Optional[ExtensionManager] = None
+
+    def main(self, page: ft.Page):
         """Initialize and configure the main application"""
         self.page = page
 
-        # Configure page with Apple-like dark theme
+        # Configure page
         page.title = "GyroSI Baby ML"
         page.theme_mode = ft.ThemeMode.DARK
         page.bgcolor = GyroTheme.BACKGROUND
         page.padding = 0
 
-        # Load Nunito font
+        # Load fonts
         page.fonts = {
             "Nunito": "https://fonts.googleapis.com/css2?family=Nunito:wght@200;300;400;500;600;700;800;900&display=swap"
         }
         page.theme = ft.Theme(font_family="Nunito")
 
-        # Initialize components
-        self.threads_panel = GyroThreadsPanel(on_thread_select=self._on_thread_select)
-        self.chat_interface = GyroChatInterface()
-        self.document_upload = GyroDocumentUpload(on_upload=self._on_document_upload)
+        # Initialize GyroSI system
+        try:
+            self.extension_manager = ExtensionManager()
+            self.current_session_id = self.extension_manager.get_session_id()
 
-        # Build layout
-        await self._build_layout()
-        self._setup_keyboard_shortcuts()
+            # Initialize components with real system
+            self.threads_panel = GyroThreadsPanel(
+                on_thread_select=self._on_thread_select, extension_manager=self.extension_manager
+            )
+            self.chat_interface = GyroChatInterface(extension_manager=self.extension_manager)
+            self.document_upload = GyroDocumentUpload(on_upload=self._on_document_upload)
 
-    async def _build_layout(self):
+            # Build layout
+            self._build_layout()
+            self._setup_keyboard_shortcuts()
+
+        except Exception as e:
+            # Show error in UI
+            page.add(
+                ft.Text(f"Failed to initialize GyroSI system: {str(e)}", color=GyroTheme.ERROR)
+            )
+            page.update()
+
+    def _build_layout(self):
         """Build the main application layout"""
 
-        # Settings button (top-right)
+        # Get system health for header
+        if self.extension_manager:
+            phase = self.extension_manager.engine.phase
+            knowledge_id = self.extension_manager.get_knowledge_id()
+        else:
+            phase = 0
+            knowledge_id = "demo"
+
+        # Settings button
         settings_button = ft.IconButton(
             icon=ft.icons.SETTINGS_OUTLINED,
             icon_color=GyroTheme.TEXT_SECONDARY,
@@ -58,7 +83,7 @@ class GyroApp:
             tooltip="Settings",
         )
 
-        # Header bar
+        # Header with real system info
         header = ft.Container(
             content=ft.Row(
                 controls=[
@@ -67,6 +92,17 @@ class GyroApp:
                         size=18,
                         weight=ft.FontWeight.W_600,
                         color=GyroTheme.TEXT_PRIMARY,
+                    ),
+                    ft.Column(
+                        controls=[
+                            ft.Text(f"Phase: {phase}/47", size=12, color=GyroTheme.TEXT_SECONDARY),
+                            ft.Text(
+                                f"Knowledge: {knowledge_id[:8]}...",
+                                size=10,
+                                color=GyroTheme.TEXT_TERTIARY,
+                            ),
+                        ],
+                        spacing=2,
                     ),
                     settings_button,
                 ],
@@ -77,15 +113,13 @@ class GyroApp:
             border=ft.border.only(bottom=ft.BorderSide(1, GyroTheme.BORDER)),
         )
 
-        # Main content area with chat and document upload
+        # Main content
         main_content = ft.Container(
             content=ft.Column(
                 controls=[
-                    # Chat interface (expandable)
                     ft.Container(
                         content=self.chat_interface, expand=True, bgcolor=GyroTheme.BACKGROUND
                     ),
-                    # Document upload area
                     ft.Container(
                         content=self.document_upload, padding=20, bgcolor=GyroTheme.BACKGROUND
                     ),
@@ -96,66 +130,91 @@ class GyroApp:
             expand=True,
         )
 
-        # Main layout with sidebar and content
+        # Main layout
         main_layout = ft.Row(
             controls=[
-                # Left sidebar with threads
                 ft.Container(
                     content=self.threads_panel,
                     width=300,
                     bgcolor=GyroTheme.SIDEBAR,
                     border=ft.border.only(right=ft.BorderSide(1, GyroTheme.BORDER)),
                 ),
-                # Main content area
                 main_content,
             ],
             spacing=0,
             expand=True,
         )
 
-        # Add everything to page
-        self.page.add(ft.Column(controls=[header, main_layout], spacing=0, expand=True))
+        if self.page:
+            self.page.add(ft.Column(controls=[header, main_layout], spacing=0, expand=True))
+            self.page.update()
 
-        await self.page.update()
+    def _on_thread_select(self, session_id: str):
+        """Handle thread selection - create new session or switch"""
+        try:
+            # For now, just load the session in chat interface
+            # TODO: Implement proper session switching via ExtensionManager
+            self.current_session_id = session_id
+            if self.chat_interface:
+                self.chat_interface.load_session(session_id)
+        except Exception as e:
+            self._show_error(f"Failed to load session: {str(e)}")
 
-    async def _on_thread_select(self, session_id: str):
-        """Handle thread selection"""
-        self.current_session_id = session_id
-        await self.chat_interface.load_session(session_id)
+    def _on_document_upload(self, file_path: str):
+        """Handle document upload through G2_BU_In"""
+        try:
+            if self.current_session_id and self.chat_interface:
+                self.chat_interface.process_document(file_path)
+        except Exception as e:
+            self._show_error(f"Failed to process document: {str(e)}")
 
-    async def _on_document_upload(self, file_path: str):
-        """Handle document upload"""
-        if self.current_session_id:
-            # Process document through G2_BU_In
-            await self.chat_interface.process_document(file_path)
+    def _show_settings(self, e):
+        """Show settings dialog with real system integration"""
+        if self.extension_manager and self.page:
+            settings_dialog = SettingsDialog(self.extension_manager)
+            self.page.dialog = settings_dialog
+            self.page.update()
 
-    async def _show_settings(self, e):
-        """Show settings dialog"""
-        settings_dialog = SettingsDialog()
-        self.page.dialog = settings_dialog
-        settings_dialog.open = True
-        await self.page.update()
+    def _show_error(self, message: str):
+        """Show error message to user"""
+        if not self.page:
+            return
 
-    # ---------- keyboard shortcuts ----------
+        error_dialog = ft.AlertDialog(
+            title=ft.Text("Error"),
+            content=ft.Text(message),
+            actions=[ft.TextButton("OK", on_click=lambda _: self._close_dialog())],
+        )
+        self.page.dialog = error_dialog
+        self.page.update()
+
+    def _close_dialog(self):
+        """Close current dialog"""
+        if self.page and self.page.dialog:
+            self.page.dialog = None
+            self.page.update()
+
     def _setup_keyboard_shortcuts(self):
-        self.page.on_keyboard_event = self._handle_keyboard
+        if self.page:
+            self.page.on_keyboard_event = self._handle_keyboard
 
     def _handle_keyboard(self, e: ft.KeyboardEvent):
-        # Cmd/Ctrl + N  → new thread
         if (e.meta or e.ctrl) and e.key == "N":
-            asyncio.create_task(self.threads_panel._create_new_thread(None))
-        # Cmd/Ctrl + O  → open document picker
-        if (e.meta or e.ctrl) and e.key == "O":
-            self.document_upload._open_file_picker(None)
-        # Cmd/Ctrl + ,  → settings
-        if (e.meta or e.ctrl) and e.key == ",":
-            asyncio.create_task(self._show_settings(None))
+            if self.threads_panel:
+                self.threads_panel._create_new_thread(None)
+        elif (e.meta or e.ctrl) and e.key == "O":
+            if self.document_upload:
+                self.document_upload._open_file_picker(None)
+        elif (e.meta or e.ctrl) and e.key == ",":
+            self._show_settings(None)
 
 
 class SettingsDialog(ft.AlertDialog):
-    """Minimal settings dialog with Apple-like design"""
+    """Settings dialog integrated with ExtensionManager"""
 
-    def __init__(self):
+    def __init__(self, extension_manager: ExtensionManager):
+        self.extension_manager = extension_manager
+
         self.system_prompt_field = ft.TextField(
             label="System Prompt",
             multiline=True,
@@ -168,24 +227,34 @@ class SettingsDialog(ft.AlertDialog):
             focused_border_color=GyroTheme.ACCENT,
         )
 
+        # System health display
+        health_text = f"""Session: {extension_manager.get_session_id()[:8]}...
+Knowledge: {extension_manager.get_knowledge_id()[:8]}...
+Phase: {extension_manager.engine.phase}/47
+Extensions: {len(extension_manager.extensions)} loaded"""
+
         super().__init__(
             modal=True,
-            title=ft.Text("Settings", size=20, weight=ft.FontWeight.W_600),
+            title=ft.Text("GyroSI Settings", size=20, weight=ft.FontWeight.W_600),
             content=ft.Container(
                 content=ft.Column(
                     controls=[
+                        ft.Text("System Status:", weight=ft.FontWeight.W_500),
+                        ft.Text(health_text, size=12, color=GyroTheme.TEXT_SECONDARY),
+                        ft.Divider(height=20, color=GyroTheme.BORDER),
                         self.system_prompt_field,
                         ft.Divider(height=20, color=GyroTheme.BORDER),
                         ft.Row(
                             controls=[
-                                ft.TextButton("Export Memory", on_click=self._export_memory),
-                                ft.TextButton("Import Memory", on_click=self._import_memory),
+                                ft.TextButton("Export Knowledge", on_click=self._export_knowledge),
+                                ft.TextButton("Import Knowledge", on_click=self._import_knowledge),
+                                ft.TextButton("Fork Knowledge", on_click=self._fork_knowledge),
                             ]
                         ),
                     ],
                     spacing=15,
                 ),
-                width=400,
+                width=500,
                 padding=20,
             ),
             actions=[
@@ -200,28 +269,56 @@ class SettingsDialog(ft.AlertDialog):
             shape=ft.RoundedRectangleBorder(radius=12),
         )
 
-    async def _export_memory(self, e):
-        """Handle memory export"""
-        # Implement G2_BU_Eg export
-        pass
+    def _export_knowledge(self, e):
+        """Export current knowledge package"""
+        try:
+            # Use file picker to get save location
+            # For now, just export to default location
+            output_path = f"knowledge_export_{self.extension_manager.get_knowledge_id()[:8]}.gyro"
+            self.extension_manager.export_knowledge(output_path)
+            # TODO: Show success message
+            print(f"Knowledge exported to: {output_path}")
+        except Exception as ex:
+            print(f"Error exporting knowledge: {ex}")
 
-    async def _import_memory(self, e):
-        """Handle memory import"""
-        # Implement G2_BU_In import
-        pass
+    def _import_knowledge(self, e):
+        """Import knowledge package"""
+        try:
+            # TODO: Use file picker to select .gyro file
+            # For now, just show a placeholder
+            print("Import knowledge - file picker not implemented yet")
+            # self.extension_manager.import_knowledge(bundle_path)
+        except Exception as ex:
+            print(f"Error importing knowledge: {ex}")
 
-    async def _save_settings(self, e):
+    def _fork_knowledge(self, e):
+        """Fork current knowledge"""
+        try:
+            new_knowledge_id = self.extension_manager.fork_knowledge()
+            print(f"Knowledge forked to: {new_knowledge_id}")
+            # TODO: Show success message with new knowledge ID
+        except Exception as ex:
+            print(f"Error forking knowledge: {ex}")
+
+    def _save_settings(self, e):
         """Save settings to G2 epigenetic memory"""
-        # Save system prompt
-        self._close(e)
+        try:
+            # Store system prompt in epigenetic memory
+            prompt = self.system_prompt_field.value
+            if prompt:
+                self.extension_manager.gyro_epigenetic_memory("current.gyrotensor_com", prompt)
+            self._close(e)
+        except Exception as ex:
+            print(f"Error saving settings: {ex}")
 
     def _close(self, e):
         """Close dialog"""
-        self.open = False
-        e.page.update()
+        if e.page:
+            e.page.dialog = None
+            e.page.update()
 
 
 def main():
     """Entry point for the application"""
     app = GyroApp()
-    ft.app(target=app.main, assets_dir="assets")
+    ft.app(target=app.main)

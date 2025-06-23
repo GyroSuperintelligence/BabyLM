@@ -37,21 +37,20 @@ from core.gyro_errors import (
 )
 
 # Import all required system extension classes from the extensions directory
-from extensions import (
-    ext_StorageManager,
-    ext_ForkManager,
-    ext_StateHelper,
-    ext_EventClassifier,
-    ext_ErrorHandler,
-    ext_NavigationHelper,
-    ext_SystemMonitor,
-    ext_PerformanceTracker,
-    # Application extensions
-    ext_MultiResolution,
-    ext_BloomFilter,
-    ext_SpinPIV,
-    ext_CosetKnowledge,
-)
+from extensions import ext_storage_manager
+from extensions.ext_fork_manager import ext_ForkManager
+from extensions.ext_state_helper import ext_StateHelper
+from extensions.ext_event_classifier import ext_EventClassifier
+from extensions.ext_error_handler import ext_ErrorHandler
+from extensions.ext_navigation_helper import ext_NavigationHelper
+from extensions.ext_system_monitor import ext_SystemMonitor
+from extensions.ext_performance_tracker import ext_PerformanceTracker
+from extensions.ext_multi_resolution import ext_MultiResolution
+from extensions.ext_bloom_filter import ext_BloomFilter
+from extensions.ext_spin_piv import ext_SpinPIV
+from extensions.ext_coset_knowledge import ext_CosetKnowledge
+from extensions.ext_cryptographer import ext_Cryptographer
+from extensions.ext_language_egress import ext_LanguageEgress
 
 
 class ExtensionManager:
@@ -82,6 +81,8 @@ class ExtensionManager:
         # Initialize extension registry
         self.extensions: Dict[str, Any] = {}
 
+        self._output_handler = None
+
         try:
             # 1. Initialize system-critical extensions in dependency order
             self._initialize_system_extensions()
@@ -105,14 +106,27 @@ class ExtensionManager:
 
     def _initialize_system_extensions(self) -> None:
         """Initialize system-critical extensions in proper dependency order."""
-        # Storage manager is the foundation - handles all I/O
-        self.extensions["storage"] = ext_StorageManager(
-            session_id=self._session_id, knowledge_id=self._knowledge_id
-        )
 
-        # Update knowledge_id if it was created by storage manager
-        if not self._knowledge_id:
-            self._knowledge_id = self.extensions["storage"].knowledge_id
+        # NEW: Initialize cryptographer FIRST
+        user_key = self._get_user_key()
+        self.extensions["crypto"] = ext_Cryptographer(user_key)
+
+        # Ensure knowledge_id is always a string and never None
+        if not self._knowledge_id or not isinstance(self._knowledge_id, str):
+            knowledge_id = str(uuid.uuid4())
+        else:
+            knowledge_id = str(self._knowledge_id)
+        self.extensions["storage"] = ext_storage_manager.ext_StorageManager(
+            session_id=self._session_id, knowledge_id=knowledge_id
+        )
+        # IMPORTANT: Set manager reference after creation
+        self.extensions["storage"].set_manager(self)
+
+        # Update knowledge_id if created by storage manager
+        if not self._knowledge_id or not isinstance(self._knowledge_id, str):
+            self._knowledge_id = str(self.extensions["storage"].knowledge_id)
+        else:
+            self._knowledge_id = str(self._knowledge_id)
 
         # State helper manages session/knowledge state coordination
         self.extensions["state"] = ext_StateHelper(storage_manager=self.extensions["storage"])
@@ -134,6 +148,14 @@ class ExtensionManager:
 
         # Performance tracker for metrics
         self.extensions["perf"] = ext_PerformanceTracker()
+
+        # NEW: Add language egress
+        self.extensions["language"] = ext_LanguageEgress()
+
+        # Set manager references for all extensions that need it
+        for ext_name, ext in self.extensions.items():
+            if hasattr(ext, "set_manager"):
+                ext.set_manager(self)
 
     def _initialize_application_extensions(self) -> None:
         """Initialize application-level extensions for pattern analysis."""
@@ -172,9 +194,12 @@ class ExtensionManager:
 
     def _validate_system_integrity(self) -> None:
         """Perform comprehensive system integrity validation."""
-        # Validate Gene checksum
-        if not self.extensions["storage"].validate_gene_checksum(self.engine.gene):
-            raise GyroIntegrityError("Gene checksum validation failed")
+        try:
+            # Validate Gene checksum
+            if not self.extensions["storage"].validate_gene_checksum(self.engine.gene):
+                raise GyroIntegrityError("Gene checksum validation failed")
+        except Exception:
+            raise GyroIntegrityError("Gene validation failed")
 
         # Validate extension footprints
         for ext_name, ext in self.extensions.items():
@@ -189,7 +214,7 @@ class ExtensionManager:
             if hasattr(ext, "shutdown"):
                 try:
                     ext.shutdown()
-                except Exception as e:
+                except Exception:
                     pass  # Best effort cleanup
 
     def get_extension(self, name: str) -> Any:
@@ -315,6 +340,7 @@ class ExtensionManager:
     def gyro_structural_memory(self, tag: str, data: Any = None) -> Any:
         """
         G3: GyroInference through GyroTensor Interaction (Structural Memory)
+        Now supports language output through .output context.
 
         Manages session-local I/O boundaries and UI state.
         All G3 data is session-specific and non-exportable.
@@ -326,9 +352,16 @@ class ExtensionManager:
         - G3_BU_In: User/System Input
         - G3_BU_Eg: System Output
         """
-        # G3 primarily handles UI state through the storage manager
+        # Parse TAG components
         tag_parts = parse_tag(tag)
 
+        # NEW: Handle language output
+        if tag.endswith(".output") and data is not None:
+            # This is how the system speaks!
+            self._handle_language_output(data)
+            return None
+
+        # Existing implementation for other G3 operations
         if tag_parts["invariant"] == "gyrotensor_nest":
             # UI state is stored in session
             return self.extensions["storage"].load_ui_state(self._session_id)
@@ -391,33 +424,20 @@ class ExtensionManager:
     # CORE ORCHESTRATION
     # ========================================================================
 
-    def gyro_operation(self, input_byte: int) -> Optional[Tuple[int, int]]:
+    def gyro_operation(self, input_byte: int) -> Tuple[int, int]:
         """
         Orchestrates one complete, atomic navigation cycle.
-
-        This is the heart of the system's operation, implementing the pipeline
-        from ADR-001 and the complete CS→UNA→ONA→BU cycle from CORE-SPEC-01.
-
-        Args:
-            input_byte: The input byte to process (0-255).
-
-        Returns:
-            A tuple of (op_code_id0, op_code_id1) if navigation occurred, None otherwise.
+        Now ALWAYS returns operator codes (never None).
         """
         try:
             # Track performance
             self.extensions["perf"].start_operation()
 
             # 1. Execute the pure cycle in the engine
+            # This now ALWAYS returns operator codes
             ops = self.engine.execute_cycle(input_byte)
 
-            if not ops:
-                # No resonance occurred
-                self.extensions["perf"].end_operation(resonated=False)
-                return None
-
             # 2. Delegate fork-on-write management
-            # This ensures we always have a writable navigation log
             self.navigation_log = self.extensions["fork"].ensure_writable(self.navigation_log)
 
             # Update knowledge_id if fork occurred
@@ -425,12 +445,15 @@ class ExtensionManager:
                 self._knowledge_id = self.navigation_log.knowledge_id
                 self.extensions["state"].update_knowledge_link(self._knowledge_id)
 
-            # 3. Record the navigation event via the log object
-            # Pack two 4-bit codes into one input_byte:[id_1:4][id_0:4]
-            packed_byte = (ops[1] & 0x0F) << 4 | (ops[0] & 0x0F)
-            self.navigation_log.append(packed_byte)
+            # 3. Record navigation event using NEW API
+            # Extract operator codes (bits 3:1)
+            op_code_0 = (ops[0] >> 1) & 0x07
+            op_code_1 = (ops[1] >> 1) & 0x07
+            self.navigation_log.append(op_code_0, op_code_1)
 
-            # 4. Notify all listening extensions of the successful event
+            # 4. Notify all listening extensions
+            # Pack for backward compatibility with existing extensions
+            packed_byte = (ops[1] & 0x0F) << 4 | (ops[0] & 0x0F)
             self._notify_extensions(packed_byte, input_byte)
 
             # 5. Persist critical state
@@ -602,7 +625,7 @@ class ExtensionManager:
                 if hasattr(ext, "shutdown"):
                     try:
                         ext.shutdown()
-                    except Exception as e:
+                    except Exception:
                         pass  # Best effort
 
     # ========================================================================
@@ -630,8 +653,7 @@ class ExtensionManager:
     def _get_decoded_gene_state(self, temporal: str) -> Dict[str, Any]:
         """
         Decode navigation log to reconstruct current gene state.
-
-        This is computationally expensive and typically cached.
+        Updated to use new NavigationLog iterator API.
         """
         # Start with base gene
         result = {
@@ -639,18 +661,11 @@ class ExtensionManager:
             "id_1": self.engine.gene["id_1"].clone(),
         }
 
-        # Apply all navigation events
-        for packed_byte in self.navigation_log.iter_steps():
-            op_0 = packed_byte & 0x0F
-            op_1 = (packed_byte >> 4) & 0x0F
-
-            # Extract operator codes (bits 3:1)
-            op_type_0 = (op_0 >> 1) & 0x07
-            op_type_1 = (op_1 >> 1) & 0x07
-
+        # Apply all navigation events using NEW iterator
+        for op_code_0, op_code_1 in self.navigation_log.iter_steps():
             # Apply transformations
-            result["id_0"] = gyration_op(result["id_0"], op_type_0, clone=False)
-            result["id_1"] = gyration_op(result["id_1"], op_type_1, clone=False)
+            result["id_0"] = gyration_op(result["id_0"], op_code_0, clone=False)
+            result["id_1"] = gyration_op(result["id_1"], op_code_1, clone=False)
 
         return result
 
@@ -669,8 +684,48 @@ class ExtensionManager:
             if hasattr(ext, "load_state"):
                 try:
                     ext.load_state()
-                except Exception as e:
-                    self.extensions["error"].log_extension_error(ext_name, e)
+                except Exception:
+                    if "error" in self.extensions:
+                        self.extensions["error"].log_extension_error(ext_name, "State load failed")
+
+    def _get_user_key(self) -> bytes:
+        """Get or generate user encryption key"""
+        # Try to get from environment or config
+        import os
+
+        key_hex = os.environ.get("GYROSI_USER_KEY")
+
+        if key_hex:
+            try:
+                return bytes.fromhex(key_hex)
+            except ValueError:
+                pass
+
+        # Try to get from structural memory
+        try:
+            key = self.gyro_structural_memory("current.user_key")
+            if key and len(key) >= 16:
+                return key[:32]
+        except:
+            pass
+
+        # Generate default key (should be replaced with proper key management)
+        import hashlib
+
+        default = b"default_user_key_replace_me"
+        return hashlib.sha256(default).digest()
+
+    def _handle_language_output(self, text: str) -> None:
+        """Handle language output from the system"""
+        # Log the output
+        if hasattr(self, "_output_handler") and self._output_handler:
+            self._output_handler(text)
+        else:
+            # Default console output
+            print(f"[GyroSI Output]: {text}")
+
+        # Store in session for UI retrieval
+        self.extensions["storage"].append_output(self._session_id, text)
 
 
 # ============================================================================

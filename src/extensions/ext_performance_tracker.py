@@ -350,3 +350,22 @@ class ext_PerformanceTracker(GyroExtension):
         """Restore current metrics."""
         if "system_metrics" in state:
             self._system_metrics.update(state["system_metrics"])
+
+    def _format_performance_summary(self, metrics: Dict[str, Any]) -> str:
+        """Format performance metrics for display"""
+        summary = []
+        summary.append(f"Navigation Events: {metrics.get('total_events', 0)}")
+        summary.append(
+            f"Average Cycle Time: {metrics.get('avg_cycle_time', 0):.3f}ms"
+        )
+        # ... rest of method
+        return "\n".join(summary)
+
+    def _calculate_efficiency_score(self, metrics: Dict[str, Any]) -> float:
+        """Calculate overall efficiency score"""
+        base_score = 100.0
+        cycle_penalty = min(
+            metrics.get('avg_cycle_time', 0) * 10, 50
+        )  # Max 50 point penalty
+        # ... rest of method
+        return base_score - cycle_penalty

@@ -6,7 +6,7 @@ torch>=2.2.0
 numpy>=1.26.0,<2.0
 
 # UI framework
-flet>=0.18.0
+flet==0.19.0
 
 # Data and serialization
 pyyaml>=6.0

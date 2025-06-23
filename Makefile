@@ -37,7 +37,7 @@ run:
 	python src/main.py
 
 dev:
-	python src/main.py --dev
+	python scripts/dev.py
 
 export-example:
 	python -m gyro_tools.gyro_knowledge_manager export --knowledge-id example --output examples/example_knowledge.gyro

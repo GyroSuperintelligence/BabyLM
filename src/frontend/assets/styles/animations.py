@@ -2,6 +2,7 @@
 
 import flet as ft
 
+
 class GyroAnimations:
     """Animation configurations"""
 

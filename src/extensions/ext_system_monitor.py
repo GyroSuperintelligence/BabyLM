@@ -5,7 +5,7 @@ This extension monitors system health, validates integrity, and reports
 anomalies.
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Tuple
 import time
 import psutil
 from collections import deque
@@ -13,6 +13,7 @@ from collections import deque
 from extensions.base import GyroExtension
 
 # Unused variables for future debug: (none listed)
+
 
 class ext_SystemMonitor(GyroExtension):
     """

@@ -1,4 +1,4 @@
-# src/frontend/styles/__init__.py
+# src/frontend/assets/styles/__init__.py
 """GyroSI Frontend Styles"""
 from .theme import GyroTheme
 

@@ -1,21 +1,13 @@
-# src/main.py
-import flet as ft
-import asyncio
+#!/usr/bin/env python3
+"""
+Main entry point for GyroSI Baby ML application.
+"""
 import sys
-from pathlib import Path
+import os
+from frontend.gyro_app import main
 
 # Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
-
-from frontend.gyro_app import GyroApp
-
-# Unused variables for future debug: (none listed)
-
-async def main(page: ft.Page):
-    """Main entry point for GyroSI Baby ML"""
-    app = GyroApp()
-    await app.main(page)
-
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 if __name__ == "__main__":
-    ft.app(target=main, assets_dir="assets", view=ft.AppView.FLET_APP_WEB, port=8550)
+    main()
