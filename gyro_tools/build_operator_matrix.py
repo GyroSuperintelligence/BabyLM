@@ -1,109 +1,99 @@
 #!/usr/bin/env python3
 """
-One-time build script to generate the deterministic operator matrix.
-This replaces all heuristic logic with provably mechanical operation.
+Build the universal GyroSI harmonics matrix (resonance mask + operator vector).
+Output layout (all byte counts are fixed):
+    32  bytes : SHA-256(Gene)                     – integrity anchor
+    48*256 b : resonance mask   M  (48 rows × 256 bits → 1536 bytes)
+    48  bytes : operator vector O (one byte / phase)
+   ---------------------------------------------------------------
+    1616 bytes total
 """
-import os, sys, hashlib, numpy as np, torch
+import os, sys, hashlib
 from typing import Dict, Tuple
+import numpy as np
+import torch
 
-# Import from your existing core
+# ------------------------------------------------------------------ #
+# Bring core types into scope
+# ------------------------------------------------------------------ #
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
-from core.gyro_core import _OP_CODES, gyration_op
+from core.gyro_core import _OP_CODES
 
-
-def _get_gene_constant() -> Dict[str, torch.Tensor]:
-    """Mirror your exact Gene definition from gyro_core.py"""
-    gene_pattern = [
-        [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]],
-        [[[1, -1], [1, -1], [1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
-        [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]],
-        [[[1, -1], [1, -1], [1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
+# ------------------------------------------------------------------ #
+# Immutable Gene (copied verbatim from gyro_core)
+# ------------------------------------------------------------------ #
+def gene_const() -> Dict[str, torch.Tensor]:
+    pattern = [
+        [[[-1,  1], [-1,  1], [-1,  1]], [[ 1, -1], [ 1, -1], [ 1, -1]]],
+        [[[ 1, -1], [ 1, -1], [ 1, -1]], [[-1,  1], [-1,  1], [-1,  1]]],
+        [[[-1,  1], [-1,  1], [-1,  1]], [[ 1, -1], [ 1, -1], [ 1, -1]]],
+        [[[ 1, -1], [ 1, -1], [ 1, -1]], [[-1,  1], [-1,  1], [-1,  1]]],
     ]
-    base_tensor = torch.tensor(gene_pattern, dtype=torch.int8)
-    return {"id_0": base_tensor.clone(), "id_1": base_tensor.clone()}
+    base = torch.tensor(pattern, dtype=torch.int8)
+    return {"id_0": base.clone(), "id_1": base.clone()}
 
+# ------------------------------------------------------------------ #
+# Helper – given phase, return ±1 pair stored in the immutable Gene
+# ------------------------------------------------------------------ #
+def slice_at_phase(phase: int) -> Tuple[int, int]:
+    g   = gene_const()
+    tid = phase % 2
+    pos = (phase // 2) % 24
+    out, inn, sp = pos // 6, (pos // 3) % 2, pos % 3
+    sl  = g[f"id_{tid}"][out][inn][sp]
+    return int(sl[0]), int(sl[1])
 
-def _extract_slice(tensor: torch.Tensor, phase: int) -> torch.Tensor:
-    """Extract the specific tensor slice for a given phase"""
-    tensor_id = phase % 2
-    position_in_tensor = (phase // 2) % 24
-    outer_idx = position_in_tensor // 6
-    inner_idx = (position_in_tensor // 3) % 2
-    spatial_idx = position_in_tensor % 3
+# ------------------------------------------------------------------ #
+# Build resonance mask M[48,256]  (bit-packed rows: uint8 per column)
+# ------------------------------------------------------------------ #
+def build_mask() -> np.ndarray:
+    M = np.zeros((48, 256), dtype=np.uint8)
+    for p in range(48):
+        s0, s1 = slice_at_phase(p)
+        for b in range(256):
+            hi, lo = (b >> 4) & 0xF, b & 0xF
+            if (1 if hi >= 8 else -1) == s0 and (1 if lo >= 8 else -1) == s1:
+                M[p, b] = 1
+    return M
 
-    tensor_key = f"id_{tensor_id}"
-    gene = _get_gene_constant()
-    return gene[tensor_key][outer_idx][inner_idx][spatial_idx]
+# ------------------------------------------------------------------ #
+# Build operator vector O[48]  (one byte per phase, packed as id₁<<4|id₀)
+# ------------------------------------------------------------------ #
+def build_operator_vector() -> np.ndarray:
+    O = np.zeros(48, dtype=np.uint8)
+    for p in range(48):
+        if   p % 12 == 0:                      # CS
+            op0, op1 = _OP_CODES["IDENTITY"], _OP_CODES["INVERSE"]
+        elif p % 12 in (3, 9):                 # UNA/ONA
+            base     = _OP_CODES["FORWARD"] if p % 24 < 12 else _OP_CODES["BACKWARD"]
+            op0 = op1 = base
+        elif p % 6 == 0:                       # Nesting
+            op0 = op1 = _OP_CODES["BACKWARD"]
+        else:                                  # unreachable (no resonance)
+            op0 = op1 = 0
+        O[p] = (op1 << 4) | (op0 & 0x0F)
+    return O
 
+# ------------------------------------------------------------------ #
+# Main builder
+# ------------------------------------------------------------------ #
+def main(out_path: str):
+    M = build_mask()
+    O = build_operator_vector()
+    h = hashlib.sha256()
+    g = gene_const()
+    h.update(g["id_0"].numpy().tobytes()); h.update(g["id_1"].numpy().tobytes())
+    gene_digest = h.digest()                                         # 32 B
+    payload = gene_digest + M.tobytes() + O.tobytes()                # 1616 B
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "wb") as fh:
+        fh.write(payload)
+    print(f"✓ Universal harmonics matrix written → {out_path}")
+    print(f"  Size: {len(payload)} bytes")
 
-def _find_alignment_operator(phase: int, target_alignment: Tuple[int, int]) -> int:
-    """
-    Find which operator achieves the target alignment at this phase.
-    This is the core mechanical proof - exactly one operator works.
-    """
-    gene = _get_gene_constant()
-    tensor_id = phase % 2
-    tensor_key = f"id_{tensor_id}"
-
-    # Check if already aligned (Identity)
-    current_slice = _extract_slice(gene[tensor_key], phase)
-    if tuple(current_slice.tolist()) == target_alignment:
-        return _OP_CODES["IDENTITY"]
-
-    # Test each operator to find the one that works
-    for op_name, op_code in _OP_CODES.items():
-        if op_name == "IDENTITY":
-            continue
-
-        # Apply operator and check result
-        temp_tensor = gyration_op(gene[tensor_key].clone(), op_code, clone=False)
-        result_slice = _extract_slice(temp_tensor, phase)
-
-        if tuple(result_slice.tolist()) == target_alignment:
-            return op_code
-
-    # This should never happen with correct implementation
-    raise Exception(f"No operator found for phase {phase}, target {target_alignment}")
-
-
-def build_operator_matrix(output_path: str = "src/core/operator_matrix.dat") -> None:
-    """Build the complete 48x256 operator matrix"""
-    print("Building mechanical operator matrix...")
-
-    # Create the lookup table
-    matrix = np.zeros((48, 256), dtype=np.uint8)
-
-    for phase in range(48):
-        print(f"  Processing phase {phase}/47...")
-        for byte_val in range(256):
-            # Map byte nibbles to target alignment
-            high_nibble = (byte_val >> 4) & 0x0F
-            low_nibble = byte_val & 0x0F
-
-            # Convert to alignment values
-            high_alignment = 1 if high_nibble >= 8 else -1
-            low_alignment = 1 if low_nibble >= 8 else -1
-            target = (high_alignment, low_alignment)
-
-            # Find the operator that achieves this alignment
-            matrix[phase, byte_val] = _find_alignment_operator(phase, target)
-
-    # Create integrity header (SHA-256 of Gene)
-    gene = _get_gene_constant()
-    hasher = hashlib.sha256()
-    hasher.update(gene["id_0"].numpy().tobytes())
-    hasher.update(gene["id_1"].numpy().tobytes())
-    header = hasher.digest()
-
-    # Save matrix with header
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "wb") as f:
-        f.write(header)  # 32-byte SHA-256 header
-        f.write(matrix.tobytes())  # 48x256 = 12,288 bytes
-
-    print(f"✓ Operator matrix saved to {output_path}")
-    print(f"  Size: {32 + matrix.nbytes} bytes (32-byte header + 12,288-byte matrix)")
-
-
+# ------------------------------------------------------------------ #
 if __name__ == "__main__":
-    build_operator_matrix()
+    if len(sys.argv) != 2:
+        print("Usage: build_operator_matrix.py <output_file>")
+        sys.exit(1)
+    main(sys.argv[1])

@@ -22,6 +22,7 @@ References:
 
 import uuid
 from typing import Optional, Any, Tuple, Dict, List
+import os
 
 # Tier 3 - The pure engine
 from core.gyro_core import GyroEngine, gyration_op
@@ -91,7 +92,7 @@ class ExtensionManager:
             self._initialize_application_extensions()
 
             # 3. Initialize the pure engine
-            self.engine = GyroEngine()
+            self.engine = GyroEngine(harmonics_path=os.path.join(os.path.dirname(__file__), "gyro_harmonics.dat"))
 
             # 4. Load session state through extensions
             self._load_session_state()
@@ -108,8 +109,7 @@ class ExtensionManager:
         """Initialize system-critical extensions in proper dependency order."""
 
         # NEW: Initialize cryptographer FIRST
-        user_key = self._get_user_key()
-        self.extensions["crypto"] = ext_Cryptographer(user_key)
+        self.extensions["crypto"] = ext_Cryptographer()
 
         # Ensure knowledge_id is always a string and never None
         if not self._knowledge_id or not isinstance(self._knowledge_id, str):
@@ -726,6 +726,24 @@ class ExtensionManager:
 
         # Store in session for UI retrieval
         self.extensions["storage"].append_output(self._session_id, text)
+
+    def export_session(self, output_path: str) -> None:
+        """
+        Exports the current session to a .session.gyro bundle.
+        Args:
+            output_path: The file path to save the bundle.
+        """
+        self.extensions["storage"].export_session(self._session_id, output_path)
+
+    def import_session(self, bundle_path: str) -> str:
+        """
+        Imports a session from a .session.gyro bundle.
+        Args:
+            bundle_path: Path to the .session.gyro bundle file.
+        Returns:
+            The new session UUID.
+        """
+        return self.extensions["storage"].import_session(bundle_path)
 
 
 # ============================================================================

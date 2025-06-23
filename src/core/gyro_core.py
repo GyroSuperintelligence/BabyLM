@@ -23,6 +23,7 @@ import numpy as np
 import hashlib
 from typing import Tuple, Dict, Optional
 from .gyro_errors import GyroIntegrityError
+from extensions.ext_cryptographer import ext_Cryptographer
 
 
 # ============================================================================
@@ -53,89 +54,55 @@ _OP_CODES = {
 class GyroEngine:
     """
     Provably mechanical navigation engine.
-    Every input byte ALWAYS produces operator codes via matrix lookup.
+    Every input byte ALWAYS produces operator codes via harmonics mask lookup.
     No heuristics, no branching, no None returns.
     """
 
-    def __init__(self, matrix_path: Optional[str] = None):
-        """Initialize with operator matrix and Gene validation"""
-        # The Gene is an immutable constant, part of the engine's identity.
-        # It is defined once and never changed.
+    def __init__(self, harmonics_path: Optional[str] = None):
+        """Initialize with harmonics matrix and Gene validation"""
         self.gene: Dict[str, torch.Tensor] = self._get_gene_constant()
-
-        # The phase is the ONLY piece of mutable state the engine tracks directly.
-        # It represents the current position in the 48-step navigation cycle.
         self.phase: int = 0
+        if harmonics_path is None:
+            harmonics_path = os.path.join(os.path.dirname(__file__), "gyro_harmonics.dat")
+        self._load_and_validate_harmonics(harmonics_path)
 
-        # Load and validate operator matrix
-        if matrix_path is None:
-            matrix_path = os.path.join(os.path.dirname(__file__), "operator_matrix.dat")
-
-        self._load_and_validate_matrix(matrix_path)
-
-    def _load_and_validate_matrix(self, matrix_path: str) -> None:
-        """Load operator matrix and validate against current Gene"""
+    def _load_and_validate_harmonics(self, harmonics_path: str) -> None:
+        """Load harmonics matrix, validate Gene, and parse mask/operator vector"""
         try:
-            with open(matrix_path, "rb") as f:
-                stored_header = f.read(32)  # SHA-256 is 32 bytes
-                matrix_data = f.read()
+            with open(harmonics_path, "rb") as f:
+                payload = f.read()
         except FileNotFoundError:
             raise GyroIntegrityError(
-                f"CRITICAL: operator_matrix.dat not found at {matrix_path}. "
-                f"Run: python gyro_tools/build_operator_matrix.py"
+                f"CRITICAL: gyro_harmonics.dat not found at {harmonics_path}. "
+                f"Run: python gyro_tools/build_operator_matrix.py <output_file>"
             )
-
-        # Validate matrix was built for current Gene
-        current_header = self._compute_gene_checksum()
-        if stored_header != current_header:
+        if len(payload) < 1616:
+            raise GyroIntegrityError("Harmonics matrix is corrupted or incomplete.")
+        digest = payload[:32]
+        mask = np.frombuffer(payload[32:32+48*256], dtype=np.uint8).reshape(48, 256)
+        opvec = np.frombuffer(payload[32+48*256:32+48*256+48], dtype=np.uint8)
+        current_digest = self._compute_gene_checksum()
+        if digest != current_digest:
             raise GyroIntegrityError(
-                "Operator matrix Gene checksum mismatch. "
+                "Harmonics matrix Gene checksum mismatch. "
                 "Matrix was built for different Gene version. "
-                "Rebuild with: python gyro_tools/build_operator_matrix.py"
+                "Rebuild with: python gyro_tools/build_operator_matrix.py <output_file>"
             )
-
-        # Load matrix
-        self._operator_matrix = np.frombuffer(matrix_data, dtype=np.uint8).reshape(48, 256)
-
-    def _compute_gene_checksum(self) -> bytes:
-        """Compute SHA-256 checksum of current Gene"""
-        hasher = hashlib.sha256()
-        hasher.update(self.gene["id_0"].numpy().tobytes())
-        hasher.update(self.gene["id_1"].numpy().tobytes())
-        return hasher.digest()
-
-    def load_phase(self, phase: int) -> None:
-        """
-        Loads the minimal required state for a session's execution context.
-        This is called by the ExtensionManager when a session is initialized.
-
-        Args:
-            phase: The starting phase (0-47) for the session.
-
-        Raises:
-            ValueError: If phase is outside the valid range [0, 47].
-        """
-        if not (0 <= phase < 48):
-            raise ValueError(f"Phase must be between 0 and 47, got {phase}")
-        self.phase = phase
+        self._harmonics_mask = mask
+        self._operator_vector = opvec
 
     def execute_cycle(self, input_byte: int) -> Tuple[int, int]:
         """
-        Execute one mechanical navigation cycle.
-        ALWAYS returns operator codes - never None.
-        This is the key change from your heuristic version.
+        Execute one mechanical navigation cycle using harmonics mask and operator vector.
+        Returns operator codes if resonance, else raises.
         """
-        # 1. Advance phase (same as your version)
         self.phase = (self.phase + 1) % 48
-
-        # 2. Mechanical operator lookup (replaces all your heuristic logic)
         clamped_byte = max(0, min(255, input_byte))
-        operator_type = int(self._operator_matrix[self.phase, clamped_byte])
-
-        # 3. Pack into 4-bit codes for both tensors
-        op_code_0 = (operator_type << 1) | 0  # For id_0 tensor
-        op_code_1 = (operator_type << 1) | 1  # For id_1 tensor
-
+        if self._harmonics_mask[self.phase, clamped_byte] == 0:
+            raise GyroIntegrityError(f"No resonance at phase {self.phase} for byte {input_byte}")
+        op_pair = self._operator_vector[self.phase]
+        op_code_0 = (op_pair & 0x0F)  # lower 4 bits
+        op_code_1 = (op_pair >> 4)    # upper 4 bits
         return (op_code_0, op_code_1)
 
     def _get_gene_constant(self) -> Dict[str, torch.Tensor]:
@@ -171,6 +138,13 @@ class GyroEngine:
 
         # Return both tensors as independent clones
         return {"id_0": base_tensor.clone(), "id_1": base_tensor.clone()}
+
+    def _compute_gene_checksum(self) -> bytes:
+        """Compute SHA-256 checksum of current Gene"""
+        hasher = hashlib.sha256()
+        hasher.update(self.gene["id_0"].numpy().tobytes())
+        hasher.update(self.gene["id_1"].numpy().tobytes())
+        return hasher.digest()
 
 
 # ============================================================================

@@ -196,43 +196,31 @@ class ext_StorageManager(GyroExtension):
     # --- Knowledge Package I/O ---
 
     def load_raw_navigation_log(self, knowledge_id: str) -> bytes:
-        """Load and decrypt navigation log"""
-        # Try encrypted first
-        enc_path = self.knowledge_root / knowledge_id / "navigation_log" / "genome.enc"
-        if enc_path.exists():
+        nav_path = self.knowledge_root / knowledge_id / "navigation_log"
+        enc_file = nav_path / "genome.enc"
+        if enc_file.exists():
             crypto = self._get_crypto_extension()
             if crypto:
-                try:
-                    encrypted = enc_path.read_bytes()
-                    return crypto.decrypt(encrypted)
-                except Exception as e:
-                    # Fall through to unencrypted if decryption fails
-                    pass
-
-        # Fallback: unencrypted
-        log_path = self.knowledge_root / knowledge_id / "navigation_log" / "genome.log"
-        if log_path.exists():
-            return log_path.read_bytes()
-
+                encrypted = enc_file.read_bytes()
+                return crypto.decrypt(encrypted)
+            else:
+                raise GyroStorageError("Found encrypted genome but no crypto key available")
+        log_file = nav_path / "genome.log"
+        if log_file.exists():
+            return log_file.read_bytes()
         return b""
 
-    def save_raw_navigation_log(self, knowledge_id: str, raw_data: bytes) -> None:
-        """Save encrypted navigation log"""
-        try:
-            # Get crypto extension
-            crypto = self._get_crypto_extension()
-            if crypto:
-                encrypted = crypto.encrypt(raw_data)
-                filepath = self.knowledge_root / knowledge_id / "navigation_log" / "genome.enc"
-            else:
-                # Fallback: unencrypted
-                encrypted = raw_data
-                filepath = self.knowledge_root / knowledge_id / "navigation_log" / "genome.log"
-
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            filepath.write_bytes(encrypted)
-        except Exception as e:
-            raise GyroStorageError(f"Failed to save navigation log: {e}")
+    def save_raw_navigation_log(self, knowledge_id: str, raw_data: bytes):
+        nav_path = self.knowledge_root / knowledge_id / "navigation_log"
+        nav_path.mkdir(parents=True, exist_ok=True)
+        crypto = self._get_crypto_extension()
+        if crypto:
+            encrypted = crypto.encrypt(raw_data)
+            (nav_path / "genome.enc").write_bytes(encrypted)
+            (nav_path / "genome.log").unlink(missing_ok=True)
+        else:
+            (nav_path / "genome.log").write_bytes(raw_data)
+            (nav_path / "genome.enc").unlink(missing_ok=True)
 
     def load_metadata(self, knowledge_id: str) -> Dict[str, Any]:
         """Loads and returns the content of knowledge.meta.json."""
@@ -654,3 +642,58 @@ class ext_StorageManager(GyroExtension):
     def get_pattern_filename(self) -> str:
         """Pattern filename for knowledge export."""
         return f"ext_storage_manager@1.0.0.config"
+
+    def export_session(self, session_id: str, output_path: str) -> None:
+        """
+        Export a session directory as a .session.gyro bundle.
+        Args:
+            session_id: The session UUID to export.
+            output_path: The file path to save the bundle.
+        """
+        session_path = self.sessions_root / session_id
+        if not session_path.exists():
+            raise GyroStorageError(f"Session {session_id} does not exist")
+        try:
+            with tarfile.open(output_path, "w:gz") as tar:
+                tar.add(session_path, arcname="session")
+        except Exception as e:
+            raise GyroStorageError(f"Failed to export session: {e}")
+
+    def import_session(self, bundle_path: str) -> str:
+        """
+        Import a .session.gyro bundle as a new session.
+        Args:
+            bundle_path: Path to the .session.gyro bundle file.
+        Returns:
+            The new session UUID.
+        """
+        if not Path(bundle_path).exists():
+            raise GyroStorageError(f"Bundle file {bundle_path} does not exist")
+        new_session_id = str(uuid.uuid4())
+        dest_path = self.sessions_root / new_session_id
+        try:
+            temp_dir = Path(bundle_path).parent / f".tmp_import_session_{new_session_id}"
+            temp_dir.mkdir(exist_ok=True)
+            try:
+                with tarfile.open(bundle_path, "r:gz") as tar:
+                    tar.extractall(temp_dir)
+                session_root = temp_dir / "session"
+                if not session_root.exists():
+                    raise GyroStorageError("Invalid session bundle: missing session directory")
+                shutil.move(str(session_root), str(dest_path))
+                # Update session_id in meta if present
+                meta_path = dest_path / "session.meta.json"
+                if meta_path.exists():
+                    with open(meta_path, "r") as f:
+                        meta = json.load(f)
+                    meta["id"] = new_session_id
+                    meta["imported_ts"] = time.time()
+                    meta["imported_from"] = str(bundle_path)
+                    with open(meta_path, "w") as f:
+                        json.dump(meta, f, indent=2)
+            finally:
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+            return new_session_id
+        except Exception as e:
+            raise GyroStorageError(f"Failed to import session: {e}")
