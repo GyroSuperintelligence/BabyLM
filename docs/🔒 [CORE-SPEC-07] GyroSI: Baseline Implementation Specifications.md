@@ -844,7 +844,7 @@
         - Multi-resolution: 3 bytes (defect accumulators)
         - Bloom filter: 0 bytes (Gene substrate utilization)
         - Parametric analyzer: 4-8 bytes (context-dependent)
-        - Spin PIV: 3 bytes (PIV + evolution counter)
+        - Spin PIV: 3 bytes (PIV + counter)
     - **Performance Characteristics**:
         - Structural resonance: 15 operations maximum
         - Operator selection: 3 comparisons maximum
@@ -895,7 +895,7 @@
         
         1. **Resolves the Core Contradiction:** This model re-interprets the "unified core" from SPEC-07 as a unified **API surface** (provided by the Extension Manager), not a monolithic file. This allows the core to be unified in its interface while the implementation remains modular, fully satisfying both SPEC-07 and SPEC-05.
         2. **Enables the Extension Framework:** A monolithic core would have no need for `ext_StorageManager` or `ext_ForkManager`. This architecture gives these extensions their specified purpose. The `ext_ForkManager` *actually manages forks*; the `ext_StorageManager` *actually manages storage*. This adheres to the explicit structure in **[CORE-SPEC-05]**.
-        3. **Guarantees Core Purity and Auditability:** By isolating the navigation logic in `GyroEngine`, we create a component with no side effects. Its behavior is perfectly deterministic and traceable, fulfilling the "complete lineage" and "auditable" requirements of **[CORE-SPEC-01 §7]**. It can be tested in complete isolation, which is a requirement for a high-integrity system.
+        3. **Guarantees Core Purity and Auditability:** By isolating the navigation logic in `GyroEngine`, we create a component with no side effects. Its behavior is perfectly traceable and traceable, fulfilling the "complete lineage" and "auditable" requirements of **[CORE-SPEC-01 §7]**. It can be tested in complete isolation, which is a requirement for a high-integrity system.
         4. **Adheres to Interface Contracts:** The Extension Manager provides the stable `gyro_memory_system()` functions as defined in **[CORE-SPEC-03 & -06]**. Extensions and other parts of the application will call these canonical functions, completely unaware of the complex orchestration happening underneath. This respects the principle that "Extensions operate through canonical memory interfaces only" **[CORE-SPEC-07 §1]**.
         5. **Implements the Operational Walkthrough Correctly:** The sequence of operations described in **[CORE-SPEC-08]** is preserved perfectly, but with clearer lines of responsibility:
             - `g4_bu_in()` (Phase Advance) -> `engine.execute_cycle()`

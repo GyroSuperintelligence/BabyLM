@@ -3,7 +3,7 @@
 extensions:
   # List of allowed extension module names
   allowed:
-    - gyro_extension_example
+    - ext_cryptographer
 
   # Maximum disk footprint per extension (in MB)
   max_footprint_mb: 50

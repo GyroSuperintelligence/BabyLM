@@ -1,0 +1,86 @@
+# Ignore Python virtual environments
+venv
+venv/
+.venv
+.venv/
+
+# Ignore Python bytecode
+__pycache__
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore build artifacts
+dist
+dist/
+build
+build/
+*.egg-info
+*.egg-info/
+gyrosi_babylm.egg-info
+gyrosi_babylm.egg-info/
+
+# Ignore logs and reports
+logs
+logs/
+*.log
+flake8_report.txt
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE/editor settings
+.vscode
+.vscode/
+.idea
+.idea/
+*.swp
+
+# Ignore binary and large data files
+*.dat
+*.bin
+*.icns
+
+# Ignore documentation build output
+site
+site/
+api_docs
+api_docs/
+docs
+docs/
+
+# Ignore test fixtures and generated test data
+tests/fixtures
+tests/fixtures/
+
+# Ignore migration scripts and temporary scripts
+scripts/migrate_*.py
+
+# Ignore any secret or config files (add more as needed)
+*.key
+*.pem
+*.env
+
+# Ignore AI helper config itself
+.aichignore
+
+# Explicitly ignore root-level metadata/config
+.git
+.git/
+.editorconfig
+.flake8
+.gitattributes
+.gitignore
+.pre-commit-config.yaml
+.mypy_cache
+.mypy_cache/
+.pytest_cache
+.pytest_cache/
+
+# Project-specific exclusions
+data
+data/
+
+# Add any other project-specific exclusions below

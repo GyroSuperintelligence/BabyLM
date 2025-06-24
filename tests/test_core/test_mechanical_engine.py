@@ -14,8 +14,8 @@ def test_engine_always_returns_operators():
         assert isinstance(ops[1], int)
 
 
-def test_engine_deterministic():
-    """Verify deterministic operation"""
+def test_engine_traceable():
+    """Verify traceable operation"""
     engine1 = GyroEngine()
     engine2 = GyroEngine()
 

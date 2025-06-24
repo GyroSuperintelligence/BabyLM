@@ -48,7 +48,6 @@ from extensions.ext_system_monitor import ext_SystemMonitor
 from extensions.ext_performance_tracker import ext_PerformanceTracker
 from extensions.ext_multi_resolution import ext_MultiResolution
 from extensions.ext_bloom_filter import ext_BloomFilter
-from extensions.ext_spin_piv import ext_SpinPIV
 from extensions.ext_coset_knowledge import ext_CosetKnowledge
 from extensions.ext_cryptographer import ext_Cryptographer
 from extensions.ext_language_egress import ext_LanguageEgress
@@ -166,9 +165,6 @@ class ExtensionManager:
 
         # Bloom filter for pattern recognition
         self.extensions["bloom"] = ext_BloomFilter()
-
-        # Spin-based PIV for cryptographic evolution
-        self.extensions["spin_piv"] = ext_SpinPIV()
 
         # Coset knowledge for semantic compression
         self.extensions["coset"] = ext_CosetKnowledge()

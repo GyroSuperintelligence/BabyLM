@@ -197,31 +197,27 @@ class ext_StorageManager(GyroExtension):
     # --- Knowledge Package I/O ---
 
     def load_raw_navigation_log(self, knowledge_id: str) -> bytes:
-        nav_path = self.knowledge_root / knowledge_id / "navigation_log"
-        enc_file = nav_path / "genome.enc"
-        if enc_file.exists():
+        enc_path = self.knowledge_root / knowledge_id / "navigation_log" / "genome.enc"
+        if enc_path.exists():
             crypto = self._get_crypto_extension()
             if crypto:
-                encrypted = enc_file.read_bytes()
+                encrypted = enc_path.read_bytes()
                 return crypto.decrypt(encrypted)
-            else:
-                raise GyroStorageError("Found encrypted genome but no crypto key available")
-        log_file = nav_path / "genome.log"
-        if log_file.exists():
-            return log_file.read_bytes()
+        log_path = self.knowledge_root / knowledge_id / "navigation_log" / "genome.log"
+        if log_path.exists():
+            return log_path.read_bytes()
         return b""
 
-    def save_raw_navigation_log(self, knowledge_id: str, raw_data: bytes):
-        nav_path = self.knowledge_root / knowledge_id / "navigation_log"
-        nav_path.mkdir(parents=True, exist_ok=True)
+    def save_raw_navigation_log(self, knowledge_id: str, raw_data: bytes) -> None:
         crypto = self._get_crypto_extension()
         if crypto:
             encrypted = crypto.encrypt(raw_data)
-            (nav_path / "genome.enc").write_bytes(encrypted)
-            (nav_path / "genome.log").unlink(missing_ok=True)
+            filepath = self.knowledge_root / knowledge_id / "navigation_log" / "genome.enc"
         else:
-            (nav_path / "genome.log").write_bytes(raw_data)
-            (nav_path / "genome.enc").unlink(missing_ok=True)
+            encrypted = raw_data
+            filepath = self.knowledge_root / knowledge_id / "navigation_log" / "genome.log"
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        filepath.write_bytes(encrypted)
 
     def load_metadata(self, knowledge_id: str) -> Dict[str, Any]:
         """Loads and returns the content of knowledge.meta.json."""
@@ -293,7 +289,7 @@ class ext_StorageManager(GyroExtension):
         except Exception as e:
             raise GyroStorageError(f"Failed to store session event: {e}")
 
-    def load_session_events(self, session_id: str) -> list:
+    def load_session_events(self, session_id: str) -> list[Any]:
         """Load all session events, decrypting if needed."""
         events_path = self.sessions_root / session_id / "events.log"
         if not events_path.exists():

@@ -7,7 +7,7 @@ system. It is responsible for executing the atomic steps of the navigation cycle
 Key characteristics:
 - It is completely stateless regarding session or knowledge context.
 - It has no awareness of files, I/O, or external state.
-- Its operations are deterministic and computationally pure.
+- Its operations are traceable and computationally pure.
 - It holds only the invariant Gene and the transient session phase.
 
 References:

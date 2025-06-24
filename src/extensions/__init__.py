@@ -24,7 +24,6 @@ from .ext_language_egress import ext_LanguageEgress
 # Application extensions
 from .ext_multi_resolution import ext_MultiResolution
 from .ext_bloom_filter import ext_BloomFilter
-from .ext_spin_piv import ext_SpinPIV
 from .ext_coset_knowledge import ext_CosetKnowledge
 
 __all__ = [
@@ -45,6 +44,5 @@ __all__ = [
     # Application extensions
     "ext_MultiResolution",
     "ext_BloomFilter",
-    "ext_SpinPIV",
     "ext_CosetKnowledge",
 ]

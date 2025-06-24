@@ -115,7 +115,7 @@ class TestCompleteSystemIntegration:
 
             result2 = process_text(session_id, text)
 
-            # Results should be deterministic
+            # Results should be traceable
             assert result1 == result2
 
         finally:
