@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Main entry point for GyroSI Baby ML application.
+Main entry point for GyroSI Baby LM CLI application.
 """
 import sys
 import os
-from frontend.gyro_app import main
+from gyro_tools.gyro_cli import main
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))

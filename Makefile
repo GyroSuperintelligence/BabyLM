@@ -37,10 +37,10 @@ clean:
 	rm -rf .pytest_cache/ .coverage htmlcov/
 
 run:
-	python src/main.py
+	python run.py
 
 dev:
-	python scripts/dev.py
+	python run.py
 
 export-example:
 	python -m gyro_tools.gyro_knowledge_manager export --knowledge-id example --output examples/example_knowledge.gyro
