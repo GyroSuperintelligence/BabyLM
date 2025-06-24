@@ -181,15 +181,15 @@ class ext_MultiResolution(GyroExtension):
 
         # Check thresholds and detect boundaries
         if self.char_defect >= self.CHAR_THRESHOLD:
-            self.ui_boundaries.append(('char', self.char_defect))
+            self.ui_boundaries.append(("char", self.char_defect))
             self.char_defect = 0
 
         if input_byte and input_byte in [32, 9, 10, 13] and self.word_defect >= self.WORD_THRESHOLD:
-            self.ui_boundaries.append(('word', self.word_defect))
+            self.ui_boundaries.append(("word", self.word_defect))
             self.word_defect = 0
 
         if input_byte and input_byte in [46, 33, 63] and self.sent_defect >= self.SENT_THRESHOLD:
-            self.ui_boundaries.append(('sentence', self.sent_defect))
+            self.ui_boundaries.append(("sentence", self.sent_defect))
             self.sent_defect = 0
 
         return None

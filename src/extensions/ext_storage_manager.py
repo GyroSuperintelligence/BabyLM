@@ -36,9 +36,9 @@ class ext_StorageManager(GyroExtension):
         # Generate IDs if not provided
         self.session_id = session_id or str(uuid.uuid4())
         self.knowledge_id = knowledge_id
-        
+
         # Manager reference will be set by ExtensionManager
-        self.manager: Optional['ExtensionManager'] = None
+        self.manager: Optional["ExtensionManager"] = None
 
         # Define root paths based on CORE-SPEC-05 structure
         self.sessions_root = Path("data/sessions")
@@ -67,13 +67,13 @@ class ext_StorageManager(GyroExtension):
         # Track open file handles for footprint calculation
         self._open_handles = {}
 
-    def set_manager(self, manager: 'ExtensionManager') -> None:
+    def set_manager(self, manager: "ExtensionManager") -> None:
         """Set the manager reference after initialization."""
         self.manager = manager
 
     def _get_crypto_extension(self):
         """Safely get crypto extension if available."""
-        if self.manager and hasattr(self.manager, 'extensions'):
+        if self.manager and hasattr(self.manager, "extensions"):
             return self.manager.extensions.get("crypto")
         return None
 
@@ -128,8 +128,9 @@ class ext_StorageManager(GyroExtension):
         """Calculate checksum of the Gene constant."""
         try:
             # Try to get Gene from manager if available
-            if self.manager and hasattr(self.manager, 'engine'):
+            if self.manager and hasattr(self.manager, "engine"):
                 import hashlib
+
                 gene = self.manager.engine.gene
                 hasher = hashlib.sha256()
                 hasher.update(gene["id_0"].numpy().tobytes())
@@ -137,7 +138,7 @@ class ext_StorageManager(GyroExtension):
                 return f"sha256:{hasher.hexdigest()}"
         except Exception:
             pass
-        
+
         # Fallback placeholder
         return "sha256:placeholder_gene_checksum"
 
@@ -154,7 +155,7 @@ class ext_StorageManager(GyroExtension):
                 if len(data) < 4:
                     return 0
                 return struct.unpack("<I", data)[0]
-        except (OSError, struct.error):
+        except Exception:
             return 0
 
     def save_phase(self, phase: int) -> None:
@@ -162,7 +163,7 @@ class ext_StorageManager(GyroExtension):
         try:
             with open(self.phase_path, "wb") as f:
                 f.write(struct.pack("<I", phase))
-        except OSError as e:
+        except Exception as e:
             raise GyroStorageError(f"Failed to save phase: {e}")
 
     def load_knowledge_link(self) -> Optional[str]:
@@ -174,7 +175,7 @@ class ext_StorageManager(GyroExtension):
             with open(self.knowledge_link_path, "r") as f:
                 content = f.read().strip()
                 return content if content else None
-        except OSError:
+        except Exception:
             return None
 
     def save_knowledge_link(self, knowledge_id: str) -> None:
@@ -184,7 +185,7 @@ class ext_StorageManager(GyroExtension):
             with open(temp_path, "w") as f:
                 f.write(knowledge_id)
             temp_path.replace(self.knowledge_link_path)
-        except OSError as e:
+        except Exception as e:
             raise GyroStorageError(f"Failed to save knowledge link: {e}")
 
     def switch_knowledge_context(self, knowledge_id: str) -> None:
@@ -231,7 +232,7 @@ class ext_StorageManager(GyroExtension):
         try:
             with open(meta_path, "r") as f:
                 return json.load(f)
-        except (OSError, json.JSONDecodeError):
+        except Exception:
             return {}
 
     def save_metadata(self, knowledge_id: str, metadata: Dict[str, Any]) -> None:
@@ -249,11 +250,17 @@ class ext_StorageManager(GyroExtension):
         ext_path = self.knowledge_root / knowledge_id / "extensions" / filename
         if not ext_path.exists():
             return None
-
         try:
             with open(ext_path, "rb") as f:
-                return f.read()
-        except OSError:
+                data = f.read()
+            crypto = self._get_crypto_extension()
+            if crypto:
+                try:
+                    return crypto.decrypt(data)
+                except Exception:
+                    pass  # Fall through to raw if decryption fails
+            return data
+        except Exception:
             return None
 
     def save_extension_data(self, knowledge_id: str, filename: str, data: bytes) -> None:
@@ -261,6 +268,9 @@ class ext_StorageManager(GyroExtension):
         try:
             ext_path = self.knowledge_root / knowledge_id / "extensions" / filename
             ext_path.parent.mkdir(parents=True, exist_ok=True)
+            crypto = self._get_crypto_extension()
+            if crypto:
+                data = crypto.encrypt(data)
             with open(ext_path, "wb") as f:
                 f.write(data)
         except Exception as e:
@@ -273,10 +283,38 @@ class ext_StorageManager(GyroExtension):
         try:
             events_path = self.sessions_root / session_id / "events.log"
             events_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(events_path, "a") as f:
-                f.write(json.dumps({"timestamp": time.time(), "event": event_data}) + "\n")
+            crypto = self._get_crypto_extension()
+            line = json.dumps({"timestamp": time.time(), "event": event_data}) + "\n"
+            data = line.encode("utf-8")
+            if crypto:
+                data = crypto.encrypt(data)
+            with open(events_path, "ab") as f:
+                f.write(data)
         except Exception as e:
             raise GyroStorageError(f"Failed to store session event: {e}")
+
+    def load_session_events(self, session_id: str) -> list:
+        """Load all session events, decrypting if needed."""
+        events_path = self.sessions_root / session_id / "events.log"
+        if not events_path.exists():
+            return []
+        crypto = self._get_crypto_extension()
+        events = []
+        try:
+            with open(events_path, "rb") as f:
+                for line in f:
+                    if crypto:
+                        try:
+                            line = crypto.decrypt(line)
+                        except Exception:
+                            pass  # Fall through to raw if decryption fails
+                    try:
+                        events.append(json.loads(line.decode("utf-8")))
+                    except Exception:
+                        continue
+            return events
+        except Exception:
+            return []
 
     def store_learning_event(self, knowledge_id: str, event_data: Any) -> None:
         """Store a learning event (high-value, contributes to intelligence)."""
@@ -284,16 +322,37 @@ class ext_StorageManager(GyroExtension):
         # This is handled by the NavigationLog class
         pass
 
+    def save_ui_state(self, session_id: str, ui_state: dict) -> None:
+        """Save UI state for a session, encrypted if crypto is available."""
+        try:
+            ui_state_path = self.sessions_root / session_id / "ui_state.json"
+            ui_state_path.parent.mkdir(parents=True, exist_ok=True)
+            data = json.dumps(ui_state).encode("utf-8")
+            crypto = self._get_crypto_extension()
+            if crypto:
+                data = crypto.encrypt(data)
+            with open(ui_state_path, "wb") as f:
+                f.write(data)
+        except Exception as e:
+            raise GyroStorageError(f"Failed to save UI state: {e}")
+
     def load_ui_state(self, session_id: str) -> Dict[str, Any]:
-        """Load UI state from session."""
-        # Placeholder - would load from SQLite databases
-        ui_state_path = self.sessions_root / session_id / "ui_state"
+        """Load UI state from session, decrypting if needed."""
+        ui_state_path = self.sessions_root / session_id / "ui_state.json"
         if not ui_state_path.exists():
             return {}
-        
-        # For now, return empty dict
-        # In full implementation, would load from SQLite
-        return {}
+        crypto = self._get_crypto_extension()
+        try:
+            with open(ui_state_path, "rb") as f:
+                data = f.read()
+            if crypto:
+                try:
+                    data = crypto.decrypt(data)
+                except Exception:
+                    pass  # Fall through to raw if decryption fails
+            return json.loads(data.decode("utf-8"))
+        except Exception:
+            return {}
 
     # --- Gene Storage (New Methods) ---
 
@@ -302,7 +361,7 @@ class ext_StorageManager(GyroExtension):
         try:
             import torch
             import io
-            
+
             buffer = io.BytesIO()
             torch.save(gene, buffer)
             raw_data = buffer.getvalue()
@@ -326,7 +385,7 @@ class ext_StorageManager(GyroExtension):
         try:
             import torch
             import io
-            
+
             # Try encrypted first
             enc_path = self.knowledge_root / knowledge_id / "gene.enc"
             if enc_path.exists():
@@ -401,13 +460,15 @@ class ext_StorageManager(GyroExtension):
             # Copy and update metadata
             source_meta = self.load_metadata(source_id)
             new_meta = source_meta.copy()
-            new_meta.update({
-                "knowledge_id": new_id,
-                "parent_knowledge_id": source_id,
-                "created_ts": time.time(),
-                "source": f"forked from {source_id}",
-                "immutable": False,
-            })
+            new_meta.update(
+                {
+                    "knowledge_id": new_id,
+                    "parent_knowledge_id": source_id,
+                    "created_ts": time.time(),
+                    "source": f"forked from {source_id}",
+                    "immutable": False,
+                }
+            )
             self.save_metadata(new_id, new_meta)
 
             # Copy extension data
@@ -574,8 +635,9 @@ class ext_StorageManager(GyroExtension):
                 return True  # No checksum to validate against
 
             # Calculate actual checksum
-            if hasattr(gene, 'get') and 'id_0' in gene and 'id_1' in gene:
+            if hasattr(gene, "get") and "id_0" in gene and "id_1" in gene:
                 import hashlib
+
                 hasher = hashlib.sha256()
                 hasher.update(gene["id_0"].numpy().tobytes())
                 hasher.update(gene["id_1"].numpy().tobytes())

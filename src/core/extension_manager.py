@@ -63,7 +63,7 @@ class ExtensionManager:
     extension ecosystem.
     """
 
-    def __init__(self, session_id: Optional[str] = None, knowledge_id: Optional[str] = None):
+    def __init__(self, session_id: Optional[str] = None, knowledge_id: str = ""):
         """
         Initializes the full GyroSI stack for a session.
 
@@ -77,7 +77,7 @@ class ExtensionManager:
         """
         # Generate IDs if not provided
         self._session_id = session_id or str(uuid.uuid4())
-        self._knowledge_id = knowledge_id  # May remain None initially
+        self._knowledge_id = knowledge_id if knowledge_id else str(uuid.uuid4())
 
         # Initialize extension registry
         self.extensions: Dict[str, Any] = {}
@@ -92,7 +92,9 @@ class ExtensionManager:
             self._initialize_application_extensions()
 
             # 3. Initialize the pure engine
-            self.engine = GyroEngine(harmonics_path=os.path.join(os.path.dirname(__file__), "gyro_harmonics.dat"))
+            self.engine = GyroEngine(
+                harmonics_path=os.path.join(os.path.dirname(__file__), "gyro_harmonics.dat")
+            )
 
             # 4. Load session state through extensions
             self._load_session_state()
@@ -109,7 +111,7 @@ class ExtensionManager:
         """Initialize system-critical extensions in proper dependency order."""
 
         # NEW: Initialize cryptographer FIRST
-        self.extensions["crypto"] = ext_Cryptographer()
+        self.extensions["crypto"] = ext_Cryptographer(self._get_user_key())
 
         # Ensure knowledge_id is always a string and never None
         if not self._knowledge_id or not isinstance(self._knowledge_id, str):
@@ -240,7 +242,7 @@ class ExtensionManager:
 
     def get_knowledge_id(self) -> str:
         """Returns the current knowledge package ID."""
-        return self._knowledge_id
+        return str(self._knowledge_id)
 
     # ========================================================================
     # G1-G5 CANONICAL MEMORY INTERFACES

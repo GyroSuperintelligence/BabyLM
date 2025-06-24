@@ -1,8 +1,8 @@
 # src/frontend/components/gyro_document_upload.py
 import flet as ft
 import time
-from typing import Callable, Optional
-from ..assets.styles.theme import GyroTheme
+from typing import Callable, Optional, cast
+from src.frontend.assets.styles.theme import GyroTheme
 
 
 class GyroDocumentUpload(ft.UserControl):
@@ -62,6 +62,7 @@ class GyroDocumentUpload(ft.UserControl):
                         icon_size=16,
                         icon_color=GyroTheme.TEXT_SECONDARY,
                         on_click=self._clear_file,
+                        tooltip="Clear uploaded file",
                     ),
                 ],
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -114,7 +115,10 @@ class GyroDocumentUpload(ft.UserControl):
             time.sleep(0.01)
 
         # Show file info
-        self.file_info.content.controls[1].value = file.name
+        if self.file_info.content is not None:
+            row = cast(ft.Row, self.file_info.content)
+            text_control = cast(ft.Text, row.controls[1])
+            text_control.value = file.name
         self.file_info.visible = True
         self.progress_bar.visible = False
         self.update()

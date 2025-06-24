@@ -18,6 +18,17 @@ References:
 
 from typing import Optional, Dict, List, Iterable, Union, Tuple, Any
 from pathlib import Path
+import sys
+
+sys.path.append(str(Path(__file__).parent.parent.parent / "gyro_tools"))
+try:
+    from gyro_tools.gyro_curriculum_manager import CURRICULUM_RESOURCES, ingest_resource
+except ImportError:
+    CURRICULUM_RESOURCES = {}
+
+    def ingest_resource(*args, **kwargs):
+        raise NotImplementedError("Curriculum ingestion backend not available.")
+
 
 # The ExtensionManager is the workhorse orchestrated by this API
 from core.extension_manager import ExtensionManager
@@ -61,7 +72,7 @@ def initialize_session(session_id: Optional[str] = None, knowledge_id: Optional[
         # Create a new ExtensionManager instance
         # This constructor does all the heavy lifting of loading state
         # and initializing extensions
-        manager = ExtensionManager(session_id, knowledge_id)
+        manager = ExtensionManager(session_id, knowledge_id or "")
         active_id = manager.get_session_id()
 
         # Cache the manager instance for subsequent API calls
@@ -108,7 +119,7 @@ def list_active_sessions() -> List[str]:
     return list(_active_sessions.keys())
 
 
-def get_session_info(session_id: str) -> Dict[str, any]:
+def get_session_info(session_id: str) -> Dict[str, Any]:
     """
     Returns information about an active session.
 
@@ -366,7 +377,7 @@ def link_session_to_knowledge(session_id: str, knowledge_id: str) -> None:
 # ============================================================================
 
 
-def query_memory(session_id: str, tag: str) -> any:
+def query_memory(session_id: str, tag: str) -> Any:
     """
     Query any of the five memory systems using TAG syntax.
 
@@ -433,6 +444,8 @@ def get_navigation_history(
 
     events = []
     for packed_byte in manager.navigation_log.iter_steps(reverse=reverse):
+        if not isinstance(packed_byte, int):
+            continue
         op_0 = packed_byte & 0x0F
         op_1 = (packed_byte >> 4) & 0x0F
         events.append((op_0, op_1))
@@ -564,4 +577,25 @@ __all__ = [
     # Utility functions
     "validate_system_integrity",
     "cleanup_inactive_sessions",
+    "ingest_curriculum_resource",
 ]
+
+
+def ingest_curriculum_resource(
+    resource_key: str, dest_dir: str = "./data/curriculum", progress_cb=None
+) -> bool:
+    """
+    Downloads and ingests a curriculum resource by key.
+    Args:
+        resource_key: The key of the resource (e.g., 'wordnet').
+        dest_dir: Directory to store downloads and extracted files.
+        progress_cb: Optional callback for progress updates.
+    Returns:
+        True if successful, False otherwise.
+    Raises:
+        ValueError if resource_key is invalid.
+        Exception on download/ingest failure.
+    """
+    if resource_key not in CURRICULUM_RESOURCES:
+        raise ValueError(f"Unknown curriculum resource: {resource_key}")
+    return ingest_resource(resource_key, dest_dir, progress_cb=progress_cb)

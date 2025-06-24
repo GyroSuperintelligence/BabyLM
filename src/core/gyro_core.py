@@ -23,7 +23,6 @@ import numpy as np
 import hashlib
 from typing import Tuple, Dict, Optional
 from .gyro_errors import GyroIntegrityError
-from extensions.ext_cryptographer import ext_Cryptographer
 
 
 # ============================================================================
@@ -79,8 +78,8 @@ class GyroEngine:
         if len(payload) < 1616:
             raise GyroIntegrityError("Harmonics matrix is corrupted or incomplete.")
         digest = payload[:32]
-        mask = np.frombuffer(payload[32:32+48*256], dtype=np.uint8).reshape(48, 256)
-        opvec = np.frombuffer(payload[32+48*256:32+48*256+48], dtype=np.uint8)
+        mask = np.frombuffer(payload[32 : 32 + 48 * 256], dtype=np.uint8).reshape(48, 256)
+        opvec = np.frombuffer(payload[32 + 48 * 256 : 32 + 48 * 256 + 48], dtype=np.uint8)
         current_digest = self._compute_gene_checksum()
         if digest != current_digest:
             raise GyroIntegrityError(
@@ -101,8 +100,8 @@ class GyroEngine:
         if self._harmonics_mask[self.phase, clamped_byte] == 0:
             raise GyroIntegrityError(f"No resonance at phase {self.phase} for byte {input_byte}")
         op_pair = self._operator_vector[self.phase]
-        op_code_0 = (op_pair & 0x0F)  # lower 4 bits
-        op_code_1 = (op_pair >> 4)    # upper 4 bits
+        op_code_0 = op_pair & 0x0F  # lower 4 bits
+        op_code_1 = op_pair >> 4  # upper 4 bits
         return (op_code_0, op_code_1)
 
     def _get_gene_constant(self) -> Dict[str, torch.Tensor]:
@@ -145,6 +144,10 @@ class GyroEngine:
         hasher.update(self.gene["id_0"].numpy().tobytes())
         hasher.update(self.gene["id_1"].numpy().tobytes())
         return hasher.digest()
+
+    def load_phase(self, phase: int) -> None:
+        """Set the engine's phase to the provided value."""
+        self.phase = phase
 
 
 # ============================================================================

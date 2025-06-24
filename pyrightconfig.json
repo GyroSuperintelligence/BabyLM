@@ -1,0 +1,9 @@
+{
+  "exclude": [
+    "codebase-mcp",
+    "data",
+    "logs",
+    ".venv",
+    "src/core/gyro_harmonics.dat"
+  ]
+} 

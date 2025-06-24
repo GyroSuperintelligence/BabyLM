@@ -17,6 +17,7 @@ sqlite-utils>=3.36.0
 
 # CLI and tools
 click>=8.1.7
+rich>=13.7.0
 
 # Compression and packaging
 tqdm>=4.66.2
@@ -48,3 +49,10 @@ filelock>=3.13.4
 
 # For system monitoring
 psutil>=5.9.0
+
+# For curriculum ingestion
+requests
+
+# For app building and icon support
+pillow>=11.2.0
+pyinstaller>=6.0.0

@@ -1,9 +1,10 @@
 # src/frontend/components/gyro_threads_panel.py
 import flet as ft
-from typing import Callable, Optional, Dict
+from typing import Callable, Optional, Dict, List
 import uuid
 from datetime import datetime
 from ..assets.styles.theme import GyroTheme
+from core.gyro_api import link_session_to_knowledge
 
 
 class GyroThreadsPanel(ft.UserControl):
@@ -16,6 +17,30 @@ class GyroThreadsPanel(ft.UserControl):
         self.threads: Dict[str, ThreadItem] = {}
         self.folders: Dict[str, FolderItem] = {}
         self.selected_thread_id: Optional[str] = None
+        self.knowledge_ids: List[str] = []
+        self.knowledge_dropdown: Optional[ft.Dropdown] = None
+        self._init_knowledge_list()
+        self._snackbar = None
+        self._pending_delete_thread_id = None
+
+    def _init_knowledge_list(self):
+        """Initialize the list of available knowledge packages from backend."""
+        if self.extension_manager:
+            try:
+                # Implement a local listing using the filesystem if not present in API
+                import os
+                from pathlib import Path
+
+                knowledge_root = Path("data/knowledge")
+                self.knowledge_ids = [
+                    d.name
+                    for d in knowledge_root.iterdir()
+                    if d.is_dir() and (d / "knowledge.meta.json").exists()
+                ]
+            except Exception:
+                self.knowledge_ids = []
+        else:
+            self.knowledge_ids = []
 
     def build(self):
         # Search bar
@@ -40,6 +65,18 @@ class GyroThreadsPanel(ft.UserControl):
             on_click=self._create_new_thread,
         )
 
+        # Knowledge selector dropdown
+        self.knowledge_dropdown = ft.Dropdown(
+            label="Knowledge",
+            options=[ft.dropdown.Option(kid, f"{kid[:8]}...") for kid in self.knowledge_ids],
+            value=self.knowledge_ids[0] if self.knowledge_ids else None,
+            on_change=self._on_knowledge_select,
+            width=220,
+            filled=True,
+            bgcolor=GyroTheme.INPUT_BG,
+            border_radius=8,
+        )
+
         # Header
         header = ft.Container(
             content=ft.Column(
@@ -56,6 +93,7 @@ class GyroThreadsPanel(ft.UserControl):
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                     ),
+                    self.knowledge_dropdown,
                     self.search_field,
                 ],
                 spacing=10,
@@ -77,29 +115,28 @@ class GyroThreadsPanel(ft.UserControl):
         return ft.Column(controls=[header, self.thread_list], spacing=0, expand=True)
 
     def _load_existing_sessions(self):
-        """Load existing GyroSI sessions from storage"""
+        """Load all active GyroSI sessions from backend"""
         try:
-            # Get current session info
-            current_session_id = self.extension_manager.get_session_id()
-            knowledge_id = self.extension_manager.get_knowledge_id()
+            from core.gyro_api import list_active_sessions, get_session_info
 
-            # Create thread for current session
-            thread_item = ThreadItem(
-                thread_id=current_session_id,
-                title="Current Session",
-                preview=f"Knowledge: {knowledge_id[:8]}...",
-                timestamp=datetime.now(),
-                on_click=self._on_thread_click,
-                on_delete=self._on_thread_delete,
-            )
-            self.threads[current_session_id] = thread_item
-            self.thread_list.controls.append(thread_item)
-
-            # Select current session
-            self._on_thread_click(current_session_id)
-
+            session_ids = list_active_sessions()
+            for session_id in session_ids:
+                info = get_session_info(session_id)
+                knowledge_id = info.get("knowledge_id", "unknown")
+                phase = info.get("phase", 0)
+                thread_item = ThreadItem(
+                    thread_id=session_id,
+                    title=f"Session {session_id[:8]}...",
+                    preview=f"Knowledge: {knowledge_id[:8]}... | Phase: {phase}/47",
+                    timestamp=datetime.now(),
+                    on_click=self._on_thread_click,
+                    on_delete=self._on_thread_delete,
+                )
+                self.threads[session_id] = thread_item
+                self.thread_list.controls.append(thread_item)
+            if session_ids:
+                self._on_thread_click(session_ids[0])
         except Exception as e:
-            # Fallback to sample threads if loading fails
             self._add_sample_threads()
 
     def _add_sample_threads(self):
@@ -127,28 +164,25 @@ class GyroThreadsPanel(ft.UserControl):
         """Create a new conversation thread with GyroSI session"""
         try:
             if self.extension_manager:
-                # Create new GyroSI session
-                from core.gyro_api import initialize_session
+                from core.gyro_api import initialize_session, get_session_info
 
                 new_session_id = initialize_session()
-
+                info = get_session_info(new_session_id)
+                knowledge_id = info.get("knowledge_id", "unknown")
+                phase = info.get("phase", 0)
                 thread_item = ThreadItem(
                     thread_id=new_session_id,
                     title="New Conversation",
-                    preview="Start typing...",
+                    preview=f"Knowledge: {knowledge_id[:8]}... | Phase: {phase}/47",
                     timestamp=datetime.now(),
                     on_click=self._on_thread_click,
                     on_delete=self._on_thread_delete,
                 )
-
                 self.threads[new_session_id] = thread_item
                 self.thread_list.controls.insert(0, thread_item)
                 self.update()
-
-                # Select the new thread
                 self._on_thread_click(new_session_id)
             else:
-                # Fallback for demo mode
                 thread_id = str(uuid.uuid4())
                 thread_item = ThreadItem(
                     thread_id=thread_id,
@@ -158,16 +192,11 @@ class GyroThreadsPanel(ft.UserControl):
                     on_click=self._on_thread_click,
                     on_delete=self._on_thread_delete,
                 )
-
                 self.threads[thread_id] = thread_item
                 self.thread_list.controls.insert(0, thread_item)
                 self.update()
-
-                # Select the new thread
                 self._on_thread_click(thread_id)
-
         except Exception as e:
-            # Show error in UI
             print(f"Error creating new thread: {e}")
 
     def _on_thread_click(self, thread_id: str):
@@ -179,30 +208,65 @@ class GyroThreadsPanel(ft.UserControl):
         self.selected_thread_id = thread_id
         if thread_id in self.threads:
             self.threads[thread_id].selected = True
-
-        self.update()
-        self.on_thread_select(thread_id)
+            self.update()
+            try:
+                self.on_thread_select(thread_id)
+            except Exception as ex:
+                self._show_message(f"Error loading session: {ex}", error=True)
+        else:
+            self._show_message("Session not found or has been deleted.", error=True)
 
     def _on_thread_delete(self, thread_id: str):
-        """Handle thread deletion"""
+        """Show confirmation dialog before deleting a session/thread"""
+        self._pending_delete_thread_id = thread_id
+        confirm_dialog = ft.AlertDialog(
+            title=ft.Text("Delete Session?", weight=ft.FontWeight.W_600),
+            content=ft.Text(
+                "Are you sure you want to delete this session? This action cannot be undone."
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=self._cancel_delete),
+                ft.FilledButton(
+                    "Delete",
+                    on_click=self._confirm_delete,
+                    style=ft.ButtonStyle(bgcolor=GyroTheme.ERROR, color="#fff"),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        if hasattr(self, "page") and self.page:
+            self.page.dialog = confirm_dialog
+            self.page.update()
+        else:
+            self._snackbar = confirm_dialog
+            self.update()
+
+    def _cancel_delete(self, e):
+        if hasattr(self, "page") and self.page:
+            self.page.dialog = None
+            self.page.update()
+        self._pending_delete_thread_id = None
+
+    def _confirm_delete(self, e):
+        if hasattr(self, "page") and self.page:
+            self.page.dialog = None
+            self.page.update()
+        thread_id = self._pending_delete_thread_id
+        self._pending_delete_thread_id = None
         try:
             if thread_id in self.threads:
+                from core.gyro_api import shutdown_session
+
+                shutdown_session(thread_id)
                 thread_item = self.threads[thread_id]
                 self.thread_list.controls.remove(thread_item)
                 del self.threads[thread_id]
-
-                # If this was the selected thread, clear selection
                 if self.selected_thread_id == thread_id:
                     self.selected_thread_id = None
-
                 self.update()
-
-                # TODO: Implement proper session cleanup via gyro_api
-                # from core.gyro_api import shutdown_session
-                # shutdown_session(thread_id)
-
-        except Exception as e:
-            print(f"Error deleting thread: {e}")
+                self._show_message("Session deleted.", info=True)
+        except Exception as ex:
+            self._show_message(f"Error deleting session: {ex}", error=True)
 
     def _on_search(self, e):
         """Filter threads based on search query"""
@@ -221,6 +285,53 @@ class GyroThreadsPanel(ft.UserControl):
         """Update the preview text for a thread"""
         if thread_id in self.threads:
             self.threads[thread_id].update_preview(preview)
+            self.update()
+
+    def _on_knowledge_select(self, e):
+        """Handle knowledge selection from dropdown and link to current session."""
+        selected_knowledge_id = e.control.value
+        if self.selected_thread_id and self.extension_manager:
+            try:
+                link_session_to_knowledge(self.selected_thread_id, selected_knowledge_id)
+                self.update_thread_preview(
+                    self.selected_thread_id,
+                    f"Knowledge: {selected_knowledge_id[:8]}... | Phase: {self.extension_manager.engine.phase}/47",
+                )
+                if hasattr(self, "on_thread_select"):
+                    self.on_thread_select(self.selected_thread_id)
+                self._show_message("Knowledge switched.", info=True)
+            except Exception as ex:
+                self._show_message(f"Error switching knowledge: {ex}", error=True)
+
+    def refresh_knowledge_list(self):
+        """Refresh the list of available knowledge packages from backend."""
+        self._init_knowledge_list()
+        if self.knowledge_dropdown:
+            self.knowledge_dropdown.options = [
+                ft.dropdown.Option(kid, f"{kid[:8]}...") for kid in self.knowledge_ids
+            ]
+            self.knowledge_dropdown.value = self.knowledge_ids[0] if self.knowledge_ids else None
+            self.knowledge_dropdown.update()
+
+    def _show_message(self, msg, error=False, info=False):
+        # Show a Flet snackbar for user feedback
+        color = (
+            GyroTheme.ERROR
+            if error
+            else (GyroTheme.TEXT_SECONDARY if info else GyroTheme.TEXT_ON_ACCENT)
+        )
+        bgcolor = GyroTheme.ERROR if error else (GyroTheme.SURFACE if info else GyroTheme.ACCENT)
+        snackbar = ft.SnackBar(
+            content=ft.Text(msg, color=color),
+            bgcolor=bgcolor,
+            open=True,
+            duration=3000,
+        )
+        if hasattr(self, "page") and self.page:
+            self.page.snack_bar = snackbar
+            self.page.update()
+        else:
+            self._snackbar = snackbar
             self.update()
 
 

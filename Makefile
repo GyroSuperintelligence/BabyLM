@@ -1,4 +1,4 @@
-.PHONY: help install test lint format clean run dev export-example import-example
+.PHONY: help install test lint format clean run dev export-example import-example ui baby build-app hot-reload
 
 help:
 	@echo "Available commands:"
@@ -11,6 +11,9 @@ help:
 	@echo "  dev            Run in development mode"
 	@echo "  export-example Export example knowledge"
 	@echo "  import-example Import example knowledge"
+	@echo "  baby           Run the UI"
+	@echo "  hot-reload     Run with hot reload (recommended for development)"
+	@echo "  build-app      Build standalone app with custom icon"
 
 install:
 	pip install -r requirements.txt
@@ -44,3 +47,15 @@ export-example:
 
 import-example:
 	python -m gyro_tools.gyro_knowledge_manager import --input examples/example_knowledge.gyro --new-session
+
+ui:
+	python -m src.frontend.gyro_app
+
+baby:
+	python -m src.frontend.gyro_app --hot-reload
+
+hot-reload:
+	flet run src/main.py --hot-reload
+
+build-app:
+	python scripts/build_app.py

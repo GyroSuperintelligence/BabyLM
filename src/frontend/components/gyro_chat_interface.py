@@ -4,6 +4,7 @@ import flet as ft
 from typing import Optional, List
 from datetime import datetime
 from ..assets.styles.theme import GyroTheme
+from gyro_api import get_language_output
 
 
 class ChatMessage(ft.UserControl):
@@ -64,6 +65,8 @@ class GyroChatInterface(ft.UserControl):
         self.session_id: Optional[str] = None
         self.messages: List[ChatMessage] = []
         self.is_processing = False
+        self._snackbar = None
+        self._pending_clear = False
 
     def build(self):
         self.message_list = ft.ListView(
@@ -84,6 +87,7 @@ class GyroChatInterface(ft.UserControl):
             on_submit=self._send_message,
             shift_enter=True,
             expand=True,
+            autofocus=True,
         )
 
         self.send_button = ft.IconButton(
@@ -92,6 +96,7 @@ class GyroChatInterface(ft.UserControl):
             icon_size=20,
             on_click=self._send_message,
             disabled=False,
+            tooltip="Send message",
         )
 
         self.processing_indicator = ft.ProgressRing(
@@ -165,9 +170,55 @@ class GyroChatInterface(ft.UserControl):
             self.message_list.controls.append(error_msg)
             self.update()
 
+    def update_language_output(self):
+        if not self.session_id:
+            return
+        try:
+            output_lines = get_language_output(self.session_id)
+            for line in output_lines:
+                assistant_msg = ChatMessage(
+                    content=line,
+                    is_user=False,
+                    timestamp=datetime.now(),
+                )
+                self.messages.append(assistant_msg)
+                self.message_list.controls.append(assistant_msg)
+            self.update()
+        except Exception as e:
+            error_msg = ChatMessage(
+                content=f"Error fetching language output: {str(e)}",
+                is_user=False,
+                is_system=True,
+                timestamp=datetime.now(),
+            )
+            self.messages.append(error_msg)
+            self.message_list.controls.append(error_msg)
+            self.update()
+
+    def _show_message(self, msg, error=False, info=False):
+        color = (
+            GyroTheme.ERROR
+            if error
+            else (GyroTheme.TEXT_SECONDARY if info else GyroTheme.TEXT_ON_ACCENT)
+        )
+        bgcolor = GyroTheme.ERROR if error else (GyroTheme.SURFACE if info else GyroTheme.ACCENT)
+        snackbar = ft.SnackBar(
+            content=ft.Text(msg, color=color),
+            bgcolor=bgcolor,
+            open=True,
+            duration=3000,
+        )
+        if hasattr(self, "page") and self.page:
+            self.page.snack_bar = snackbar
+            self.page.update()
+        else:
+            self._snackbar = snackbar
+            self.update()
+
     def _send_message(self, e):
         """Send message through G3→G2→G4→G5 cycle"""
         if not self.input_field.value or self.is_processing:
+            self._show_message("Cannot send empty or duplicate message.", error=True)
             return
 
         message_text = self.input_field.value.strip()
@@ -181,20 +232,17 @@ class GyroChatInterface(ft.UserControl):
         self._set_processing(True)
         self.update()
 
-        # Process through real GyroSI system
-        response_text = self._process_with_gyro_system(message_text)
-
-        # Add assistant response
-        assistant_msg = ChatMessage(
-            content=response_text,
-            is_user=False,
-            timestamp=datetime.now(),
-        )
-        self.messages.append(assistant_msg)
-        self.message_list.controls.append(assistant_msg)
-
-        self._set_processing(False)
-        self.update()
+        try:
+            # Process through real GyroSI system
+            self._process_with_gyro_system(message_text)
+            # Fetch and display new language output
+            self.update_language_output()
+            self._show_message("Message processed.", info=True)
+        except Exception as ex:
+            self._show_message(f"Error sending message: {ex}", error=True)
+        finally:
+            self._set_processing(False)
+            self.update()
 
     def _process_with_gyro_system(self, text: str) -> str:
         """Process text through the complete GyroSI system"""
@@ -337,6 +385,7 @@ class GyroChatInterface(ft.UserControl):
             self.messages.append(result_msg)
             self.message_list.controls.append(result_msg)
             self.update()
+            self._show_message("Document processed.", info=True)
 
         except Exception as e:
             error_msg = ChatMessage(
@@ -348,3 +397,44 @@ class GyroChatInterface(ft.UserControl):
             self.messages.append(error_msg)
             self.message_list.controls.append(error_msg)
             self.update()
+            self._show_message(f"Error processing document: {e}", error=True)
+
+    # Optionally, add a clear chat history feature with confirmation
+    def clear_chat_history(self):
+        self._pending_clear = True
+        confirm_dialog = ft.AlertDialog(
+            title=ft.Text("Clear Chat History?", weight=ft.FontWeight.W_600),
+            content=ft.Text(
+                "Are you sure you want to clear the chat history for this session? This cannot be undone."
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=self._cancel_clear),
+                ft.FilledButton(
+                    "Clear",
+                    on_click=self._confirm_clear,
+                    style=ft.ButtonStyle(bgcolor=GyroTheme.ERROR, color="#fff"),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        if hasattr(self, "page") and self.page:
+            self.page.dialog = confirm_dialog
+            self.page.update()
+        else:
+            self._snackbar = confirm_dialog
+            self.update()
+
+    def _cancel_clear(self, e):
+        if hasattr(self, "page") and self.page:
+            self.page.dialog = None
+            self.page.update()
+        self._pending_clear = False
+
+    def _confirm_clear(self, e):
+        if hasattr(self, "page") and self.page:
+            self.page.dialog = None
+            self.page.update()
+        self.messages.clear()
+        self.message_list.controls.clear()
+        self.update()
+        self._show_message("Chat history cleared.", info=True)
