@@ -6,7 +6,6 @@ in the GyroSI ecosystem.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
 
 
 class GyroExtension(ABC):
@@ -45,7 +44,7 @@ class GyroExtension(ABC):
         pass
 
     @abstractmethod
-    def get_learning_state(self) -> Dict[str, Any]:
+    def get_learning_state(self) -> dict[str, object]:
         """
         Returns state that should be exported with knowledge packages.
         This is the accumulated intelligence/patterns learned.
@@ -53,7 +52,7 @@ class GyroExtension(ABC):
         pass
 
     @abstractmethod
-    def get_session_state(self) -> Dict[str, Any]:
+    def get_session_state(self) -> dict[str, object]:
         """
         Returns session-local state that is NOT exported.
         This includes caches, UI preferences, temporary data.
@@ -61,7 +60,7 @@ class GyroExtension(ABC):
         pass
 
     @abstractmethod
-    def set_learning_state(self, state: Dict[str, Any]) -> None:
+    def set_learning_state(self, state: dict[str, object]) -> None:
         """
         Restores learning state from a knowledge package.
         Called when importing or loading knowledge.
@@ -69,16 +68,16 @@ class GyroExtension(ABC):
         pass
 
     @abstractmethod
-    def set_session_state(self, state: Dict[str, Any]) -> None:
+    def set_session_state(self, state: dict[str, object]) -> None:
         """
         Restores session state.
         Called when resuming a session.
         """
         pass
 
-    def ext_on_navigation_event(self, nav_event: int, input_byte: Optional[int] = None) -> None:
+    def ext_on_navigation_event(self, nav_event: int, input_byte: int | None = None) -> None:
         """
-        Process a navigation event. This is called by the ExtensionManager
+        Process a navigation event. This is called by the GyroOperations
         whenever a navigation event occurs.
 
         Args:

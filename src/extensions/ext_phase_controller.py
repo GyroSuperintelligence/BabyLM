@@ -5,7 +5,7 @@ This extension provides alternative phase advancement strategies and
 phase-based control mechanisms.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Deque, List, Callable
 from collections import deque
 import math
 
@@ -22,7 +22,7 @@ class ext_PhaseController(GyroExtension):
     def __init__(self):
         """Initialize phase controller."""
         # Phase control state (4 bytes)
-        self._phase_state = {
+        self._phase_state: Dict[str, Any] = {
             "strategy": "linear",  # Current advancement strategy
             "modifier": 1,  # Phase advancement modifier
             "skip_count": 0,  # Phases skipped
@@ -30,7 +30,7 @@ class ext_PhaseController(GyroExtension):
         }
 
         # Available strategies
-        self._strategies = {
+        self._strategies: Dict[str, Callable[[int, bool], int]] = {
             "linear": self._linear_advance,
             "accelerated": self._accelerated_advance,
             "decelerated": self._decelerated_advance,
@@ -40,13 +40,13 @@ class ext_PhaseController(GyroExtension):
         }
 
         # Phase history for adaptive strategies
-        self._phase_history = deque(maxlen=48)
+        self._phase_history: Deque[int] = deque(maxlen=48)
 
         # Resonance history for adaptation
-        self._resonance_history = deque(maxlen=48)
+        self._resonance_history: Deque[bool] = deque(maxlen=48)
 
         # Phase transition rules
-        self._transition_rules = {
+        self._transition_rules: Dict[str, bool] = {
             "skip_non_resonant": False,
             "hold_on_resonance": False,
             "accelerate_on_pattern": False,
@@ -54,10 +54,10 @@ class ext_PhaseController(GyroExtension):
         }
 
         # Custom phase mappings
-        self._phase_mappings = {}
+        self._phase_mappings: Dict[int, int] = {}
 
         # Statistics
-        self._phase_stats = {
+        self._phase_stats: Dict[str, int] = {
             "total_advances": 0,
             "strategy_changes": 0,
             "phases_skipped": 0,
@@ -99,7 +99,7 @@ class ext_PhaseController(GyroExtension):
 
         # Apply custom mappings if any
         if new_phase in self._phase_mappings:
-            new_phase = self._phase_mappings[new_phase]
+            new_phase = self._phase_mappings.get(new_phase, new_phase)
 
         return new_phase % 48
 
@@ -179,7 +179,9 @@ class ext_PhaseController(GyroExtension):
         # Adapt based on resonance rate
         if resonance_rate > 0.7:
             # High resonance - slow down to exploit
-            return phase + 1 if self._phase_stats["total_advances"] % 3 != 0 else phase
+            if self._phase_stats["total_advances"] % 3 != 0:
+                return phase + 1
+            return phase
         elif resonance_rate < 0.3:
             # Low resonance - speed up to find better region
             return phase + 2
@@ -247,8 +249,8 @@ class ext_PhaseController(GyroExtension):
                         cycle_lengths.append(i - cycle_start + 1)
 
             if cycle_lengths:
-                self._phase_stats["effective_cycle_length"] = sum(cycle_lengths) / len(
-                    cycle_lengths
+                self._phase_stats["effective_cycle_length"] = int(
+                    sum(cycle_lengths) / len(cycle_lengths)
                 )
 
         return {
@@ -265,18 +267,18 @@ class ext_PhaseController(GyroExtension):
             return 0.0
 
         # Simple correlation: do certain phases have higher resonance?
-        phase_resonance_map = {}
+        phase_resonance_map: Dict[int, float] = {}
 
         for phase, resonated in zip(self._phase_history, self._resonance_history):
             if phase not in phase_resonance_map:
-                phase_resonance_map[phase] = []
-            phase_resonance_map[phase].append(1 if resonated else 0)
+                phase_resonance_map[phase] = 0.0
+            phase_resonance_map[phase] += 1.0 if resonated else 0.0
 
         # Calculate variance in resonance rates across phases
         resonance_rates = []
         for phase, resonances in phase_resonance_map.items():
-            if resonances:
-                resonance_rates.append(sum(resonances) / len(resonances))
+            if resonances > 0:
+                resonance_rates.append(resonances)
 
         if len(resonance_rates) > 1:
             mean_rate = sum(resonance_rates) / len(resonance_rates)
@@ -286,19 +288,15 @@ class ext_PhaseController(GyroExtension):
         return 0.0
 
     def _calculate_phase_distribution(self) -> Dict[str, int]:
-        """Calculate distribution of phases visited."""
-        distribution = {}
-
+        """Calculate distribution of visited phases."""
+        distribution = {f"phase_{i}": 0 for i in range(48)}
         for phase in self._phase_history:
-            if phase not in distribution:
-                distribution[phase] = 0
-            distribution[phase] += 1
-
+            distribution[f"phase_{phase}"] += 1
         return distribution
 
     def ext_optimize_strategy(self) -> str:
         """
-        Automatically select optimal strategy based on performance.
+        Suggest an optimal strategy based on current conditions.
 
         Returns:
             Selected strategy name

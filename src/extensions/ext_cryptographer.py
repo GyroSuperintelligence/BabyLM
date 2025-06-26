@@ -12,10 +12,11 @@ CRITICAL GUARANTEES:
 - Navigation mechanics are NEVER affected
 - Operator matrix remains untouched
 """
+
 import hashlib
 import random
 import math
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Optional, Deque
 from collections import deque
 from .base import GyroExtension
 
@@ -23,7 +24,7 @@ from .base import GyroExtension
 class ext_Cryptographer(GyroExtension):
     """
     Implements a gyration-aware stream cipher, merging user-key security
-    with navigation-driven state evolution (successor to the original ext_SpinPIV approach).
+    with navigation-driven state evolution.
 
     FOOTPRINT: 5 bytes (2B counter + 2B GyroCryptography + 1B evolution_counter)
     """
@@ -49,8 +50,8 @@ class ext_Cryptographer(GyroExtension):
         self.evolution_counter = 0  # 8-bit
 
         # Navigation history for entropy
-        self._nav_history = deque(maxlen=16)
-        self._gyro_cryptography_history = deque(maxlen=100)
+        self._nav_history: Deque[int] = deque(maxlen=16)
+        self._gyro_cryptography_history: Deque[int] = deque(maxlen=100)
         self._gyro_cryptography_history.append(self.gyro_cryptography)
 
         # Diagnostic statistics
@@ -58,7 +59,7 @@ class ext_Cryptographer(GyroExtension):
             "bytes_encrypted": 0,
             "bytes_decrypted": 0,
             "evolution_count": 0,
-            "entropy_quality": 1.0
+            "entropy_quality": 1.0,
         }
 
     # --- Core Cryptographic Logic ---
@@ -78,8 +79,8 @@ class ext_Cryptographer(GyroExtension):
             raise ValueError("Block size must be <= 32 bytes")
 
         ctx = hashlib.blake2s(digest_size=length, key=self.user_key)
-        ctx.update(block_idx.to_bytes(2, "big"))   # Stream counter
-        ctx.update(self.gyro_cryptography.to_bytes(2, "big"))    # Navigation-derived salt
+        ctx.update(block_idx.to_bytes(2, "big"))  # Stream counter
+        ctx.update(self.gyro_cryptography.to_bytes(2, "big"))  # Navigation-derived salt
         return ctx.digest()
 
     def encrypt(self, data: bytes) -> bytes:
@@ -99,7 +100,7 @@ class ext_Cryptographer(GyroExtension):
             # Evolve GyroCryptography every 16 bytes (except at start)
             if start > 0:
                 self._evolve_gyro_cryptography()
-            chunk = data[start:start+16]
+            chunk = data[start : start + 16]
             ks = self._keystream_block(self.counter + block_idx, len(chunk))
             out.extend(b ^ k for b, k in zip(chunk, ks))
         # Update counter based on 16-byte blocks used
@@ -127,7 +128,7 @@ class ext_Cryptographer(GyroExtension):
             # Evolve GyroCryptography every 16 bytes (except at start)
             if start > 0:
                 self._evolve_gyro_cryptography()
-            chunk = data[start:start+16]
+            chunk = data[start : start + 16]
             ks = self._keystream_block(current_counter + block_idx, len(chunk))
             out.extend(b ^ k for b, k in zip(chunk, ks))
 
@@ -172,7 +173,10 @@ class ext_Cryptographer(GyroExtension):
         # Apply spin transformation (720° = 2 full rotations)
         # Each evolution represents 720°/256 = 2.8125° of rotation
         rotation_bits = (self.evolution_counter * 3) % 16
-        rotated = ((self.gyro_cryptography << rotation_bits) | (self.gyro_cryptography >> (16 - rotation_bits))) & 0xFFFF
+        rotated = (
+            (self.gyro_cryptography << rotation_bits)
+            | (self.gyro_cryptography >> (16 - rotation_bits))
+        ) & 0xFFFF
         self.gyro_cryptography = (rotated ^ entropy) & 0xFFFF
 
         # Update counters and history
@@ -183,10 +187,9 @@ class ext_Cryptographer(GyroExtension):
 
     # --- Diagnostic & Analysis Tools ---
 
-    def ext_get_crypto_analysis(self) -> Dict[str, Any]:
+    def ext_get_crypto_analysis(self) -> dict[str, Any]:
         """
         Get comprehensive cryptographic analysis.
-        Useful for monitoring system health and entropy quality.
         """
         return {
             "current_gyro_cryptography": self.gyro_cryptography,
@@ -195,7 +198,7 @@ class ext_Cryptographer(GyroExtension):
             "gyro_cryptography_period": self._detect_gyro_cryptography_period(),
             "bit_entropy": self._calculate_bit_entropy(),
             "recent_gyro_cryptographies": list(self._gyro_cryptography_history)[-20:],
-            "nav_history_size": len(self._nav_history)
+            "nav_history_size": len(self._nav_history),
         }
 
     def _update_entropy_quality(self) -> None:
@@ -213,7 +216,7 @@ class ext_Cryptographer(GyroExtension):
 
         expected = len(recent_gyro_cryptographies) / 2
         variance = sum((count - expected) ** 2 for count in bit_counts) / 16
-        max_variance = expected ** 2
+        max_variance = expected**2
         self._crypto_stats["entropy_quality"] = 1.0 - min(variance / max_variance, 1.0)
 
     def _detect_gyro_cryptography_period(self) -> Optional[int]:
@@ -256,7 +259,7 @@ class ext_Cryptographer(GyroExtension):
             if count > 0 and (total_samples - count) > 0:
                 p1 = count / total_samples
                 p0 = (total_samples - count) / total_samples
-                entropy -= (p1 * math.log2(p1) + p0 * math.log2(p0))
+                entropy -= p1 * math.log2(p1) + p0 * math.log2(p0)
 
         return entropy / 16
 
@@ -271,7 +274,7 @@ class ext_Cryptographer(GyroExtension):
     def get_footprint_bytes(self) -> int:
         return 5  # 2 (counter) + 2 (gyro_cryptography) + 1 (evolution_counter)
 
-    def get_learning_state(self) -> Dict[str, Any]:
+    def get_learning_state(self) -> dict[str, Any]:
         """
         Returns learning state for knowledge export.
         This state will be encrypted when written to disk.
@@ -285,7 +288,7 @@ class ext_Cryptographer(GyroExtension):
             "crypto_stats": self._crypto_stats.copy(),
         }
 
-    def set_learning_state(self, state: Dict[str, Any]) -> None:
+    def set_learning_state(self, state: dict[str, Any]) -> None:
         """Restore learning state from knowledge package."""
         self.counter = state.get("counter", 0)
         self.evolution_counter = state.get("evolution_counter", 0)
@@ -298,14 +301,14 @@ class ext_Cryptographer(GyroExtension):
 
         self._crypto_stats = state.get("crypto_stats", self._crypto_stats.copy())
 
-    def get_session_state(self) -> Dict[str, Any]:
+    def get_session_state(self) -> dict[str, Any]:
         """Returns session-specific state (non-exportable)."""
         return {
             "current_gyro_cryptography": self.gyro_cryptography,
-            "nav_history": list(self._nav_history)
+            "nav_history": list(self._nav_history),
         }
 
-    def set_session_state(self, state: Dict[str, Any]) -> None:
+    def set_session_state(self, state: dict[str, Any]) -> None:
         """Restore session state."""
         self.gyro_cryptography = state.get("current_gyro_cryptography", self.gyro_cryptography)
         self._nav_history.clear()

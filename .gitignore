@@ -34,12 +34,12 @@ ENV/
 *~
 
 # GyroSI specific - sessions and logs only
-data/sessions/*/
+memory/sessions/*/
 logs/*.log
 config/local.yaml
 
 # Keep knowledge packages in git for examples
-!data/knowledge/example_*/
+!memory/knowledge/example_*/
 
 # External tools and dependencies
 codebase-mcp/

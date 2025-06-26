@@ -5,9 +5,10 @@ This extension analyzes and processes structural resonance patterns,
 detecting cyclic patterns and modulating resonance response.
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Deque, Set
 from collections import deque
 import numpy as np
+from numpy.typing import NDArray
 
 from extensions.base import GyroExtension
 
@@ -22,7 +23,7 @@ class ext_ResonanceProcessor(GyroExtension):
     def __init__(self):
         """Initialize resonance processor."""
         # Resonance cache (8-12 bytes)
-        self._resonance_cache = {
+        self._resonance_cache: Dict[str, Any] = {
             "last_resonance_phase": -1,  # 2 bytes
             "resonance_strength": 0.0,  # 4 bytes
             "pattern_id": 0,  # 2 bytes
@@ -30,25 +31,25 @@ class ext_ResonanceProcessor(GyroExtension):
         }
 
         # Resonance history for pattern detection
-        self._resonance_events = deque(maxlen=144)  # 3 full cycles
+        self._resonance_events: Deque[Dict[str, Any]] = deque(maxlen=144)  # 3 full cycles
 
         # Detected resonance patterns
-        self._resonance_patterns = {}
-        self._pattern_counter = 0
+        self._resonance_patterns: Dict[str, Dict[str, Any]] = {}
+        self._pattern_counter: int = 0
 
         # Resonance field map (phase -> resonance probability)
-        self._resonance_field = np.zeros(48, dtype=np.float32)
-        self._field_samples = np.zeros(48, dtype=np.int32)
+        self._resonance_field: NDArray[np.float32] = np.zeros(48, dtype=np.float32)
+        self._field_samples: NDArray[np.int32] = np.zeros(48, dtype=np.int32)
 
         # Harmonic analysis
-        self._harmonic_components = {
+        self._harmonic_components: Dict[str, Dict[str, float]] = {
             "fundamental": {"frequency": 1 / 48, "amplitude": 0.0, "phase": 0.0},
             "second": {"frequency": 2 / 48, "amplitude": 0.0, "phase": 0.0},
             "third": {"frequency": 3 / 48, "amplitude": 0.0, "phase": 0.0},
         }
 
         # Resonance statistics
-        self._resonance_stats = {
+        self._resonance_stats: Dict[str, Any] = {
             "total_resonances": 0,
             "unique_patterns": 0,
             "average_strength": 0.0,
@@ -57,7 +58,7 @@ class ext_ResonanceProcessor(GyroExtension):
         }
 
         # Cyclic pattern detection
-        self._cycle_detector = {
+        self._cycle_detector: Dict[str, Any] = {
             "buffer": deque(maxlen=96),  # 2 cycles
             "detected_periods": set(),
             "confidence": {},
@@ -88,18 +89,20 @@ class ext_ResonanceProcessor(GyroExtension):
         }
 
         # Calculate resonance strength
+        strength = 0.0
         if resonated and ops:
-            event["strength"] = self._calculate_resonance_strength(phase, input_byte, ops)
+            strength = self._calculate_resonance_strength(phase, input_byte, ops)
+        event["strength"] = strength
 
         self._resonance_events.append(event)
 
         # Update resonance field
-        self._update_resonance_field(phase, event["strength"])
+        self._update_resonance_field(phase, strength)
 
         # Update cache
         if resonated:
             self._resonance_cache["last_resonance_phase"] = phase
-            self._resonance_cache["resonance_strength"] = event["strength"]
+            self._resonance_cache["resonance_strength"] = strength
             self._resonance_stats["total_resonances"] += 1
 
         # Detect patterns
@@ -373,49 +376,41 @@ class ext_ResonanceProcessor(GyroExtension):
         return 12
 
     def get_learning_state(self) -> Dict[str, Any]:
-        """Resonance patterns and field map."""
+        """Get the learning state of the extension."""
         return {
-            "resonance_patterns": self._resonance_patterns.copy(),
-            "field_map": self._resonance_field.tolist(),
-            "harmonic_components": self._harmonic_components.copy(),
-            "statistics": self._resonance_stats.copy(),
+            "resonance_patterns": list(self._resonance_patterns.values()),
+            "resonance_field": self._resonance_field.tolist(),
+            "harmonic_components": self._harmonic_components,
+            "cycle_detector_periods": list(self._cycle_detector["detected_periods"]),
         }
 
     def get_session_state(self) -> Dict[str, Any]:
-        """Current resonance state."""
-        return {
-            "resonance_cache": self._resonance_cache.copy(),
-            "recent_events": list(self._resonance_events)[-20:],
-            "cycle_detector": {
-                "detected_periods": list(self._cycle_detector["detected_periods"]),
-                "confidence": self._cycle_detector["confidence"].copy(),
-            },
-        }
+        """Get the session state of the extension."""
+        state = self._resonance_cache.copy()
+        state["resonance_events"] = list(self._resonance_events)
+        state["cycle_buffer"] = list(self._cycle_detector["buffer"])
+        return state
 
     def set_learning_state(self, state: Dict[str, Any]) -> None:
-        """Restore learned patterns."""
-        if "resonance_patterns" in state:
-            self._resonance_patterns = state["resonance_patterns"]
+        """Set the learning state of the extension."""
+        # Convert list back to dict for patterns
+        self._resonance_patterns = {
+            f"{p['type']}_{hash(str(p))}": p for p in state.get("resonance_patterns", [])
+        }
 
-        if "field_map" in state:
-            self._resonance_field = np.array(state["field_map"], dtype=np.float32)
+        self._resonance_field = np.array(state.get("resonance_field", [0] * 48), dtype=np.float32)
+        self._harmonic_components = state.get("harmonic_components", self._harmonic_components)
 
-        if "harmonic_components" in state:
-            self._harmonic_components = state["harmonic_components"]
-
-        if "statistics" in state:
-            self._resonance_stats = state["statistics"]
+        # Convert list back to set for periods
+        self._cycle_detector["detected_periods"] = set(state.get("cycle_detector_periods", []))
 
     def set_session_state(self, state: Dict[str, Any]) -> None:
-        """Restore current state."""
-        if "resonance_cache" in state:
-            self._resonance_cache = state["resonance_cache"]
+        """Set the session state of the extension."""
+        self._resonance_cache = state.get("resonance_cache", self._resonance_cache)
 
-        if "cycle_detector" in state:
-            self._cycle_detector["detected_periods"] = set(
-                state["cycle_detector"]["detected_periods"]
-            )
-            self._cycle_detector["confidence"] = state["cycle_detector"]["confidence"]
+        # Convert list back to deque for events and buffer
+        self._resonance_events = deque(state.get("resonance_events", []), maxlen=144)
+        self._cycle_detector["buffer"] = deque(state.get("cycle_buffer", []), maxlen=96)
 
     def ext_on_navigation_event(self, nav_event: int, input_byte: Optional[int] = None) -> None:
         """Process navigation events for resonance analysis."""

@@ -5,7 +5,7 @@ This extension provides state management utilities and helpers for
 coordinating state across the system.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Set
 import time
 
 from extensions.base import GyroExtension
@@ -26,7 +26,7 @@ class ext_StateHelper(GyroExtension):
             storage_manager: Handle to storage manager
         """
         self._storage = storage_manager
-        self._state_cache = {
+        self._state_cache: Dict[str, Any] = {
             "phase": 0,
             "nav_log_max_size": 1048576,  # 1MB default
             "last_checkpoint": time.time(),

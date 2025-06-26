@@ -47,9 +47,6 @@ typing-extensions>=4.11.0
 # For file locking (thread/process safety)
 filelock>=3.13.4
 
-# For system monitoring
-psutil>=5.9.0
-
 # For interactive CLI
 questionary>=2.0.0
 

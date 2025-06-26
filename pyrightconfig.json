@@ -4,6 +4,7 @@
     "data",
     "logs",
     ".venv",
-    "src/core/gyro_harmonics.dat"
+    "memory/g1_memory.dat",
+    "src/extensions/deprecated"
   ]
 } 

@@ -1,4 +1,4 @@
 [flake8]
-exclude = codebase-mcp, data, logs, .venv, src/core/gyro_harmonics.dat
+exclude = codebase-mcp, data, logs, .venv, memory/g1_memory.dat
 max-line-length = 120
 ignore = E203, W503 
