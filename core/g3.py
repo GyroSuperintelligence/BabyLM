@@ -8,7 +8,7 @@ for any external application.
 Its primary responsibilities are:
 - Managing the lifecycle of active sessions (initialization, shutdown).
 - Providing simple, command-like functions (e.g., export_knowledge, process_stream).
-- Delegating all complex operations to the appropriate ExtensionManager instance.
+- Delegating all complex operation to the appropriate ExtensionManager instance.
 
 References:
 - CORE-SPEC-05: Baby ML Structure
@@ -43,12 +43,12 @@ except ImportError:
         raise NotImplementedError("Curriculum ingestion backend not available.")
 
 # The ExtensionManager is the workhorse orchestrated by this API
-from core.g5 import GyroOperations  # type: ignore
+from core.g5 import Gyrooperation  # type: ignore
 from core.gyro_errors import GyroSessionError  # type: ignore
 
 # A simple in-memory cache to hold manager instances for active sessions
 # This prevents re-initializing the entire system on every call
-_active_sessions: dict[str, GyroOperations] = {}
+_active_sessions: dict[str, GyroOperation ] = {}
 
 # ============================================================================
 # SESSION MANAGEMENT
@@ -81,7 +81,7 @@ def initialize_session(session_id: str | None = None, knowledge_id: str | None =
         # Create a new ExtensionManager instance
         # This constructor does all the heavy lifting of loading state
         # and initializing extensions
-        manager = GyroOperations(session_id, knowledge_id or "")
+        manager = GyroOperation (session_id, knowledge_id or "")
         active_id = manager.get_session_id()
 
         # Cache the manager instance for subsequent API calls
@@ -161,7 +161,7 @@ def get_session_info(session_id: str) -> dict[str, object]:
 
 
 # ============================================================================
-# PROCESSING OPERATIONS
+# PROCESSING Operation 
 # ============================================================================
 
 
@@ -329,7 +329,7 @@ def import_knowledge(bundle_path: str | Path, new_session: bool = True) -> str:
 
     if new_session:
         # Create a temporary manager just for import
-        temp_manager = GyroOperations()
+        temp_manager = GyroOperation ()
         knowledge_id = temp_manager.import_knowledge(str(bundle_path))
         temp_manager.shutdown()
 
@@ -337,7 +337,7 @@ def import_knowledge(bundle_path: str | Path, new_session: bool = True) -> str:
         return initialize_session(knowledge_id=knowledge_id)
     else:
         # Just import and return knowledge ID
-        temp_manager = GyroOperations()
+        temp_manager = GyroOperation ()
         knowledge_id = temp_manager.import_knowledge(str(bundle_path))
         temp_manager.shutdown()
         return knowledge_id
@@ -390,7 +390,7 @@ def link_session_to_knowledge(session_id: str, knowledge_id: str) -> None:
 
 
 # ============================================================================
-# QUERY OPERATIONS
+# QUERY Operation 
 # ============================================================================
 
 
@@ -511,7 +511,7 @@ def cleanup_inactive_sessions() -> int:
     return len(to_remove)
 
 
-def _get_manager(session_id: str) -> GyroOperations:
+def _get_manager(session_id: str) -> GyroOperation :
     """
     Internal helper to get a manager instance with validation.
 
@@ -583,7 +583,7 @@ __all__ = [
     "shutdown_session",
     "list_active_sessions",
     "get_session_info",
-    # Processing operations
+    # Processing Operation 
     "process_byte",
     "process_byte_stream",
     "process_text",
@@ -593,7 +593,7 @@ __all__ = [
     "import_knowledge",
     "fork_knowledge",
     "link_session_to_knowledge",
-    # Query operations
+    # Query Operation 
     "query_memory",
     "search_knowledge",
     "list_recent_outputs",

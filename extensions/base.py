@@ -77,7 +77,7 @@ class GyroExtension(ABC):
 
     def ext_on_navigation_event(self, nav_event: int, input_byte: int | None = None) -> None:
         """
-        Process a navigation event. This is called by the GyroOperations
+        Process a navigation event. This is called by the GyroOperation 
         whenever a navigation event occurs.
 
         Args:

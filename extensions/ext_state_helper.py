@@ -30,7 +30,7 @@ class ext_StateHelper(GyroExtension):
             "phase": 0,
             "nav_log_max_size": 1048576,  # 1MB default
             "last_checkpoint": time.time(),
-            "checkpoint_interval": 100000,  # Operations between checkpoints
+            "checkpoint_interval": 100000,  # operation between checkpoints
             "dirty_flags": set(),
         }
 
@@ -111,7 +111,7 @@ class ext_StateHelper(GyroExtension):
         Determine if a checkpoint should be performed.
 
         Args:
-            operation_count: Number of operations since last checkpoint
+            operation_count: Number of operation since last checkpoint
 
         Returns:
             True if checkpoint is needed

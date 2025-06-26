@@ -1,11 +1,11 @@
-from core.g5 import GyroOperations
+from core.g5 import GyroOperation 
 from core.g1 import GyroEngine
 from ..utils.display import console, show_error, create_table, show_panel
 
 def show_health():
     """Show system health metrics."""
     try:
-        mgr = GyroOperations()
+        mgr = GyroOperation ()
         health = mgr.get_system_health()
         
         rows = [[str(k), str(v)] for k, v in health.items()]
@@ -22,7 +22,7 @@ def show_health():
 def show_extensions():
     """Show loaded extensions."""
     try:
-        mgr = GyroOperations()
+        mgr = GyroOperation ()
         exts = mgr.extensions
         
         rows = []

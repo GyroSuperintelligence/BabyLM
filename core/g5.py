@@ -44,7 +44,7 @@ StateHelperType = T
 
 
 @final
-class GyroOperations:
+class GyroOperation :
     """
     The orchestrator for a single, active GyroSI session.
 
@@ -240,7 +240,7 @@ class GyroOperations:
 
         Args:
             tag: TAG expression per CORE-SPEC-04 grammar
-            data: Optional data for write operations
+            data: Optional data for write Operation 
 
         Returns:
             Requested invariant data
@@ -357,7 +357,7 @@ class GyroOperations:
             self._handle_language_output(text_data)
             return None
 
-        # Existing implementation for other G3 operations
+        # Existing implementation for other G3 Operation 
         if tag_parts["invariant"] == "gyrotensor_nest":
             # UI state is stored in session
             if hasattr(self.extensions["state"], "load_ui_state"):
@@ -809,5 +809,5 @@ class GyroOperations:
 # PUBLIC API of this Module
 # ============================================================================
 __all__ = [
-    "GyroOperations",
+    "GyroOperation ",
 ]

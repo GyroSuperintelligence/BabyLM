@@ -20,7 +20,7 @@ The `ext_Cryptographer` extension implements a traceable, navigation-aware strea
 
 ### User Key
 - Must be 16–32 bytes.
-- Used as the cryptographic root for all operations.
+- Used as the cryptographic root for all Operation .
 
 ### Gyration Evolution
 - A 16-bit value that acts as a salt for the keystream.
@@ -60,7 +60,7 @@ The `ext_Cryptographer` extension implements a traceable, navigation-aware strea
 - **Gyration Evolution:**
     - Every 16 bytes encrypted, or every 8 navigation events, the gyration evolution evolves.
     - If fewer than 8 navigation events are present, the history is padded with zeros.
-    - Entropy is computed by combining navigation events with bitwise operations.
+    - Entropy is computed by combining navigation events with bitwise Operation .
     - A spin transformation (bit rotation) is applied, and the result is XORed with the entropy to produce the new gyration evolution.
 - **Result:** This mechanism ensures that the cryptographic state is sensitive to both user key and operational history, making attacks more difficult and providing a unique fusion of cryptography and system behavior.
 
@@ -97,7 +97,7 @@ assert decrypted == plaintext
 ## Security Notes
 
 - **Key Management:** Security depends on the secrecy and quality of the user key.
-- **Traceability:** All cryptographic operations are reproducible given the same key and navigation history.
+- **Traceability:** All cryptographic operation are reproducible given the same key and navigation history.
 - **No RAM Encryption:** Data is only encrypted at storage boundaries, never in RAM.
 - **Navigation Sensitivity:** Navigation events directly influence cryptographic state, providing additional entropy and system integration.
 
