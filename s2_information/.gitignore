@@ -1,0 +1,25 @@
+# Ignore all agent and agency user data
+agents/
+agency/g1_information/
+agency/g4_information/
+agency/g5_information/
+
+# Allow the epigenome projection
+!agency/g2_information/g2_information.dat
+
+# Ignore all other files in g2_information except the epigenome
+agency/g2_information/*
+!agency/g2_information/g2_information.dat
+
+# Allow manifest and module
+!s2_manifest.py
+!__init__.py
+
+# Optionally allow the JSON manifest (uncomment if you want to keep it)
+#!s2_manifest.json
+
+# Ignore Python cache
+__pycache__/
+
+# Allow this .gitignore
+!.gitignore 

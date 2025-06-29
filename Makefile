@@ -1,61 +1,41 @@
-.PHONY: help install test lint format clean run dev export-example import-example ui baby build-app hot-reload
+.PHONY: help install test lint format clean run bootstrap
 
 help:
 	@echo "Available commands:"
-	@echo "  install         Install dependencies"
-	@echo "  test           Run tests"
-	@echo "  lint           Run linting"
-	@echo "  format         Format code"
-	@echo "  clean          Clean build artifacts"
-	@echo "  run            Run the application"
-	@echo "  dev            Run in development mode"
-	@echo "  export-example Export example knowledge"
-	@echo "  import-example Import example knowledge"
-	@echo "  baby           Run the UI"
-	@echo "  hot-reload     Run with hot reload (recommended for development)"
-	@echo "  build-app      Build standalone app with custom icon"
+	@echo "  install     Install dependencies"
+	@echo "  test        Run all tests"
+	@echo "  lint        Run flake8 linter"
+	@echo "  format      Format code with black and isort"
+	@echo "  clean       Remove Python and test artifacts"
+	@echo "  run         Run main.py"
+	@echo "  bootstrap   Initialize S2 structure and epigenome"
 
 install:
 	pip install -r requirements.txt
-	pre-commit install
 
 test:
-	python -m pytest
+	PYTHONPATH=. pytest scripts/tests/test_gyrosi.py
 
 lint:
-	flake8 src tests
-	mypy src
+	flake8 .
+	mypy .
 
 format:
-	black src tests
-	isort src tests
+	black .
+	isort .
 
 clean:
 	find . -type d -name __pycache__ -delete
 	find . -type f -name "*.pyc" -delete
 	rm -rf build/ dist/ *.egg-info/
 	rm -rf .pytest_cache/ .coverage htmlcov/
+	rm -rf s2_information/agents/
+	rm -rf s2_information/agency/g1_information/
+	rm -rf s2_information/agency/g4_information/
+	rm -rf s2_information/agency/g5_information/
 
 run:
-	python run.py
+	python main.py
 
-dev:
-	python run.py
-
-export-example:
-	python -m gyro_tools.gyro_knowledge_manager export --knowledge-id example --output examples/example_knowledge.gyro
-
-import-example:
-	python -m gyro_tools.gyro_knowledge_manager import --input examples/example_knowledge.gyro --new-session
-
-ui:
-	python -m src.frontend.gyro_app
-
-baby:
-	python -m src.frontend.gyro_app --hot-reload
-
-hot-reload:
-	flet run src/main.py --hot-reload
-
-build-app:
-	python scripts/build_app.py
+bootstrap:
+	python scripts/genesis.py

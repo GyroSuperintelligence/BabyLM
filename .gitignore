@@ -19,40 +19,113 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual environments
 venv/
 env/
 ENV/
 .venv/
+env.bak/
+venv.bak/
 
-# IDE
-.vscode/settings.json
+# IDE and Editor files
+.vscode/
 .idea/
 *.swp
 *.swo
 *~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
 
-# GyroSI specific - sessions and logs only
-memory/sessions/*/
-logs/*.log
+# GyroSI Baby LM specific
+# S2 Information layer - exclude data files but keep structure
+s2_information/agency/g1_information/*/*.dat
+s2_information/agency/g4_information/*/*.json
+s2_information/agency/g5_information/*/*.json
+s2_information/agents/*/*/g4_information/curriculum.json
+s2_information/agents/*/*/g5_information/session.json
+s2_information/agents/*/*/g5_information/session.json.bak
+
+# Keep sample files and manifest
+!s2_information/agency/g1_information/*/sample-*.dat
+!s2_information/agency/g4_information/*/sample-*.json
+!s2_information/agency/g5_information/*/sample-*.json
+!s2_information/agents/*/*/g4_information/sample-*.json
+!s2_information/agents/*/*/g5_information/sample-*.json
+!s2_information/s2_manifest.json
+
+# Logs and temporary files
+logs/
+*.log
+*.tmp
+*.temp
+.cache/
+
+# Configuration files with sensitive data
 config/local.yaml
+config/secrets.yaml
+*.env
+.env.local
+.env.production
 
-# Keep knowledge packages in git for examples
-!memory/knowledge/example_*/
-
-# External tools and dependencies
-codebase-mcp/
-
-# OS
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Testing
+# Testing and coverage
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
 
-# Documentation
+# Documentation builds
 docs/_build/
+docs/build/
+site/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# Pyre type checker
+.pyre/
+
+# Ruff
+.ruff_cache/
+
+# External dependencies and tools
+codebase-mcp/
+node_modules/

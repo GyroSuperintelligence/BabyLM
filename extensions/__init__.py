@@ -2,7 +2,7 @@
 Extensions package for GyroSI.
 
 This package contains all system and application extensions that operate
-through the canonical memory interfaces defined in the core.
+through the canonical information interfaces defined in the s1_governance.
 """
 
 # Import all extensions for easy access

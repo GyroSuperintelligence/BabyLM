@@ -1,0 +1,5 @@
+{
+  "version": "1.0",
+  "pack_size": 65536,
+  "shard_prefix_length": 2
+}

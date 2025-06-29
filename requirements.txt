@@ -1,29 +1,23 @@
 # Core Python version
 # python_version >=3.11
 
-# Core scientific stack
+# Core dependencies
 torch>=2.2.0
 numpy>=1.26.0,<2.0
-
-# UI framework
 flet==0.19.0
-
-# Data and serialization
 pyyaml>=6.0
 msgpack>=1.0.7
-
-# Database for UI state/session
 sqlite-utils>=3.36.0
-
-# CLI and tools
 click>=8.1.7
-rich>=13.7.0
-
-# Compression and packaging
 tqdm>=4.66.2
 zstandard>=0.22.0
+cryptography>=42.0.0
+typing-extensions>=4.11.0
+filelock>=3.13.4
+psutil>=5.9.0
+questionary>=2.0.0
 
-# Testing and linting
+# Development and testing
 pytest>=8.2.0
 black>=24.4.2
 flake8>=7.0.0
@@ -31,31 +25,13 @@ mypy>=1.10.0
 isort>=5.13.2
 pre-commit>=3.7.1
 
-# Optional: For UUID, path, and typing (standard in Python 3.11+)
-# No need to specify
-
-# For cryptographic integrity
-cryptography>=42.0.0
-
-# For documentation
+# Documentation
 mkdocs>=1.6.0
 mkdocs-material>=9.5.18
 
-# For type hints and static analysis
-typing-extensions>=4.11.0
-
-# For file locking (thread/process safety)
-filelock>=3.13.4
-
-# For interactive CLI
-questionary>=2.0.0
-
-# For curriculum ingestion
-requests
-
-# For app building and icon support
-pillow>=11.2.0
-pyinstaller>=6.0.0
-
-# Documentation Generator
-pdoc
+# (Optional) Add any extra packages you use below:
+# rich>=13.7.0
+# requests
+# pillow>=11.2.0
+# pyinstaller>=6.0.0
+# pdoc

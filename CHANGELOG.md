@@ -7,5 +7,5 @@ Added
 
 📁 Created base directories: src/, tests/, docs/, examples/
 
-📄 Added core files: README.md, LICENSE, pyproject.toml, requirements.txt, Makefile, CHANGELOG.md
+📄 Added s1_governance files: README.md, LICENSE, pyproject.toml, requirements.txt, Makefile, CHANGELOG.md
 

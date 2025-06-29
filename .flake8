@@ -1,4 +1,4 @@
 [flake8]
-exclude = codebase-mcp, data, logs, .venv, memory/g1_memory.dat
+exclude = codebase-mcp, data, logs, .venv, s2_information/g1_s2_information.dat, .gitignore
 max-line-length = 120
 ignore = E203, W503 
