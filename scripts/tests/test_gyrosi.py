@@ -16,7 +16,7 @@ from s4_intelligence.g1_intelligence_in import (
     initialize_system,
     create_agent,
     process_stream,
-    generate_text
+    generate_text,
 )
 from s3_inference.g1_inference import GovernanceEngine, CycleComplete
 from s3_inference.g2_inference import InformationEngine
@@ -26,13 +26,13 @@ from s3_inference.g3_inference import InferenceEngine, PatternPromotion
 def cleanup_s2_information():
     """Clean up all test-generated data while preserving essential system files."""
     base = "s2_information"
-    
+
     # Files/directories to preserve (essential system files)
     preserve_files = [
         "s2_manifest.json",
         os.path.join("agency", "g2_information", "g2_information.dat"),
     ]
-    
+
     # Directories to clean (test-generated data)
     clean_dirs = [
         os.path.join("agency", "g1_information"),
@@ -40,7 +40,7 @@ def cleanup_s2_information():
         os.path.join("agency", "g5_information"),
         "agents",
     ]
-    
+
     for clean_dir in clean_dirs:
         path = os.path.join(base, clean_dir)
         if os.path.exists(path):
@@ -123,7 +123,9 @@ class TestGyroSIBabyLM:
 
     def test_epigenome_projection_build(self):
         """Test that the epigenome projection exists and has correct size"""
-        epigenome_path = os.path.join("s2_information", "agency", "g2_information", "g2_information.dat")
+        epigenome_path = os.path.join(
+            "s2_information", "agency", "g2_information", "g2_information.dat"
+        )
         assert os.path.exists(epigenome_path)
         file_size = os.path.getsize(epigenome_path)
         expected_size = 32 + (48 * 256)
@@ -139,7 +141,9 @@ class TestGyroSIBabyLM:
 
     def test_information_engine_resonance(self):
         """Test information engine resonance classification"""
-        epigenome_path = os.path.join("s2_information", "agency", "g2_information", "g2_information.dat")
+        epigenome_path = os.path.join(
+            "s2_information", "agency", "g2_information", "g2_information.dat"
+        )
         engine = InformationEngine(epigenome_path)
         event = engine.process_accepted_op_pair(phase=0, op_pair=(0, 0), byte_val=0)
         assert hasattr(event, "resonance_flag")
@@ -150,27 +154,27 @@ class TestGyroSIBabyLM:
         # Create engine with lower threshold
         engine = InferenceEngine(pattern_threshold=2)
         engine.reset()
-        
+
         # Create a pattern that should be promoted within a single cycle
         base_pattern = [(0, 0), (1, 1)]
-        
+
         # Create a cycle with repeating patterns (the same pattern appears multiple times)
         cycle_ops = []
         for _ in range(12):  # Repeat pattern 12 times to fill 48-element cycle
             cycle_ops.extend(base_pattern)
-        
+
         # All ops are resonant
         resonance_flags = [True] * len(cycle_ops)
-        
+
         # Process once - this should be enough to detect the repeating pattern
         events = engine.process_cycle_complete(cycle_ops, resonance_flags)
-        
+
         # Find pattern promotions
         promotions = [e for e in events if isinstance(e, PatternPromotion)]
-        
+
         # Should have at least one promotion
         assert len(promotions) > 0
-        
+
         # Verify the promoted pattern
         if len(promotions) > 0:
             assert promotions[0].pattern == base_pattern
@@ -194,7 +198,7 @@ class TestGyroSIBabyLM:
         engine = IntelligenceEngine(agent_id, encryption_enabled=False)
         small_data = b"X" * 48
         engine.process_stream(small_data)
-        engine.close() 
+        engine.close()
         pack_dir = os.path.join("s2_information", "agency", "g1_information", engine.shard)
         assert os.path.exists(pack_dir)
         pack_files = [f for f in os.listdir(pack_dir) if f.endswith("-genome.dat")]
@@ -207,7 +211,9 @@ class TestGyroSIBabyLM:
         pattern_data = b"ABCDABCDABCDABCD" * 3
         engine.process_stream(pattern_data)
         engine.close()
-        curriculum_path = os.path.join("s2_information", "agents", engine.shard, agent_id, "g4_information", "curriculum.json")
+        curriculum_path = os.path.join(
+            "s2_information", "agents", engine.shard, agent_id, "g4_information", "curriculum.json"
+        )
         assert os.path.exists(curriculum_path)
         with open(curriculum_path, "r") as f:
             curriculum = json.load(f)
@@ -224,7 +230,7 @@ class TestGyroSIBabyLM:
         engine2 = IntelligenceEngine(agent_id)
         state2 = engine2.get_state()
         engine2.close()
-        
+
         assert state1["governance"]["cycle_count"] > 0
         assert state2["governance"]["cycle_count"] == state1["governance"]["cycle_count"]
         assert state2["governance"]["phase"] == state1["governance"]["phase"]
@@ -233,16 +239,16 @@ class TestGyroSIBabyLM:
         """Test that a decoded genome cycle is constant and deterministic."""
         agent_id = create_agent()
         engine = IntelligenceEngine(agent_id)
-        
+
         # Get the snapshot from a fresh engine
         snapshot1 = engine.get_current_cycle_decoded()
-        
+
         # Process some data
         engine.process_stream(b"some data to change the state")
-        
+
         # Get the snapshot again
         snapshot2 = engine.get_current_cycle_decoded()
-        
+
         # The snapshot should be identical because it's based on immutable constants
         assert snapshot1 == snapshot2
         assert len(snapshot1) == 96
@@ -254,7 +260,9 @@ class TestGyroSIBabyLM:
         # Agent 1
         agent1_id = create_agent()
         engine1 = IntelligenceEngine(agent_uuid=agent1_id, encryption_enabled=False)
-        engine1.inference_engine = InferenceEngine(agent_uuid=agent1_id, min_pattern_length=2, max_pattern_length=4)
+        engine1.inference_engine = InferenceEngine(
+            agent_uuid=agent1_id, min_pattern_length=2, max_pattern_length=4
+        )
         engine1.process_stream(data)
         engine1.close()
 
@@ -267,7 +275,9 @@ class TestGyroSIBabyLM:
         # Agent 2
         agent2_id = create_agent()
         engine2 = IntelligenceEngine(agent_uuid=agent2_id, encryption_enabled=False)
-        engine2.inference_engine = InferenceEngine(agent_uuid=agent2_id, min_pattern_length=2, max_pattern_length=4)
+        engine2.inference_engine = InferenceEngine(
+            agent_uuid=agent2_id, min_pattern_length=2, max_pattern_length=4
+        )
         engine2.process_stream(data)
         engine2.close()
 
@@ -306,14 +316,14 @@ class TestGyroSIBabyLM:
         """Test cycle compression for repeated patterns"""
         agent_id = create_agent()
         engine = IntelligenceEngine(agent_id)
-        
+
         # Create a simple pattern that will repeat
         simple_data = b"ABCDEFGHIJKL" * 4  # 48 bytes for a full cycle
-        
+
         # Process the same data twice to ensure we get compression
         engine.process_stream(simple_data)
         artifacts = engine.process_stream(simple_data)
-        
+
         # Look for compressed blocks
         compressed = [b for b in artifacts["compressed_blocks"] if b.block_type == "cycle_repeat"]
         assert len(compressed) > 0
@@ -324,7 +334,7 @@ class TestGyroSIBabyLM:
         engine = IntelligenceEngine(agent_id)
         training_data = b"ABCD" * 10
         engine.process_stream(training_data)
-        
+
         generated = engine.generate(b"AB", max_length=10)
         assert isinstance(generated, bytes)
         assert len(generated) == 10
@@ -349,7 +359,7 @@ class TestGyroSIBabyLM:
             assert len(header) == 40
             cycle_index = struct.unpack("<I", header[32:36])[0]
             assert cycle_index >= 0
-    
+
     def test_pruning_analysis_metrics(self):
         """Test that pruning analysis produces correct metrics"""
         engine = InferenceEngine()
@@ -374,7 +384,7 @@ class TestGyroSIBabyLM:
 
         state = engine.get_state()
         assert state["inference"]["promoted_patterns"] > 0
-        
+
         generated = engine.generate(b"The quick", max_length=20)
         assert len(generated) > 0
 

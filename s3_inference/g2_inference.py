@@ -3,9 +3,13 @@ g2_inference.py - Information Engine
 
 Resonance tagging engine that classifies op-pairs based on the epigenome mask.
 No bit-flipping or mask mutation - purely classificatory.
+
+Device logic: All tensors are created on the selected device (GPU if available, else CPU).
 """
 
 import torch
+# Select device for all tensors and models
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 import numpy as np
 import os
 from typing import Tuple, List, Dict, Any, Optional
@@ -16,13 +20,14 @@ from dataclasses import dataclass
 class ResonanceEvent:
     """
     Event emitted for each processed op-pair with resonance flag.
-    
+
     Attributes:
         phase: Current phase (0-47) when this op-pair was processed
         op_pair: The operation pair as (op_code, tensor_id)
         resonance_flag: Whether this op-pair resonates with the epigenome at this phase
         bit_index: Calculated index in the 384-bit epigenome space (phase*8 + op_index)
     """
+
     phase: int
     op_pair: Tuple[int, int]  # (op_code, tensor_id)
     resonance_flag: bool
@@ -33,7 +38,7 @@ class InformationEngine:
     """
     Resonance classification engine using the immutable epigenome mask.
     Tags each op-pair as resonant or non-resonant based on phase alignment.
-    
+
     The epigenome is a 48×256 table mapping each (phase, byte) combination
     to an expected operation code. Resonance occurs when an op-pair's code
     matches the expected code for the current phase and input byte.
@@ -49,10 +54,7 @@ class InformationEngine:
             epigenome_path: Path to the epigenome projection file
         """
         self.resonance_mask = self._load_epigenome(epigenome_path)
-        self.resonance_counts = {
-            "total": 0,
-            "resonant": 0
-        }
+        self.resonance_counts = {"total": 0, "resonant": 0}
 
     def _load_epigenome(self, path: str) -> np.ndarray:
         """
@@ -73,12 +75,12 @@ class InformationEngine:
                 header = f.read(32)
                 if len(header) != 32:
                     raise ValueError(f"Invalid epigenome header size: {len(header)}")
-                
+
                 # Read 48x256 table
                 data = f.read(48 * 256)
                 if len(data) != 48 * 256:
                     raise ValueError(f"Invalid epigenome data size: {len(data)}")
-                
+
                 return np.frombuffer(data, dtype=np.uint8).reshape(48, 256)
         except Exception as e:
             # Fall back to a default empty mask if file loading fails
@@ -102,16 +104,16 @@ class InformationEngine:
         # Validate inputs
         if not 0 <= phase < 48:
             raise ValueError(f"Phase must be 0-47, got {phase}")
-        
+
         if not isinstance(op_pair, tuple) or len(op_pair) != 2:
             raise ValueError(f"Invalid op_pair format: {op_pair}")
-            
+
         if not 0 <= byte_val <= 255:
             raise ValueError(f"Byte value must be 0-255, got {byte_val}")
 
         # Extract operation components
         op_code, tensor_id = op_pair
-        
+
         # Range checks
         if not 0 <= op_code <= 3:
             raise ValueError(f"Op code must be 0-3, got {op_code}")
@@ -122,7 +124,7 @@ class InformationEngine:
         expected_op_code = self.resonance_mask[phase, byte_val]
 
         # Resonance occurs if the op-pair's code matches the expected code
-        resonance_flag = (op_code == expected_op_code)
+        resonance_flag = op_code == expected_op_code
 
         # Update statistics
         self.resonance_counts["total"] += 1
@@ -133,10 +135,7 @@ class InformationEngine:
         bit_index = phase * 8 + op_code * 2 + tensor_id
 
         return ResonanceEvent(
-            phase=phase, 
-            op_pair=op_pair, 
-            resonance_flag=resonance_flag, 
-            bit_index=bit_index
+            phase=phase, op_pair=op_pair, resonance_flag=resonance_flag, bit_index=bit_index
         )
 
     def get_state(self) -> Dict[str, Any]:
@@ -144,13 +143,11 @@ class InformationEngine:
         return {
             "mask_shape": self.resonance_mask.shape,
             "mask_loaded": self.resonance_mask is not None,
-            "resonance_ratio": self.resonance_counts["resonant"] / max(1, self.resonance_counts["total"]),
-            "resonance_counts": self.resonance_counts
+            "resonance_ratio": self.resonance_counts["resonant"]
+            / max(1, self.resonance_counts["total"]),
+            "resonance_counts": self.resonance_counts,
         }
 
     def reset(self) -> None:
         """Reset the engine statistics."""
-        self.resonance_counts = {
-            "total": 0,
-            "resonant": 0
-        }
+        self.resonance_counts = {"total": 0, "resonant": 0}

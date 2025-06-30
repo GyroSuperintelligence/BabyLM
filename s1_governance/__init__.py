@@ -3,9 +3,13 @@ s1_governance.py - GyroSI Baby LM Governance Module
 
 Defines immutable tensor mechanics and byte↔operation mapping.
 No storage, no inference logic - pure definitions and transformations.
+
+Device logic: All tensors are created on the selected device (GPU if available, else CPU).
 """
 
 import torch
+# Select device for all tensors and models
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 import numpy as np
 import hashlib
 import os
@@ -23,6 +27,7 @@ _OP_CODES = {
 # Global immutable gene tensors - NEVER CHANGE THESE
 _GENE_TENSORS: Optional[Dict[str, torch.Tensor]] = None
 
+
 def _initialize_gene_tensors():
     """Initialize the immutable gene tensors once"""
     global _GENE_TENSORS
@@ -33,14 +38,15 @@ def _initialize_gene_tensors():
             [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]],
             [[[1, -1], [1, -1], [1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
         ]
-        base_tensor = torch.tensor(gene_pattern, dtype=torch.int8, requires_grad=False)
+        base_tensor = torch.tensor(gene_pattern, dtype=torch.int8, requires_grad=False, device=device)
         _GENE_TENSORS = {
-            "id_0": base_tensor.clone().requires_grad_(False),
-            "id_1": base_tensor.clone().requires_grad_(False)
+            "id_0": base_tensor.clone().requires_grad_(False).to(device),
+            "id_1": base_tensor.clone().requires_grad_(False).to(device),
         }
         # Make tensors truly immutable
         for tensor in _GENE_TENSORS.values():
             tensor.requires_grad_(False)
+
 
 def get_gene_anchor() -> bytes:
     """
@@ -53,6 +59,7 @@ def get_gene_anchor() -> bytes:
     hasher.update(gene["id_1"].numpy().tobytes())
     return hasher.digest()
 
+
 def get_gene_constant() -> Dict[str, torch.Tensor]:
     """
     Return READ-ONLY copies of the immutable Gene tensors.
@@ -62,10 +69,8 @@ def get_gene_constant() -> Dict[str, torch.Tensor]:
     if _GENE_TENSORS is None:
         # This branch should be logically unreachable if _initialize_gene_tensors works.
         raise RuntimeError("Fatal error: Gene tensors did not initialize.")
-    return {
-        "id_0": _GENE_TENSORS["id_0"].clone(),
-        "id_1": _GENE_TENSORS["id_1"].clone()
-    }
+    return {"id_0": _GENE_TENSORS["id_0"].clone().to(device), "id_1": _GENE_TENSORS["id_1"].clone().to(device)}
+
 
 def get_gene_tensors() -> Dict[str, torch.Tensor]:
     """
@@ -74,12 +79,14 @@ def get_gene_tensors() -> Dict[str, torch.Tensor]:
     """
     return get_gene_constant()
 
+
 def get_baseline_epigenome() -> torch.Tensor:
     """
     Return the baseline Epigenome mask: a 48×8-bit tensor (384 bits total).
     Initialized to zeros - will be populated by the epigenome projection.
     """
-    return torch.zeros(48, 8, dtype=torch.uint8)
+    return torch.zeros(48, 8, dtype=torch.uint8, device=device)
+
 
 def compute_bit_index(phase: int, op_index: int) -> int:
     """
@@ -94,10 +101,11 @@ def compute_bit_index(phase: int, op_index: int) -> int:
     """
     return phase * 8 + op_index
 
+
 def gyration_op(tensor: torch.Tensor, code: int, clone: bool = True) -> torch.Tensor:
     """
     Apply a gyration transformation to a tensor.
-    
+
     IMPORTANT: This function ALWAYS operates on copies when clone=True.
     The original Gene tensors should NEVER be mutated.
 
@@ -133,6 +141,7 @@ def gyration_op(tensor: torch.Tensor, code: int, clone: bool = True) -> torch.Te
 
     return result
 
+
 def byte_to_gyrations(byte_val: int) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     """
     Convert a byte value to two gyration operations.
@@ -140,7 +149,7 @@ def byte_to_gyrations(byte_val: int) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     """
     if not 0 <= byte_val <= 255:
         raise ValueError("byte_val must be 0-255")
-        
+
     # High nibble for first operation
     hi_nibble = (byte_val >> 4) & 0xF
     hi_op = (hi_nibble >> 1) & 0x7
@@ -157,6 +166,7 @@ def byte_to_gyrations(byte_val: int) -> Tuple[Tuple[int, int], Tuple[int, int]]:
 
     return ((hi_op, hi_tensor), (lo_op, lo_tensor))
 
+
 def gyrations_to_byte(op_pair1: Tuple[int, int], op_pair2: Tuple[int, int]) -> int:
     """
     Convert two gyration operation pairs back to a byte.
@@ -168,14 +178,15 @@ def gyrations_to_byte(op_pair1: Tuple[int, int], op_pair2: Tuple[int, int]) -> i
     # Reconstruct the nibbles
     # High nibble: op is bits 1,2,3; tensor is bit 0
     hi_nibble = ((hi_op & 0x7) << 1) | (hi_tensor & 0x1)
-    
+
     # Low nibble: op is bits 1,2,3; tensor is bit 0
     lo_nibble = ((lo_op & 0x7) << 1) | (lo_tensor & 0x1)
 
     # Combine nibbles to form the byte
     byte_val = (hi_nibble << 4) | lo_nibble
-    
+
     return byte_val
+
 
 def _extract_slice(tensor: torch.Tensor, phase: int) -> torch.Tensor:
     """Extract tensor slice for phase without mutation"""
@@ -183,7 +194,8 @@ def _extract_slice(tensor: torch.Tensor, phase: int) -> torch.Tensor:
     outer_idx = pos // 6
     inner_idx = (pos // 3) % 2
     spatial_idx = pos % 3
-    return tensor[outer_idx][inner_idx][spatial_idx].clone()
+    return tensor[outer_idx][inner_idx][spatial_idx].clone().to(device)
+
 
 def _find_alignment_operator(phase: int, target_alignment: Tuple[int, int]) -> int:
     """Find which operator achieves target alignment at this phase"""
@@ -206,6 +218,7 @@ def _find_alignment_operator(phase: int, target_alignment: Tuple[int, int]) -> i
             if match_score == 2:
                 return best_op_code
     return best_op_code
+
 
 def build_epigenome_projection(
     output_path: str = "s2_information/agency/g2_information/g2_information.dat",
@@ -235,6 +248,7 @@ def build_epigenome_projection(
 
     size = len(header) + table.nbytes
     print(f"Epigenome projection saved to {output_path} ({size} bytes)")
+
 
 # Module constants
 OP_CODES = _OP_CODES.copy()
