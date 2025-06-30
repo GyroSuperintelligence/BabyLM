@@ -45,12 +45,13 @@ class InferenceEngine:
     Learns repeated sequences and provides key derivation.
     """
 
-    def __init__(self, pattern_threshold: int = 3):
+    def __init__(self, pattern_threshold: int = 3, agent_uuid: Optional[str] = None):
         """
         Initialize the inference engine.
 
         Args:
             pattern_threshold: Minimum occurrences before pattern promotion
+            agent_uuid: Optional agent UUID for unique gene state initialization
         """
         self.pattern_threshold = pattern_threshold
         self.cycle_history = deque(maxlen=100)  # Keep last 100 cycles
@@ -58,19 +59,21 @@ class InferenceEngine:
         self.promoted_patterns = {}
         self.next_pattern_id = 0
         self.step_count = 0
+        self.agent_uuid = agent_uuid
 
         # Gene state tracking for key derivation
         self.current_gene_state: Optional[Dict[str, torch.Tensor]] = None
         self._initialize_gene_state()
 
         # Safe pruning configuration - VERY conservative thresholds
-        self.HORIZON_CUT = 0.02  # Only prune if very close to 50/50 (was 0.05)
-        self.ENTROPY_CUT = 0.05  # Only prune if very low diversity (was 0.10)
+        self.HORIZON_CUT = 0.01  # Only prune if very close to 50/50 (was 0.02)
+        self.ENTROPY_CUT = 0.03  # Only prune if very low diversity (was 0.05)
         self.prune_stats = {"pruned": 0, "total": 0}  # Track pruning statistics
 
     def _initialize_gene_state(self):
-        """Initialize the gene state from S1 governance."""
+        """Initialize the gene state from S1 governance (shared, constant for all agents)."""
         self.current_gene_state = s1_governance.get_gene_tensors()
+        # No agent-specific mutation. The gene is a universal topological space.
 
     def apply_op_pair(self, op_pair: Tuple[int, int]):
         """

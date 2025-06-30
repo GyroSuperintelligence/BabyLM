@@ -49,26 +49,16 @@ def ensure_s2_structure(base_path: str = "s2_information"):
     with open(manifest_path, "w") as f:
         json.dump(MANIFEST, f, indent=2)
 
-    # Create agency directories
+    # Create agency directories (shards will be created on-demand by IntelligenceEngine)
     agency_path = os.path.join(base_path, "agency")
     os.makedirs(os.path.join(agency_path, "g1_information"), exist_ok=True)
     os.makedirs(os.path.join(agency_path, "g2_information"), exist_ok=True)
     os.makedirs(os.path.join(agency_path, "g4_information"), exist_ok=True)
     os.makedirs(os.path.join(agency_path, "g5_information"), exist_ok=True)
 
-    # Create shard directories for g1, g4, g5
-    for subdir in ["g1_information", "g4_information", "g5_information"]:
-        for i in range(256):
-            shard = f"{i:02x}"
-            shard_path = os.path.join(agency_path, subdir, shard)
-            os.makedirs(shard_path, exist_ok=True)
-
-    # Create agents directory with shards
+    # Create agents directory (shards will be created on-demand by IntelligenceEngine)
     agents_path = os.path.join(base_path, "agents")
-    for i in range(256):
-        shard = f"{i:02x}"
-        shard_path = os.path.join(agents_path, shard)
-        os.makedirs(shard_path, exist_ok=True)
+    os.makedirs(agents_path, exist_ok=True)
 
 
 if __name__ == "__main__":

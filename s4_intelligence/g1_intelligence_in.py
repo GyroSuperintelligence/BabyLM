@@ -78,7 +78,7 @@ class IntelligenceEngine:
         self.information_engine = InformationEngine(
             os.path.join(base_path, "agency", "g2_information", "g2_information.dat")
         )
-        self.inference_engine = InferenceEngine()
+        self.inference_engine = InferenceEngine(agent_uuid=self.agent_uuid)
 
         # Load agent state and curriculum
         self._load_state()
@@ -204,23 +204,15 @@ class IntelligenceEngine:
         """
         Process a stream of bytes through the full GyroSI pipeline.
 
-        This is the main API endpoint that:
-        1. Splits each byte → two op-pairs via byte_to_gyrations()
-        2. Feeds op-pairs through all S3 engines
-        3. Persists outputs into S2
-        4. Returns all emitted artifacts
-
         Args:
-            data_bytes: Raw byte stream to process
+            data_bytes: Raw bytes to process
 
         Returns:
-            Dictionary containing all emitted artifacts:
-            - accepted_ops: List of accepted operation pairs
-            - resonances: List of resonance classifications
-            - compressed_blocks: List of compressed cycle data
-            - pattern_promotions: List of newly discovered patterns
-            - gene_snapshots: List of gene state snapshots
+            Dictionary containing all artifacts from processing
         """
+        print(f"Processing {len(data_bytes)} bytes of data...")
+        
+        # Initialize artifacts collection
         artifacts = {
             "accepted_ops": [],
             "resonances": [],
@@ -229,16 +221,19 @@ class IntelligenceEngine:
             "gene_snapshots": [],
         }
 
-        # Process each byte through the pipeline
-        for byte_val in data_bytes:
+        # Process each byte
+        for i, byte_val in enumerate(data_bytes):
+            if i % 100 == 0:  # Print progress every 100 bytes
+                print(f"Processed {i}/{len(data_bytes)} bytes...")
+                
             # Convert byte to two op-pairs
             op_pair1, op_pair2 = byte_to_gyrations(byte_val)
 
-            # Process first op-pair
-            # Get resonance classification first
+            # Process first op-pair through S1-S3
             info_event1 = self.information_engine.process_accepted_op_pair(
-                self.governance_engine.phase, op_pair1, byte_val
+                phase=self.governance_engine.phase, op_pair=op_pair1, byte_val=byte_val
             )
+            # Add resonance event to artifacts
             artifacts["resonances"].append(info_event1)
 
             # Process with resonance flag
@@ -253,11 +248,11 @@ class IntelligenceEngine:
                     self._write_op_pair(event.op_pair)
                     artifacts["accepted_ops"].append(event)
 
-            # Process second op-pair
-            # Get resonance classification first
+            # Process second op-pair through S1-S3
             info_event2 = self.information_engine.process_accepted_op_pair(
-                self.governance_engine.phase, op_pair2, byte_val
+                phase=self.governance_engine.phase, op_pair=op_pair2, byte_val=byte_val
             )
+            # Add resonance event to artifacts
             artifacts["resonances"].append(info_event2)
 
             # Process with resonance flag
@@ -275,16 +270,57 @@ class IntelligenceEngine:
             # Process cycle completion events
             for event in gov_events1 + gov_events2:
                 if isinstance(event, CycleComplete):
-                    # Process inference events first to detect compression
-                    inference_events = self.inference_engine.process_cycle_complete(event.op_pairs)
+                    print(f"Cycle complete at byte {i}, processing inference...")
+                    
+                    # Process the cycle through inference engine
+                    inference_events = self.inference_engine.process_cycle_complete(
+                        event.op_pairs
+                    )
 
-                    # Analyze cycle for pruning
+                    # Check if this cycle is a repeat BEFORE pruning
+                    is_repeat = False
+                    repeat_count = 1
+                    cycle_hash = None
+                    compressed_data = None
+
+                    # Look for cycle repeat in the inference events
+                    for inf_event in inference_events:
+                        if (
+                            isinstance(inf_event, CompressedBlock)
+                            and inf_event.block_type == "cycle_repeat"
+                        ):
+                            is_repeat = True
+                            # Extract from the data dictionary structure
+                            repeat_count = inf_event.data.get("count", 1)
+                            cycle_hash_str = inf_event.data.get("hash", "")
+                            # Convert hex string to integer for storage
+                            cycle_hash = (
+                                int(cycle_hash_str, 16)
+                                if cycle_hash_str
+                                else hash(tuple(self._pending_cycle_buffer))
+                            )
+                            compressed_data = inf_event.data
+
+                            # Store compression metadata in session
+                            if "compression_metadata" not in self.session:
+                                self.session["compression_metadata"] = []
+                            self.session["compression_metadata"].append(
+                                {
+                                    "cycle_hash": cycle_hash_str,
+                                    "repeat_count": repeat_count,
+                                    "cycle_index": self.session.get("cycle_count", 0),
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                }
+                            )
+                            break
+
+                    # Get pruning analysis
                     analysis = self.inference_engine.analyse_cycle(
                         event.op_pairs, event.resonance_flags
                     )
 
-                    # Check if cycle should be pruned
-                    if analysis["prune"]:
+                    # Check if cycle should be pruned (but don't prune repeated cycles)
+                    if analysis["prune"] and not is_repeat:
                         print(f"Pruning cycle {event.cycle_number}: {analysis['prune_reason']}")
                         # Skip writing this cycle entirely
                         self._pending_cycle_buffer = []  # Clear buffer
@@ -292,45 +328,13 @@ class IntelligenceEngine:
 
                     # Write the buffered cycle (compressed or raw)
                     if len(self._pending_cycle_buffer) == 48:
-                        # Check if this cycle is a repeat by looking at compressed blocks
-                        is_repeat = False
-                        repeat_count = 1
-                        cycle_hash = None
-                        compressed_data = None
-
-                        # Look for cycle repeat in the inference events
-                        for inf_event in inference_events:
-                            if (
-                                isinstance(inf_event, CompressedBlock)
-                                and inf_event.block_type == "cycle_repeat"
-                            ):
-                                is_repeat = True
-                                # Extract from the data dictionary structure
-                                repeat_count = inf_event.data.get("count", 1)
-                                cycle_hash_str = inf_event.data.get("hash", "")
-                                # Convert hex string to integer for storage
-                                cycle_hash = (
-                                    int(cycle_hash_str, 16)
-                                    if cycle_hash_str
-                                    else hash(tuple(self._pending_cycle_buffer))
-                                )
-                                compressed_data = inf_event.data
-
-                                # Store compression metadata in session
-                                if "compression_metadata" not in self.session:
-                                    self.session["compression_metadata"] = []
-                                self.session["compression_metadata"].append(
-                                    {
-                                        "cycle_hash": cycle_hash_str,
-                                        "repeat_count": repeat_count,
-                                        "cycle_index": self.session.get("cycle_count", 0),
-                                        "timestamp": datetime.utcnow().isoformat(),
-                                    }
-                                )
-                                break
-
+                        print(f"Writing cycle with {len(self._pending_cycle_buffer)} op-pairs...")
+                        
                         # Write the cycle (compressed or raw)
                         self._write_cycle(self._pending_cycle_buffer, analysis, compressed_data)
+
+                        # Update header count after every cycle for GyroCrypt compliance
+                        self._update_header_count()
 
                         # Clear the buffer
                         self._pending_cycle_buffer = []
@@ -345,8 +349,16 @@ class IntelligenceEngine:
                             elif isinstance(inf_event, GeneSnapshot):
                                 artifacts["gene_snapshots"].append(inf_event)
 
+        print(f"Finished processing {len(data_bytes)} bytes")
+        
         # Update session
         self._update_session()
+
+        # Ensure all pack data is flushed to disk before returning
+        self._update_header_count()
+        if self.current_pack_file:
+            self.current_pack_file.flush()
+            os.fsync(self.current_pack_file.fileno())
 
         return artifacts
 
@@ -440,26 +452,34 @@ class IntelligenceEngine:
     def _write_cycle(self, op_pairs, analysis, compressed_data=None):
         """
         Write a complete cycle to the pack file (compressed or raw).
-
+        
         Args:
             op_pairs: List of 48 op-pairs
             analysis: Dict with pruning analysis results
             compressed_data: Optional compressed data from InferenceEngine
         """
+        print(f"_write_cycle called with {len(op_pairs)} op-pairs, compressed_data={compressed_data is not None}")
+        
         # Check if we have compressed data
         is_repeat = compressed_data is not None and "count" in compressed_data
         repeat_count = compressed_data.get("count", 1) if compressed_data else 1
-
+        
+        print(f"is_repeat={is_repeat}, repeat_count={repeat_count}")
+        
         if not self._cycle_compression_enabled or not is_repeat:
+            print("Writing raw 48 op-pairs...")
             # Write raw 48 op-pairs
             cycle_data = bytearray()
             for op_pair in op_pairs:
                 op_code, tensor_id = op_pair
-                byte_val = (op_code << 4) | tensor_id
-                cycle_data.append(byte_val)
-
+                nibble = ((op_code & 0x7) << 1) | (tensor_id & 0x1)
+                cycle_data.append(nibble)
+            
+            print(f"Created cycle_data of {len(cycle_data)} bytes")
+            
             # Apply encryption if enabled
             if self._encryption_enabled and self._gyrocrypt_key:
+                print("Applying encryption...")
                 # Get gene snapshot for keystream generation
                 gene_snapshot = self.get_full_gene_snapshot()
                 if len(gene_snapshot) == 96 and self._gyrocrypt_key is not None:  # Full snapshot
@@ -467,21 +487,32 @@ class IntelligenceEngine:
                     # XOR encrypt the cycle data
                     for i in range(len(cycle_data)):
                         cycle_data[i] ^= keystream[i]
-                    # Increment cycle index
-                    self._cycle_index += 1
+                    print("Encryption applied")
                 else:
                     # Fallback: write unencrypted if no valid snapshot
+                    print("Fallback: no valid snapshot, writing unencrypted")
                     pass
-
+            
+            # Increment cycle index for every cycle written (encrypted or not)
+            self._cycle_index += 1
+            
             # Write the cycle data
+            print(f"Writing {len(cycle_data)} bytes to pack file...")
             self._write_encrypted_cycle_data(bytes(cycle_data))
+            print("Cycle data written successfully")
         else:
+            print("Writing compressed repeat token...")
             # Write compressed repeat token
             cycle_hash = None
             if compressed_data and "hash" in compressed_data:
                 cycle_hash_str = compressed_data["hash"]
                 cycle_hash = int(cycle_hash_str, 16) if cycle_hash_str else hash(tuple(op_pairs))
+            
+            # Increment cycle index for compressed cycles as well
+            self._cycle_index += 1
+            
             self._write_compressed_cycle(repeat_count, cycle_hash)
+            print("Compressed cycle written successfully")
 
     def _write_raw_op_pair(self, op_pair):
         """Write a single op-pair directly to the pack file."""
@@ -502,10 +533,10 @@ class IntelligenceEngine:
         # At this point, file is definitely open
         assert self.current_pack_file is not None
 
-        # Pack op-pair as 4-bit values into one byte
+        # Pack op-pair as 4-bit nibble to match byte_to_gyrations encoding
         op_code, tensor_id = op_pair
-        byte_val = (op_code << 4) | tensor_id
-        self.current_pack_file.write(struct.pack("B", byte_val))
+        nibble = ((op_code & 0x7) << 1) | (tensor_id & 0x1)
+        self.current_pack_file.write(struct.pack("B", nibble))
 
         self.current_pack_bytes += 1
         self._header_update_counter += 1
@@ -804,31 +835,42 @@ class IntelligenceEngine:
 
     def _write_encrypted_cycle_data(self, cycle_data: bytes):
         """Write encrypted cycle data to the pack file."""
+        print(f"_write_encrypted_cycle_data called with {len(cycle_data)} bytes")
+        
         # Check if current pack would exceed pack_size (excluding header)
         header_size = (
             40 if (self._encryption_enabled and self._gyrocrypt_key) else 13
         )  # GyroCrypt vs old format
         payload_size = self.current_pack_bytes + len(cycle_data)
 
+        print(f"header_size={header_size}, current_pack_bytes={self.current_pack_bytes}, payload_size={payload_size}, pack_size={self.pack_size}")
+
         if payload_size >= (self.pack_size - header_size):
             # Current pack would exceed size limit, start new one
+            print("Pack would exceed size limit, starting new pack...")
             self._open_current_pack()
 
         # Ensure file is open
         if self.current_pack_file is None:
+            print("No pack file open, opening new one...")
             self._open_current_pack()
 
         # At this point, file is definitely open
         assert self.current_pack_file is not None
+        print(f"Pack file is open: {self.current_pack_file}")
 
         # Write the encrypted cycle data
+        print(f"Writing {len(cycle_data)} bytes to pack file...")
         self.current_pack_file.write(cycle_data)
+        print("Data written to file")
 
         self.current_pack_bytes += len(cycle_data)
         self._header_update_counter += len(cycle_data)
+        print(f"Updated counters: current_pack_bytes={self.current_pack_bytes}, header_update_counter={self._header_update_counter}")
 
         # Update header periodically
         if self._header_update_counter >= 256:
+            print("Updating header count...")
             self._update_header_count()
             self._header_update_counter = 0
 
