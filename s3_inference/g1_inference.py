@@ -6,15 +6,17 @@ Operates entirely in memory with no storage logic.
 """
 
 import torch
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, Any
 from dataclasses import dataclass
 from collections import deque
+
+# Import gene mechanics from s1_governance
+from s1_governance import get_gene_tensors, gyration_op
 
 
 @dataclass
 class AcceptedOpPair:
     """Event emitted for each accepted operation pair."""
-
     phase: int
     op_pair: Tuple[int, int]  # Single op_pair: (op_code, tensor_id)
     cycle_position: int
@@ -23,7 +25,6 @@ class AcceptedOpPair:
 @dataclass
 class CycleComplete:
     """Event emitted when a 48-step cycle completes."""
-
     cycle_number: int
     op_pairs: List[Tuple[int, int]]  # List of 48 op_pairs
     resonance_flags: List[bool]  # List of 48 resonance flags for pruning analysis
@@ -32,27 +33,42 @@ class CycleComplete:
 class GovernanceEngine:
     """
     Phase-driven acceptance engine for operation pairs.
-    Maintains a circular buffer of the last 48 accepted op-pairs.
+    Maintains a circular buffer of the last 48 accepted op-pairs and tracks the phase.
+    
+    Key responsibilities:
+    1. Accept operation pairs and advance the phase
+    2. Maintain a fixed-size buffer of the most recent 48 op-pairs
+    3. Emit events when cycles complete (every 48 steps)
+    4. Track resonance flags for pattern analysis
     """
 
     def __init__(self):
-        self.phase = 0
-        self.cycle_count = 0
-        self.buffer = deque(maxlen=48)
-        self.current_cycle_ops = []
-        self.current_cycle_resonance = []  # Track resonance flags for current cycle
+        """Initialize the engine with empty state."""
+        self.phase = 0  # Current phase (0-47)
+        self.cycle_count = 0  # Number of completed cycles
+        self.buffer = deque(maxlen=48)  # Circular buffer of recent op-pairs
+        self.current_cycle_ops = []  # Accumulating buffer for current cycle
+        self.current_cycle_resonance = []  # Resonance flags for current cycle
 
-    def process_op_pair(self, op_pair: Tuple[int, int], resonance_flag: bool = False) -> List:
+    def process_op_pair(self, op_pair: Tuple[int, int], resonance_flag: bool = False) -> List[Any]:
         """
-        Process a single operation pair.
-
+        Process a single operation pair through the governance cycle.
+        
         Args:
             op_pair: Tuple of (op_code, tensor_id)
             resonance_flag: Whether this op-pair was resonant
-
+            
         Returns:
-            List of emitted events
+            List of emitted events (AcceptedOpPair and possibly CycleComplete)
         """
+        # Validate inputs
+        if not isinstance(op_pair, tuple) or len(op_pair) != 2:
+            raise ValueError(f"Invalid op_pair format: {op_pair}. Expected (op_code, tensor_id) tuple.")
+            
+        op_code, tensor_id = op_pair
+        if not (0 <= op_code <= 3 and 0 <= tensor_id <= 1):
+            raise ValueError(f"Invalid op_code or tensor_id: ({op_code}, {tensor_id}). Values must be within range.")
+
         events = []
 
         # Accept the op-pair unconditionally
@@ -63,7 +79,9 @@ class GovernanceEngine:
         # Emit accepted event
         events.append(
             AcceptedOpPair(
-                phase=self.phase, op_pair=op_pair, cycle_position=len(self.current_cycle_ops) - 1
+                phase=self.phase, 
+                op_pair=op_pair, 
+                cycle_position=len(self.current_cycle_ops) - 1
             )
         )
 
@@ -72,24 +90,46 @@ class GovernanceEngine:
 
         # Check for cycle completion
         if self.phase == 0:
+            # Make deep copies to ensure immutability
+            cycle_ops = self.current_cycle_ops.copy()
+            cycle_res = self.current_cycle_resonance.copy()
+            
+            # Emit cycle completion event
             events.append(
                 CycleComplete(
                     cycle_number=self.cycle_count,
-                    op_pairs=self.current_cycle_ops.copy(),
-                    resonance_flags=self.current_cycle_resonance.copy(),
+                    op_pairs=cycle_ops,
+                    resonance_flags=cycle_res,
                 )
             )
+            
+            # Increment cycle count and reset accumulators
             self.cycle_count += 1
             self.current_cycle_ops = []
             self.current_cycle_resonance = []
 
         return events
 
-    def get_state(self) -> Dict:
-        """Return current engine state."""
+    def get_state(self) -> Dict[str, Any]:
+        """
+        Return the current engine state as a dictionary.
+        Useful for monitoring and debugging.
+        """
         return {
             "phase": self.phase,
             "cycle_count": self.cycle_count,
             "buffer_size": len(self.buffer),
             "current_cycle_size": len(self.current_cycle_ops),
+            "current_cycle_buffer": list(self.buffer)
         }
+
+    def reset(self) -> None:
+        """
+        Reset the engine to its initial state.
+        Useful for testing or when starting a new session.
+        """
+        self.phase = 0
+        self.cycle_count = 0
+        self.buffer.clear()
+        self.current_cycle_ops = []
+        self.current_cycle_resonance = []

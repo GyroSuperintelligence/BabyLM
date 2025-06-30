@@ -101,7 +101,7 @@ if __name__ == "__main__":
     print("🚀 BabyLM Test Data Cleanup")
     print("=" * 40)
     
-    # Analyze current state
+    # Analyze Current Decoded Genome Cycle
     analyze_sharding()
     
     print("\n" + "=" * 40)

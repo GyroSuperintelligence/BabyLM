@@ -10,24 +10,61 @@ import json
 import uuid
 import hashlib
 import struct
+import fcntl
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, BinaryIO, Union, Set
+from pathlib import Path
 import torch
 import numpy as np
 
+# Import from S3 inference modules
 from s3_inference.g1_inference import GovernanceEngine, AcceptedOpPair, CycleComplete
-from s3_inference.g2_inference import InformationEngine
+from s3_inference.g2_inference import InformationEngine, ResonanceEvent
 from s3_inference.g3_inference import (
     InferenceEngine,
     CompressedBlock,
     PatternPromotion,
-    GeneSnapshot,
 )
-from s4_intelligence.g2_intelligence_eg import byte_to_gyrations, gyrations_to_byte
+
+# Import from S1 governance
+from s1_governance import (
+    get_gene_constant,
+    get_gene_anchor,
+    build_epigenome_projection,
+    get_gene_tensors,
+)
+
+# Import from S4 gyration primitives
+from s4_intelligence.g2_intelligence_eg import (
+    byte_to_gyrations,
+    gyrations_to_byte,
+    gyration_op,
+)
+
+# Utility for JSON serialization of state
+def sanitize_for_json(obj):
+    if isinstance(obj, dict):
+        return {str(k): sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return str(obj)
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        return str(obj)
 
 
 def get_shard_from_uuid(uuid_str: str) -> str:
-    """Extract shard prefix from UUID string."""
+    """
+    Extract shard prefix from UUID string.
+    
+    Args:
+        uuid_str: UUID string
+        
+    Returns:
+        First two characters of UUID (shard identifier)
+    """
     clean_uuid = uuid_str.replace("-", "")
     return clean_uuid[:2].lower()
 
@@ -35,922 +72,909 @@ def get_shard_from_uuid(uuid_str: str) -> str:
 class IntelligenceEngine:
     """
     Main orchestration engine that coordinates S3 processing and S2 persistence.
-    This is the only class that writes to S2 storage.
+    This is the only class that writes to S2 storage and the sole controller of
+    the three S3 inference engines.
+    
+    This class manages:
+    1. Agent lifecycle and state persistence
+    2. Stream processing through S3 engines
+    3. File I/O for genome packs and curriculum
+    4. GyroCrypt encryption/decryption
+    5. Pattern learning and curriculum management
     """
 
+    # Class constants
+    PACK_HEADER_SIZE = 40  # 32B gene anchor + 4B cycle index + 4B salt
+    DEFAULT_PACK_SIZE = 65536  # 64KB
+    MAX_CYCLE_INDEX = 0xFFFFFFFF  # 32-bit max
+    
     def __init__(
         self,
         agent_uuid: Optional[str] = None,
-        base_path: str = "s2_information",
+        base_path: Union[str, Path] = "s2_information",
         encryption_enabled: bool = True,
     ):
         """
         Initialize the Intelligence Engine.
 
         Args:
-            agent_uuid: Optional agent UUID. If None, generates a new one.
+            agent_uuid: Agent UUID (generated if None)
             base_path: Base path for S2 information storage
             encryption_enabled: Whether to enable GyroCrypt encryption
         """
-        self.base_path = base_path
+        # Core identity
         self.agent_uuid = agent_uuid or str(uuid.uuid4())
         self.shard = get_shard_from_uuid(self.agent_uuid)
-
-        # GyroCrypt encryption settings
-        self._encryption_enabled = encryption_enabled  # Enable/disable encryption
-        self._gyrocrypt_key: Optional[bytes] = None  # Will be loaded from session
-        self._cycle_index = 0  # Current cycle counter for encryption
-
-        # Load pack size from manifest
-        manifest_path = os.path.join(base_path, "s2_manifest.json")
-        if os.path.exists(manifest_path):
-            with open(manifest_path, "r") as f:
-                manifest = json.load(f)
-                self.pack_size = manifest.get("pack_size", 4096)
-        else:
-            self.pack_size = 4096  # Default fallback
-
-        # Make sure base directories exist
+        self.base_path = Path(base_path)
+        
+        # Encryption settings
+        self._encryption_enabled = encryption_enabled
+        self._gyrocrypt_key: Optional[bytes] = None
+        self._cycle_index = 0
+        
+        # Initialize storage structure
         self._ensure_directories()
-
-        # Initialize S3 engines
-        self.governance_engine = GovernanceEngine()
-        self.information_engine = InformationEngine(
-            os.path.join(base_path, "agency", "g2_information", "g2_information.dat")
-        )
-        self.inference_engine = InferenceEngine(agent_uuid=self.agent_uuid)
-
-        # Load agent state and curriculum
-        self._load_state()
+        
+        # Read manifest for configuration
+        self.pack_size = self._load_manifest_config()
+        
+        # Load state and curriculum
+        self._load_agent_state()
         self._load_curriculum()
-
-        # Initialize current pack file
-        self.current_pack_uuid = None  # Will be set when first pack is opened
-        self.current_pack_bytes = 0  # Count of payload bytes in current pack (excluding header)
-        self.current_pack_file = None
-        self._header_update_counter = 0  # Track when to update header
-
-        # Cycle buffering for compression
-        self._pending_cycle_buffer = []  # Buffer for current 48 op-pairs
-        self._cycle_compression_enabled = True  # Enable/disable compression
-
+        
+        # Initialize S3 engines
+        self._initialize_engines()
+        
+        # File handling
+        self.current_pack_file: Optional[BinaryIO] = None
+        self.current_pack_uuid: Optional[str] = None
+        self.current_pack_bytes = 0
+        self._pending_cycle_buffer: List[Tuple[int, int]] = []
+        self._current_resonance_flags: List[bool] = []
+        
+        # Initialize the first pack file
         self._open_current_pack()
 
-    def _ensure_directories(self):
-        """Ensure all required directories exist."""
-        # Base paths
-        os.makedirs(self.base_path, exist_ok=True)
-        os.makedirs(os.path.join(self.base_path, "agency"), exist_ok=True)
+    def _ensure_directories(self) -> None:
+        """
+        Create all required directories for the agent.
+        """
+        # Global directories
+        (self.base_path / "agency" / "g1_information" / self.shard).mkdir(parents=True, exist_ok=True)
+        (self.base_path / "agency" / "g2_information").mkdir(parents=True, exist_ok=True)
+        (self.base_path / "agency" / "g4_information" / self.shard).mkdir(parents=True, exist_ok=True)
+        (self.base_path / "agency" / "g5_information" / self.shard).mkdir(parents=True, exist_ok=True)
+        
+        # Agent-specific directories
+        (self.base_path / "agents" / self.shard / self.agent_uuid / "g4_information").mkdir(parents=True, exist_ok=True)
+        (self.base_path / "agents" / self.shard / self.agent_uuid / "g5_information").mkdir(parents=True, exist_ok=True)
 
-        # Agency directories
-        for subdir in ["g1_information", "g2_information", "g4_information", "g5_information"]:
-            os.makedirs(os.path.join(self.base_path, "agency", subdir), exist_ok=True)
+    def _load_manifest_config(self) -> int:
+        """
+        Load configuration from manifest.json.
+        
+        Returns:
+            Pack size from manifest or default (65536)
+        """
+        manifest_path = self.base_path / "s2_manifest.json"
+        
+        if manifest_path.exists():
+            try:
+                with open(manifest_path, "r") as f:
+                    manifest = json.load(f)
+                return manifest.get("pack_size", self.DEFAULT_PACK_SIZE)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Error loading manifest: {e}. Using default pack size.")
+        
+        return self.DEFAULT_PACK_SIZE
 
-        # Shard directories for agency
-        for subdir in ["g1_information", "g4_information", "g5_information"]:
-            shard_path = os.path.join(self.base_path, "agency", subdir, self.shard)
-            os.makedirs(shard_path, exist_ok=True)
-
-        # Agent directories
-        agent_path = os.path.join(self.base_path, "agents", self.shard, self.agent_uuid)
-        os.makedirs(os.path.join(agent_path, "g4_information"), exist_ok=True)
-        os.makedirs(os.path.join(agent_path, "g5_information"), exist_ok=True)
-
-    def _load_state(self):
-        """Load agent state and global navigation logs."""
-        # Load agent session if exists
-        session_path = os.path.join(
-            self.base_path, "agents", self.shard, self.agent_uuid, "g5_information", "session.json"
+    def _load_agent_state(self) -> None:
+        """
+        Load the agent's session state from disk.
+        Initializes with defaults if not found.
+        """
+        session_path = (
+            self.base_path / "agents" / self.shard / self.agent_uuid / 
+            "g5_information" / "session.json"
         )
-
-        if os.path.exists(session_path):
-            with open(session_path, "r") as f:
-                self.session = json.load(f)
-                # Load GyroCrypt key if present
-                if "gyrocrypt_key" in self.session:
-                    import base64
-
-                    self._gyrocrypt_key = base64.b64decode(self.session["gyrocrypt_key"])
-                self._cycle_index = self.session.get("cycle_index", 0)
-        else:
-            self.session = {
-                "agent_uuid": self.agent_uuid,
-                "created": datetime.utcnow().isoformat(),
-                "last_checkpoint": None,
-                "phase": 0,
-                "cycle_count": 0,
-                "active_curriculum": None,
-                "compression_metadata": [],  # Store compression details here
-            }
-
-            # Add GyroCrypt fields only if encryption is enabled
-            if self._encryption_enabled:
-                self.session["gyrocrypt_key"] = None  # Will be generated
-                self.session["cycle_index"] = 0  # Encryption cycle counter
-
-                # Generate GyroCrypt key if encryption is enabled
+        
+        # Default initial state
+        self.session = {
+            "agent_uuid": self.agent_uuid,
+            "created": datetime.utcnow().isoformat(),
+            "last_checkpoint": None,
+            "phase": 0,
+            "cycle_count": 0,
+            "active_curriculum": None,
+        }
+        
+        # Load existing state if available
+        if session_path.exists():
+            try:
+                with open(session_path, "r") as f:
+                    loaded_session = json.load(f)
+                    self.session.update(loaded_session)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Error loading session state: {e}. Using defaults.")
+        
+        # Initialize GyroCrypt
+        if self._encryption_enabled:
+            if "gyrocrypt_key" in self.session:
+                # Use existing key
+                self._gyrocrypt_key = bytes.fromhex(self.session["gyrocrypt_key"])
+            else:
+                # Generate new key
                 import secrets
-                import base64
+                self._gyrocrypt_key = secrets.token_bytes(32)
+                self.session["gyrocrypt_key"] = self._gyrocrypt_key.hex()
+            
+            # Load cycle index
+            self._cycle_index = self.session.get("cycle_index", 0)
 
-                # Generate 32-byte key
-                key_bytes = secrets.token_bytes(32)
-                self._gyrocrypt_key = key_bytes
-                self.session["gyrocrypt_key"] = base64.b64encode(key_bytes).decode("utf-8")
-                self.session["cycle_index"] = 0
-
-        # Load active curriculum
-        self._load_curriculum()
-
-    def _load_curriculum(self):
-        """Load the active curriculum/dictionary."""
-        # First check agent-specific curriculum
-        agent_curriculum_path = os.path.join(
-            self.base_path,
-            "agents",
-            self.shard,
-            self.agent_uuid,
-            "g4_information",
-            "curriculum.json",
+    def _load_curriculum(self) -> None:
+        """
+        Load the agent's curriculum (learned patterns and token mappings).
+        """
+        curriculum_path = (
+            self.base_path / "agents" / self.shard / self.agent_uuid / 
+            "g4_information" / "curriculum.json"
         )
-
-        if os.path.exists(agent_curriculum_path):
-            with open(agent_curriculum_path, "r") as f:
-                self.curriculum = json.load(f)
-                return
-
-        # Otherwise load latest global curriculum
-        global_curriculum_dir = os.path.join(self.base_path, "agency", "g4_information", self.shard)
-
-        if os.path.exists(global_curriculum_dir):
-            # Get most recent curriculum
-            files = sorted(
-                [f for f in os.listdir(global_curriculum_dir) if f.endswith("-curriculum.json")]
-            )
-            if files:
-                with open(os.path.join(global_curriculum_dir, files[-1]), "r") as f:
-                    self.curriculum = json.load(f)
-                    return
-
+        
         # Default empty curriculum
         self.curriculum = {
             "version": "1.0",
             "patterns": {},
-            "byte_to_token": {},  # Map bytes to tokens
-            "token_to_byte": {},  # Reverse mapping
-            "metadata": {},
+            "byte_to_token": {},
+            "token_to_byte": {},
+            "metadata": {"created": datetime.utcnow().isoformat()},
         }
+        
+        # Load existing curriculum if available
+        if curriculum_path.exists():
+            try:
+                with open(curriculum_path, "r") as f:
+                    loaded_curriculum = json.load(f)
+                    self.curriculum.update(loaded_curriculum)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Error loading curriculum: {e}. Using defaults.")
+
+    def _initialize_engines(self) -> None:
+        """
+        Initialize the three S3 inference engines.
+        """
+        # Ensure epigenome projection exists
+        epigenome_path = self.base_path / "agency" / "g2_information" / "g2_information.dat"
+        if not epigenome_path.exists():
+            build_epigenome_projection(str(epigenome_path))
+        
+        # Create inference engines
+        self.governance_engine = GovernanceEngine()
+        self.information_engine = InformationEngine(str(epigenome_path))
+        self.inference_engine = InferenceEngine(agent_uuid=self.agent_uuid)
+        
+        # Set initial phase from session if available
+        if "phase" in self.session:
+            self.governance_engine.phase = self.session["phase"]
+        
+        # Set initial cycle count from session if available
+        if "cycle_count" in self.session:
+            self.governance_engine.cycle_count = self.session["cycle_count"]
 
     def process_stream(self, data_bytes: bytes) -> Dict[str, List[Any]]:
         """
         Process a stream of bytes through the full GyroSI pipeline.
+        
+        This is the main entry point for the Intelligence Engine and the
+        only public API that processes data.
 
         Args:
             data_bytes: Raw bytes to process
 
         Returns:
-            Dictionary containing all artifacts from processing
+            Dictionary containing all artifacts from processing:
+            - accepted_ops: List of AcceptedOpPair events
+            - resonances: List of ResonanceEvent events
+            - compressed_blocks: List of CompressedBlock events
+            - pattern_promotions: List of PatternPromotion events
         """
-        print(f"Processing {len(data_bytes)} bytes of data...")
+        if not isinstance(data_bytes, bytes):
+            raise TypeError(f"Expected bytes, got {type(data_bytes)}")
         
-        # Initialize artifacts collection
+        # Initialize collection of artifacts
         artifacts = {
             "accepted_ops": [],
             "resonances": [],
             "compressed_blocks": [],
             "pattern_promotions": [],
-            "gene_snapshots": [],
         }
-
-        # Process each byte
-        for i, byte_val in enumerate(data_bytes):
-            if i % 100 == 0:  # Print progress every 100 bytes
-                print(f"Processed {i}/{len(data_bytes)} bytes...")
+        try:
+            # Process each byte in the stream
+            for byte_val in data_bytes:
+                # Convert byte to two op-pairs
+                op_pair1, op_pair2 = byte_to_gyrations(byte_val)
                 
-            # Convert byte to two op-pairs
-            op_pair1, op_pair2 = byte_to_gyrations(byte_val)
-
-            # Process first op-pair through S1-S3
-            info_event1 = self.information_engine.process_accepted_op_pair(
-                phase=self.governance_engine.phase, op_pair=op_pair1, byte_val=byte_val
-            )
-            # Add resonance event to artifacts
-            artifacts["resonances"].append(info_event1)
-
-            # Process with resonance flag
-            gov_events1 = self.governance_engine.process_op_pair(
-                op_pair1, info_event1.resonance_flag
-            )
-
-            # Process governance events for first op-pair
-            for event in gov_events1:
-                if isinstance(event, AcceptedOpPair):
-                    # Buffer op-pair for cycle compression
-                    self._write_op_pair(event.op_pair)
-                    artifacts["accepted_ops"].append(event)
-
-            # Process second op-pair through S1-S3
-            info_event2 = self.information_engine.process_accepted_op_pair(
-                phase=self.governance_engine.phase, op_pair=op_pair2, byte_val=byte_val
-            )
-            # Add resonance event to artifacts
-            artifacts["resonances"].append(info_event2)
-
-            # Process with resonance flag
-            gov_events2 = self.governance_engine.process_op_pair(
-                op_pair2, info_event2.resonance_flag
-            )
-
-            # Process governance events for second op-pair
-            for event in gov_events2:
-                if isinstance(event, AcceptedOpPair):
-                    # Buffer op-pair for cycle compression
-                    self._write_op_pair(event.op_pair)
-                    artifacts["accepted_ops"].append(event)
-
-            # Process cycle completion events
-            for event in gov_events1 + gov_events2:
-                if isinstance(event, CycleComplete):
-                    print(f"Cycle complete at byte {i}, processing inference...")
+                # Process each op-pair through the pipeline
+                for op_pair in [op_pair1, op_pair2]:
+                    # 1. Information Engine: determine resonance
+                    info_event = self.information_engine.process_accepted_op_pair(
+                        phase=self.governance_engine.phase,
+                        op_pair=op_pair,
+                        byte_val=byte_val
+                    )
+                    artifacts["resonances"].append(info_event)
                     
-                    # Process the cycle through inference engine
-                    inference_events = self.inference_engine.process_cycle_complete(
-                        event.op_pairs
+                    # 2. Governance Engine: accept and advance phase
+                    gov_events = self.governance_engine.process_op_pair(
+                        op_pair, 
+                        info_event.resonance_flag
                     )
-
-                    # Check if this cycle is a repeat BEFORE pruning
-                    is_repeat = False
-                    repeat_count = 1
-                    cycle_hash = None
-                    compressed_data = None
-
-                    # Look for cycle repeat in the inference events
-                    for inf_event in inference_events:
-                        if (
-                            isinstance(inf_event, CompressedBlock)
-                            and inf_event.block_type == "cycle_repeat"
-                        ):
-                            is_repeat = True
-                            # Extract from the data dictionary structure
-                            repeat_count = inf_event.data.get("count", 1)
-                            cycle_hash_str = inf_event.data.get("hash", "")
-                            # Convert hex string to integer for storage
-                            cycle_hash = (
-                                int(cycle_hash_str, 16)
-                                if cycle_hash_str
-                                else hash(tuple(self._pending_cycle_buffer))
+                    
+                    # Store resonance flag for cycle analysis
+                    self._current_resonance_flags.append(info_event.resonance_flag)
+                    
+                    # Process governance events
+                    for event in gov_events:
+                        if isinstance(event, AcceptedOpPair):
+                            # Record accepted op-pair
+                            artifacts["accepted_ops"].append(event)
+                            
+                            # Buffer for cycle writing
+                            self._pending_cycle_buffer.append(event.op_pair)
+                            
+                        elif isinstance(event, CycleComplete):
+                            # 3. Inference Engine: analyze completed cycle
+                            inference_events = self.inference_engine.process_cycle_complete(
+                                event.op_pairs,
+                                event.resonance_flags
                             )
-                            compressed_data = inf_event.data
+                            
+                            cycle_was_written = False
+                            # Process inference events
+                            for inf_event in inference_events:
+                                if isinstance(inf_event, CompressedBlock):
+                                    artifacts["compressed_blocks"].append(inf_event)
+                                    if self._handle_compressed_block(inf_event):
+                                        cycle_was_written = True
+                                    
+                                elif isinstance(inf_event, PatternPromotion):
+                                    artifacts["pattern_promotions"].append(inf_event)
+                                    self._persist_pattern_promotion(inf_event)
+                            
+                            # If the inference engine didn't explicitly handle the cycle by writing it, write it now.
+                            if not cycle_was_written:
+                                self._write_cycle(event.op_pairs)
+                                cycle_was_written = True
+                            
+                            # Reset for next cycle only if it was persisted.
+                            if cycle_was_written:
+                                self._current_resonance_flags = []
+                                self._pending_cycle_buffer = []
+            
+            # Update session with latest state
+            self._update_session()
+            
+            return artifacts
+            
+        except Exception as e:
+            print(f"Error in process_stream: {e}")
+            # Try to save state even on error
+            try:
+                self._update_session()
+            except:
+                pass
+            raise
 
-                            # Store compression metadata in session
-                            if "compression_metadata" not in self.session:
-                                self.session["compression_metadata"] = []
-                            self.session["compression_metadata"].append(
-                                {
-                                    "cycle_hash": cycle_hash_str,
-                                    "repeat_count": repeat_count,
-                                    "cycle_index": self.session.get("cycle_count", 0),
-                                    "timestamp": datetime.utcnow().isoformat(),
-                                }
-                            )
-                            break
-
-                    # Get pruning analysis
-                    analysis = self.inference_engine.analyse_cycle(
-                        event.op_pairs, event.resonance_flags
-                    )
-
-                    # Check if cycle should be pruned (but don't prune repeated cycles)
-                    if analysis["prune"] and not is_repeat:
-                        print(f"Pruning cycle {event.cycle_number}: {analysis['prune_reason']}")
-                        # Skip writing this cycle entirely
-                        self._pending_cycle_buffer = []  # Clear buffer
-                        continue
-
-                    # Write the buffered cycle (compressed or raw)
-                    if len(self._pending_cycle_buffer) == 48:
-                        print(f"Writing cycle with {len(self._pending_cycle_buffer)} op-pairs...")
-                        
-                        # Write the cycle (compressed or raw)
-                        self._write_cycle(self._pending_cycle_buffer, analysis, compressed_data)
-
-                        # Update header count after every cycle for GyroCrypt compliance
-                        self._update_header_count()
-
-                        # Clear the buffer
-                        self._pending_cycle_buffer = []
-
-                        # Process all inference events
-                        for inf_event in inference_events:
-                            if isinstance(inf_event, CompressedBlock):
-                                artifacts["compressed_blocks"].append(inf_event)
-                            elif isinstance(inf_event, PatternPromotion):
-                                artifacts["pattern_promotions"].append(inf_event)
-                                self._persist_pattern_promotion(inf_event)
-                            elif isinstance(inf_event, GeneSnapshot):
-                                artifacts["gene_snapshots"].append(inf_event)
-
-        print(f"Finished processing {len(data_bytes)} bytes")
+    def _handle_compressed_block(self, block: CompressedBlock) -> bool:
+        """
+        Process a compressed block from the inference engine.
         
-        # Update session
-        self._update_session()
-
-        # Ensure all pack data is flushed to disk before returning
-        self._update_header_count()
-        if self.current_pack_file:
-            self.current_pack_file.flush()
-            os.fsync(self.current_pack_file.fileno())
-
-        return artifacts
-
-    def generate(self, prompt: bytes = b"", max_length: int = 100) -> bytes:
-        """
-        Generate bytes based on learned patterns.
-
         Args:
-            prompt: Initial bytes to seed the generation
-            max_length: Maximum number of bytes to generate
-
+            block: CompressedBlock event from InferenceEngine
+            
         Returns:
-            Generated byte sequence
+            True if the cycle was written to disk, False otherwise.
         """
-        # Process the prompt first to set the initial state
-        if prompt:
-            self.process_stream(prompt)
+        if block.block_type == "full_cycle":
+            # Write the full cycle to disk
+            self._write_cycle(block.data["ops"])
+            return True
+            
+        elif block.block_type == "cycle_repeat":
+            # Log the repeated cycle (actual writing handled by InferenceEngine)
+            hash_val = block.data.get("hash", "unknown")
+            count = block.data.get("count", 0)
+            
+            # Record compressed blocks in session for analytics
+            if "compression_stats" not in self.session:
+                self.session["compression_stats"] = {}
+            
+            self.session["compression_stats"][hash_val] = {
+                "count": count,
+                "last_seen": datetime.utcnow().isoformat()
+            }
+            
+            # Increment cycle index for encryption
+            self._cycle_index += 1
+            
+            # Flush to persist the updated cycle index in the header.
+            self._flush_pack_file()
+            
+        elif block.block_type == "pruned_cycle":
+            # Log pruned cycles for analytics
+            if "pruned_cycles" not in self.session:
+                self.session["pruned_cycles"] = 0
+            
+            self.session["pruned_cycles"] += 1
+            
+        return False
 
-        generated = bytearray()
+    def _persist_pattern_promotion(self, promotion: PatternPromotion) -> None:
+        """
+        Add a promoted pattern to the curriculum and persist it.
+        
+        Args:
+            promotion: PatternPromotion event from InferenceEngine
+        """
+        # Convert pattern to serializable format
+        serialized_pattern = []
+        for op_code, tensor_id in promotion.pattern:
+            serialized_pattern.append({
+                "op": op_code,
+                "tensor": tensor_id
+            })
+        
+        # Add to curriculum
+        self.curriculum["patterns"][promotion.pattern_hash] = {
+            "sequence": serialized_pattern,
+            "frequency": promotion.frequency,
+            "created": datetime.utcnow().isoformat(),
+            "length": len(promotion.pattern)
+        }
+        
+        # Save curriculum
+        self._persist_curriculum()
+        
+        # Also save to global curriculum for sharing
+        self._persist_global_curriculum(promotion)
 
-        for _ in range(max_length):
-            # Use the InferenceEngine to predict the next operation
-            op_pair1 = self.inference_engine.predict_next_operation(self.curriculum)
-            op_pair2 = self.inference_engine.predict_next_operation(self.curriculum)
+    def _persist_curriculum(self) -> None:
+        """
+        Save the agent's curriculum to disk.
+        """
+        curriculum_path = (
+            self.base_path / "agents" / self.shard / self.agent_uuid / 
+            "g4_information" / "curriculum.json"
+        )
+        
+        # Write with atomic replacement
+        temp_path = curriculum_path.with_suffix(".tmp")
+        try:
+            with open(temp_path, "w") as f:
+                json.dump(self.curriculum, f, indent=2)
+            
+            # Use os.replace for atomic operation
+            os.replace(temp_path, curriculum_path)
+        except Exception as e:
+            print(f"Error saving curriculum: {e}")
+            if temp_path.exists():
+                temp_path.unlink()
 
-            # Convert the predicted op_pairs to a byte
-            next_byte = gyrations_to_byte(op_pair1, op_pair2)
-            generated.append(next_byte)
+    def _persist_global_curriculum(self, promotion: PatternPromotion) -> None:
+        """
+        Add promoted pattern to global curriculum for sharing across agents.
+        
+        Args:
+            promotion: PatternPromotion event from InferenceEngine
+        """
+        # Create a new curriculum snapshot with UUID
+        curriculum_uuid = str(uuid.uuid4())
+        curriculum_path = (
+            self.base_path / "agency" / "g4_information" / self.shard /
+            f"{curriculum_uuid}-curriculum.json"
+        )
+        
+        # Create a minimal shared curriculum with just this pattern
+        shared_curriculum = {
+            "version": "1.0",
+            "source_agent": self.agent_uuid,
+            "created": datetime.utcnow().isoformat(),
+            "patterns": {
+                promotion.pattern_hash: {
+                    "sequence": [{"op": op, "tensor": tid} for op, tid in promotion.pattern],
+                    "frequency": promotion.frequency,
+                    "created": datetime.utcnow().isoformat(),
+                    "length": len(promotion.pattern)
+                }
+            }
+        }
+        
+        # Write the global curriculum
+        try:
+            with open(curriculum_path, "w") as f:
+                json.dump(shared_curriculum, f, indent=2)
+        except Exception as e:
+            print(f"Error saving global curriculum: {e}")
 
-            # Process the generated byte to update state
-            self.process_stream(bytes([next_byte]))
+    def _update_session(self) -> None:
+        """
+        Update the session file with current state.
+        """
+        # Update session with engine states
+        gov_state = self.governance_engine.get_state()
+        info_state = self.information_engine.get_state()
+        inf_state = self.inference_engine.get_state()
+        
+        # Extract before sanitization
+        phase = gov_state["phase"]
+        cycle_count = gov_state["cycle_count"]
 
-        return bytes(generated)
+        gov_state = sanitize_for_json(gov_state)
+        info_state = sanitize_for_json(info_state)
+        inf_state = sanitize_for_json(inf_state)
+        
+        self.session.update({
+            "phase": phase,
+            "cycle_count": cycle_count,
+            "last_checkpoint": datetime.utcnow().isoformat(),
+            "governance": gov_state,
+            "information": info_state,
+            "inference": inf_state,
+        })
+        
+        # Add encryption data if enabled
+        if self._encryption_enabled and self._gyrocrypt_key:
+            self.session["gyrocrypt_key"] = self._gyrocrypt_key.hex()
+            self.session["cycle_index"] = self._cycle_index
+        
+        # Write the session file atomically
+        session_path = Path(
+            self.base_path, "agents", self.shard, self.agent_uuid, 
+            "g5_information", "session.json"
+        )
+        
+        # Ensure directory exists
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Use a temporary file and rename approach
+        temp_path = session_path.with_suffix(".tmp")
+        backup_path = session_path.with_suffix(".bak")
+        
+        try:
+            # Write to temporary file first
+            with open(temp_path, "w") as f:
+                json.dump(self.session, f, indent=2)
+            
+            # Backup existing if present
+            if session_path.exists():
+                try:
+                    if backup_path.exists():
+                        backup_path.unlink()
+                    os.replace(session_path, backup_path)
+                except:
+                    pass  # Backup is optional
+            
+            # Move temporary to main
+            os.replace(temp_path, session_path)
+            
+        except Exception as e:
+            print(f"Error updating session: {e}")
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except:
+                    pass
 
-    def _open_current_pack(self):
-        """Open a new pack file for writing."""
-        if self.current_pack_file:
-            # Update header count before closing
-            self._update_header_count()
-            self.current_pack_file.flush()  # Guarantee header hits disk
+    def _open_current_pack(self) -> None:
+        """
+        Open a new genome pack file for writing.
+        Closes the current pack if one is open.
+        """
+        # Close current pack if open
+        if self.current_pack_file and not self.current_pack_file.closed:
+            self._flush_pack_file()
             self.current_pack_file.close()
-
+        
         # Generate new UUID for this pack
         self.current_pack_uuid = str(uuid.uuid4())
-
-        pack_dir = os.path.join(self.base_path, "agency", "g1_information", self.shard)
-        os.makedirs(pack_dir, exist_ok=True)
-
-        pack_path = os.path.join(pack_dir, f"{self.current_pack_uuid}-genome.dat")
-        self.current_pack_file = open(pack_path, "wb")
-
-        # Write GyroCrypt header: 32B anchor + 4B cycle_index + 4B salt
-        if self._encryption_enabled and self._gyrocrypt_key:
-            # Use constant gene anchor for pack header (never changes)
-            from s1_governance import get_gene_anchor
-
-            gene_anchor = get_gene_anchor()
-
-            # Get current gene snapshot for salt (changes with state)
-            gene_snapshot = self.get_gene_snapshot()
-            if len(gene_snapshot) == 32:  # SHA-256 hash
-                self.current_pack_file.write(gene_anchor)  # 32B constant anchor
-                self.current_pack_file.write(struct.pack("<I", self._cycle_index))  # 4B cycle_index
-                self.current_pack_file.write(
-                    gene_snapshot[:4]
-                )  # 4B salt (first 4 bytes of current snapshot)
+        
+        # Create pack path
+        pack_dir = self.base_path / "agency" / "g1_information" / self.shard
+        pack_path = pack_dir / f"{self.current_pack_uuid}-genome.dat"
+        
+        try:
+            # Open new pack file
+            self.current_pack_file = open(pack_path, "wb")
+            
+            # Write header
+            if self._encryption_enabled and self._gyrocrypt_key:
+                # GyroCrypt header (32B anchor + 4B cycle_index + 4B salt)
+                gene_anchor = get_gene_anchor()
+                gene_snapshot = self.get_current_cycle_decoded()
+                
+                self.current_pack_file.write(gene_anchor)  # 32B
+                self.current_pack_file.write(struct.pack("<I", self._cycle_index))  # 4B
+                self.current_pack_file.write(gene_snapshot[:4])  # 4B salt
             else:
-                # Fallback to old format if no valid snapshot
-                self.current_pack_file.write(struct.pack("B", 1))  # version
-                self.current_pack_file.write(struct.pack(">Q", int(datetime.utcnow().timestamp())))
-                self.current_pack_file.write(struct.pack(">I", 0))  # op count
-        else:
-            # Old format for non-encrypted packs
-            self.current_pack_file.write(struct.pack("B", 1))  # version
-            self.current_pack_file.write(struct.pack(">Q", int(datetime.utcnow().timestamp())))
-            self.current_pack_file.write(struct.pack(">I", 0))  # op count
+                # Simple header for unencrypted packs
+                version = 1
+                timestamp = int(datetime.utcnow().timestamp())
+                op_count = 0
+                
+                self.current_pack_file.write(struct.pack("B", version))  # 1B
+                self.current_pack_file.write(struct.pack(">Q", timestamp))  # 8B
+                self.current_pack_file.write(struct.pack(">I", op_count))  # 4B
+            
+            # Acquire exclusive lock
+            fcntl.flock(self.current_pack_file.fileno(), fcntl.LOCK_EX)
+            
+            # Reset byte counter
+            self.current_pack_bytes = 0
+            
+        except IOError as e:
+            print(f"Error opening pack file: {e}")
+            self.current_pack_file = None
+            raise
 
-        self.current_pack_bytes = 0
-        self._header_update_counter = 0
-
-    def _write_op_pair(self, op_pair):
-        """Buffer a single op-pair for cycle compression."""
-        # Add to pending cycle buffer
-        self._pending_cycle_buffer.append(op_pair)
-
-        # If we have a full cycle (48 op-pairs), we'll write it when CycleComplete arrives
-        if len(self._pending_cycle_buffer) >= 48:
-            # This should be handled by the cycle completion logic
-            pass
-
-    def _write_cycle(self, op_pairs, analysis, compressed_data=None):
+    def _flush_pack_file(self) -> None:
         """
-        Write a complete cycle to the pack file (compressed or raw).
+        Flush current pack file to disk and update header.
+        """
+        if not self.current_pack_file or self.current_pack_file.closed:
+            return
+        
+        try:
+            # Update header based on format
+            if self._encryption_enabled and self._gyrocrypt_key:
+                # Update cycle index in header
+                self.current_pack_file.seek(32)  # Skip anchor
+                self.current_pack_file.write(struct.pack("<I", self._cycle_index))
+            else:
+                # Update op count in header
+                self.current_pack_file.seek(9)  # Skip version and timestamp
+                self.current_pack_file.write(struct.pack(">I", self.current_pack_bytes))
+            
+            # Force flush to disk
+            self.current_pack_file.flush()
+            os.fsync(self.current_pack_file.fileno())
+            
+            # Return to end of file for further writing
+            self.current_pack_file.seek(0, 2)  # Seek to end
+            
+        except IOError as e:
+            print(f"Error flushing pack file: {e}")
+
+    def _write_cycle(self, op_pairs: List[Tuple[int, int]]) -> None:
+        """
+        Write a complete cycle to the pack file.
         
         Args:
             op_pairs: List of 48 op-pairs
-            analysis: Dict with pruning analysis results
-            compressed_data: Optional compressed data from InferenceEngine
         """
-        print(f"_write_cycle called with {len(op_pairs)} op-pairs, compressed_data={compressed_data is not None}")
+        if len(op_pairs) != 48:
+            raise ValueError(f"Cycle must have exactly 48 op-pairs, got {len(op_pairs)}")
         
-        # Check if we have compressed data
-        is_repeat = compressed_data is not None and "count" in compressed_data
-        repeat_count = compressed_data.get("count", 1) if compressed_data else 1
+        # Check if we need a new pack file
+        header_size = self.PACK_HEADER_SIZE if (self._encryption_enabled and self._gyrocrypt_key) else 13
+        cycle_size = 48  # 48 op-pairs, 1 byte each
         
-        print(f"is_repeat={is_repeat}, repeat_count={repeat_count}")
+        if (self.current_pack_bytes + cycle_size) > (self.pack_size - header_size):
+            self._open_current_pack()
         
-        if not self._cycle_compression_enabled or not is_repeat:
-            print("Writing raw 48 op-pairs...")
-            # Write raw 48 op-pairs
-            cycle_data = bytearray()
-            for op_pair in op_pairs:
-                op_code, tensor_id = op_pair
-                nibble = ((op_code & 0x7) << 1) | (tensor_id & 0x1)
-                cycle_data.append(nibble)
+        # Ensure pack file is open
+        if not self.current_pack_file or self.current_pack_file.closed:
+            self._open_current_pack()
+        if not self.current_pack_file:
+            raise RuntimeError("Failed to open pack file for writing.")
+        
+        # Format the cycle data
+        cycle_data = bytearray(48)
+        for i, (op_code, tensor_id) in enumerate(op_pairs):
+            # Pack each op-pair as a single byte
+            nibble = ((op_code & 0x7) << 1) | (tensor_id & 0x1)
+            cycle_data[i] = nibble
+        
+        # Apply encryption if enabled
+        if self._encryption_enabled and self._gyrocrypt_key:
+            # Generate keystream
+            gene_snapshot = self.get_current_cycle_decoded()
+            keystream = self._make_keystream(gene_snapshot, self._gyrocrypt_key)
             
-            print(f"Created cycle_data of {len(cycle_data)} bytes")
+            # XOR encrypt the cycle data
+            for i in range(len(cycle_data)):
+                cycle_data[i] ^= keystream[i % len(keystream)]
+        
+        # Write the cycle data
+        try:
+            self.current_pack_file.write(cycle_data)
+            self.current_pack_bytes += len(cycle_data)
             
-            # Apply encryption if enabled
-            if self._encryption_enabled and self._gyrocrypt_key:
-                print("Applying encryption...")
-                # Get gene snapshot for keystream generation
-                gene_snapshot = self.get_full_gene_snapshot()
-                if len(gene_snapshot) == 96 and self._gyrocrypt_key is not None:  # Full snapshot
-                    keystream = self._make_keystream(gene_snapshot, self._gyrocrypt_key)
-                    # XOR encrypt the cycle data
-                    for i in range(len(cycle_data)):
-                        cycle_data[i] ^= keystream[i]
-                    print("Encryption applied")
-                else:
-                    # Fallback: write unencrypted if no valid snapshot
-                    print("Fallback: no valid snapshot, writing unencrypted")
-                    pass
-            
-            # Increment cycle index for every cycle written (encrypted or not)
+            # Increment cycle index for next encryption
             self._cycle_index += 1
+            if self._cycle_index >= self.MAX_CYCLE_INDEX:
+                # Handle cycle index wrap
+                print("WARNING: Cycle index wrapped around")
+                self._cycle_index = 0
             
-            # Write the cycle data
-            print(f"Writing {len(cycle_data)} bytes to pack file...")
-            self._write_encrypted_cycle_data(bytes(cycle_data))
-            print("Cycle data written successfully")
-        else:
-            print("Writing compressed repeat token...")
-            # Write compressed repeat token
-            cycle_hash = None
-            if compressed_data and "hash" in compressed_data:
-                cycle_hash_str = compressed_data["hash"]
-                cycle_hash = int(cycle_hash_str, 16) if cycle_hash_str else hash(tuple(op_pairs))
+            # Flush after every cycle to ensure data durability.
+            self._flush_pack_file()
+                
+        except IOError as e:
+            print(f"Error writing cycle: {e}")
+            self._open_current_pack()
+            if not self.current_pack_file:
+                raise RuntimeError("Failed to open pack file for writing after IOError.")
+            # Retry write
+            self.current_pack_file.write(cycle_data)
+            self.current_pack_bytes += len(cycle_data)
+
+    def _make_keystream(self, snapshot: bytes, key: bytes) -> bytes:
+        """
+        Generate encryption keystream from gene snapshot and key.
+        
+        Args:
+            snapshot: 96-byte gene snapshot
+            key: Encryption key
             
-            # Increment cycle index for compressed cycles as well
-            self._cycle_index += 1
-            
-            self._write_compressed_cycle(repeat_count, cycle_hash)
-            print("Compressed cycle written successfully")
-
-    def _write_raw_op_pair(self, op_pair):
-        """Write a single op-pair directly to the pack file."""
-        # Check if current pack would exceed pack_size (excluding header)
-        header_size = (
-            40 if (self._encryption_enabled and self._gyrocrypt_key) else 13
-        )  # GyroCrypt vs old format
-        payload_size = self.current_pack_bytes + 1  # +1 for the new op-pair
-
-        if payload_size >= (self.pack_size - header_size):
-            # Current pack would exceed size limit, start new one
-            self._open_current_pack()
-
-        # Ensure file is open
-        if self.current_pack_file is None:
-            self._open_current_pack()
-
-        # At this point, file is definitely open
-        assert self.current_pack_file is not None
-
-        # Pack op-pair as 4-bit nibble to match byte_to_gyrations encoding
-        op_code, tensor_id = op_pair
-        nibble = ((op_code & 0x7) << 1) | (tensor_id & 0x1)
-        self.current_pack_file.write(struct.pack("B", nibble))
-
-        self.current_pack_bytes += 1
-        self._header_update_counter += 1
-
-        # Update op count in header periodically (every 256 ops) to reduce I/O
-        if self._header_update_counter >= 256:
-            self._update_header_count()
-            self._header_update_counter = 0
-
-    def _write_compressed_cycle(self, repeat_count, cycle_hash):
-        """Write a compressed cycle repeat token."""
-        # Check if current pack would exceed pack_size (excluding header)
-        header_size = (
-            40 if (self._encryption_enabled and self._gyrocrypt_key) else 13
-        )  # GyroCrypt vs old format
-        # Simplified compressed token: 1 byte type + 1 byte repeat count = 2 bytes
-        payload_size = self.current_pack_bytes + 2
-
-        if payload_size >= (self.pack_size - header_size):
-            # Current pack would exceed size limit, start new one
-            self._open_current_pack()
-
-        # Ensure file is open
-        if self.current_pack_file is None:
-            self._open_current_pack()
-
-        # At this point, file is definitely open
-        assert self.current_pack_file is not None
-
-        # Write simplified compressed token
-        self.current_pack_file.write(struct.pack("B", 0xFF))  # Compression marker
-        self.current_pack_file.write(
-            struct.pack("B", min(repeat_count, 255))
-        )  # Repeat count (capped at 255)
-
-        self.current_pack_bytes += 2
-        self._header_update_counter += 2
-
-        # Update op count in header periodically
-        if self._header_update_counter >= 256:
-            self._update_header_count()
-            self._header_update_counter = 0
-
-    def _update_header_count(self):
-        """Update the op count in the pack header."""
-        if self.current_pack_file:
-            if self._encryption_enabled and self._gyrocrypt_key:
-                # GyroCrypt format: update cycle_index at offset 32
-                self.current_pack_file.seek(32)
-                self.current_pack_file.write(struct.pack("<I", self._cycle_index))
-                self.current_pack_file.seek(0, 2)  # Go back to end
+        Returns:
+            48-byte keystream for cycle encryption
+        """
+        if len(snapshot) != 96:
+            # Pad or truncate to 96 bytes
+            if len(snapshot) < 96:
+                snapshot = snapshot + b'\x00' * (96 - len(snapshot))
             else:
-                # Old format: update op count at offset 9
-                self.current_pack_file.seek(9)  # Skip version and timestamp
-                self.current_pack_file.write(struct.pack(">I", self.current_pack_bytes))
-                self.current_pack_file.seek(0, 2)  # Go back to end
+                snapshot = snapshot[:96]
+        
+        # Ensure key is at least 32 bytes
+        padded_key = key + b'\x00' * (32 - len(key))
+        
+        # Split snapshot into four 24-byte quarters
+        quarters = []
+        for i in range(0, 96, 24):
+            quarters.append(snapshot[i:i+24])
+        
+        # Get gyration codes from key (first byte of each 8-byte chunk)
+        gyration_codes = [padded_key[i*8] & 0x3 for i in range(4)]
+        
+        # Apply permutations to each quarter based on gyration code
+        permuted_quarters = []
+        for i, quarter in enumerate(quarters):
+            code = gyration_codes[i]
+            q_array = bytearray(quarter)
+            
+            if code == 1:  # Left Inverse - global sign flip
+                for j in range(len(q_array)):
+                    q_array[j] ^= 0xFF
+            elif code == 2:  # Forward Gyration - flip rows 0,2
+                for row in [0, 2]:
+                    for col in range(6):
+                        idx = row * 6 + col
+                        if idx < len(q_array):
+                            q_array[idx] ^= 0xFF
+            elif code == 3:  # Backward Gyration - flip rows 1,3
+                for row in [1, 3]:
+                    for col in range(6):
+                        idx = row * 6 + col
+                        if idx < len(q_array):
+                            q_array[idx] ^= 0xFF
+            
+            permuted_quarters.append(bytes(q_array))
+        
+        # XOR pairs to create keystream
+        keystream = bytearray(48)
+        for i in range(24):
+            keystream[i] = permuted_quarters[0][i] ^ permuted_quarters[1][i]
+            keystream[i+24] = permuted_quarters[2][i] ^ permuted_quarters[3][i]
+        
+        return bytes(keystream)
 
-    def _persist_pattern_promotion(self, promotion: PatternPromotion):
-        """Persist a newly promoted pattern to curriculum."""
-        # Update curriculum
-        self.curriculum["patterns"][promotion.pattern_id] = {
-            "sequence": [{"op": op, "tensor": tid} for op, tid in promotion.op_sequence],
-            "frequency": promotion.frequency,
-            "discovered": datetime.utcnow().isoformat(),
+    def get_current_cycle_decoded(self) -> bytes:
+        """
+        Get a full 96-byte snapshot for encryption by flattening the S1 gene tensors.
+        
+        This is the definitive, deterministic snapshot required for reproducible
+        encryption. It is based *only* on the immutable gene constants.
+        
+        Returns:
+            96-byte snapshot suitable for keystream generation.
+        """
+        # Get the immutable gene tensors from S1
+        gene_tensors = get_gene_tensors()
+        
+        # Ensure the tensors are in the expected format
+        id_0 = gene_tensors["id_0"].numpy().tobytes()
+        id_1 = gene_tensors["id_1"].numpy().tobytes()
+        
+        # Each tensor is 4x2x3x2 int8 = 48 bytes. Concatenated, they are 96 bytes.
+        if len(id_0) != 48 or len(id_1) != 48:
+            raise ValueError(f"Unexpected tensor size. id_0: {len(id_0)}, id_1: {len(id_1)}")
+            
+        return id_0 + id_1
+
+    def generate(self, prompt: bytes = b"", max_length: int = 100) -> bytes:
+        """
+        Generate new bytes based on learned patterns.
+        
+        Args:
+            prompt: Initial bytes to process before generating
+            max_length: Maximum number of bytes to generate
+            
+        Returns:
+            Generated byte sequence
+        """
+        # Process prompt if provided
+        if prompt:
+            self.process_stream(prompt)
+        
+        # Generate new bytes
+        generated = bytearray()
+        for _ in range(max_length):
+            # Predict two op-pairs
+            op_pair1 = self.inference_engine.predict_next_operation(self.curriculum)
+            op_pair2 = self.inference_engine.predict_next_operation(self.curriculum)
+            
+            # Convert to byte
+            next_byte = gyrations_to_byte(op_pair1, op_pair2)
+            generated.append(next_byte)
+            
+            # Process the generated byte to update state
+            self.process_stream(bytes([next_byte]))
+        
+        return bytes(generated)
+
+    def get_state(self) -> Dict[str, Any]:
+        """
+        Get the current state of the engine.
+        
+        Returns:
+            Dictionary with engine state
+        """
+        return {
+            "agent_uuid": self.agent_uuid,
+            "governance": self.governance_engine.get_state(),
+            "information": self.information_engine.get_state(),
+            "inference": self.inference_engine.get_state(),
+            "encryption_enabled": self._encryption_enabled,
+            "cycle_index": self._cycle_index,
+            "curriculum_size": len(self.curriculum["patterns"]),
+            "pack_bytes": self.current_pack_bytes,
         }
 
-        # Write new curriculum version
-        curriculum_uuid = str(uuid.uuid4())
-        curriculum_dir = os.path.join(self.base_path, "agency", "g4_information", self.shard)
-        os.makedirs(curriculum_dir, exist_ok=True)
-
-        curriculum_path = os.path.join(curriculum_dir, f"{curriculum_uuid}-curriculum.json")
-        with open(curriculum_path, "w") as f:
-            json.dump(self.curriculum, f, indent=2)
-
-        # Also update the agent's local copy
-        agent_curriculum_path = os.path.join(
-            self.base_path,
-            "agents",
-            self.shard,
-            self.agent_uuid,
-            "g4_information",
-            "curriculum.json",
-        )
-        with open(agent_curriculum_path, "w") as f:
-            json.dump(self.curriculum, f, indent=2)
-
-    def _update_session(self):
-        """Update and persist session state."""
-        # Update session data
-        gov_state = self.governance_engine.get_state()
-        self.session.update(
-            {
-                "phase": gov_state["phase"],
-                "cycle_count": gov_state["cycle_count"],
-                "last_checkpoint": datetime.utcnow().isoformat(),
-            }
-        )
-
-        # Update GyroCrypt cycle index if encryption is enabled
-        if self._encryption_enabled and self._gyrocrypt_key:
-            self.session["cycle_index"] = self._cycle_index
-
-        # Ensure agent directories exist
-        agent_dir = os.path.join(self.base_path, "agents", self.shard, self.agent_uuid)
-        os.makedirs(os.path.join(agent_dir, "g4_information"), exist_ok=True)
-        os.makedirs(os.path.join(agent_dir, "g5_information"), exist_ok=True)
-
-        # Write session with backup
-        session_path = os.path.join(agent_dir, "g5_information", "session.json")
-        backup_path = session_path + ".bak"
-
-        # Backup existing if present
-        if os.path.exists(session_path):
-            if os.path.exists(backup_path):
-                os.remove(backup_path)
-            os.rename(session_path, backup_path)
-
-        # Write new session
-        with open(session_path, "w") as f:
-            json.dump(self.session, f, indent=2)
-
-    def learn_token_mapping(self, tokens_bytes: Dict[str, bytes]):
+    def learn_token_mapping(self, tokens_bytes: Dict[str, bytes]) -> None:
         """
         Learn mappings between tokens and byte sequences.
-
+        
         Args:
             tokens_bytes: Dictionary mapping token strings to byte sequences
         """
         for token, byte_seq in tokens_bytes.items():
             # Store byte sequence as list of integers
             byte_list = list(byte_seq)
-
+            
             # Update curriculum dictionaries
-            byte_key = str(byte_list)  # Use string representation as key
+            byte_key = str(byte_list)
             self.curriculum["byte_to_token"][byte_key] = token
             self.curriculum["token_to_byte"][token] = byte_list
-
-        # Persist updated curriculum
+        
+        # Save updated curriculum
         self._persist_curriculum()
 
-    def _persist_curriculum(self):
-        """Save the current curriculum."""
-        # Write to agent's local copy
-        agent_curriculum_path = os.path.join(
-            self.base_path,
-            "agents",
-            self.shard,
-            self.agent_uuid,
-            "g4_information",
-            "curriculum.json",
-        )
-        with open(agent_curriculum_path, "w") as f:
-            json.dump(self.curriculum, f, indent=2)
-
-        # Write new global version
-        curriculum_uuid = str(uuid.uuid4())
-        curriculum_dir = os.path.join(self.base_path, "agency", "g4_information", self.shard)
-        curriculum_path = os.path.join(curriculum_dir, f"{curriculum_uuid}-curriculum.json")
-        with open(curriculum_path, "w") as f:
-            json.dump(self.curriculum, f, indent=2)
-
-    def get_gene_snapshot(self) -> bytes:
+    def close(self) -> None:
         """
-        Get current gene snapshot for key derivation.
-
-        Returns:
-            96-byte gene configuration state
+        Close the engine and flush all data to disk.
         """
-        snapshot = self.inference_engine.get_gene_snapshot()
-        return snapshot.snapshot_hash
+        try:
+            # Update session state
+            self._update_session()
+            
+            # Flush and close pack file
+            if self.current_pack_file and not self.current_pack_file.closed:
+                self._flush_pack_file()
+                fcntl.flock(self.current_pack_file.fileno(), fcntl.LOCK_UN)
+                self.current_pack_file.close()
+                self.current_pack_file = None
+        except Exception as e:
+            print(f"Error closing engine: {e}")
 
-    def get_full_gene_snapshot(self) -> bytes:
+    def __del__(self) -> None:
         """
-        Get full 96-byte gene snapshot for GyroCrypt keystream generation.
-
-        Returns:
-            96-byte gene state derived from tensor data
+        Ensure cleanup on garbage collection.
         """
-        snapshot = self.inference_engine.get_gene_snapshot()
-
-        # Convert tensor data to 96-byte representation
-        gene_state = snapshot.gene_state
-        tensor_0 = gene_state["id_0"]  # 4x2x3x2 tensor
-        tensor_1 = gene_state["id_1"]  # 4x2x3x2 tensor
-
-        # Flatten tensors to bytes
-        # Each tensor is 4x2x3x2 = 48 elements, each element is 1 byte
-        # Convert from int8 (-1, 1) to uint8 (0, 255)
-        def tensor_to_bytes(tensor):
-            # Flatten to 1D array
-            flat = tensor.flatten()
-            # Convert from int8 to uint8: -1 -> 0, 1 -> 255
-            bytes_data = bytearray(48)
-            for i, val in enumerate(flat):
-                bytes_data[i] = 0 if val == -1 else 255
-            return bytes(bytes_data)
-
-        # Combine both tensors: 48 + 48 = 96 bytes
-        snapshot_bytes = tensor_to_bytes(tensor_0) + tensor_to_bytes(tensor_1)
-        return snapshot_bytes
-
-    def get_state(self) -> Dict[str, Any]:
-        """Get complete engine state."""
-        return {
-            "agent_uuid": self.agent_uuid,
-            "session": self.session,
-            "governance": self.governance_engine.get_state(),
-            "information": self.information_engine.get_state(),
-            "inference": self.inference_engine.get_state(),
-            "pack_buffer_size": self.current_pack_bytes,
-        }
-
-    def close(self):
-        """Explicitly close the engine and flush all data to disk."""
-        # Write any remaining buffered op-pairs
-        if self._pending_cycle_buffer:
-            # Write remaining op-pairs as raw data
-            for op_pair in self._pending_cycle_buffer:
-                self._write_raw_op_pair(op_pair)
-            self._pending_cycle_buffer = []
-
-        if hasattr(self, "current_pack_file") and self.current_pack_file:
-            # Update header count before closing
-            self._update_header_count()
-            self.current_pack_file.flush()  # Guarantee header hits disk
-            self.current_pack_file.close()
-            self.current_pack_file = None
-
-    def __del__(self):
-        """Cleanup when the engine is destroyed."""
-        # Write any remaining buffered op-pairs
-        if hasattr(self, "_pending_cycle_buffer") and self._pending_cycle_buffer:
-            for op_pair in self._pending_cycle_buffer:
-                self._write_raw_op_pair(op_pair)
-
-        if hasattr(self, "current_pack_file") and self.current_pack_file:
-            # Update header count before closing
-            self._update_header_count()
-            self.current_pack_file.close()
-
-    def _permute_quarter(self, block: bytes, code: int) -> bytes:
-        # block is 24 bytes, each either 0 or 255
-        b = bytearray(block)
-        if code == 1:  # inverse – flip every sign
-            for i in range(24):
-                b[i] ^= 0xFF  # 0 ↔ 255
-        elif code == 2:  # forward – rows 0 and 2
-            for row in (0, 2):
-                for col in range(6):
-                    idx = row * 6 + col
-                    b[idx] ^= 0xFF
-        elif code == 3:  # backward – rows 1 and 3
-            for row in (1, 3):
-                for col in range(6):
-                    idx = row * 6 + col
-                    b[idx] ^= 0xFF
-        # code 0: identity – nothing to do
-        return bytes(b)
-
-    def _make_keystream(self, snapshot: bytes, key: bytes) -> bytes:
-        """
-        Generate 48-byte keystream from gene snapshot and agent key.
-        Args:
-            snapshot: 96-byte gene snapshot
-            key: Agent's encryption key (16-32 bytes)
-        Returns:
-            48-byte keystream for XOR encryption
-        """
-        if len(snapshot) != 96:
-            raise ValueError(f"Snapshot must be 96 bytes, got {len(snapshot)}")
-        # Split snapshot into four 24-byte quarters
-        Q0 = snapshot[0:24]
-        Q1 = snapshot[24:48]
-        Q2 = snapshot[48:72]
-        Q3 = snapshot[72:96]
-        # Pad key to 32 bytes if needed
-        padded_key = key + b"\x00" * (32 - len(key))
-        # Extract gyration codes from key (4 chunks of 8 bytes each)
-        gyration_codes = []
-        for i in range(4):
-            chunk = padded_key[i * 8 : (i + 1) * 8]
-            # Use low 2 bits of first byte for gyration code
-            gyration_codes.append(chunk[0] & 0x03)
-        # Apply direct permutation to each quarter
-        Q0_bytes = self._permute_quarter(Q0, gyration_codes[0])
-        Q1_bytes = self._permute_quarter(Q1, gyration_codes[1])
-        Q2_bytes = self._permute_quarter(Q2, gyration_codes[2])
-        Q3_bytes = self._permute_quarter(Q3, gyration_codes[3])
-        # XOR pairs: (Q0⊕Q1) || (Q2⊕Q3) → 48 bytes
-        keystream = bytearray(48)
-        for i in range(24):
-            keystream[i] = Q0_bytes[i] ^ Q1_bytes[i]
-            keystream[i + 24] = Q2_bytes[i] ^ Q3_bytes[i]
-        return bytes(keystream)
-
-    def _write_encrypted_cycle_data(self, cycle_data: bytes):
-        """Write encrypted cycle data to the pack file."""
-        print(f"_write_encrypted_cycle_data called with {len(cycle_data)} bytes")
-        
-        # Check if current pack would exceed pack_size (excluding header)
-        header_size = (
-            40 if (self._encryption_enabled and self._gyrocrypt_key) else 13
-        )  # GyroCrypt vs old format
-        payload_size = self.current_pack_bytes + len(cycle_data)
-
-        print(f"header_size={header_size}, current_pack_bytes={self.current_pack_bytes}, payload_size={payload_size}, pack_size={self.pack_size}")
-
-        if payload_size >= (self.pack_size - header_size):
-            # Current pack would exceed size limit, start new one
-            print("Pack would exceed size limit, starting new pack...")
-            self._open_current_pack()
-
-        # Ensure file is open
-        if self.current_pack_file is None:
-            print("No pack file open, opening new one...")
-            self._open_current_pack()
-
-        # At this point, file is definitely open
-        assert self.current_pack_file is not None
-        print(f"Pack file is open: {self.current_pack_file}")
-
-        # Write the encrypted cycle data
-        print(f"Writing {len(cycle_data)} bytes to pack file...")
-        self.current_pack_file.write(cycle_data)
-        print("Data written to file")
-
-        self.current_pack_bytes += len(cycle_data)
-        self._header_update_counter += len(cycle_data)
-        print(f"Updated counters: current_pack_bytes={self.current_pack_bytes}, header_update_counter={self._header_update_counter}")
-
-        # Update header periodically
-        if self._header_update_counter >= 256:
-            print("Updating header count...")
-            self._update_header_count()
-            self._header_update_counter = 0
+        self.close()
 
 
 # System-level functions
-def initialize_system():
+def initialize_system() -> Dict[str, Any]:
     """
-    Create the S2 directory structure if missing and verify seed files.
-    Returns paths and version info.
+    Create the S2 directory structure and initialize the system.
+    
+    Returns:
+        Dictionary with system information
     """
-    base_path = "s2_information"
-
+    base_path = Path("s2_information")
+    
     # Create base directories
-    os.makedirs(base_path, exist_ok=True)
-    os.makedirs(os.path.join(base_path, "agency"), exist_ok=True)
-
+    base_path.mkdir(exist_ok=True)
+    (base_path / "agency").mkdir(exist_ok=True)
+    
     # Create agency subdirectories
     for subdir in ["g1_information", "g2_information", "g4_information", "g5_information"]:
-        os.makedirs(os.path.join(base_path, "agency", subdir), exist_ok=True)
-
+        (base_path / "agency" / subdir).mkdir(exist_ok=True)
+    
     # Create shard directories
     for subdir in ["g1_information", "g4_information", "g5_information"]:
-        for i in range(256):
-            shard = f"{i:02x}"
-            os.makedirs(os.path.join(base_path, "agency", subdir, shard), exist_ok=True)
-
+        for i in range(16):
+            for j in range(16):
+                shard = f"{i:x}{j:x}"
+                (base_path / "agency" / subdir / shard).mkdir(exist_ok=True)
+    
     # Create agents directory
-    os.makedirs(os.path.join(base_path, "agents"), exist_ok=True)
-    for i in range(256):
-        shard = f"{i:02x}"
-        os.makedirs(os.path.join(base_path, "agents", shard), exist_ok=True)
-
-    # Write manifest
-    manifest = {"version": "1.0", "pack_size": 65536, "shard_prefix_length": 2}
-
-    manifest_path = os.path.join(base_path, "s2_manifest.json")
+    (base_path / "agents").mkdir(exist_ok=True)
+    for i in range(16):
+        for j in range(16):
+            shard = f"{i:x}{j:x}"
+            (base_path / "agents" / shard).mkdir(exist_ok=True)
+    
+    # Create manifest
+    manifest = {
+        "version": "1.0",
+        "pack_size": 65536,
+        "shard_prefix_length": 2,
+        "initialized": datetime.utcnow().isoformat()
+    }
+    
+    manifest_path = base_path / "s2_manifest.json"
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
-
+    
     # Generate epigenome if not exists
-    epigenome_path = os.path.join(base_path, "agency", "g2_information", "g2_information.dat")
-    if not os.path.exists(epigenome_path):
-        import s1_governance
-
-        s1_governance.build_epigenome_projection(epigenome_path)
-
+    epigenome_path = base_path / "agency" / "g2_information" / "g2_information.dat"
+    if not epigenome_path.exists():
+        build_epigenome_projection(str(epigenome_path))
+    
     return {
-        "base_path": base_path,
-        "manifest_path": manifest_path,
-        "epigenome_path": epigenome_path,
+        "base_path": str(base_path),
+        "manifest_path": str(manifest_path),
+        "epigenome_path": str(epigenome_path),
         "version": manifest["version"],
+        "status": "initialized"
     }
 
 
 def create_agent(agent_uuid: Optional[str] = None) -> str:
     """
     Create a new agent with empty curriculum and session files.
-    Returns the agent UUID.
+    
+    Args:
+        agent_uuid: Optional UUID for the agent
+        
+    Returns:
+        Agent UUID
     """
+    # Generate UUID if not provided
     agent_id = agent_uuid or str(uuid.uuid4())
     shard = get_shard_from_uuid(agent_id)
-
+    
+    # Base path
+    base_path = Path("s2_information")
+    
     # Create agent directories
-    base_path = "s2_information"
-    agent_dir = os.path.join(base_path, "agents", shard, agent_id)
-    os.makedirs(os.path.join(agent_dir, "g4_information"), exist_ok=True)
-    os.makedirs(os.path.join(agent_dir, "g5_information"), exist_ok=True)
-
+    agent_dir = base_path / "agents" / shard / agent_id
+    (agent_dir / "g4_information").mkdir(parents=True, exist_ok=True)
+    (agent_dir / "g5_information").mkdir(parents=True, exist_ok=True)
+    
     # Create empty curriculum
     curriculum = {
         "version": "1.0",
         "patterns": {},
         "byte_to_token": {},
         "token_to_byte": {},
-        "metadata": {"created": datetime.utcnow().isoformat()},
+        "metadata": {"created": datetime.utcnow().isoformat()}
     }
-
-    with open(os.path.join(agent_dir, "g4_information", "curriculum.json"), "w") as f:
+    
+    with open(agent_dir / "g4_information" / "curriculum.json", "w") as f:
         json.dump(curriculum, f, indent=2)
-
+    
     # Create empty session
     session = {
         "agent_uuid": agent_id,
@@ -958,76 +982,105 @@ def create_agent(agent_uuid: Optional[str] = None) -> str:
         "last_checkpoint": None,
         "phase": 0,
         "cycle_count": 0,
-        "active_curriculum": None,
-        "compression_metadata": [],  # Store compression details here
+        "active_curriculum": None
     }
-
-    with open(os.path.join(agent_dir, "g5_information", "session.json"), "w") as f:
+    
+    with open(agent_dir / "g5_information" / "session.json", "w") as f:
         json.dump(session, f, indent=2)
-
+    
     return agent_id
 
 
 def load_epigenome_tensor(
-    path: str = "s2_information/agency/g2_information/g2_information.dat",
+    path: str = "s2_information/agency/g2_information/g2_information.dat"
 ) -> np.ndarray:
     """
     Load the epigenome projection table into memory.
+    
+    Args:
+        path: Path to the epigenome projection file
+        
+    Returns:
+        48x256 numpy array of epigenome values
     """
-    with open(path, "rb") as f:
-        # Skip 32-byte SHA-256 header
-        f.read(32)
-        # Read 48x256 table
-        data = f.read(48 * 256)
-        return np.frombuffer(data, dtype=np.uint8).reshape(48, 256)
+    try:
+        with open(path, "rb") as f:
+            # Skip 32-byte SHA-256 header
+            header = f.read(32)
+            if len(header) != 32:
+                raise ValueError(f"Invalid epigenome header size: {len(header)}")
+            
+            # Read 48x256 table
+            data = f.read(48 * 256)
+            if len(data) != 48 * 256:
+                raise ValueError(f"Invalid epigenome data size: {len(data)}")
+            
+            return np.frombuffer(data, dtype=np.uint8).reshape(48, 256)
+    except Exception as e:
+        print(f"Error loading epigenome: {e}")
+        # Return empty epigenome as fallback
+        return np.zeros((48, 256), dtype=np.uint8)
 
 
 def set_active_agent(agent_uuid: str) -> IntelligenceEngine:
     """
     Create and return an IntelligenceEngine for the specified agent.
+    
+    Args:
+        agent_uuid: UUID of the agent to activate
+        
+    Returns:
+        Initialized IntelligenceEngine
     """
     return IntelligenceEngine(agent_uuid=agent_uuid)
 
 
 def process_stream(data_bytes: bytes, agent_uuid: Optional[str] = None) -> Dict[str, List[Any]]:
     """
-    Process a byte stream through GyroSI.
-
+    Process a byte stream through the GyroSI pipeline.
+    
+    This is a convenience function that creates a temporary engine,
+    processes the data, and then closes the engine.
+    
     Args:
         data_bytes: Raw bytes to process
         agent_uuid: Optional agent UUID
-
+        
     Returns:
         Dictionary of all emitted artifacts
     """
-    engine = IntelligenceEngine(agent_uuid)
+    engine = IntelligenceEngine(agent_uuid=agent_uuid)
     try:
         return engine.process_stream(data_bytes)
     finally:
         engine.close()
 
 
-def generate_text(prompt: str = "", max_length: int = 100, agent_uuid: Optional[str] = None) -> str:
+def generate_text(
+    prompt: str = "", 
+    max_length: int = 100, 
+    agent_uuid: Optional[str] = None
+) -> str:
     """
     Generate text using the GyroSI Baby LM.
-
+    
     Args:
         prompt: Initial text to seed the generation
         max_length: Maximum number of characters to generate
         agent_uuid: Optional agent UUID
-
+        
     Returns:
         Generated text
     """
-    engine = IntelligenceEngine(agent_uuid)
+    engine = IntelligenceEngine(agent_uuid=agent_uuid)
     try:
         # Process the prompt
         if prompt:
             engine.process_stream(prompt.encode("utf-8"))
-
+        
         # Generate bytes
         generated_bytes = engine.generate(b"", max_length)
-
+        
         # Try to decode as UTF-8, falling back to latin-1 if needed
         try:
             return generated_bytes.decode("utf-8")

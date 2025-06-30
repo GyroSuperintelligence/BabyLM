@@ -1,5 +1,6 @@
 {
   "version": "1.0",
   "pack_size": 65536,
-  "shard_prefix_length": 2
+  "shard_prefix_length": 2,
+  "initialized": "2025-06-30T16:09:29.624543"
 }

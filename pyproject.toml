@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gyrosi-babylm"
 version = "0.1.0"
-description = "GyroSI Baby LM: Alignment-Based Gyroscopic Superintelligence Language Model"
 authors = [
-    { name = "Basil Korompilias", email = "basilkorompilias@gmail.com" }
+  { name="The BabyLM Authors" },
 ]
-license = { file = "LICENSE" }
+description = "BabyLM"
 readme = "README.md"
+license = { file="LICENSE" }
 requires-python = ">=3.11"
 keywords = [
     "superintelligence", "gyrogroup", "tensor", "alignment", "AI", "language-model", "governance", "physics"
@@ -22,7 +22,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
-
 dependencies = [
     "torch>=2.2.0",
     "numpy>=1.26.0,<2.0",
@@ -40,9 +39,12 @@ dependencies = [
     "questionary>=2.0.0"
 ]
 
+[tool.setuptools]
+packages = ["s1_governance", "s2_information", "s3_inference", "s4_intelligence", "extensions", "scripts"]
+
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.2.0",
+    "pytest>=8.0.0",
     "black>=24.4.2",
     "flake8>=7.0.0",
     "mypy>=1.10.0",

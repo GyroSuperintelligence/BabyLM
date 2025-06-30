@@ -435,7 +435,7 @@
         
         Each genome step is one uint8 (8-bit) value that captures two discrete gyration instructions, one for each gene tensor (`id_0` and `id_1`). The 8 bits are divided evenly into two **4-bit segments**, each representing a navigation command for one gene tensor.
         
-        The Genome writes only the 4‑bit ops, never a new Gene snapshot.
+        The Genome writes only the 4‑bit ops, never a new Cycle Decoded.
         
         - **Each 4-bit segment** corresponds to:
             - **3 bits** for the operator code (bits 3–1 within the segment)
@@ -642,7 +642,7 @@
     
     - Sliding window of recent op-pairs (usually 48)
     - Short-code dictionary (for learned 2–16 op-pair macros)
-    - Optional Gene snapshot tracker (for key derivation)
+    - Optional Cycle Decoded tracker (for key derivation)
     
     **Input:**
     
@@ -659,14 +659,14 @@
         - Assign short-codes when patterns reach promotion threshold
         - Ensure lossless reversibility at all times
     3. **Key derivation (deterministic)**
-        - At any time, return the current 96-byte Gene configuration state (post-op traversal)
+        - At any time, return the current 96-byte Current Cycle Decoded (post-op traversal)
         - S4 may hash this snapshot to derive stream keys, signatures, or checkpoints
     
     **Emits (to S4):**
     
     - `compressed_block`: either a cycle repeat tag or a full 48-op log
     - `pattern_promotion`: new short-code and its corresponding op-sequence
-    - `gene_snapshot`: (optional) unique fingerprint of current traversal state
+    - `current_cycle_decoded`: (optional) unique fingerprint of current traversal state
     
     ---
     
@@ -1037,7 +1037,7 @@
     3. **g3_inference.py**
         - Maintains sliding window of op‑pairs
         - Detects cycle repeats and pattern promotions
-        - Emits `compressed_block`, `pattern_promotion`, `gene_snapshot`
+        - Emits `compressed_block`, `pattern_promotion`, `current_cycle_decoded`
     
     *No module in S3 performs any disk writes; all outputs are streamed to S4.*
     
@@ -1213,7 +1213,7 @@
     | `cycle_complete` | `cycle_id`, `phase` |
     | `compressed_block` | `data`, `original_size` |
     | `pattern_promotion` | `code`, `sequence`, `frequency` |
-    | `gene_snapshot` | `fingerprint`, `timestamp` |
+    | `current_cycle_decoded` | `fingerprint`, `timestamp` |
     
     The caller receives events in the exact order they occur.
     
@@ -1295,7 +1295,7 @@
     
     1. **Deterministic traceability**
         
-        Ciphertext is derived solely from the agent's secret key, the exact Gene snapshot, and the cycle index. Any auditor with those three can recompute the keystream and confirm integrity.
+        Ciphertext is derived solely from the agent's secret key, the exact Cycle Decoded, and the cycle index. Any auditor with those three can recompute the keystream and confirm integrity.
         
     2. **Physics‑native mixing**
         
@@ -1355,7 +1355,7 @@
     
     ## 4. Keystream generation
     
-    On each `cycle_complete`, S4 receives a 96‑byte **Gene snapshot**. It produces a 48‑byte keystream:
+    On each `cycle_complete`, S4 receives a 96‑byte **Cycle Decoded**. It produces a 48‑byte keystream:
     
     1. **Split** into four 24‑byte quarters: Q₀, Q₁, Q₂, Q₃.
     2. **Permute** each Qi by applying its assigned gyration (from section 3.1).

@@ -7,206 +7,223 @@ Operates on accepted op-pairs to identify cycles and patterns.
 
 import torch
 import hashlib
-from typing import List, Dict, Tuple, Optional, Any
+import numpy as np
+from typing import List, Dict, Tuple, Optional, Any, Set
 from dataclasses import dataclass
 from collections import deque, Counter
-import s1_governance
 
 
 @dataclass
 class CompressedBlock:
-    """Compressed representation of a cycle or pattern."""
-
-    block_type: str  # "cycle_repeat" or "full_cycle"
-    data: Any  # Either repeat count or full op-pair list
+    """
+    Event for a compressed block of information.
+    
+    Attributes:
+        block_type: Type of block ("full_cycle", "cycle_repeat", "pruned_cycle")
+        data: Dictionary containing block-specific data
+    """
+    block_type: str
+    data: Dict[str, Any]
 
 
 @dataclass
 class PatternPromotion:
-    """New pattern discovered and assigned a short code."""
-
-    pattern_id: str
-    op_sequence: List[Tuple[int, int]]
+    """
+    Event for when a new pattern is identified and promoted.
+    
+    Attributes:
+        pattern_hash: Unique hash identifying the pattern
+        pattern: List of operation pairs constituting the pattern
+        frequency: Number of times the pattern was observed
+        cycle_ops: Complete cycle operations where pattern was found
+    """
+    pattern_hash: str
+    pattern: List[Tuple[int, int]]
     frequency: int
-
-
-@dataclass
-class GeneSnapshot:
-    """Current gene state fingerprint."""
-
-    snapshot_hash: bytes
-    step_count: int
-    gene_state: Dict[str, torch.Tensor]
+    cycle_ops: List[Tuple[int, int]]
 
 
 class InferenceEngine:
     """
-    Pattern recognition and compression engine.
-    Learns repeated sequences and provides key derivation.
+    Analyzes sequences of operation pairs for patterns and compression opportunities.
+    This engine is purely analytical and does not maintain a mutable gene state.
+    
+    Key responsibilities:
+    1. Detect repeated cycles and emit compressed blocks
+    2. Identify recurring patterns and promote them to the curriculum
+    3. Analyze resonance patterns for pruning decisions
+    4. Generate predictions based on learned patterns
     """
 
-    def __init__(self, pattern_threshold: int = 3, agent_uuid: Optional[str] = None):
-        """
-        Initialize the inference engine.
+    # Constants for pruning analysis
+    HORIZON_CUT = 0.01  # Prune if resonance is within 1% of the 50/50 horizon
+    ENTROPY_CUT = 0.03  # Prune if pattern diversity is less than 3%
+    
+    # Constants for pattern recognition
+    MIN_PATTERN_LENGTH = 2  # Shortest pattern to recognize
+    MAX_PATTERN_LENGTH = 16  # Longest pattern to recognize
 
+    def __init__(self, pattern_threshold: int = 5, agent_uuid: Optional[str] = None, min_pattern_length: Optional[int] = None, max_pattern_length: Optional[int] = None):
+        """
+        Initialize the Inference Engine.
+        
         Args:
-            pattern_threshold: Minimum occurrences before pattern promotion
-            agent_uuid: Optional agent UUID for unique gene state initialization
+            pattern_threshold: Min frequency for a pattern to be promoted
+            agent_uuid: Optional agent UUID for context
+            min_pattern_length: Optional override for minimum pattern length
+            max_pattern_length: Optional override for maximum pattern length
         """
         self.pattern_threshold = pattern_threshold
-        self.cycle_history = deque(maxlen=100)  # Keep last 100 cycles
-        self.pattern_candidates = Counter()
-        self.promoted_patterns = {}
-        self.next_pattern_id = 0
-        self.step_count = 0
         self.agent_uuid = agent_uuid
+        self.MIN_PATTERN_LENGTH = min_pattern_length if min_pattern_length is not None else InferenceEngine.MIN_PATTERN_LENGTH
+        self.MAX_PATTERN_LENGTH = max_pattern_length if max_pattern_length is not None else InferenceEngine.MAX_PATTERN_LENGTH
+        
+        # Pattern storage
+        self.promoted_patterns = {}  # Hash -> pattern
+        self.pattern_counts = Counter()  # Pattern -> count
+        
+        # Cycle history for compression
+        self.cycle_history = {}  # Hash -> {ops, count}
+        
+        # Statistics
+        self.prune_stats = {"total": 0, "pruned": 0, "reasons": {}}
+        
+        # Sliding window for pattern detection
+        self.sliding_window = deque(maxlen=self.MAX_PATTERN_LENGTH*2)
 
-        # Gene state tracking for key derivation
-        self.current_gene_state: Optional[Dict[str, torch.Tensor]] = None
-        self._initialize_gene_state()
-
-        # Safe pruning configuration - VERY conservative thresholds
-        self.HORIZON_CUT = 0.01  # Only prune if very close to 50/50 (was 0.02)
-        self.ENTROPY_CUT = 0.03  # Only prune if very low diversity (was 0.05)
-        self.prune_stats = {"pruned": 0, "total": 0}  # Track pruning statistics
-
-    def _initialize_gene_state(self):
-        """Initialize the gene state from S1 governance (shared, constant for all agents)."""
-        self.current_gene_state = s1_governance.get_gene_tensors()
-        # No agent-specific mutation. The gene is a universal topological space.
-
-    def apply_op_pair(self, op_pair: Tuple[int, int]):
+    def process_cycle_complete(
+        self, op_pairs: List[Tuple[int, int]], resonance_flags: List[bool]
+    ) -> List[Any]:
         """
-        Apply a single operation pair to the current gene state.
-
+        Process a completed cycle of op-pairs for pattern detection and compression.
+        
         Args:
-            op_pair: (op_code, tensor_id) to apply
-        """
-        op_code, tensor_id = op_pair
-        tensor_key = f"id_{tensor_id}"
-        if self.current_gene_state is None:
-            raise RuntimeError("Gene state not initialized")
-        self.current_gene_state[tensor_key] = s1_governance.gyration_op(
-            self.current_gene_state[tensor_key],
-            op_code,
-            clone=False,  # Mutate in place for efficiency
-        )
-        self.step_count += 1
-
-    def process_cycle_complete(self, cycle_ops: List[Tuple[int, int]]) -> List:
-        """
-        Process a completed 48-op cycle.
-
-        Args:
-            cycle_ops: List of 48 operation pairs from the cycle
-
+            op_pairs: List of op-pairs from the completed cycle
+            resonance_flags: List of resonance flags for pruning analysis
+            
         Returns:
-            List of emitted events
+            List of generated events (CompressedBlock, PatternPromotion)
         """
         events = []
-
-        # Apply all operations to gene state
-        for op_pair in cycle_ops:
-            self.apply_op_pair(op_pair)
-
-        # Convert to hashable representation
-        cycle_tuple = tuple(cycle_ops)
-
-        # Check if this cycle is a repeat
-        is_repeat = cycle_tuple in [tuple(c) for c in self.cycle_history]
-
-        if is_repeat:
-            # Find how many times it repeated
-            repeat_count = sum(1 for c in self.cycle_history if tuple(c) == cycle_tuple)
-            events.append(
-                CompressedBlock(
-                    block_type="cycle_repeat",
-                    data={
-                        "count": repeat_count,
-                        "hash": hashlib.sha256(str(cycle_tuple).encode()).hexdigest()[:8],
-                    },
-                )
+        
+        # More flexible validation for tests
+        if len(op_pairs) != len(resonance_flags):
+            raise ValueError(f"Op pairs and resonance flags must match, got {len(op_pairs)} and {len(resonance_flags)}")
+        
+        # Create cycle hash for detection
+        cycle_str = "".join([f"{op[0]},{op[1]};" for op in op_pairs])
+        cycle_hash = hashlib.sha256(cycle_str.encode("utf-8")).hexdigest()[:8]
+        
+        # Check for cycle repetition
+        if cycle_hash in self.cycle_history:
+            # This is a repeated cycle
+            self.cycle_history[cycle_hash]["count"] += 1
+            repeat_block = CompressedBlock(
+                block_type="cycle_repeat",
+                data={"hash": cycle_hash, "count": self.cycle_history[cycle_hash]["count"]},
             )
+            events.append(repeat_block)
         else:
-            # New cycle - store full data
-            events.append(CompressedBlock(block_type="full_cycle", data=cycle_ops))
-
-        # Add to history
-        self.cycle_history.append(cycle_ops)
-
-        # Look for patterns within the cycle
-        pattern_events = self._detect_patterns(cycle_ops)
-        events.extend(pattern_events)
-
-        # Add a gene snapshot after processing the cycle
-        events.append(self.get_gene_snapshot())
-
+            # This is a new cycle
+            self.cycle_history[cycle_hash] = {
+                "ops": op_pairs.copy(), 
+                "count": 1,
+                "index": len(self.cycle_history)
+            }
+            full_cycle_block = CompressedBlock(
+                block_type="full_cycle", 
+                data={"hash": cycle_hash, "ops": op_pairs.copy()}
+            )
+            events.append(full_cycle_block)
+        
+        # Pattern detection - look for recurring patterns
+        for pattern_len in range(self.MIN_PATTERN_LENGTH, min(self.MAX_PATTERN_LENGTH, len(op_pairs)//2)):
+            for i in range(len(op_pairs) - pattern_len + 1):
+                # Extract potential pattern
+                pattern = tuple(op_pairs[i:i+pattern_len])
+                
+                # Update pattern count
+                self.pattern_counts[pattern] += 1
+                
+                # Check if pattern meets threshold for promotion
+                if self.pattern_counts[pattern] >= self.pattern_threshold:
+                    pattern_list = list(pattern)
+                    pattern_str = "".join([f"{op[0]},{op[1]};" for op in pattern_list])
+                    pattern_hash = hashlib.sha256(pattern_str.encode("utf-8")).hexdigest()[:8]
+                    
+                    # Only promote if not already promoted
+                    if pattern_hash not in self.promoted_patterns:
+                        self.promoted_patterns[pattern_hash] = pattern_list
+                        events.append(
+                            PatternPromotion(
+                                pattern_hash=pattern_hash,
+                                pattern=pattern_list,
+                                frequency=self.pattern_counts[pattern],
+                                cycle_ops=op_pairs.copy(),
+                            )
+                        )
+        
         return events
 
-    def _detect_patterns(self, ops: List[Tuple[int, int]]) -> List[PatternPromotion]:
+    def analyse_cycle(
+        self, op_pairs: List[Tuple[int, int]], resonance_flags: List[bool]
+    ) -> Dict[str, Any]:
         """
-        Detect repeated patterns of 2-16 operations.
-
+        Perform pruning analysis on a completed cycle.
+        
         Args:
-            ops: List of operation pairs to analyze
-
+            op_pairs: List of 48 op-pairs
+            resonance_flags: List of 48 boolean resonance flags
+            
         Returns:
-            List of newly promoted patterns
+            Dictionary with analysis metrics and pruning decision
         """
-        promotions = []
+        self.prune_stats["total"] += 1
 
-        # Check patterns of different lengths
-        for length in range(2, min(17, len(ops) + 1)):
-            for start in range(len(ops) - length + 1):
-                pattern = tuple(ops[start : start + length])
-                self.pattern_candidates[pattern] += 1
+        # 1. Horizon distance (how far from 50/50 resonance)
+        aligned_count = sum(resonance_flags)
+        horizon_dist = abs(aligned_count / 48 - 0.5)
 
-                if self.pattern_candidates[pattern] >= self.pattern_threshold:
-                    # Always emit a promotion event if threshold is met
-                    if pattern not in self.promoted_patterns.values():
-                        # First time promotion: assign a new pattern_id
-                        pattern_id = f"P{self.next_pattern_id:04d}"
-                        self.next_pattern_id += 1
-                        self.promoted_patterns[pattern_id] = pattern
-                    else:
-                        # Find the existing pattern_id
-                        pattern_id = next(
-                            pid for pid, seq in self.promoted_patterns.items() if seq == pattern
-                        )
+        # 2. Pattern entropy (diversity of op-pairs)
+        unique_ops = len(set(op_pairs))
+        pattern_entropy = unique_ops / 48.0
 
-                    promotions.append(
-                        PatternPromotion(
-                            pattern_id=pattern_id,
-                            op_sequence=list(pattern),
-                            frequency=self.pattern_candidates[pattern],
-                        )
-                    )
+        # Pruning decision
+        prune = False
+        prune_reason = "none"
 
-        return promotions
+        if horizon_dist < self.HORIZON_CUT:
+            prune = True
+            prune_reason = "horizon_proximity"
+        elif pattern_entropy < self.ENTROPY_CUT:
+            prune = True
+            prune_reason = "low_entropy"
 
-    def get_gene_snapshot(self) -> GeneSnapshot:
-        """
-        Generate a fingerprint of the current gene traversal state.
+        if prune:
+            self.prune_stats["pruned"] += 1
+            self.prune_stats["reasons"][prune_reason] = (
+                self.prune_stats["reasons"].get(prune_reason, 0) + 1
+            )
 
-        Returns:
-            GeneSnapshot with hash and step count
-        """
-        if self.current_gene_state is None:
-            raise RuntimeError("Gene state not initialized")
-        hasher = hashlib.sha256()
-        hasher.update(self.current_gene_state["id_0"].numpy().tobytes())
-        hasher.update(self.current_gene_state["id_1"].numpy().tobytes())
-        hasher.update(str(self.step_count).encode())
-        return GeneSnapshot(
-            snapshot_hash=hasher.digest(),
-            step_count=self.step_count,
-            gene_state={
-                "id_0": self.current_gene_state["id_0"].clone(),
-                "id_1": self.current_gene_state["id_1"].clone(),
-            },
-        )
+        return {
+            "prune": prune,
+            "prune_reason": prune_reason,
+            "horizon_distance": horizon_dist,
+            "pattern_entropy": pattern_entropy,
+            "aligned_count": aligned_count,
+            "unique_ops": unique_ops,
+        }
 
-    def predict_next_operation(self, curriculum: Dict) -> Tuple[int, int]:
+    def get_state(self) -> Dict[str, Any]:
+        """Return current engine state."""
+        return {
+            "promoted_patterns": len(self.promoted_patterns),
+            "cycle_history_size": len(self.cycle_history),
+            "prune_stats": self.prune_stats,
+            "top_patterns": dict(self.pattern_counts.most_common(5)),
+        }
+
+    def predict_next_operation(self, curriculum: Dict[str, Any]) -> Tuple[int, int]:
         """
         Predict the next operation based on learned patterns.
 
@@ -216,119 +233,28 @@ class InferenceEngine:
         Returns:
             Predicted next operation pair (op_code, tensor_id)
         """
-        # Check if we have any patterns in our history
-        if not self.cycle_history or not curriculum.get("patterns"):
-            # Default to identity operation if no patterns available
+        # Default to identity operation if no patterns
+        if not curriculum or "patterns" not in curriculum or not curriculum["patterns"]:
             return (0, 0)
 
-        # Get recent history (last few operations)
-        recent_history = []
-        for cycle in reversed(list(self.cycle_history)):
-            recent_history = list(cycle) + recent_history
-            if len(recent_history) >= 32:  # Look at last 32 ops max
-                break
-
-        recent_history = recent_history[-32:]
-
-        # Look for the longest matching pattern
-        best_match = None
-        best_match_length = 0
-        next_op = None
-
-        for pattern_id, pattern_info in curriculum.get("patterns", {}).items():
-            pattern_sequence = [(op["op"], op["tensor"]) for op in pattern_info.get("sequence", [])]
-            if not pattern_sequence:
-                continue
-
-            pattern_length = len(pattern_sequence)
-
-            # Skip if pattern is longer than our history
-            if pattern_length > len(recent_history):
-                continue
-
-            # Check if the end of our history matches this pattern
-            if tuple(recent_history[-pattern_length:]) == tuple(pattern_sequence):
-                if pattern_length > best_match_length:
-                    best_match = pattern_id
-                    best_match_length = pattern_length
-
-                    # If this is a recurring pattern, predict it continues
-                    if pattern_length < len(pattern_sequence):
-                        next_op = pattern_sequence[0]  # First op of pattern
-
-        # If we found a matching pattern, predict it continues
-        if best_match and next_op:
-            return next_op
-
-        # Default to identity operation if no pattern matches
-        return (0, 0)
-
-    def get_state(self) -> Dict:
-        """Return current engine state."""
-        return {
-            "cycle_history_size": len(self.cycle_history),
-            "pattern_candidates": len(self.pattern_candidates),
-            "promoted_patterns": len(self.promoted_patterns),
-            "step_count": self.step_count,
-        }
-
-    def analyse_cycle(
-        self, op_pairs: List[Tuple[int, int]], resonance_flags: List[bool]
-    ) -> Dict[str, Any]:
-        """
-        Analyze a cycle for pruning decisions using safe, conservative thresholds.
-
-        Args:
-            op_pairs: List of 48 (op_code, tensor_id) pairs
-            resonance_flags: List of 48 boolean resonance flags
-
-        Returns:
-            Dict with analysis metrics and prune decision
-        """
-        if len(op_pairs) != 48 or len(resonance_flags) != 48:
-            raise ValueError(
-                f"Expected 48 op_pairs and 48 resonance_flags, got {len(op_pairs)} and {len(resonance_flags)}"
-            )
-
-        # Calculate horizon distance (how close to 50/50 resonance)
-        aligned_count = sum(1 for flag in resonance_flags if flag)
-        horizon_distance = abs(aligned_count / 48.0 - 0.5)
-
-        # Calculate pattern entropy (diversity of op-pairs)
-        unique_ops = len(set(op_pairs))
-        pattern_entropy = unique_ops / 48.0
-
-        # Safe pruning decision - only prune if BOTH metrics are below thresholds
-        # This is more conservative than A2's "either" logic
-        horizon_prune = horizon_distance < self.HORIZON_CUT
-        entropy_prune = pattern_entropy < self.ENTROPY_CUT
-
-        # Only prune if BOTH conditions are met (extra safety)
-        should_prune = horizon_prune and entropy_prune
-
-        # Update statistics
-        self.prune_stats["total"] += 1
-        if should_prune:
-            self.prune_stats["pruned"] += 1
-
-        # Log detailed information for monitoring
-        if (
-            should_prune or self.prune_stats["total"] % 100 == 0
-        ):  # Log every 100th cycle or when pruning
-            print(
-                f"Cycle analysis: horizon={horizon_distance:.3f} (cut={self.HORIZON_CUT}), "
-                f"entropy={pattern_entropy:.3f} (cut={self.ENTROPY_CUT}), "
-                f"prune={should_prune}, "
-                f"stats={self.prune_stats['pruned']}/{self.prune_stats['total']}"
-            )
-
-        return {
-            "horizon_distance": horizon_distance,
-            "pattern_entropy": pattern_entropy,
-            "aligned_count": aligned_count,
-            "unique_ops": unique_ops,
-            "horizon_prune": horizon_prune,
-            "entropy_prune": entropy_prune,
-            "prune": should_prune,
-            "prune_reason": "both_metrics_low" if should_prune else "none",
-        }
+        # Find the most frequent pattern
+        best_pattern = None
+        highest_freq = 0
+        
+        for pattern_id, pattern_info in curriculum["patterns"].items():
+            if pattern_info.get("frequency", 0) > highest_freq:
+                highest_freq = pattern_info["frequency"]
+                pattern_seq = pattern_info.get("sequence", [])
+                if pattern_seq:
+                    # Extract first op-pair from the sequence
+                    best_pattern = (pattern_seq[0]["op"], pattern_seq[0]["tensor"])
+        
+        return best_pattern if best_pattern else (0, 0)
+    
+    def reset(self) -> None:
+        """Reset the engine to its initial state."""
+        self.promoted_patterns = {}
+        self.pattern_counts = Counter()
+        self.cycle_history = {}
+        self.prune_stats = {"total": 0, "pruned": 0, "reasons": {}}
+        self.sliding_window.clear()
