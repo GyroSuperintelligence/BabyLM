@@ -8,14 +8,18 @@ Device logic: All tensors are created on the selected device (GPU if available, 
 """
 
 import torch
+
 # Select device for all tensors and models
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from typing import Tuple, List, Dict, Optional, Any
 from dataclasses import dataclass
 from collections import deque
 
 # Import gene mechanics from s1_governance
 from s1_governance import get_gene_tensors, gyration_op
+
+# Import VOID_OP_PAIR and is_void from g2_intelligence_eg
+from s4_intelligence.g2_intelligence_eg import VOID_OP_PAIR, is_void
 
 
 @dataclass
@@ -56,13 +60,16 @@ class GovernanceEngine:
         self.current_cycle_ops = []  # Accumulating buffer for current cycle
         self.current_cycle_resonance = []  # Resonance flags for current cycle
 
-    def process_op_pair(self, op_pair: Tuple[int, int], resonance_flag: bool = False) -> List[Any]:
+    def process_op_pair(
+        self, op_pair: Tuple[int, int], resonance_flag: bool, padding: bool = False
+    ) -> List[Any]:
         """
         Process a single operation pair through the governance cycle.
 
         Args:
             op_pair: Tuple of (op_code, tensor_id)
             resonance_flag: Whether this op-pair was resonant
+            padding: Whether this op-pair is a padding op-pair
 
         Returns:
             List of emitted events (AcceptedOpPair and possibly CycleComplete)
@@ -74,10 +81,10 @@ class GovernanceEngine:
             )
 
         op_code, tensor_id = op_pair
-        if not (0 <= op_code <= 3 and 0 <= tensor_id <= 1):
-            raise ValueError(
-                f"Invalid op_code or tensor_id: ({op_code}, {tensor_id}). Values must be within range."
-            )
+        if not padding:
+            if not (0 <= op_code <= 3 and 0 <= tensor_id <= 1):
+                if not is_void(op_pair):
+                    raise ValueError(f"Invalid op_pair: {op_pair}")
 
         events = []
 

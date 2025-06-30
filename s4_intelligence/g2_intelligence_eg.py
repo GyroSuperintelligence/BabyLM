@@ -9,13 +9,23 @@ Device logic: All tensors are created on the selected device (GPU if available, 
 
 from typing import Tuple, Union, List, Dict, cast
 import torch
+
 # Select device for all tensors and models
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 import numpy as np
 from s1_governance import gyration_op as s1_gyration_op, OP_CODES
 
 # Re-export the canonical operation codes
 OP_CODES = OP_CODES.copy()
+
+# Canonical op-pairs
+IDENTITY_OP_PAIR: Tuple[int, int] = (0, 0)  # Status-quo identity op-pair
+VOID_OP_PAIR: Tuple[int, int] = (7, 0)  # Canonical padding/void op-pair (op_code=7, tensor_id=0)
+
+
+def is_void(pair: Tuple[int, int]) -> bool:
+    """Return True if this op-pair is the canonical padding/void."""
+    return pair == VOID_OP_PAIR
 
 
 def byte_to_gyrations(byte_val: int) -> Tuple[Tuple[int, int], Tuple[int, int]]:
@@ -83,8 +93,9 @@ def gyrations_to_byte(op_pair1: Tuple[int, int], op_pair2: Tuple[int, int]) -> i
             raise TypeError(f"op_pair{idx+1} must be a tuple of (op_code, tensor_id)")
 
         op_code, tensor_id = op_pair
-        if not 0 <= op_code <= 3:
-            raise ValueError(f"op_code must be 0-3, got {op_code}")
+        # Accept op_code 0-7 (0-3 are real, 4-7 are reserved/padding)
+        if not 0 <= op_code <= 7:
+            raise ValueError(f"op_code must be 0-7, got {op_code}")
         if not 0 <= tensor_id <= 1:
             raise ValueError(f"tensor_id must be 0-1, got {tensor_id}")
 

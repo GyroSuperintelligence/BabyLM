@@ -1,5 +1,5 @@
 """
-s1_governance.py - GyroSI Baby LM Governance Module
+s1_governance/__init__.py - GyroSI Baby LM Governance Module
 
 Defines immutable tensor mechanics and byte↔operation mapping.
 No storage, no inference logic - pure definitions and transformations.
@@ -8,8 +8,9 @@ Device logic: All tensors are created on the selected device (GPU if available, 
 """
 
 import torch
+
 # Select device for all tensors and models
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 import numpy as np
 import hashlib
 import os
@@ -38,7 +39,9 @@ def _initialize_gene_tensors():
             [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]],
             [[[1, -1], [1, -1], [1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
         ]
-        base_tensor = torch.tensor(gene_pattern, dtype=torch.int8, requires_grad=False, device=device)
+        base_tensor = torch.tensor(
+            gene_pattern, dtype=torch.int8, requires_grad=False, device=device
+        )
         _GENE_TENSORS = {
             "id_0": base_tensor.clone().requires_grad_(False).to(device),
             "id_1": base_tensor.clone().requires_grad_(False).to(device),
@@ -69,7 +72,10 @@ def get_gene_constant() -> Dict[str, torch.Tensor]:
     if _GENE_TENSORS is None:
         # This branch should be logically unreachable if _initialize_gene_tensors works.
         raise RuntimeError("Fatal error: Gene tensors did not initialize.")
-    return {"id_0": _GENE_TENSORS["id_0"].clone().to(device), "id_1": _GENE_TENSORS["id_1"].clone().to(device)}
+    return {
+        "id_0": _GENE_TENSORS["id_0"].clone().to(device),
+        "id_1": _GENE_TENSORS["id_1"].clone().to(device),
+    }
 
 
 def get_gene_tensors() -> Dict[str, torch.Tensor]:

@@ -1,4 +1,4 @@
-# Ignore all agent and agency user data
+# Ignore all agent and agency agent data
 agents/
 agency/g1_information/
 agency/g4_information/

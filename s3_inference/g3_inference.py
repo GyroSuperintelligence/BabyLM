@@ -8,8 +8,9 @@ Device logic: All tensors are created on the selected device (GPU if available, 
 """
 
 import torch
+
 # Select device for all tensors and models
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 import hashlib
 import numpy as np
 from typing import List, Dict, Tuple, Optional, Any, Set
@@ -258,7 +259,7 @@ class InferenceEngine:
         """
         # Default to identity operation if no patterns
         if not curriculum or "patterns" not in curriculum or not curriculum["patterns"]:
-            return (0, 0)
+            return (7, 0)
 
         # Find the most frequent pattern
         best_pattern = None
@@ -272,7 +273,7 @@ class InferenceEngine:
                     # Extract first op-pair from the sequence
                     best_pattern = (pattern_seq[0]["op"], pattern_seq[0]["tensor"])
 
-        return best_pattern if best_pattern else (0, 0)
+        return best_pattern if best_pattern else (7, 0)
 
     def reset(self) -> None:
         """Reset the engine to its initial state."""

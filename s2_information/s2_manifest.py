@@ -9,8 +9,9 @@ import os
 
 MANIFEST = {
     "version": "1.0",
-    "pack_size": 4096,  # bytes per pack
+    "pack_size": 65536,  # bytes per pack (updated to match JSON)
     "shard_prefix_length": 2,  # hex digits for sharding by first byte
+    "archive_shard_limit": 10000,  # max records per archive file
 }
 
 

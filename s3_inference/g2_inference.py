@@ -8,12 +8,14 @@ Device logic: All tensors are created on the selected device (GPU if available, 
 """
 
 import torch
+
 # Select device for all tensors and models
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 import numpy as np
 import os
 from typing import Tuple, List, Dict, Any, Optional
 from dataclasses import dataclass
+from s4_intelligence.g2_intelligence_eg import VOID_OP_PAIR, is_void
 
 
 @dataclass
@@ -115,6 +117,9 @@ class InformationEngine:
         op_code, tensor_id = op_pair
 
         # Range checks
+        if is_void(op_pair):
+            # This is padding—emit a no-resonance event but skip mask lookup
+            return ResonanceEvent(phase, op_pair, False, -1)
         if not 0 <= op_code <= 3:
             raise ValueError(f"Op code must be 0-3, got {op_code}")
         if not 0 <= tensor_id <= 1:

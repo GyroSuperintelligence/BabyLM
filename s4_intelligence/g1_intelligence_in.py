@@ -17,8 +17,9 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple, BinaryIO, Union, Set
 from pathlib import Path
 import torch
+
 # Select device for all tensors and models
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 import numpy as np
 
 # Import from S3 inference modules
@@ -43,6 +44,8 @@ from s4_intelligence.g2_intelligence_eg import (
     byte_to_gyrations,
     gyrations_to_byte,
     gyration_op,
+    VOID_OP_PAIR,
+    is_void,
 )
 
 
@@ -107,10 +110,12 @@ class IntelligenceEngine:
             base_path: Base path for S2 information storage
             encryption_enabled: Whether to enable GyroCrypt encryption
         """
-        # Core identity
+        # allow tests to override via env
+        env = os.environ.get("S2_BASE_PATH")
+        self.base_path = Path(env if env is not None else base_path)
+
         self.agent_uuid = agent_uuid or str(uuid.uuid4())
         self.shard = get_shard_from_uuid(self.agent_uuid)
-        self.base_path = Path(base_path)
 
         # Encryption settings
         self._encryption_enabled = encryption_enabled
@@ -312,6 +317,8 @@ class IntelligenceEngine:
             "pattern_promotions": [],
         }
         try:
+            # Track the starting cycle index for this stream
+            self._last_cycle_start = self._cycle_index
             # Process each byte in the stream
             for byte_val in data_bytes:
                 # Convert byte to two op-pairs
@@ -377,12 +384,40 @@ class IntelligenceEngine:
 
         except Exception as e:
             print(f"Error in process_stream: {e}")
-            # Try to save state even on error
             try:
                 self._update_session()
             except:
                 pass
             raise
+
+    def finalize(self):
+        """
+        Force any in-flight (partial) cycle to disk as a full cycle (padding with no-ops if needed), and flush the pack file.
+        """
+        # If there are any op-pairs in the pending buffer, pad to 48 and write as a cycle
+        if self._pending_cycle_buffer:
+            needed = 48 - len(self._pending_cycle_buffer)
+            if needed > 0:
+                # Pad with canonical void op-pair
+                self._pending_cycle_buffer.extend([VOID_OP_PAIR] * needed)
+            self._write_cycle(self._pending_cycle_buffer)
+            self._pending_cycle_buffer = []
+            self._current_resonance_flags = []
+        # Always flush the pack file
+        if self.current_pack_file and not self.current_pack_file.closed:
+            self._flush_pack_file()
+
+    def get_last_pack_info(self) -> dict:
+        """
+        Return metadata about the last pack/cycle range written.
+        Returns:
+            dict with keys: pack_uuid, cycle_index_start, cycle_index_end
+        """
+        return {
+            "pack_uuid": self.current_pack_uuid,
+            "cycle_index_start": getattr(self, "_last_cycle_start", None),
+            "cycle_index_end": self._cycle_index,
+        }
 
     def _handle_compressed_block(self, block: CompressedBlock) -> bool:
         """
@@ -395,8 +430,11 @@ class IntelligenceEngine:
             True if the cycle was written to disk, False otherwise.
         """
         if block.block_type == "full_cycle":
-            # Write the full cycle to disk
-            self._write_cycle(block.data["ops"])
+            # Write the full cycle to disk (pad if needed)
+            ops = block.data["ops"]
+            if len(ops) < 48:
+                ops = ops + [VOID_OP_PAIR] * (48 - len(ops))
+            self._write_cycle(ops)
             return True
 
         elif block.block_type == "cycle_repeat":
@@ -669,12 +707,7 @@ class IntelligenceEngine:
             print(f"Error flushing pack file: {e}")
 
     def _write_cycle(self, op_pairs: List[Tuple[int, int]]) -> None:
-        """
-        Write a complete cycle to the pack file.
-
-        Args:
-            op_pairs: List of 48 op-pairs
-        """
+        print(f"[DEBUG] _write_cycle called with {len(op_pairs)} op_pairs.")
         if len(op_pairs) != 48:
             raise ValueError(f"Cycle must have exactly 48 op-pairs, got {len(op_pairs)}")
 
@@ -696,7 +729,10 @@ class IntelligenceEngine:
         # Format the cycle data
         cycle_data = bytearray(48)
         for i, (op_code, tensor_id) in enumerate(op_pairs):
-            # Pack each op-pair as a single byte
+            # If this is a void op-pair, mark as padding
+            is_padding = is_void((op_code, tensor_id))
+            # Pass padding flag to governance engine if needed (for future extensibility)
+            # self.governance_engine.process_op_pair((op_code, tensor_id), False, padding=is_padding)
             nibble = ((op_code & 0x7) << 1) | (tensor_id & 0x1)
             cycle_data[i] = nibble
 
@@ -893,7 +929,8 @@ class IntelligenceEngine:
         try:
             # Update session state
             self._update_session()
-
+            # Finalize any partial cycles
+            self.finalize()
             # Flush and close pack file
             if self.current_pack_file and not self.current_pack_file.closed:
                 self._flush_pack_file()
@@ -908,6 +945,44 @@ class IntelligenceEngine:
         Ensure cleanup on garbage collection.
         """
         self.close()
+
+    def read_genome_segment(self, pack_uuid: str, first_cycle: int, num_cycles: int) -> bytes:
+        """
+        Read and decode a segment from a genome pack using canonical engine logic.
+        Args:
+            pack_uuid: UUID of the genome pack file
+            first_cycle: Index of the first cycle to read
+            num_cycles: Number of cycles to read
+        Returns:
+            Decoded byte stream for the requested cycles
+        """
+        shard = get_shard_from_uuid(self.agent_uuid)
+        pack_path = self.base_path / "agency" / "g1_information" / shard / f"{pack_uuid}-genome.dat"
+        encrypted = self._encryption_enabled and self._gyrocrypt_key is not None
+        header_size = 40 if encrypted else 13
+        cycles = []
+        with open(pack_path, "rb") as f:
+            f.seek(header_size + first_cycle * 48)
+            for _ in range(num_cycles):
+                data = bytearray(f.read(48))
+                if len(data) < 48:
+                    break
+                if encrypted:
+                    if self._gyrocrypt_key is None:
+                        raise ValueError("Cannot decrypt genome pack: missing gyrocrypt key.")
+                    gene_snapshot = self.get_current_cycle_decoded()
+                    keystream = self._make_keystream(gene_snapshot, self._gyrocrypt_key)
+                    for i in range(48):
+                        data[i] ^= keystream[i % len(keystream)]
+                # Decode op-pairs to bytes
+                op_pairs = [((b >> 1) & 0x7, b & 1) for b in data]
+                cycles.append(op_pairs)
+        # Convert cycles of op-pairs back to bytes
+        result = bytearray()
+        for cycle in cycles:
+            for i in range(0, len(cycle), 2):
+                result.append(gyrations_to_byte(cycle[i], cycle[i + 1]))
+        return bytes(result)
 
 
 # System-level functions
