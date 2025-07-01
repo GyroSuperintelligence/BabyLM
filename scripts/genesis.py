@@ -19,6 +19,7 @@ def ensure_s2_structure(base_path="s2_information"):
     epigenome_path = os.path.join(base_path, "agency", "g2_information", "g2_information.dat")
     os.makedirs(os.path.dirname(epigenome_path), exist_ok=True)
     if not os.path.exists(epigenome_path):
+        # Epigenome file is now exactly 48*256 bytes, no SHA-256 header
         s1_governance.build_epigenome_projection(epigenome_path)
 
 

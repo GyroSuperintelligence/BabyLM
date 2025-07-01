@@ -10,10 +10,10 @@ import glob
 from pathlib import Path
 
 
-def cleanup_test_data():
+def cleanup_test_data(base_path: str = "s2_information"):
     """Clean up test-generated data while preserving essential files."""
 
-    base_path = "s2_information"
+    base_path = str(base_path)
 
     print("🧹 Starting cleanup of test data...")
 
@@ -69,10 +69,11 @@ def cleanup_test_data():
             print(f"   - {pattern}")
 
 
-def analyze_sharding():
+def analyze_sharding(base_path: str = "s2_information"):
     """Analyze the sharding distribution to understand why so many shards exist."""
 
-    g1_path = "s2_information/agency/g1_information"
+    base_path = str(base_path)
+    g1_path = os.path.join(base_path, "agency/g1_information")
     if not os.path.exists(g1_path):
         print("❌ No g1_information directory found")
         return

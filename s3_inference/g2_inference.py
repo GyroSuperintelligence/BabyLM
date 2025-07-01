@@ -46,15 +46,11 @@ class InformationEngine:
     matches the expected code for the current phase and input byte.
     """
 
-    def __init__(
-        self, epigenome_path: str = "s2_information/agency/g2_information/g2_information.dat"
-    ):
-        """
-        Initialize with the epigenome projection table.
-
-        Args:
-            epigenome_path: Path to the epigenome projection file
-        """
+    def __init__(self, epigenome_path: Optional[str] = None):
+        if epigenome_path is None:
+            raise ValueError(
+                "InformationEngine requires explicit epigenome_path to avoid path mismatches."
+            )
         self.resonance_mask = self._load_epigenome(epigenome_path)
         self.resonance_counts = {"total": 0, "resonant": 0}
 
@@ -73,16 +69,10 @@ class InformationEngine:
 
         try:
             with open(path, "rb") as f:
-                # Skip 32-byte SHA-256 header
-                header = f.read(32)
-                if len(header) != 32:
-                    raise ValueError(f"Invalid epigenome header size: {len(header)}")
-
-                # Read 48x256 table
+                # No SHA-256 header; file is exactly 48*256 bytes
                 data = f.read(48 * 256)
                 if len(data) != 48 * 256:
                     raise ValueError(f"Invalid epigenome data size: {len(data)}")
-
                 return np.frombuffer(data, dtype=np.uint8).reshape(48, 256)
         except Exception as e:
             # Fall back to a default empty mask if file loading fails

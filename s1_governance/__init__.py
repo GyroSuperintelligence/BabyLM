@@ -229,7 +229,9 @@ def _find_alignment_operator(phase: int, target_alignment: Tuple[int, int]) -> i
 def build_epigenome_projection(
     output_path: str = "s2_information/agency/g2_information/g2_information.dat",
 ) -> None:
-    """Build and save the Epigenome projection table"""
+    """Build and save the Epigenome projection table (48x256).
+    The output file contains only 12,288 bytes of table data (no SHA-256 header).
+    """
     print("Building Epigenome projection...")
     table = np.zeros((48, 256), dtype=np.uint8)
 
@@ -239,20 +241,12 @@ def build_epigenome_projection(
             lo = 1 if byte_val & 0xF >= 8 else -1
             table[phase, byte_val] = _find_alignment_operator(phase, (hi, lo))
 
-    # Create integrity header from gene tensors
-    gene = get_gene_tensors()
-    hasher = hashlib.sha256()
-    hasher.update(gene["id_0"].numpy().tobytes())
-    hasher.update(gene["id_1"].numpy().tobytes())
-    header = hasher.digest()
-
-    # Write file
+    # Write file (no SHA header)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "wb") as f:
-        f.write(header)
         f.write(table.tobytes())
 
-    size = len(header) + table.nbytes
+    size = table.nbytes
     print(f"Epigenome projection saved to {output_path} ({size} bytes)")
 
 
