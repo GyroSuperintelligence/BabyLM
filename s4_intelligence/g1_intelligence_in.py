@@ -38,10 +38,6 @@ from s1_governance import (
     byte_to_gyrations,
     gyrations_to_byte,
     build_epigenome_projection,
-)
-
-# Import from S4 gyration primitives
-from s4_intelligence.g2_intelligence_eg import (
     VOID_OP_PAIR,
     is_void,
 )

@@ -12,7 +12,6 @@ from datetime import datetime
 
 # Import all modules
 import s1_governance
-from s4_intelligence.g2_intelligence_eg import byte_to_gyrations, gyrations_to_byte
 from s4_intelligence.g1_intelligence_in import (
     IntelligenceEngine,
     initialize_system,
@@ -140,16 +139,16 @@ class TestGyroSIBabyLM(unittest.TestCase):
             (0x42, ((2, 0), (1, 0))),
         ]
         for byte_val, expected in test_cases:
-            op_pair1, op_pair2 = byte_to_gyrations(byte_val)
+            op_pair1, op_pair2 = s1_governance.byte_to_gyrations(byte_val)
             assert 0 <= op_pair1[0] <= 3 and 0 <= op_pair2[0] <= 3
             assert op_pair1[1] in [0, 1] and op_pair2[1] in [0, 1]
 
     def test_gyrations_to_byte_inverse(self):
         """Test that gyrations_to_byte is inverse of byte_to_gyrations"""
         for byte_val in range(256):
-            op_pair1, op_pair2 = byte_to_gyrations(byte_val)
-            reconstructed = gyrations_to_byte(op_pair1, op_pair2)
-            op_pair1_new, op_pair2_new = byte_to_gyrations(reconstructed)
+            op_pair1, op_pair2 = s1_governance.byte_to_gyrations(byte_val)
+            reconstructed = s1_governance.gyrations_to_byte(op_pair1, op_pair2)
+            op_pair1_new, op_pair2_new = s1_governance.byte_to_gyrations(reconstructed)
             assert op_pair1 == op_pair1_new
             assert op_pair2 == op_pair2_new
 

@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 
-from app.services.message_store import MessageStore
+from s4_intelligence.g2_intelligence_eg import MessageStore
 from s4_intelligence.g1_intelligence_in import IntelligenceEngine, initialize_system, EncryptedFile
 from s1_governance import build_epigenome_projection
 

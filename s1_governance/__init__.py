@@ -14,8 +14,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 import numpy as np
 import hashlib
 import os
-from typing import Dict, Tuple, Optional
-
+from typing import Dict, Tuple, Optional, List, Union, cast
 
 # Gyration operator codes
 _OP_CODES = {
@@ -24,6 +23,13 @@ _OP_CODES = {
     "FORWARD": 2,  # Forward Gyration: flip rows 0 and 2
     "BACKWARD": 3,  # Backward Gyration: flip rows 1 and 3
 }
+
+# Module constants
+OP_CODES = _OP_CODES.copy()
+
+# Canonical op-pairs
+IDENTITY_OP_PAIR: Tuple[int, int] = (0, 0)  # Status-quo identity op-pair
+VOID_OP_PAIR: Tuple[int, int] = (7, 0)  # Canonical padding/void op-pair (op_code=7, tensor_id=0)
 
 # Global immutable gene tensors - NEVER CHANGE THESE
 _GENE_TENSORS: Optional[Dict[str, torch.Tensor]] = None
@@ -115,6 +121,12 @@ def gyration_op(tensor: torch.Tensor, code: int, clone: bool = True) -> torch.Te
     IMPORTANT: This function ALWAYS operates on copies when clone=True.
     The original Gene tensors should NEVER be mutated.
 
+    The transformation applies one of four operations to the tensor:
+    - 0: Left Identity - no transformation
+    - 1: Left Inverse - global sign flip
+    - 2: Forward Gyration - flip rows 0 and 2
+    - 3: Backward Gyration - flip rows 1 and 3
+
     Parameters:
         tensor: The 4×2×3×2 tensor to transform
         code: Gyration operator code (0-3)
@@ -122,7 +134,13 @@ def gyration_op(tensor: torch.Tensor, code: int, clone: bool = True) -> torch.Te
 
     Returns:
         Transformed tensor (new tensor if clone=True, modified original if clone=False)
+        
+    Raises:
+        ValueError: If code is not 0-3
     """
+    if not 0 <= code <= 3:
+        raise ValueError(f"Unsupported gyration code: {code}")
+        
     if clone:
         result = tensor.clone()
     else:
@@ -142,56 +160,93 @@ def gyration_op(tensor: torch.Tensor, code: int, clone: bool = True) -> torch.Te
         # Backward Gyration Operator: flip rows 1 and 3
         result[1] = result[1] * -1
         result[3] = result[3] * -1
-    else:
-        raise ValueError(f"Unsupported gyration code: {code}")
 
     return result
 
 
 def byte_to_gyrations(byte_val: int) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     """
-    Convert a byte value to two gyration operations.
-    This is the universal codec entry point.
+    Map one byte to two op-pairs for CGM processing.
+
+    Each byte is split into high and low nibbles, each encoding an operation pair:
+    - High nibble (bits 7-4) → first op-pair
+    - Low nibble (bits 3-0) → second op-pair
+
+    Within each nibble:
+    - Bits 3-1: operation code (0-3, clamped if higher)
+    - Bit 0: tensor ID (0 or 1)
+
+    Args:
+        byte_val: A single byte value (0-255)
+
+    Returns:
+        Tuple of two op-pairs: ((op_code1, tensor_id1), (op_code2, tensor_id2))
+
+    Raises:
+        ValueError: If byte_val is outside the valid range
+        TypeError: If byte_val is not an integer
     """
+    if not isinstance(byte_val, int):
+        raise TypeError(f"Expected integer byte value, got {type(byte_val)}")
+
     if not 0 <= byte_val <= 255:
-        raise ValueError("byte_val must be 0-255")
+        raise ValueError(f"byte_val must be 0-255, got {byte_val}")
 
-    # High nibble for first operation
-    hi_nibble = (byte_val >> 4) & 0xF
-    hi_op = (hi_nibble >> 1) & 0x7
-    hi_tensor = hi_nibble & 0x1
+    # Extract high and low nibbles
+    high_nibble = (byte_val >> 4) & 0xF
+    low_nibble = byte_val & 0xF
 
-    # Low nibble for second operation
-    lo_nibble = byte_val & 0xF
-    lo_op = (lo_nibble >> 1) & 0x7
-    lo_tensor = lo_nibble & 0x1
+    # Extract operation code (bits 3-1) and tensor ID (bit 0)
+    op_code1 = (high_nibble >> 1) & 0x7
+    tensor_id1 = high_nibble & 0x1
 
-    # Ensure op codes are in valid range (0-3)
-    hi_op = min(hi_op, 3)
-    lo_op = min(lo_op, 3)
+    op_code2 = (low_nibble >> 1) & 0x7
+    tensor_id2 = low_nibble & 0x1
 
-    return ((hi_op, hi_tensor), (lo_op, lo_tensor))
+    # Ensure op codes are valid (0-3)
+    op_code1 = min(op_code1, 3)
+    op_code2 = min(op_code2, 3)
+
+    return ((op_code1, tensor_id1), (op_code2, tensor_id2))
 
 
 def gyrations_to_byte(op_pair1: Tuple[int, int], op_pair2: Tuple[int, int]) -> int:
     """
-    Convert two gyration operation pairs back to a byte.
-    This is the inverse of byte_to_gyrations.
+    Convert two operation pairs back to a byte (inverse of byte_to_gyrations).
+
+    Args:
+        op_pair1: First op-pair (op_code, tensor_id)
+        op_pair2: Second op-pair (op_code, tensor_id)
+
+    Returns:
+        Byte value (0-255)
+
+    Raises:
+        ValueError: If operation codes or tensor IDs are outside valid ranges
+        TypeError: If op_pairs have incorrect format
     """
-    hi_op, hi_tensor = op_pair1
-    lo_op, lo_tensor = op_pair2
+    # Validate input
+    for idx, op_pair in enumerate([op_pair1, op_pair2]):
+        if not isinstance(op_pair, tuple) or len(op_pair) != 2:
+            raise TypeError(f"op_pair{idx+1} must be a tuple of (op_code, tensor_id)")
 
-    # Reconstruct the nibbles
-    # High nibble: op is bits 1,2,3; tensor is bit 0
-    hi_nibble = ((hi_op & 0x7) << 1) | (hi_tensor & 0x1)
+        op_code, tensor_id = op_pair
+        # Accept op_code 0-7 (0-3 are real, 4-7 are reserved/padding)
+        if not 0 <= op_code <= 7:
+            raise ValueError(f"op_code must be 0-7, got {op_code}")
+        if not 0 <= tensor_id <= 1:
+            raise ValueError(f"tensor_id must be 0-1, got {tensor_id}")
 
-    # Low nibble: op is bits 1,2,3; tensor is bit 0
-    lo_nibble = ((lo_op & 0x7) << 1) | (lo_tensor & 0x1)
+    # Extract components
+    op_code1, tensor_id1 = op_pair1
+    op_code2, tensor_id2 = op_pair2
 
-    # Combine nibbles to form the byte
-    byte_val = (hi_nibble << 4) | lo_nibble
+    # Assemble nibbles
+    high_nibble = ((op_code1 & 0x7) << 1) | (tensor_id1 & 0x1)
+    low_nibble = ((op_code2 & 0x7) << 1) | (tensor_id2 & 0x1)
 
-    return byte_val
+    # Combine into byte
+    return (high_nibble << 4) | low_nibble
 
 
 def _extract_slice(tensor: torch.Tensor, phase: int) -> torch.Tensor:
@@ -226,6 +281,79 @@ def _find_alignment_operator(phase: int, target_alignment: Tuple[int, int]) -> i
     return best_op_code
 
 
+def is_void(pair: Tuple[int, int]) -> bool:
+    """Return True if this op-pair is the canonical padding/void."""
+    return pair == VOID_OP_PAIR
+
+
+def apply_gyrations_to_tensor(
+    tensor: torch.Tensor, gyration_sequence: List[Tuple[int, int]]
+) -> torch.Tensor:
+    """
+    Apply a sequence of gyration operations to a tensor.
+
+    This is a convenience function for applying multiple operations in sequence.
+
+    Args:
+        tensor: The 4×2×3×2 gene tensor to transform
+        gyration_sequence: List of (op_code, tensor_id) pairs to apply
+
+    Returns:
+        Transformed tensor with all gyrations applied
+    """
+    # Ensure tensor is on the correct device
+    result = tensor.clone().to(device)
+
+    for op_code, tensor_id in gyration_sequence:
+        # Only apply operation if this is the correct tensor
+        if tensor_id == 0:  # Only apply if this is id_0
+            result = gyration_op(result, op_code, clone=False)
+
+    return result
+
+
+def batch_gyrations(tensor: torch.Tensor, op_codes: torch.Tensor) -> torch.Tensor:
+    """
+    Apply gyrations to a tensor in batch mode (vectorized).
+
+    This optimized version uses vectorized operations for better performance.
+
+    Args:
+        tensor: The 4×2×3×2 gene tensor to transform
+        op_codes: Tensor of operation codes (0-3)
+
+    Returns:
+        Batch of transformed tensors
+    """
+    # Ensure tensor and op_codes are on the correct device
+    tensor = tensor.to(device)
+    op_codes = op_codes.to(device)
+    batch_size = op_codes.size(0)
+    result = tensor.repeat(batch_size, 1, 1, 1, 1)
+
+    # Apply operations using vectorized logic
+    # Identity (0): do nothing
+
+    # Left Inverse (1): global sign flip
+    inverse_mask = op_codes == 1
+    if inverse_mask.any():
+        result[inverse_mask] = -result[inverse_mask]
+
+    # Forward Gyration (2): flip rows 0 and 2
+    forward_mask = op_codes == 2
+    if forward_mask.any():
+        result[forward_mask, 0] = -result[forward_mask, 0]
+        result[forward_mask, 2] = -result[forward_mask, 2]
+
+    # Backward Gyration (3): flip rows 1 and 3
+    backward_mask = op_codes == 3
+    if backward_mask.any():
+        result[backward_mask, 1] = -result[backward_mask, 1]
+        result[backward_mask, 3] = -result[backward_mask, 3]
+
+    return result
+
+
 def build_epigenome_projection(
     output_path: str = "s2_information/agency/g2_information/g2_information.dat",
 ) -> None:
@@ -249,9 +377,6 @@ def build_epigenome_projection(
     size = table.nbytes
     print(f"Epigenome projection saved to {output_path} ({size} bytes)")
 
-
-# Module constants
-OP_CODES = _OP_CODES.copy()
 
 if __name__ == "__main__":
     build_epigenome_projection()

@@ -15,7 +15,7 @@ import numpy as np
 import os
 from typing import Tuple, List, Dict, Any, Optional
 from dataclasses import dataclass
-from s4_intelligence.g2_intelligence_eg import VOID_OP_PAIR, is_void
+from s1_governance import VOID_OP_PAIR, is_void
 
 
 @dataclass
