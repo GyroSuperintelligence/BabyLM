@@ -10,10 +10,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union, Tuple
 import os
+from typing import TYPE_CHECKING
 
-from s4_intelligence.g1_intelligence_in import get_shard_from_uuid, IntelligenceEngine
+from s1_governance import get_shard_from_uuid, VOID_OP_PAIR, is_void
 from s2_information.s2_manifest import get_manifest
-from s4_intelligence.g2_intelligence_eg import byte_to_gyrations, VOID_OP_PAIR
+
+# Import from S1 governance
+from s1_governance import (
+    get_gene_tensors,
+    gyration_op,
+    byte_to_gyrations,
+    gyrations_to_byte,
+    build_epigenome_projection,
+)
+
+if TYPE_CHECKING:
+    from s4_intelligence.g1_intelligence_in import IntelligenceEngine
 
 
 # Minimal atomic JSON write helper
@@ -88,7 +100,7 @@ class MessageStore:
         thread_id: str,
         keep_last: int = 250,
         cycle_info: Optional[dict] = None,
-        engine: Optional[IntelligenceEngine] = None,
+        engine: Optional["IntelligenceEngine"] = None,
     ) -> None:
         """
         Trim the recent window, keeping only the last N messages. All archiving is handled by genome packs.
@@ -106,7 +118,7 @@ class MessageStore:
     def restore_thread(
         self,
         thread_id: str,
-        engine: IntelligenceEngine,
+        engine: "IntelligenceEngine",
         start_cycle: int,
         num_cycles: int,
     ) -> List[Dict[str, Any]]:

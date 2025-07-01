@@ -134,13 +134,13 @@ def gyration_op(tensor: torch.Tensor, code: int, clone: bool = True) -> torch.Te
 
     Returns:
         Transformed tensor (new tensor if clone=True, modified original if clone=False)
-        
+
     Raises:
         ValueError: If code is not 0-3
     """
     if not 0 <= code <= 3:
         raise ValueError(f"Unsupported gyration code: {code}")
-        
+
     if clone:
         result = tensor.clone()
     else:
@@ -376,6 +376,13 @@ def build_epigenome_projection(
 
     size = table.nbytes
     print(f"Epigenome projection saved to {output_path} ({size} bytes)")
+
+
+def get_shard_from_uuid(uuid_str: str) -> str:
+    """
+    Return the shard prefix (first two hex digits) for a given UUID string.
+    """
+    return uuid_str[:2]
 
 
 if __name__ == "__main__":

@@ -18,8 +18,8 @@ from collections import deque
 # Import gene mechanics from s1_governance
 from s1_governance import get_gene_tensors, gyration_op
 
-# Import VOID_OP_PAIR and is_void from g2_intelligence_eg
-from s4_intelligence.g2_intelligence_eg import VOID_OP_PAIR, is_void
+# Import VOID_OP_PAIR and is_void from s1_governance
+from s1_governance import VOID_OP_PAIR, is_void
 
 
 @dataclass
