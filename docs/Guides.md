@@ -480,15 +480,15 @@
     │   │       └── <uuid>-genome.dat   # Append‑only mutated navigation packs
     │   ├── g4_information/             # Immutable, versioned dictionaries
     │   │   └── <shard>/                # e.g. "00" … "ff"
-    │   │       └── <uuid>-curriculum.json
+    │   │       └── <uuid>-format.json
     │   └── g5_information/             # Global session archives (if any)
     │       └── <shard>/                # e.g. "00" … "ff"
     │           └── <uuid>-session.json
     └── agents/
         └── <shard>/                    # e.g. "00" … "ff"
             └── <agent‑uuid>/
-                ├── g4_information/     # Agent‑specific curriculum deltas
-                │   └── curriculum.json
+                ├── g3_information/     # Agent‑specific format (byte_to_token, token_to_byte)
+                │   └── format.json
                 └── g5_information/     # Agent session state
                     ├── session.json    # { threads, keys, last_checkpoint, … }
                     └── session.json.bak
@@ -515,21 +515,20 @@
     - Each `.dat` file logs a UUID-stamped 48-op segment (or multiple)
     - Ordered, append-only, immutable
     
-    **2. `g4_information/`** – *Versioned Dictionaries*
+    **2. `g4_information/`** – * Format *
     
     - Contains semantic mappings (bytes → meaning) as immutable JSON snapshots
     - Shared across agents
-    - Agents may fork and adapt these into local curricula
     
     **3. `g5_information/`** – *Session Metadata*
     
     - Holds optional global recovery or lineage session files
-    - Typically lightweight JSON (phase, checkpoint, active dictionary)
+    - Typically lightweight JSON (phase, checkpoint, active format)
     
     **4. `agents/<uuid>/`**
     
-    - Agent-local deltas and runtime data:
-        - `g4_information/`: dynamic, local curriculum copy
+    - Agent-local data and runtime state:
+        - `g3_information/`: agent-specific format (byte_to_token, token_to_byte)
         - `g5_information/`: runtime state (e.g., current phase, session keys)
     
     ---
@@ -541,7 +540,7 @@
         - No compression
         - Checksum and metadata embedded within
     - No in-place edits, ever
-    - `.json` index files are used only where needed (e.g., curriculum versions, agent state)
+    - `.json` index files are used only where needed (e.g., format versions, agent state)
     
     ---
     
@@ -551,7 +550,7 @@
     
     - Policies may remove:
         - Old genome packs
-        - Deprecated curricula
+        - Deprecated dictionaries
         - Session logs
     - No compaction or merging within S2. New snapshots are written as clean copies in g1/g4.
     
@@ -563,7 +562,7 @@
         - Binary, append-only, no interpretation
         - Used for genome navigation logs
     - **`.json`**
-        - Human-readable metadata (sessions, curricula)
+        - Human-readable metadata (sessions, dictionaries)
         - Optional integrity (e.g., checksums, HMAC)
     
     ---
@@ -641,7 +640,7 @@
     **State (ephemeral):**
     
     - Sliding window of recent op-pairs (usually 48)
-    - Short-code dictionary (for learned 2–16 op-pair macros)
+    - Short-code format (for learned 2–16 op-pair macros)
     - Optional Cycle Decoded tracker (for key derivation)
     
     **Input:**
@@ -666,7 +665,7 @@
     
     - `compressed_block`: either a cycle repeat tag or a full 48-op log
     - `pattern_promotion`: new short-code and its corresponding op-sequence
-    - `current_cycle_decoded`: (optional) unique fingerprint of current traversal state
+    - `gene_stateless_snapshot`: (optional) unique fingerprint of current traversal state
     
     ---
     
@@ -772,7 +771,7 @@
     
     - Load all global navigation logs from `s2_information/agency/g1_information/` into memory for cycle alignment.
     - Load the immutable epigenome mask from `s2_information/agency/g2_information.dat`.
-    - Load the active dictionary from `s2_information/agency/g4_information/` or the agent's own `agents/.../g4_information/curriculum.json`.
+    - Load the active format from `s2_information/agency/g4_information/` or the agent's own `agents/.../g4_information/format.json`.
     
     **Public API**
     
@@ -809,7 +808,7 @@
         
     - **Pattern promotions** →
         
-        append new `<uuid>-curriculum.json` under
+        append new `<uuid>-format.json` under
         
         `s2_information/agency/g4_information/<shard>/`
         
@@ -831,7 +830,7 @@
     **Notes & Clarifications**
     
     - All writes into **S2** happen **only** in this layer.
-    - Agents store only their **active dictionary** (`g4`) and **runtime session** (`g5`).
+    - Agents store only their **active format** (`g4`) and **runtime session** (`g5`).
     - The epigenome mask loaded at startup never changes at runtime.
     
     ---
@@ -871,7 +870,7 @@
             
     4. **S4 (Intelligence)** is the single orchestrator and writer: it loads seeds and curricula, feeds bytes through S3 in order, gathers all artifacts, persists them back into S2, and exposes one high‑level API—`process_stream`—for end‑to‑end operation.
     
-    In essence, every step from ingress through egress is just navigation through a closed, immutable tensor topology using the four gyrations. The only state that ever changes is the log of moves, and all interpretation of text, audio, images or other formats happens afterward via a separate, versioned dictionary layer.
+    In essence, every step from ingress through egress is just navigation through a closed, immutable tensor topology using the four gyrations. The only state that ever changes is the log of moves, and all interpretation of text, audio, images or other formats happens afterward via a separate, versioned format layer.
     
     ---
     
@@ -891,7 +890,7 @@
     
     **4. Data explosion (duplicate storage)**
     
-    We never store full tensor snapshots except at curriculum promotion. All Epigenome changes are bit‑flip deltas and all Genome state is op‑pairs. Cycle compression and RLE collapse redundancy at pack boundaries. Compaction tasks can merge old packs for long‑term efficiency.
+    We never store full tensor snapshots except at format promotion. All Epigenome changes are bit‑flip deltas and all Genome state is op‑pairs. Cycle compression and RLE collapse redundancy at pack boundaries. Compaction tasks can merge old packs for long‑term efficiency.
     
     **5. Overlapping functions (layer separation)**
     
@@ -899,11 +898,11 @@
     
     **6. "Knowledge dismissed" (single‑byte inputs, emoji, hello)**
     
-    Every byte, including non‑alphabetic or single‑emoji code points, maps to two op‑pairs. GovernanceEngine accepts them if they match the canonical cycle. Even a lone zero‑length input still produces valid (possibly empty) navigation. The dictionary layer then reconstructs exactly what was fed in, bit for bit.
+    Every byte, including non‑alphabetic or single‑emoji code points, maps to two op‑pairs. GovernanceEngine accepts them if they match the canonical cycle. Even a lone zero‑length input still produces valid (possibly empty) navigation. The format layer then reconstructs exactly what was fed in, bit for bit.
     
     **Unusual edge cases (determinism and alignment vs true information)**
     
-    By design the Gene is fixed and traceable. The Genome log is not a repetition of the Gene but a record of navigation—every op‑pair captures new information about input context. Epigenome deltas capture resonance events, not mere repeats. Compression and pattern learning prune redundant logs while preserving novel paths. Nothing in the core freezes intelligence to a small set of states. All format‑specific semantics live in the dictionary layer, so the core remains a pure, physics‑grounded navigator rather than a deterministic state machine.
+    By design the Gene is fixed and traceable. The Genome log is not a repetition of the Gene but a record of navigation—every op‑pair captures new information about input context. Epigenome deltas capture resonance events, not mere repeats. Compression and pattern learning prune redundant logs while preserving novel paths. Nothing in the core freezes intelligence to a small set of states. All format‑specific semantics live in the format layer, so the core remains a pure, physics‑grounded navigator rather than a deterministic state machine.
     
     All of these mechanisms emerge directly from our four‑layer design—no extra modules needed.
     
@@ -971,15 +970,15 @@
         │       └── <uuid>-genome.dat        # 4 KB append-only packs
         ├── g4_information/
         │   └── <shard>/                     # "00" … "ff"
-        │       └── <uuid>-curriculum.json   # versioned JSON snapshots
+        │       └── <uuid>-format.json   # versioned JSON snapshots
         └── g5_information/
             └── <shard>/                     # "00" … "ff"
                 └── <uuid>-session.json      # session metadata
     └── agents/
         └── <shard>/                        # "00" … "ff"
             └── <agent‑uuid>/
-                ├── g4_information/
-                │   └── curriculum.json     # local curriculum delta
+                ├── g3_information/
+                │   └── format.json     # local format delta
                 └── g5_information/
                     ├── session.json        # current session state
                     └── session.json.bak    # backup
@@ -1003,7 +1002,7 @@
         
     - **agency/g4_information/**
         
-        Immutable, versioned dictionaries (`curriculum.json`) for bytes ↔ meaning mappings. Shared across agents.
+        Immutable, versioned dictionaries (`format.json`) for bytes ↔ meaning mappings. Shared across agents.
         
     - **agency/g5_information/**
         
@@ -1011,7 +1010,7 @@
         
     - **agents/**
         
-        Per‑agent storage of local curriculum deltas and session state. No global write occurs here except through the IntelligenceEngine API.
+        Per‑agent storage of local format deltas and session state. No global write occurs here except through the IntelligenceEngine API.
         
     
     ---
@@ -1037,7 +1036,7 @@
     3. **g3_inference.py**
         - Maintains sliding window of op‑pairs
         - Detects cycle repeats and pattern promotions
-        - Emits `compressed_block`, `pattern_promotion`, `current_cycle_decoded`
+        - Emits `compressed_block`, `pattern_promotion`, `gene_stateless_snapshot`
     
     *No module in S3 performs any disk writes; all outputs are streamed to S4.*
     
@@ -1056,7 +1055,7 @@
         - **Startup**:
             1. Load global genome packs from `s2_information/agency/g1_information/`
             2. Load `epigenome_projection.dat` from `s2_information/agency/g2_information.dat`
-            3. Load active dictionary from either global `g4_information` or agent's local `agents/.../g4_information/curriculum.json`
+            3. Load active format from either global `g4_information` or agent's local `agents/.../g4_information/format.json`
         - **process_stream(data_bytes)**:
             - Splits bytes → op‑pairs
             - Feeds through GovernanceEngine, InformationEngine, InferenceEngine
@@ -1180,7 +1179,7 @@
     
     def create_agent(agent_uuid: Optional[str] = None) -> str:
         """
-        Create `agents/<shard>/<uuid>/` with empty curriculum and session files,
+        Create `agents/<shard>/<uuid>/` with empty format and session files,
         then return the agent UUID.
         """
     
@@ -1213,7 +1212,7 @@
     | `cycle_complete` | `cycle_id`, `phase` |
     | `compressed_block` | `data`, `original_size` |
     | `pattern_promotion` | `code`, `sequence`, `frequency` |
-    | `current_cycle_decoded` | `fingerprint`, `timestamp` |
+    | `gene_stateless_snapshot` | `fingerprint`, `timestamp` |
     
     The caller receives events in the exact order they occur.
     
@@ -1226,7 +1225,7 @@
     | Artifact | Location | Trigger |
     | --- | --- | --- |
     | Navigation pack (`*.dat`, configurable size) | `s2_information/agency/g1_information/<shard>/` | When pack reaches size limit |
-    | Curriculum snapshot (`*-curriculum.json`) | `s2_information/agency/g4_information/<shard>/` | On pattern promotion |
+    | Format snapshot (`*-format.json`) | `s2_information/agency/g4_information/<shard>/` | On pattern promotion |
     | Session state and backup | `agents/<shard>/<agent_uuid>/g5_information/` | After each call |
     
     Directory sharding always uses the first two hex digits of the file UUID.

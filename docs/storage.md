@@ -20,7 +20,7 @@
 | 5      | 1    | flags = 0            | always 0 for genome packs                          |
 | 6      | 2    | header_size = 128    | allows future extension                            |
 | 8      | 4    | start_cycle_index    | first cycle number stored                          |
-| 12     | 96   | genome_snapshot      | output of get_current_cycle_decoded()              |
+| 12     | 96   | gene_stateless_snapshot      | output of get_gene_stateless_snapshot()              |
 | 108    | 12   | salt                 | random per pack, for keystream separation (unused) |
 | 120    | 8    | reserved (zero)      | pad to 128                                         |
 
@@ -30,10 +30,10 @@
 ## 2. Agent-Private File Encryption
 
 - **Files:**
-  - `agents/<uuid>/g4_information/curriculum.json.enc`
+  - `agents/<uuid>/g3_information/format.json.enc`
   - `agents/<uuid>/g5_information/session.json.enc`
 - **Header:** 128 bytes, same structure as genome packs but with different magic
-  - `b'GYR4'` for curriculum
+  - `b'GYR3'` for format
   - `b'GYR5'` for session
 - **Payload:** UTF-8 JSON, chunked into 24-byte blocks, XORed with GyroCrypt keystream, padded to 24B boundary
 - **Keystream:** Deterministic, derived from 96B snapshot, 12B salt, and agent key
@@ -55,14 +55,14 @@
 
 ```
 agency/g1_information/00/genome_000000000000.dat
-agents/00/abcdef1234567890/g4_information/curriculum.json.enc
+agents/00/abcdef1234567890/g3_information/format.json.enc
 agents/00/abcdef1234567890/g5_information/session.json.enc
 ```
 
 ## 5. Backward Compatibility
 
 - **Legacy files:**
-  - Plaintext `curriculum.json` and `session.json` are still readable (fallback)
+  - Plaintext `format.json` and `session.json` are still readable (fallback)
   - Migration tool can convert legacy files to encrypted format
 - **Genome packs:** Only new format is supported for writing; loader can distinguish by magic
 
@@ -71,15 +71,15 @@ agents/00/abcdef1234567890/g5_information/session.json.enc
 | File/Folder                                      | Encrypted? | Notes                                 |
 |--------------------------------------------------|------------|---------------------------------------|
 | `agency/g1_information/*.dat`                    | No         | Genome is public, agent-agnostic      |
-| `agents/<uuid>/g4_information/curriculum.json.enc`| Yes        | Agent-private, GyroCrypt-encrypted    |
+| `agents/<uuid>/g3_information/format.json.enc`| Yes        | Agent-private, GyroCrypt-encrypted    |
 | `agents/<uuid>/g5_information/session.json.enc`   | Yes        | Agent-private, GyroCrypt-encrypted    |
-| `agency/g4_information/*.json`                   | No         | Global curricula, public              |
+| `agency/g4_information/*.json`                   | No         | Global dictionaries, public           |
 | `agency/g2_information/g2_information.dat`        | No         | Epigenome, public                     |
 
 ## 7. Auditability and Privacy
 
 - **Genome is always clear:** Anyone can hash, audit, and replay the genome
-- **Agent privacy is preserved:** Only the agent's key can decrypt their curriculum and session
+- **Agent privacy is preserved:** Only the agent's key can decrypt their format and session
 - **Performance:** Encryption overhead is negligible (only two small files per agent)
 
 ## 8. Test and Migration Expectations

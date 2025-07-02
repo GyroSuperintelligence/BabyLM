@@ -657,7 +657,7 @@
     # Private layer: Agent-specific navigation
     agent_intelligence = {
         "navigation_log": [...],       # Actual path taken (encrypted by order)
-        "dictionary": {...},           # Personal meaning assignments
+        "format": {...},           # Personal meaning assignments
         "session_keys": [...],         # Agent-specific resonance patterns
     }
     
@@ -679,7 +679,7 @@
     
     Agent isolation is achieved through UUID-based sharding, where each agent's data is stored under directories named by the first two hex digits of their UUID (00-ff). This distributes file I/O across 256 directories, preventing filesystem bottlenecks. Each agent maintains only:
     
-    - Local curriculum deltas (g4_information)
+    - Local format deltas (g4_information)
     - Session state (g5_information)
     - References to shared genome packs (g1_information)
     
@@ -730,7 +730,7 @@
     
     The system achieves compression by leveraging the closed nature of the tensor topology. Rather than storing every possible configuration, the genome records only the navigation operations needed to reach specific states. This is analogous to GPS coordinates—you don't need to store every point on Earth's surface, just the path taken across it.
     
-    Pattern promotion further compresses navigation by identifying frequently used subsequences and assigning them short-codes. The dictionary layer then maps these compressed navigation patterns back to their original meanings, creating a complete round-trip encoding system.
+    Pattern promotion further compresses navigation by identifying frequently used subsequences and assigning them short-codes. The format layer then maps these compressed navigation patterns back to their original meanings, creating a complete round-trip encoding system.
     
     ### Universal Codec Implementation
     

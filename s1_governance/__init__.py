@@ -57,39 +57,18 @@ def _initialize_gene_tensors():
             tensor.requires_grad_(False)
 
 
-def get_gene_anchor() -> bytes:
-    """
-    Return the constant 32-byte anchor (SHA-256 of immutable gene tensors).
-    This is used for pack headers and should never change.
-    """
-    gene = get_gene_tensors()
-    hasher = hashlib.sha256()
-    hasher.update(gene["id_0"].numpy().tobytes())
-    hasher.update(gene["id_1"].numpy().tobytes())
-    return hasher.digest()
-
-
-def get_gene_constant() -> Dict[str, torch.Tensor]:
+def get_gene_tensors() -> Dict[str, torch.Tensor]:
     """
     Return READ-ONLY copies of the immutable Gene tensors.
     These define the invariant topological space.
     """
     _initialize_gene_tensors()
     if _GENE_TENSORS is None:
-        # This branch should be logically unreachable if _initialize_gene_tensors works.
         raise RuntimeError("Fatal error: Gene tensors did not initialize.")
     return {
         "id_0": _GENE_TENSORS["id_0"].clone().to(device),
         "id_1": _GENE_TENSORS["id_1"].clone().to(device),
     }
-
-
-def get_gene_tensors() -> Dict[str, torch.Tensor]:
-    """
-    Return a copy of the gene tensors for read-only access.
-    NEVER mutate these - they define the invariant topology.
-    """
-    return get_gene_constant()
 
 
 def get_baseline_epigenome() -> torch.Tensor:

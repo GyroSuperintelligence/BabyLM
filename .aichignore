@@ -1,40 +1,29 @@
 # Ignore Python virtual environments
-venv
 venv/
-.venv
 .venv/
 
 # Ignore Python bytecode
-__pycache__
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
 # Ignore build artifacts
-dist
 dist/
-build
 build/
-*.egg-info
 *.egg-info/
-gyrosi_babylm.egg-info
 gyrosi_babylm.egg-info/
 
 # Ignore logs and reports
-logs
 logs/
 *.log
 flake8_report.txt
 
 # Ignore OS files
 .DS_Store
-Thumbs.db
 
 # Ignore IDE/editor settings
-.vscode
 .vscode/
-.idea
 .idea/
 *.swp
 
@@ -44,16 +33,12 @@ Thumbs.db
 *.icns
 
 # Ignore documentation build output
-site
-site/
-api_docs
-api_docs/
-docs
 docs/
 
 # Ignore test fixtures and generated test data
-tests/fixtures
-tests/fixtures/
+scripts/tests/
+scripts/tests/fixtures/
+scripts/tests/*.dat
 
 # Ignore migration scripts and temporary scripts
 scripts/migrate_*.py
@@ -67,20 +52,26 @@ scripts/migrate_*.py
 .aichignore
 
 # Explicitly ignore root-level metadata/config
-.git
 .git/
 .editorconfig
 .flake8
 .gitattributes
 .gitignore
 .pre-commit-config.yaml
-.mypy_cache
 .mypy_cache/
-.pytest_cache
 .pytest_cache/
+.coverage
 
 # Project-specific exclusions
-data
-data/
+# Exclude all .dat files in s2_information/agency and subfolders
+s2_information/agency/**/*.dat
+s2_information/agency/**/*.DS_Store
+s2_information/agency/**/__pycache__/
+
+# Exclude all .DS_Store files everywhere
+**/.DS_Store
+
+# Exclude all __pycache__ folders everywhere
+**/__pycache__/
 
 # Add any other project-specific exclusions below

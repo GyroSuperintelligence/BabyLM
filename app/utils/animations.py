@@ -46,7 +46,7 @@ def fade_in_animation() -> Dict[str, Any]:
     Create a fade-in animation for controls.
 
     Returns:
-        Dictionary of animation properties
+        Format of animation properties
     """
     return {"opacity": 0, "animate_opacity": get_animation("normal", "decelerate")}
 
@@ -59,7 +59,7 @@ def slide_in_animation(direction: str = "up") -> Dict[str, Any]:
         direction: "up", "down", "left", or "right"
 
     Returns:
-        Dictionary of animation properties
+        Format of animation properties
     """
     offset_map = {
         "up": ft.Offset(0, 0.1),

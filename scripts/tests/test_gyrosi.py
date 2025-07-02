@@ -104,7 +104,7 @@ class TestGyroSIBabyLM(unittest.TestCase):
 
     def test_s1_governance_gene_constants(self):
         """Test that gene constants are properly defined"""
-        gene = s1_governance.get_gene_constant()
+        gene = s1_governance.get_gene_tensors()
         assert "id_0" in gene
         assert "id_1" in gene
         for tensor_id in ["id_0", "id_1"]:
@@ -115,7 +115,7 @@ class TestGyroSIBabyLM(unittest.TestCase):
 
     def test_s1_governance_gyration_operations(self):
         """Test all four gyration operations"""
-        gene = s1_governance.get_gene_constant()
+        gene = s1_governance.get_gene_tensors()
         tensor = gene["id_0"].clone()
         # Test identity (no change)
         result = s1_governance.gyration_op(tensor, 0)
@@ -169,8 +169,7 @@ class TestGyroSIBabyLM(unittest.TestCase):
         engine = GovernanceEngine()
         for i in range(48):
             engine.process_op_pair((0, 0), False)
-        assert engine.phase == 0
-        assert engine.cycle_count == 1
+        assert engine.cycle_index == 1  # After one full cycle, index should be 1
 
     def test_information_engine_resonance(self):
         """Test information engine resonance classification"""
@@ -241,42 +240,6 @@ class TestGyroSIBabyLM(unittest.TestCase):
             assert len(header) == 128
             assert header[:4] == b"GYRO"
 
-    def test_curriculum_persistence(self):
-        """Test that patterns are persisted to curriculum.json(.enc) and can be decrypted or read"""
-        agent_id = create_agent(base_path=self.base_path)
-        for encryption_enabled in (True, False):
-            engine = IntelligenceEngine(
-                agent_id, base_path=self.base_path, encryption_enabled=encryption_enabled
-            )
-            pattern_data = b"ABCDABCDABCDABCD" * 3
-            engine.process_stream(pattern_data)
-            engine.close()
-            curriculum_dir = (
-                Path(self.base_path) / "agents" / engine.shard / agent_id / "g4_information"
-            )
-            if encryption_enabled:
-                curriculum_path = curriculum_dir / "curriculum.json.enc"
-                assert curriculum_path.exists()
-                key = (
-                    engine._gyrocrypt_key
-                    if hasattr(engine, "_gyrocrypt_key") and engine._gyrocrypt_key
-                    else b"\x00" * 16
-                )
-                curriculum = EncryptedFile.read_json(curriculum_path, key, b"GYR4")
-            else:
-                curriculum_path = curriculum_dir / "curriculum.json"
-                assert curriculum_path.exists()
-                import json
-
-                with open(curriculum_path, "r") as f:
-                    curriculum = json.load(f)
-            # patterns is now a dict
-            assert (
-                "patterns" in curriculum
-                and isinstance(curriculum["patterns"], dict)
-                and len(curriculum["patterns"]) > 0
-            )
-
     def test_session_state_persistence(self):
         """Test that session state is saved and loaded correctly (encrypted or plaintext)"""
         agent_id = create_agent(base_path=self.base_path)
@@ -339,8 +302,8 @@ class TestGyroSIBabyLM(unittest.TestCase):
             state2 = engine2.get_state()
             engine2.close()
 
-            assert state1["governance"]["cycle_count"] > 0
-            assert state2["governance"]["cycle_count"] == state1["governance"]["cycle_count"]
+            assert state1["governance"]["cycle_index"] > 0
+            assert state2["governance"]["cycle_index"] == state1["governance"]["cycle_index"]
             # Check session file
             session_dir = g5_dir
             if encryption_enabled:
@@ -356,21 +319,21 @@ class TestGyroSIBabyLM(unittest.TestCase):
 
                 with open(session_path, "r") as f:
                     session = json.load(f)
-            assert session["cycle_index"] == state1["governance"]["cycle_count"]
+            assert session["cycle_index"] == state1["governance"]["cycle_index"]
 
-    def test_current_cycle_decoded_is_constant(self):
+    def test_gene_stateless_snapshot_is_constant(self):
         """Test that a decoded genome cycle is constant and deterministic."""
         agent_id = create_agent(base_path=self.base_path)
         engine = IntelligenceEngine(agent_id, base_path=self.base_path)
 
         # Get the snapshot from a fresh engine
-        snapshot1 = engine.get_current_cycle_decoded()
+        snapshot1 = engine.get_gene_stateless_snapshot()
 
         # Process some data
         engine.process_stream(b"some data to change the state")
 
         # Get the snapshot again
-        snapshot2 = engine.get_current_cycle_decoded()
+        snapshot2 = engine.get_gene_stateless_snapshot()
 
         # The snapshot should be identical because it's based on immutable constants
         assert snapshot1 == snapshot2
@@ -420,23 +383,24 @@ class TestGyroSIBabyLM(unittest.TestCase):
     def test_empty_input_handling(self):
         """Test that empty input is handled gracefully"""
         agent_id = create_agent(base_path=self.base_path)
-        engine = IntelligenceEngine(base_path=self.base_path)
+        engine = IntelligenceEngine(agent_uuid=agent_id, base_path=self.base_path)
         artifacts = engine.process_stream(b"")
         assert len(artifacts["accepted_ops"]) == 0
 
     def test_single_byte_input(self):
         """Test handling of single byte input"""
-        engine = IntelligenceEngine(base_path=self.base_path)
+        agent_id = create_agent(base_path=self.base_path)
+        engine = IntelligenceEngine(agent_uuid=agent_id, base_path=self.base_path)
         artifacts = engine.process_stream(b"X")
         assert len(artifacts["accepted_ops"]) == 2
 
     def test_unicode_handling(self):
         """Test handling of unicode/emoji input"""
-        engine = IntelligenceEngine(base_path=self.base_path)
+        agent_id = create_agent(base_path=self.base_path)
+        engine = IntelligenceEngine(agent_uuid=agent_id, base_path=self.base_path)
         emoji_bytes = "👋".encode("utf-8")
         artifacts = engine.process_stream(emoji_bytes)
-        expected_ops = len(emoji_bytes) * 2
-        assert len(artifacts["accepted_ops"]) == expected_ops
+        assert len(artifacts["accepted_ops"]) == len(emoji_bytes) * 2
 
     def test_cycle_compression(self):
         """Test cycle compression for repeated patterns"""
@@ -615,40 +579,24 @@ class TestMessageStore(unittest.TestCase):
             parents=True, exist_ok=True
         )
 
-        # Initialize agent files
-        curriculum = {
-            "version": "1.0",
-            "patterns": {},
-            "byte_to_token": {},
-            "token_to_byte": {},
-            "metadata": {"created": datetime.utcnow().isoformat()},
-        }
+        # Initialize agent files (session only)
         session = {
             "agent_uuid": self.agent_uuid,
             "created": datetime.utcnow().isoformat(),
             "last_checkpoint": None,
             "phase": 0,
-            "cycle_count": 0,
-            "active_curriculum": None,
+            "cycle_index": 0,
         }
 
-        # Encrypt curriculum and session files
+        # Encrypt session file
         key = os.urandom(32)
         g5_dir = agent_dir / "g5_information"
         g5_dir.mkdir(parents=True, exist_ok=True)
         (g5_dir / "gyrocrypt.key").write_bytes(key)
         snapshot = IntelligenceEngine(
             self.agent_uuid, base_path=self.base_path, gyrocrypt_key=key
-        ).get_current_cycle_decoded()
+        ).get_gene_stateless_snapshot()
         salt = os.urandom(12)
-        EncryptedFile.write_json(
-            agent_dir / "g4_information" / "curriculum.json.enc",
-            curriculum,
-            key,
-            snapshot,
-            salt,
-            b"GYR4",
-        )
         EncryptedFile.write_json(
             agent_dir / "g5_information" / "session.json.enc", session, key, snapshot, salt, b"GYR5"
         )
@@ -660,24 +608,16 @@ class TestMessageStore(unittest.TestCase):
         # Thread ID for testing
         self.thread_id = "test-thread-001"
 
-        # Ensure curriculum and session files exist for both encryption modes
-        g4_dir = agent_dir / "g4_information"
+        # Ensure session files exist for both encryption modes
         g5_dir = agent_dir / "g5_information"
-        g4_dir.mkdir(parents=True, exist_ok=True)
         g5_dir.mkdir(parents=True, exist_ok=True)
-        curriculum = {"patterns": {}, "byte_to_token": {}, "token_to_byte": {}}
         session = {"cycle_index": 0}
         key = self._test_key
         snapshot = IntelligenceEngine(
             self.agent_uuid, base_path=self.base_path
-        ).get_current_cycle_decoded()
+        ).get_gene_stateless_snapshot()
         salt = os.urandom(12)
-        EncryptedFile.write_json(
-            g4_dir / "curriculum.json.enc", curriculum, key, snapshot, salt, b"GYR4"
-        )
         EncryptedFile.write_json(g5_dir / "session.json.enc", session, key, snapshot, salt, b"GYR5")
-        with open(g4_dir / "curriculum.json", "w") as f:
-            json.dump(curriculum, f)
         with open(g5_dir / "session.json", "w") as f:
             json.dump(session, f)
 

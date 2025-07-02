@@ -74,15 +74,9 @@ class DevView(ft.UserControl):
                             ),
                             MetricCard(
                                 title="Cycles",
-                                value=str(engine_state.get("governance", {}).get("cycle_count", 0)),
+                                value=str(engine_state.get("governance", {}).get("cycle_index", 0)),
                                 subtitle="Completed",
                                 icon=ft.icons.REFRESH,
-                            ),
-                            MetricCard(
-                                title="Patterns",
-                                value=str(engine_state.get("curriculum_size", 0)),
-                                subtitle="Learned",
-                                icon=ft.icons.PSYCHOLOGY,
                             ),
                         ],
                         spacing=10,
@@ -99,7 +93,7 @@ class DevView(ft.UserControl):
             title="Governance Engine",
             controls=[
                 self._build_state_row("Phase", gov_state.get("phase", 0)),
-                self._build_state_row("Cycle Count", gov_state.get("cycle_count", 0)),
+                self._build_state_row("Cycle Index", gov_state.get("cycle_index", 0)),
                 self._build_state_row("Buffer Size", gov_state.get("buffer_size", 0)),
                 self._build_state_row("Current Cycle Size", gov_state.get("current_cycle_size", 0)),
             ],

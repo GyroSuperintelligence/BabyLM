@@ -1,13 +1,14 @@
 """
 settings_view.py - Settings management view for GyroSI Baby LM
 
-Handles general settings, agent management, and curriculum operations.
+Handles general settings, agent management, and format operations.
 """
 
 import flet as ft
 from typing import Optional, Callable, Dict, Any
 import json
 from datetime import datetime
+import os
 
 from state import AppState
 from components.common import Section, SettingRow, ActionButton
@@ -82,9 +83,6 @@ class SettingsView(ft.UserControl):
             ],
         )
 
-        # Get curriculum data safely
-        curriculum_patterns = self._get_curriculum_patterns()
-
         # Agent management section
         agent_section = Section(
             title="Agent Management",
@@ -117,58 +115,13 @@ class SettingsView(ft.UserControl):
             ],
         )
 
-        # Agency management section
-        agency_section = Section(
-            title="Agency Management",
-            controls=[
-                SettingRow(
-                    title="Curriculum",
-                    subtitle=f"{len(curriculum_patterns)} patterns learned",
-                    control=None,
-                ),
-                ft.Container(
-                    content=ft.Column(
-                        controls=[
-                            ActionButton(
-                                text="Add Pattern",
-                                icon=ft.icons.ADD_CIRCLE_OUTLINE,
-                                on_click=self._add_pattern,
-                                full_width=True,
-                            ),
-                            ActionButton(
-                                text="Export Curriculum",
-                                icon=ft.icons.DOWNLOAD,
-                                on_click=self._export_curriculum,
-                                full_width=True,
-                            ),
-                            ActionButton(
-                                text="Import Curriculum",
-                                icon=ft.icons.UPLOAD,
-                                on_click=self._import_curriculum,
-                                full_width=True,
-                            ),
-                            ActionButton(
-                                text="Clear Curriculum",
-                                icon=ft.icons.DELETE_OUTLINE,
-                                on_click=self._clear_curriculum,
-                                style="danger",
-                                full_width=True,
-                            ),
-                        ],
-                        spacing=10,
-                    ),
-                    padding=ft.padding.all(20),
-                ),
-            ],
-        )
-
         # Scroll view with all sections
         return ft.Column(
             controls=[
                 header,
                 ft.Container(
                     content=ft.Column(
-                        controls=[general_section, agent_section, agency_section],
+                        controls=[general_section, agent_section],
                         spacing=20,
                         scroll=ft.ScrollMode.AUTO,
                     ),
@@ -180,21 +133,10 @@ class SettingsView(ft.UserControl):
             expand=True,
         )
 
-    def _get_curriculum_patterns(self) -> Dict[str, Any]:
-        """Safely get curriculum patterns."""
-        try:
-            # Try to access curriculum patterns through the state
-            curriculum = getattr(self.state, "curriculum", {})
-            if isinstance(curriculum, dict):
-                return curriculum.get("patterns", {})
-            return {}
-        except (AttributeError, TypeError):
-            # If any error occurs, return empty dict
-            return {}
-
     def _update_setting(self, key: str, value: Any):
         """Update a setting value."""
-        self.state.update_setting(key, value)
+        self.state.settings[key] = value
+        self.state._notify_updates()
         if key == "show_dev_info" and self.page is not None:
             # Notify parent to update UI
             self.page.update()
@@ -252,13 +194,12 @@ class SettingsView(ft.UserControl):
         if not self.state.current_agent:
             return
 
-        info = self.state.get_engine_state()
+        info = self.state.current_agent.get_state()
 
         content = ft.Column(
             controls=[
                 ft.Text(f"UUID: {self.state.agent_uuid}", size=12, color="#8E8E93"),
                 ft.Text(f"Cycles: {info.get('cycle_index', 0)}", size=12, color="#8E8E93"),
-                ft.Text(f"Patterns: {info.get('curriculum_size', 0)}", size=12, color="#8E8E93"),
                 ft.Text(
                     f"Phase: {info.get('governance', {}).get('phase', 0)}", size=12, color="#8E8E93"
                 ),
@@ -339,81 +280,6 @@ class SettingsView(ft.UserControl):
             self.page.dialog = dialog
             self.page.overlay.append(dialog_container)
             self.page.update()
-
-    def _add_pattern(self, e):
-        """Add a new pattern to curriculum."""
-        # This would show a pattern input interface
-        # For now, just show a placeholder
-        self.state.status_message = "Pattern editor not yet implemented"
-
-    def _export_curriculum(self, e):
-        """Export curriculum to file."""
-        if not self.state.current_agent:
-            return
-
-        try:
-            # Export to JSON file
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"curriculum_export_{timestamp}.json"
-
-            # In a real app, this would use a file picker
-            # For now, just show success message
-            self.state.status_message = f"Curriculum exported to {filename}"
-        except Exception as ex:
-            self.state.error_message = f"Export failed: {str(ex)}"
-
-    def _import_curriculum(self, e):
-        """Import curriculum from file."""
-        # This would show a file picker
-        self.state.status_message = "Import functionality not yet implemented"
-
-    def _clear_curriculum(self, e):
-        """Clear all learned patterns."""
-
-        def confirm_clear(e):
-            if self.state.current_agent:
-                # Use a safe method to update curriculum
-                self._update_curriculum({"patterns": {}, "byte_to_token": {}, "token_to_byte": {}})
-                self.state.status_message = "Curriculum cleared"
-
-            if self.page is not None:
-                dlg = self.page.dialog
-                if dlg is not None:
-                    dlg.visible = False
-                self.page.update()
-
-            self.update()
-
-        dialog = ft.AlertDialog(
-            title=ft.Text("Clear Curriculum", color="#FFFFFF"),
-            content=ft.Text(
-                "This will delete all learned patterns. This action cannot be undone.",
-                color="#8E8E93",
-            ),
-            actions=[
-                ft.TextButton("Cancel", on_click=lambda e: self._close_dialog(dialog)),
-                ft.TextButton(
-                    "Clear", on_click=confirm_clear, style=ft.ButtonStyle(color="#FF453A")
-                ),
-            ],
-            content_padding=ft.padding.all(10),
-        )
-
-        dialog_container = ft.Container(content=dialog, bgcolor="#1C1C1E")
-
-        if self.page is not None:
-            self.page.dialog = dialog
-            self.page.overlay.append(dialog_container)
-            self.page.update()
-
-    def _update_curriculum(self, new_curriculum: Dict[str, Any]):
-        """Safely update the curriculum."""
-        if hasattr(self.state, "curriculum"):
-            setattr(self.state, "curriculum", new_curriculum)
-
-        # If the agent has a method to persist curriculum, call it
-        if self.state.current_agent and hasattr(self.state.current_agent, "_persist_curriculum"):
-            self.state.current_agent._persist_curriculum()
 
     def _close_dialog(self, dialog):
         """Close a dialog."""

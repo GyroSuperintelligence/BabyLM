@@ -73,16 +73,25 @@ class GyroSIApp:
         self._init_agent()
 
     def _init_agent(self):
-        """Initialize the agent or create a new one."""
+        """Initialize the agent or create a new one, persisting UUID."""
         from s4_intelligence.g1_intelligence_in import initialize_system, create_agent
 
         try:
             # Ensure system is initialized
             initialize_system(base_path=self.state.base_path)
 
-            # Create a new agent if none exists
-            if not self.state.agent_uuid:
+            # Path to persist agent UUID
+            uuid_path = os.path.join(self.state.base_path, "agent_uuid.txt")
+            agent_uuid = None
+            if os.path.exists(uuid_path):
+                with open(uuid_path, "r") as f:
+                    agent_uuid = f.read().strip()
+
+            if not agent_uuid:
                 agent_uuid = create_agent(base_path=self.state.base_path)
+                with open(uuid_path, "w") as f:
+                    f.write(agent_uuid)
+
                 self.state.set_agent(agent_uuid)
         except Exception as e:
             self.state.error_message = f"Failed to initialize system: {str(e)}"

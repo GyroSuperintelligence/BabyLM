@@ -25,7 +25,7 @@ class Message:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert message to dictionary for storage."""
+        """Convert message to format for storage."""
         return {
             "id": self.id,
             "thread_id": self.thread_id,
@@ -37,7 +37,7 @@ class Message:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Message":
-        """Create message from dictionary."""
+        """Create message from format."""
         return cls(
             id=data["id"],
             thread_id=data["thread_id"],
@@ -59,7 +59,7 @@ class Thread:
     message_count: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert thread to dictionary for storage."""
+        """Convert thread to format for storage."""
         return {
             "id": self.id,
             "title": self.title,
@@ -70,7 +70,7 @@ class Thread:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Thread":
-        """Create thread from dictionary."""
+        """Create thread from format."""
         return cls(
             id=data["id"],
             title=data["title"],
@@ -164,7 +164,7 @@ class AppState:
             self.message_store = MessageStore(agent_uuid=agent_uuid, base_path=self.base_path)
 
             # Load threads for this agent
-            self._load_threads()
+            self.load_threads()
 
             self.error_message = None
             self._notify_updates()
@@ -212,7 +212,7 @@ class AppState:
             raise ValueError(f"Thread {thread_id} not found")
 
         self.current_thread_id = thread_id
-        self._load_thread_messages()
+        self.load_thread_messages()
         self._notify_updates()
 
     def add_message(
@@ -255,7 +255,7 @@ class AppState:
 
         # Save to message store
         if self.message_store and self.settings.get("auto_save", True):
-            self._save_thread_messages()
+            self.save_thread_messages()
 
         self._notify_updates()
         return message
@@ -277,11 +277,15 @@ class AppState:
         self._notify_updates()
 
         try:
+            # Tokenize input (default: list of characters, but could be any tokenization)
+            tokens = list(text)
+            # Use new instance-based codec (agent+global format)
+            data_bytes = self.current_agent.encode_tokens_to_bytes(tokens)
+
             # Add user message
             user_message = self.add_message("user", text)
 
             # Process through engine
-            data_bytes = text.encode("utf-8")
             artifacts = self.current_agent.process_stream(data_bytes)
 
             # Store processing stats
@@ -294,7 +298,13 @@ class AppState:
 
             # Generate response
             response_bytes = self.current_agent.generate(b"", max_length=200)
-            response_text = response_bytes.decode("utf-8", errors="replace")
+            response_tokens = self.current_agent.decode_bytes_to_tokens(response_bytes)
+            # Join tokens for display if they are strings
+            response_text = (
+                "".join(response_tokens)
+                if response_tokens and isinstance(response_tokens[0], str)
+                else str(response_tokens)
+            )
 
             # Add assistant message
             self.add_message(
@@ -309,12 +319,7 @@ class AppState:
             self._notify_updates()
 
     def process_file(self, file_path: str) -> None:
-        """
-        Process a file through the IntelligenceEngine.
-
-        Args:
-            file_path: Path to the file to process
-        """
+        """Process a file through the IntelligenceEngine using the codec."""
         if not self.current_agent:
             self.error_message = "No agent selected"
             self._notify_updates()
@@ -329,16 +334,44 @@ class AppState:
             with open(file_path, "rb") as f:
                 data_bytes = f.read()
 
-            # Add user message
             file_name = file_path.split("/")[-1]
-            self.add_message(
-                "user",
-                f"[Uploaded file: {file_name}]",
-                metadata={"file_path": file_path, "file_size": len(data_bytes)},
-            )
 
-            # Process through engine
+            # Try to decode the file content using the codec
+            try:
+                # Decode bytes to tokens using the agent's format
+                tokens = self.current_agent.decode_bytes_to_tokens(data_bytes)
+
+                # For display, join tokens (could be characters, words, etc.)
+                content_preview = "".join(str(t) for t in tokens[:100])  # First 100 tokens
+                if len(tokens) > 100:
+                    content_preview += "..."
+
+                # Add user message with decoded content
+                self.add_message(
+                    "user",
+                    f"[File: {file_name}]\n{content_preview}",
+                    metadata={
+                        "file_path": file_path,
+                        "file_size": len(data_bytes),
+                        "token_count": len(tokens),
+                    },
+                )
+
+            except Exception as decode_error:
+                # If decode fails, show raw bytes info
+                self.add_message(
+                    "user",
+                    f"[Binary file: {file_name}, {len(data_bytes)} bytes]",
+                    metadata={"file_path": file_path, "file_size": len(data_bytes)},
+                )
+
+            # Process through engine (this learns patterns)
             artifacts = self.current_agent.process_stream(data_bytes)
+
+            # Generate a response based on what was learned
+            response_bytes = self.current_agent.generate(b"", max_length=50)
+            response_tokens = self.current_agent.decode_bytes_to_tokens(response_bytes)
+            response_text = "".join(str(t) for t in response_tokens)
 
             # Store processing stats
             self.processing_stats = {
@@ -348,12 +381,13 @@ class AppState:
                 "resonances": len(artifacts.get("resonances", [])),
                 "compressed_blocks": len(artifacts.get("compressed_blocks", [])),
                 "pattern_promotions": len(artifacts.get("pattern_promotions", [])),
+                "new_patterns": len([p for p in artifacts.get("pattern_promotions", [])]),
             }
 
-            # Add response
+            # Add meaningful response
             self.add_message(
                 "assistant",
-                f"Processed {len(data_bytes)} bytes from {file_name}",
+                f"Processed {file_name}. Learned {self.processing_stats['new_patterns']} new patterns.\n{response_text}",
                 metadata={"processing_stats": self.processing_stats},
             )
 
@@ -364,19 +398,13 @@ class AppState:
             self.processing = False
             self._notify_updates()
 
-    def get_engine_state(self) -> Dict[str, Any]:
-        """Get current state of the IntelligenceEngine."""
-        if not self.current_agent:
-            return {}
-        return self.current_agent.get_state()
-
-    def _load_threads(self) -> None:
+    def load_threads(self) -> None:
         """Load threads for the current agent."""
         # In a real implementation, this would load from persistent storage
         # For now, we'll start with empty threads
         self.threads = {}
 
-    def _load_thread_messages(self) -> None:
+    def load_thread_messages(self) -> None:
         """Load messages for the current thread."""
         if not self.message_store or not self.current_thread_id:
             self.current_messages = []
@@ -389,7 +417,7 @@ class AppState:
             print(f"Error loading messages: {e}")
             self.current_messages = []
 
-    def _save_thread_messages(self) -> None:
+    def save_thread_messages(self) -> None:
         """Save current thread messages."""
         if not self.message_store or not self.current_thread_id:
             return
@@ -399,13 +427,3 @@ class AppState:
             self.message_store.write_recent(self.current_thread_id, message_dicts)
         except Exception as e:
             print(f"Error saving messages: {e}")
-
-    def clear_error(self) -> None:
-        """Clear the current error message."""
-        self.error_message = None
-        self._notify_updates()
-
-    def update_setting(self, key: str, value: Any) -> None:
-        """Update a setting value."""
-        self.settings[key] = value
-        self._notify_updates()

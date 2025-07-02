@@ -55,7 +55,7 @@ class GovernanceEngine:
     def __init__(self):
         """Initialize the engine with empty state."""
         self.phase = 0  # Current phase (0-47)
-        self.cycle_count = 0  # Number of completed cycles
+        self.cycle_index = 0  # Number of completed cycles
         self.buffer = deque(maxlen=48)  # Circular buffer of recent op-pairs
         self.current_cycle_ops = []  # Accumulating buffer for current cycle
         self.current_cycle_resonance = []  # Resonance flags for current cycle
@@ -112,14 +112,14 @@ class GovernanceEngine:
             # Emit cycle completion event
             events.append(
                 CycleComplete(
-                    cycle_number=self.cycle_count,
+                    cycle_number=self.cycle_index,
                     op_pairs=cycle_ops,
                     resonance_flags=cycle_res,
                 )
             )
 
-            # Increment cycle count and reset accumulators
-            self.cycle_count += 1
+            # Increment cycle index and reset accumulators
+            self.cycle_index += 1
             self.current_cycle_ops = []
             self.current_cycle_resonance = []
 
@@ -127,12 +127,12 @@ class GovernanceEngine:
 
     def get_state(self) -> Dict[str, Any]:
         """
-        Return the current engine state as a dictionary.
+        Return the current engine state as a format.
         Useful for monitoring and debugging.
         """
         return {
             "phase": self.phase,
-            "cycle_count": self.cycle_count,
+            "cycle_index": self.cycle_index,
             "buffer_size": len(self.buffer),
             "current_cycle_size": len(self.current_cycle_ops),
             "current_cycle_buffer": list(self.buffer),
@@ -144,7 +144,7 @@ class GovernanceEngine:
         Useful for testing or when starting a new session.
         """
         self.phase = 0
-        self.cycle_count = 0
+        self.cycle_index = 0
         self.buffer.clear()
         self.current_cycle_ops = []
         self.current_cycle_resonance = []

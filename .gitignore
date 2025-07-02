@@ -46,7 +46,6 @@ venv.bak/
 s2_information/agency/g1_information/*/*.dat
 s2_information/agency/g4_information/*/*.json
 s2_information/agency/g5_information/*/*.json
-s2_information/agents/*/*/g4_information/curriculum.json
 s2_information/agents/*/*/g5_information/session.json
 s2_information/agents/*/*/g5_information/session.json.bak
 

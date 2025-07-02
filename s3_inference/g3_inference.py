@@ -25,7 +25,7 @@ class CompressedBlock:
 
     Attributes:
         block_type: Type of block ("full_cycle", "cycle_repeat", "pruned_cycle")
-        data: Dictionary containing block-specific data
+        data: Format containing block-specific data
     """
 
     block_type: str
@@ -57,7 +57,7 @@ class InferenceEngine:
 
     Key responsibilities:
     1. Detect repeated cycles and emit compressed blocks
-    2. Identify recurring patterns and promote them to the curriculum
+    2. Identify recurring patterns and promote them to the dictionaries
     3. Analyze resonance patterns for pruning decisions
     4. Generate predictions based on learned patterns
     """
@@ -200,7 +200,7 @@ class InferenceEngine:
             resonance_flags: List of 48 boolean resonance flags
 
         Returns:
-            Dictionary with analysis metrics and pruning decision
+            Format with analysis metrics and pruning decision
         """
         self.prune_stats["total"] += 1
 
@@ -247,33 +247,26 @@ class InferenceEngine:
             "top_patterns": dict(self.pattern_counts.most_common(5)),
         }
 
-    def predict_next_operation(self, curriculum: Dict[str, Any]) -> Tuple[int, int]:
+    def predict_next_operation(self) -> Tuple[int, int]:
         """
-        Predict the next operation based on learned patterns.
-
-        Args:
-            curriculum: Dictionary of learned patterns
-
+        Predict the next operation based on learned patterns (now using only promoted_patterns).
         Returns:
             Predicted next operation pair (op_code, tensor_id)
         """
-        # Default to identity operation if no patterns
-        if not curriculum or "patterns" not in curriculum or not curriculum["patterns"]:
+        # Default to identity operation if no promoted patterns
+        if not self.promoted_patterns:
             return (7, 0)
-
         # Find the most frequent pattern
         best_pattern = None
         highest_freq = 0
-
-        for pattern_id, pattern_info in curriculum["patterns"].items():
-            if pattern_info.get("frequency", 0) > highest_freq:
-                highest_freq = pattern_info["frequency"]
-                pattern_seq = pattern_info.get("sequence", [])
-                if pattern_seq:
-                    # Extract first op-pair from the sequence
-                    best_pattern = (pattern_seq[0]["op"], pattern_seq[0]["tensor"])
-
-        return best_pattern if best_pattern else (7, 0)
+        for pattern_hash, pattern_list in self.promoted_patterns.items():
+            freq = self.pattern_counts.get(tuple(pattern_list), 0)
+            if freq > highest_freq and pattern_list:
+                highest_freq = freq
+                best_pattern = pattern_list[0]
+        if best_pattern is not None and isinstance(best_pattern, tuple) and len(best_pattern) == 2:
+            return best_pattern
+        return (7, 0)
 
     def reset(self) -> None:
         """Reset the engine to its initial state."""
