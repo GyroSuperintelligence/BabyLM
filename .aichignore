@@ -75,3 +75,7 @@ s2_information/agency/**/__pycache__/
 **/__pycache__/
 
 # Add any other project-specific exclusions below
+.git
+.pytest_cache
+.venv
+.vscode

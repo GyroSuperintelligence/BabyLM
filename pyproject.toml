@@ -1,90 +1,114 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gyrosi-babylm"
-version = "0.1.0"
-authors = [
-  { name="The BabyLM Authors" },
-]
-description = "BabyLM"
+name = "gyrosi-baby-lm"
+version = "0.9.5"
+description = "GyroSI Baby LM - A physics-based language model implementing the Common Governance Model"
 readme = "README.md"
-license = { file="LICENSE" }
-requires-python = ">=3.11"
-keywords = [
-    "superintelligence", "gyrogroup", "tensor", "alignment", "AI", "language-model", "governance", "physics"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [
+    {name = "GyroSI Team"},
 ]
+keywords = ["language-model", "cgm", "superintelligence", "tensor-operations"]
 classifiers = [
-    "Programming Language :: Python :: 3.11",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence"
-]
-dependencies = [
-    "torch>=2.2.0",
-    "numpy>=1.26.0,<2.0",
-    "flet==0.19.0",
-    "pyyaml>=6.0",
-    "msgpack>=1.0.7",
-    "sqlite-utils>=3.36.0",
-    "click>=8.1.7",
-    "tqdm>=4.66.2",
-    "zstandard>=0.22.0",
-    "cryptography>=42.0.0",
-    "typing-extensions>=4.11.0",
-    "filelock>=3.13.4",
-    "psutil>=5.9.0",
-    "questionary>=2.0.0"
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-[tool.setuptools]
-packages = ["s1_governance", "s2_information", "s3_inference", "s4_intelligence", "extensions", "scripts"]
+dependencies = [
+    "numpy>=1.24.0,<2.0.0",
+    "cryptography>=41.0.0,<42.0.0",
+]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "black>=24.4.2",
-    "flake8>=7.0.0",
-    "mypy>=1.10.0",
-    "isort>=5.13.2",
-    "pre-commit>=3.7.1"
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+    "black>=23.7.0",
+    "flake8>=6.1.0",
+    "mypy>=1.5.0",
+    "isort>=5.12.0",
 ]
-docs = [
-    "mkdocs>=1.6.0",
-    "mkdocs-material>=9.5.18"
+
+test = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.0",
+]
+
+[project.scripts]
+babylm = "babylm:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["baby*", "memories*", "toys*"]
+exclude = ["tests*", "venv*", "__pycache__*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["toys"]
+python_files = ["*_tests.py", "test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "--cov=baby",
+    "--cov-report=term-missing",
+    "--cov-report=html",
 ]
 
 [tool.black]
-line-length = 100
-target-version = ['py311']
+line-length = 120
+target-version = ['py310']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | __pycache__
+  | \.mypy_cache
+  | \.pytest_cache
+  | memories
+)/
+'''
 
 [tool.isort]
 profile = "black"
+line_length = 120
+skip_gitignore = true
+skip = ["venv", ".venv", "__pycache__", "memories"]
 
 [tool.mypy]
-python_version = 3.11
-ignore_missing_imports = true
-
-[tool.pytest.ini_options]
-minversion = "8.0"
-addopts = "-ra -q"
-testpaths = [
-    "scripts/tests",
-]
-
-[tool.flake8]
-max-line-length = 100
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_equality = true
 exclude = [
-    ".git",
-    "__pycache__",
-    "build",
-    "dist",
-    ".venv",
     "venv",
-    "env",
-    ".eggs",
-    "*.egg-info",
-    "docs/_build",
+    ".venv",
+    "__pycache__",
+    "memories",
 ]
+
+[[tool.mypy.overrides]]
+module = "cryptography.*"
+ignore_missing_imports = true

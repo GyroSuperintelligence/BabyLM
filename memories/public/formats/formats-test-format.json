@@ -1,0 +1,2365 @@
+{
+  "format_uuid": "test-format",
+  "format_name": "default_format",
+  "cgm_version": "1.0.0",
+  "format_version": "1.0.0",
+  "stability": "experimental",
+  "compatibility": {
+    "min_cgm_version": "0.9.0",
+    "max_cgm_version": "1.0.0",
+    "depends_on": [],
+    "conflicts_with": []
+  },
+  "metadata": {
+    "author": "agent_test-age",
+    "description": "Default format initialized automatically",
+    "tags": [
+      "default",
+      "auto_generated"
+    ],
+    "created_at": "2025-07-07T00:31:27.175674",
+    "last_updated": "2025-07-07T00:31:27.175690",
+    "usage_count": 0,
+    "validation_status": "unverified"
+  },
+  "cgm_policies": {
+    "governance": {
+      "operation": "L0",
+      "bits": [
+        0,
+        7
+      ],
+      "policy": "traceability"
+    },
+    "information": {
+      "operation": "LI",
+      "bits": [
+        1,
+        6
+      ],
+      "policy": "variety"
+    },
+    "inference": {
+      "operation": "FG",
+      "bits": [
+        2,
+        5
+      ],
+      "policy": "accountability"
+    },
+    "intelligence": {
+      "operation": "BG",
+      "bits": [
+        3,
+        4
+      ],
+      "policy": "integrity"
+    }
+  },
+  "patterns": [
+    {
+      "index": 0,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 1,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 2,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 3,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 4,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 5,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 6,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 7,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 8,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 9,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 10,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 11,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 12,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 13,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 14,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 15,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 16,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 17,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 18,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 19,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 20,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 21,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 22,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 23,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 24,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 25,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 26,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 27,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 28,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 29,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 30,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 31,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 32,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 33,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 34,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 35,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 36,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 37,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 38,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 39,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 40,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 41,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 42,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 43,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 44,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 45,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 46,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 47,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 48,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 49,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 50,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 51,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 52,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 53,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 54,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 55,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 56,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 57,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 58,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 59,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 60,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 61,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 62,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 63,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 64,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 65,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 66,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 67,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 68,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 69,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 70,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 71,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 72,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 73,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 74,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 75,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 76,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 77,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 78,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 79,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 80,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 81,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 82,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 83,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 84,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 85,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 86,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 87,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 88,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 89,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 90,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 91,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 92,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 93,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 94,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 95,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 96,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 97,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 98,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 99,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 100,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 101,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 102,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 103,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 104,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 105,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 106,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 107,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 108,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 109,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 110,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 111,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 112,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 113,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 114,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 115,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 116,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 117,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 118,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 119,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 120,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 121,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 122,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 123,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 124,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 125,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 126,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 127,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 128,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 129,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 130,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 131,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 132,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 133,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 134,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 135,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 136,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 137,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 138,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 139,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 140,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 141,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 142,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 143,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 144,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 145,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 146,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 147,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 148,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 149,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 150,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 151,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 152,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 153,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 154,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 155,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 156,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 157,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 158,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 159,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 160,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 161,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 162,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 163,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 164,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 165,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 166,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 167,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 168,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 169,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 170,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 171,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 172,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 173,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 174,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 175,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 176,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 177,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 178,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 179,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 180,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 181,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 182,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 183,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 184,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 185,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 186,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 187,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 188,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 189,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 190,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 191,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 192,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 193,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 194,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 195,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 196,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 197,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 198,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 199,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 200,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 201,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 202,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 203,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 204,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 205,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 206,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 207,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 208,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 209,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 210,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 211,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 212,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 213,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 214,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 215,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 216,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 217,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 218,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 219,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 220,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 221,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 222,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 223,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 224,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 225,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 226,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 227,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 228,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 229,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 230,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 231,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 232,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 233,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 234,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 235,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 236,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 237,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 238,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 239,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 240,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 241,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 242,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 243,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 244,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 245,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 246,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 247,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 248,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "backward",
+      "confidence": 0.0
+    },
+    {
+      "index": 249,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 250,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 251,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 252,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "forward",
+      "confidence": 0.0
+    },
+    {
+      "index": 253,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    },
+    {
+      "index": 254,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "inverse",
+      "confidence": 0.0
+    },
+    {
+      "index": 255,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "resonance_class": "identity",
+      "confidence": 0.0
+    }
+  ]
+}
