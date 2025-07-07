@@ -196,9 +196,9 @@ def classify_pattern_resonance(mask: int) -> str:
 |-----------|----------|------|---------|-------|
 | **Epigenome Mask** | `public/masks/epigenome.dat` | 12,288 bytes | Canonical patterns for matching | **Complete intelligence framework** |
 | **Genome Mask** | `public/masks/genome.dat` | 256 bytes | Output byte mappings | **Totality of all intelligence** |
-| **Gyronorm Formats** | `public/formats/formats-<format_uuid>.json` | Variable | Pattern usage metadata | **Ability to speak, decode, encode** |
-| **Gene Keys** | `private/<uuid>/keys/keys-<uuid>.json.enc` | Variable | Pattern observation logs | **Personal learning history** |
-| **Thread Files** | `private/<uuid>/threads/<shard>/thread-<uuid>.enc` | ≤64 MiB | Encrypted conversation data | **Personal conversations** |
+| **Gyronorm Formats** | `public/formats/<shard>/format-<uuid>.json` | Variable | Pattern usage metadata | **Ability to speak, decode, encode** |
+| **Gene Keys** | `private/agents/<shard>/agent-<uuid>/keys/<shard>/key-<uuid>.bin.enc` | Variable | Pattern observation logs | **Personal learning history** |
+| **Thread Files** | `private/agents/<shard>/agent-<uuid>/threads/<shard>/thread-<uuid>.enc` | ≤64 MiB | Encrypted conversation data | **Personal conversations** |
 
 #### 3.2.3 Security Model
 
@@ -214,182 +214,104 @@ def classify_pattern_resonance(mask: int) -> str:
 
 ### 3.3 File Organization
 
-#### 3.3.1 System Responsibilities
-
-- **Information Engine (S2 / information.py):**
-  - Responsible for creation, registry, and management of all persistent objects: agents, threads, keys, and formats.
-  - Handles deterministic UUID generation and registry file creation for agents and files.
-  - Ensures all objects are sharded and recorded according to the specification.
-  - Provides a persistent agent UUID, automatically generated on first run, with a managed routine to allow reassignment if needed.
-- **Intelligence Engine (S3 / intelligence.py):**
-  - Acts as the main I/O endpoint, calling the S2-provided helpers for all persistent read and write operations.
-
-#### 3.3.2 Terminology
-
-| Term | Definition |
-| --- | --- |
-| UUID | Lower-case RFC 4122 string (36 chars, 4 hyphens). Unique and never reused for any object. |
-| Object type | One of: `agent`, `key`, `thread`, `format`. |
-| Shard | Directory named by the first two (or four) hex digits of the UUID, to spread files evenly. |
-| Registry | JSON file named `registry.json`, lists immediate children in the current directory. |
-
-#### 3.3.3 Directory Structure
+#### 3.3.1 Directory Structure
 
 ```
 memories/
-├── memory_preferences.json                      # Tuning parameters including sharding
+├── memory_preferences.json      # Sharding configuration and tuning parameters
 ├── public/
 │   ├── masks/
-│   │   ├── epigenome.dat                       # 12,288 bytes
-│   │   └── genome.dat                          # 256 bytes
+│   │   ├── epigenome.dat        # 12,288 bytes
+│   │   └── genome.dat           # 256 bytes
 │   └── formats/
-│       └── <dd>[/<ee>]/format-<uuid>.json      # Sharded by format UUID
+│       └── <dd>[/<ee>]/         # Format shards
+│           ├── registry.json
+│           └── format-<uuid>.json
 └── private/
     └── agents/
-        └── <aa>[/<bb>]/agent-<agent‑uuid>/
-            ├── threads/
-            │   ├── registry.json
-            │   └── <tt>[/<uu>]/                # Thread shards
-            │       ├── registry.json
-            │       ├── thread-<uuid>.enc       # Encrypted thread
-            │       └── thread-<uuid>.json      # Thread metadata
-            ├── keys/
-            │   ├── registry.json
-            │   └── <tt>[/<uu>]/                # Key shards (match thread UUIDs)
-            │       ├── registry.json
-            │       └── key-<thread‑uuid>.bin.enc # Encrypted key blob
+        └── <aa>[/<bb>]/         # Agent shards
+            └── agent-<uuid>/
+                ├── threads/
+                │   ├── registry.json
+                │   └── <tt>[/<uu>]/    # Thread shards
+                │       ├── registry.json
+                │       ├── thread-<uuid>.enc
+                │       └── thread-<uuid>.json
+                └── keys/
+                    ├── registry.json
+                    └── <tt>[/<uu>]/    # Key shards
+                        ├── registry.json
+                        └── key-<uuid>.bin.enc
 ```
 
-- **Sharding:** `aa`, `bb`, `tt`, `uu`, `dd`, `ee` are two-character hex directories (first two, then next two hex of UUID as needed).
-- **Second-level shards** are created only when the first-level shard exceeds the configured maximum (see below).
+- `<aa>`, `<bb>`, `<dd>`, `<ee>`, `<tt>`, `<uu>` are two-character hex shards based on the first characters of the UUID.
+- Second-level shards (e.g., `<bb>`, `<ee>`, `<uu>`) are created only when the first-level shards exceed a configured maximum.
 
-#### 3.3.4 Naming Conventions
+#### 3.3.2 Information Engine Responsibility
 
-- All files: `<type>-<uuid>[.<ext>]`, where `type` ∈ {agent, thread, key, format}.
-  - `.json` for structured data, `.dat` or `.bin.enc` for binary or encrypted content.
-- No additional separators, suffixes, or directories beyond those specified.
+The Information Engine (S2) handles creation, registry, and management of all persistent objects:
 
-#### 3.3.5 Sharding Parameters
+- Deterministic UUID generation and registry file creation
+- Agent identity management (creation, persistence, reassignment)
+- Sharded storage of all files for efficient scaling
+- Registry maintenance for all object types
+- Atomic file operations with crash recovery
+- Thread relationship tracking (parent/child)
 
-| Parameter | Default | Description |
-| --- | --- | --- |
-| SHARD_WIDTH | 2 | First-level shard, 256 subdirectories per object type. |
-| SHARD_MAX_FILES | 30,000 | Promote to next-level shard if entries exceed this count in one directory. |
-| SHARD_SECOND_LEVEL | true | Enables a second 2-char hex shard after limit is exceeded. |
+#### 3.3.3 Intelligence Engine Responsibility
 
-**Configurable in** `memories/memory_preferences.json` under key `"sharding"`:
+The Intelligence Engine (S4) acts as the main I/O endpoint, calling S2-provided helpers for all persistent read and write operations. This separation ensures:
+
+- Consistent file handling across the system
+- Clean separation between intelligence operations and storage
+- Atomic, crash-resistant file operations
+- Scalable storage that remains efficient with millions of objects
+
+#### 3.3.4 Registry Files
+
+Every directory containing persistent objects includes a `registry.json` file that lists its immediate children:
 
 ```json
 {
-  "sharding": {
-    "width": 2,
-    "max_files": 30000,
-    "second_level": true
-  }
+  "count": 2,
+  "uuids": [
+    "67d9e4c4-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "ab12c3d4-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  ]
 }
 ```
 
-#### 3.3.6 Registry Files
+Registries only track immediate children, never recursing deeper, and are atomically updated with each file operation.
 
-- Every directory directly containing persistent objects (files or shards) contains a `registry.json` file.
-- Each registry lists only immediate children, never recurses, and must always be kept in sync with actual contents.
-- **Example structure:**
-  
-  ```json
-  {
-    "count": 2,
-    "uuids": [
-      "67d9e4c4-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-      "ab12c3d4-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-    ]
-  }
-  ```
+#### 3.3.5 Thread and Key Management
 
-#### 3.3.7 Thread Metadata Files
+- Each thread has a matching key file named `key-<thread‑uuid>.bin.enc`
+- Thread metadata tracks parentage, format association, and timestamps
+- Keys are encrypted using AES-256-GCM with a key derived from the agent secret
+- All file operations are atomic and include appropriate registry updates
 
-- Each thread has a `thread-<uuid>.json` file in the same shard as its payload.
-  - Fields: `thread_uuid`, `agent_uuid`, `parent_uuid`, `child_uuids`, `format_uuid`, `created_at`, `last_updated`, `size_bytes`.
-  - Fields are updated or appended, but never deleted, to ensure crash-tolerance and auditability.
+#### 3.3.6 Concurrency and Consistency
 
-#### 3.3.8 Key Files
+- File operations use atomic write patterns with temporary files and rename
+- Directory locking ensures consistency during updates
+- Registry files are kept in sync with actual directory contents
+- Startup includes crash recovery to resolve any incomplete operations
 
-- Each thread has a matching key file named `key-<thread‑uuid>.bin.enc`, 256 bytes encrypted with AES-256-GCM (PBKDF2-HMAC-SHA256 with agent secret, salt = agent UUID).
-- Located under the agent's key shard, using the thread UUID as the basis for sharding.
-- Each key is written atomically; only the containing registry is touched.
+#### 3.3.7 API Contract
 
-#### 3.3.9 Format Files
-
-- **All formats are global and live only under** `memories/public/formats/` using the sharding convention.
-- No agent stores or references formats in any private directory.
-
-#### 3.3.10 Agent UUID Lifecycle
-
-- **Persistent agent UUID:** S2 generates and persists the agent UUID at first run, stored under `agent-<uuid>/` in the appropriate shard.
-- **Managed re-assignment:** S2 provides a function to generate a new UUID and rebind the agent, including appropriate registry and directory updates.
-- **CLI/Interface access:** S2 exposes all agent/UUID management, including reassignment and inspection, via callable functions.
-
-#### 3.3.11 Creation, Atomicity, and Consistency
-
-- **All object creation is performed using a single helper:** `store_object(obj_type, payload, ext="dat")`, with correct UUID, filename, and atomic write with `.tmp` suffix and `fsync` before `rename()`.
-- **Registry update:** Always update the local `registry.json` after object creation, with appropriate directory lock.
-- **Crash recovery:** On startup, remove orphan `.tmp` files and rebuild any missing registries by scanning the folder.
-
-#### 3.3.12 Helper Functions (API Contract)
-
-All persistent store logic is encapsulated in deterministic, reusable helpers. These are always called by S2 (information.py); S3 (intelligence.py) interacts with persistent state only through these APIs.
-
-- **Sharding and atomic I/O:**
-    
-  ```python
-  def shard_path(root: Path, uuid_: str, width=2, limit=30_000) -> Path
-  def atomic_write(path: Path, data: bytes) -> None
-  def update_registry(dirpath: Path, uuid_: str) -> None
-  ```
-    
-- **Agent/Thread lifecycle:**
-    
-  ```python
-  def ensure_agent_uuid() -> str
-  def assign_agent_uuid(new_uuid: str) -> None
-  def create_thread(agent_uuid: str, parent_uuid: str | None, format_uuid: str) -> str
-  def save_thread(agent_uuid: str, thread_uuid: str, ciphertext: bytes, size: int) -> None
-  def load_thread(agent_uuid: str, thread_uuid: str) -> bytes | None
-  ```
-    
-- **Key storage:**
-    
-  ```python
-  def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes) -> None
-  def load_thread_key(agent_uuid: str, thread_uuid: str) -> bytes | None
-  ```
-    
-- **Relationship traversal:**
-    
-  ```python
-  def parent(agent_uuid: str, thread_uuid: str) -> str | None
-  def children(agent_uuid: str, thread_uuid: str) -> list[str]
-  ```
-    
-- **Format listing/lookup:**
-    
-  ```python
-  def list_formats() -> list[str]
-  def load_format(format_uuid: str) -> dict | None
-  ```
-
-#### 3.3.13 Concurrency Contract
-
-- Every persistent write touches **exactly one shard**, with atomic file/registry update and directory lock.
-- Reads never lock and must retry if an incomplete `.tmp` file is detected.
-- No global registry or monolithic file exists at any level.
-
-#### 3.3.14 System Goals
-
-1. All directories remain small and efficient even with 10⁶ + objects per type.
-2. Any thread, key, or format can be located in O(1) using its UUID.
-3. The parent↔child relationship graph persists without ever-growing global files.
-4. Atomic updates allow many concurrent writers with no risk of corruption.
-5. Only the specified helpers are used for path, sharding, and registry access—no hand-coded paths or side tables.
+```python
+# Core API functions for persistent storage
+def ensure_agent_uuid() -> str
+def create_thread(agent_uuid: str, parent_uuid: str | None, format_uuid: str) -> str
+def save_thread(agent_uuid: str, thread_uuid: str, ciphertext: bytes, size: int) -> None
+def load_thread(agent_uuid: str, thread_uuid: str) -> bytes | None
+def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes) -> None
+def load_thread_key(agent_uuid: str, thread_uuid: str) -> bytes | None
+def parent(agent_uuid: str, thread_uuid: str) -> str | None
+def children(agent_uuid: str, thread_uuid: str) -> list[str]
+def list_formats() -> list[str]
+def load_format(format_uuid: str) -> dict | None
+```
 
 ## 4. Engine Implementation
 
@@ -399,10 +321,8 @@ The S4 IntelligenceEngine acts as the primary container and entry point for the 
 
 ```python
 def initialize_intelligence_engine():
-    # 1. Ensure UUID registry exists and load it
-    uuid_registry = ensure_uuid_registry()
-    agent_uuid = uuid_registry["agent_uuid"]
-    format_uuid = uuid_registry["format_uuid"]
+    # 1. Get persistent agent UUID
+    agent_uuid = ensure_agent_uuid()
     
     # 2. Load agent preferences
     with open("baby/baby_preferences.json", 'r') as f:
@@ -413,10 +333,10 @@ def initialize_intelligence_engine():
     inference_engine = InferenceEngine()
     information_engine = InformationEngine()
     
-    # 4. Load public components
-    formats_path = f"public/formats/formats-{format_uuid}.json"
-    with open(formats_path, 'r') as f:
-        M = json.load(f)
+    # 4. Load formats
+    formats = list_formats()
+    format_uuid = formats[0] if formats else create_default_format()
+    format_data = load_format(format_uuid)
     
     # 5. Create Intelligence Engine
     intelligence_engine = IntelligenceEngine(
@@ -425,7 +345,7 @@ def initialize_intelligence_engine():
         format_uuid=format_uuid,
         inference_engine=inference_engine,
         information_engine=information_engine,
-        formats=M
+        formats=format_data
     )
     
     return intelligence_engine
@@ -516,25 +436,9 @@ def compute_pattern_resonances(current_T, all_patterns_F):
     return [gyrodistance(current_T, all_patterns_F[j]) for j in range(256)]
 ```
 
-### S3: Canonical Byte Emission (Foundational Route)
+### 4.4.1 Canonical Byte Emission
 
 The only canonical, spec-compliant way to convert the Epigenome tensor to a byte is:
-
-```python
-key_index = find_closest_pattern_index(T, F)   # F = 256 canonical tensors
-output_byte = G[key_index]                     # G = Genome Mask (uint8[256])
-```
-
-**Why this is foundational:**
-- **Epigenome coherence:** The evolving tensor T is always compared against the closure set of 256 canonical patterns.
-- **Reversibility & auditability:** Every output byte is traceable to the exact canonical pattern that produced it.
-- **Thread/file keys:** The same output_byte stream is reused for encryption, ensuring unity between generation and security.
-
-**No other method (e.g., direct tensor-to-byte via thresholding or chirality) is canonical or spec-compliant.**
-
-**Canonical Tensor-to-Byte Conversion (Spec-Compliant)**
-
-The ONLY canonical, spec-compliant way to convert a tensor to a byte is:
 
 ```python
 def tensor_to_output_byte(T, F, G):
@@ -546,9 +450,12 @@ def tensor_to_output_byte(T, F, G):
     return G[key_index]
 ```
 
-- All code and engines (including S4/Intelligence) MUST use this route for byte emission.
-- No threshold-based, chirality, or direct sum methods are allowed for canonical operation.
-- This ensures epigenome coherence, reversibility, and security as described above.
+**Why this is foundational:**
+- **Epigenome coherence:** The evolving tensor T is always compared against the closure set of 256 canonical patterns.
+- **Reversibility & auditability:** Every output byte is traceable to the exact canonical pattern that produced it.
+- **Thread/file keys:** The same output_byte stream is reused for encryption, ensuring unity between generation and security.
+
+All code and engines must use this route for byte emission, ensuring epigenome coherence, reversibility, and security.
 
 ### 4.5 S4: Intelligence Engine
 
@@ -564,12 +471,12 @@ def tensor_to_output_byte(T, F, G):
 #### 4.5.1 Thread Lifecycle Operations
 
 ```python
-def start_new_thread():
+def start_new_thread(parent_uuid=None):
     # 1. Capture Epigenome state
     epigenome_snapshot = inference_engine.T.copy()
     
-    # 2. Generate thread UUID
-    thread_uuid = generate_new_uuid()
+    # 2. Create new thread
+    thread_uuid = create_thread(agent_uuid, parent_uuid, format_uuid)
 
     # 3. Derive thread file key
     thread_file_key = derive_file_key(
@@ -578,6 +485,8 @@ def start_new_thread():
 
     # 4. Reset observation log
     current_thread_keys = []
+    
+    return thread_uuid
 
 def process_and_end_thread(input_stream: bytes):
     # 1. Process the stream
@@ -599,43 +508,15 @@ def end_current_thread(intermediate_ciphertext: bytes, dynamic_keystream: bytes)
     for i in range(len(plaintext)):
         final_encrypted_data[i] = plaintext[i] ^ thread_file_key[i % 256]
 
-    # 3. Save thread file
-    shard = str(thread_uuid)[:2]
-    thread_path = f"private/{agent_uuid}/threads/{shard}/thread-{thread_uuid}.enc"
-    with open(thread_path, "wb") as f:
-        f.write(final_encrypted_data)
-
-    # 4. Save Gene Keys
-    keys_path = f"private/{agent_uuid}/keys/keys-{agent_uuid}.json.enc"
-    agent_key = derive_agent_key(agent_uuid, agent_secret)
-
-    try:
-        with open(keys_path, 'rb') as f:
-            encrypted_keys = f.read()
-        decrypted_json_str = decrypt_data(encrypted_keys, agent_key)
-        all_keys_data = json.loads(decrypted_json_str)
-    except FileNotFoundError:
-        all_keys_data = {}
-    
-    all_keys_data[str(thread_uuid)] = current_thread_keys
-    
-    updated_json_str = json.dumps(all_keys_data)
-    encrypted_updated_keys = encrypt_data(updated_json_str.encode('utf-8'), agent_key)
-    with open(keys_path, 'wb') as f:
-        f.write(encrypted_updated_keys)
-
-    # 5. Save formats metadata
-    formats_path = f"public/formats/formats-{format_uuid}.json"
-    with open(formats_path, "w") as f:
-        json.dump(M, f)
+    # 3. Save thread and key
+    save_thread(agent_uuid, thread_uuid, final_encrypted_data, len(final_encrypted_data))
+    store_thread_key(agent_uuid, thread_uuid, thread_file_key)
 
 def update_learning_state(key_index: int, inference_engine: InferenceEngine):
     # 1. Update pattern metadata
-    M.pattern_meta[key_index]["count"] += 1
-    M.pattern_meta[key_index]["last_cycle"] = inference_engine.cycle_counter
-    if M.pattern_meta[key_index]["first_cycle"] is None:
-        M.pattern_meta[key_index]["first_cycle"] = inference_engine.cycle_counter
-
+    M["patterns"][key_index]["frequency"] += 1
+    M["patterns"][key_index]["last_seen"] = inference_engine.cycle_counter
+    
     # 2. Record Gene Key
     gene_key_entry = {
         "cycle": inference_engine.cycle_counter,
@@ -649,14 +530,14 @@ def update_learning_state(key_index: int, inference_engine: InferenceEngine):
 ```python
 def encode(semantic_label: str) -> int | None:
     """Finds pattern index for semantic label"""
-    for index, meta in enumerate(M.pattern_meta):
-        if meta.get("semantic") == semantic_label:
+    for index, pattern in enumerate(M["patterns"]):
+        if pattern.get("translation") == semantic_label:
             return index
     return None
 
 def decode(key_index: int) -> str | None:
     """Finds semantic label for pattern index"""
-    return M.pattern_meta[key_index].get("semantic")
+    return M["patterns"][key_index].get("translation")
 ```
 
 #### 4.5.3 Intelligent Response Generation
@@ -679,10 +560,10 @@ def generate_response_byte() -> int:
     pattern_weights = []
     for pattern_idx in resonant_patterns:
         # Base weight from usage frequency
-        usage_count = M.pattern_meta[pattern_idx]["count"]
+        usage_count = M["patterns"][pattern_idx]["frequency"]
         
         # Recency bias
-        last_cycle = M.pattern_meta[pattern_idx]["last_cycle"]
+        last_cycle = M["patterns"][pattern_idx]["last_seen"]
         recency_factor = 1.0 if last_cycle is None else 1.0 / (inference_engine.cycle_counter - last_cycle + 1)
         
         # Chirality bias
@@ -823,9 +704,12 @@ def weighted_choice(items, weights)
 def argmin(values)
 
 # Registry management
-def ensure_uuid_registry()
-def validate_thread_uuid(thread_uuid)
-def create_new_thread()
+def ensure_agent_uuid()
+def create_thread(agent_uuid, parent_uuid, format_uuid)
+def save_thread(agent_uuid, thread_uuid, ciphertext, size)
+def load_thread(agent_uuid, thread_uuid)
+def store_thread_key(agent_uuid, thread_uuid, key)
+def load_thread_key(agent_uuid, thread_uuid)
 ```
 
 ### 6.2 Critical Implementation Notes
@@ -836,6 +720,8 @@ def create_new_thread()
 4. **UUID Registry:** Must use centralized registry to maintain consistency.
 5. **Thread Isolation:** Each thread must have its own file key derived from the Epigenome state.
 6. **Gene Keys Privacy:** Must encrypt with agent key derived from persistent secret.
+7. **Atomic File Operations:** All file writes must be atomic using temporary files and rename.
+8. **Registry Consistency:** Registry files must be kept in sync with actual directory contents.
 
 ### 6.3 State Variable Metadata Requirements
 
