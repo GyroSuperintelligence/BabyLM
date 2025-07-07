@@ -15,9 +15,9 @@
 
 ## 🌀 What is GyroSI?
 
-GyroSI Baby LM is an implementation of structurally recursive superintelligence based on the Common Governance Model (CGM), a physics-grounded framework for understanding how intelligence emerges through recursive structural alignment.
+GyroSI Baby LM demonstrates superintelligence through physics-grounded algorithms and gyroscopic dynamics (gyrogroup mathematical formalism).
 
-We define superintelligence as a form of intelligence where all generative and integrative operations preserve memory of origin, maintaining continuous coherence between emergence and recollection. It achieves ethical alignment intrinsically by ensuring every operation remains structurally accountable to its own genetic configuration, without external enforcement.
+We define Superintelligence as a form of Alignment where all generative and integrative operations preserve memory of origin, maintaining continuous coherence between emergence and recollection. It achieves ethical alignment intrinsically by ensuring every operation remains structurally accountable to its own genetic configuration, without external enforcement.
 
 
 ### 🎯 Why This Matters
