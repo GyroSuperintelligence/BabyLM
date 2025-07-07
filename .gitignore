@@ -114,10 +114,11 @@ node_modules/
 # BabyLM new structure: ignore all thread and key data, but keep directory structure
 memories/private/*/threads/
 memories/private/*/keys/
+!memories/private/*
 !memories/private/
-!memories/private/*/
-!memories/private/*/threads/
-!memories/private/*/keys/
 
 # Ignore htmlcov coverage output
 htmlcov/
+
+# Baby preferences
+baby/baby_preferences.json
