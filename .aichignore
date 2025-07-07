@@ -63,19 +63,13 @@ scripts/migrate_*.py
 .coverage
 
 # Project-specific exclusions
-# Exclude all .dat files in s2_information/agency and subfolders
-s2_information/agency/**/*.dat
-s2_information/agency/**/*.DS_Store
-s2_information/agency/**/__pycache__/
+# BabyLM new structure: ignore all thread and key data, but keep directory structure
+memories/private/*/threads/
+memories/private/*/keys/
+!memories/private/
+!memories/private/*/
+!memories/private/*/threads/
+!memories/private/*/keys/
 
-# Exclude all .DS_Store files everywhere
-**/.DS_Store
-
-# Exclude all __pycache__ folders everywhere
-**/__pycache__/
-
-# Add any other project-specific exclusions below
-.git
-.pytest_cache
-.venv
-.vscode
+# Ignore htmlcov coverage output
+htmlcov/

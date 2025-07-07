@@ -41,25 +41,6 @@ venv.bak/
 *.sublime-project
 *.sublime-workspace
 
-# GyroSI Baby LM specific
-# S2 Information layer - exclude data files but keep structure
-s2_information/agency/g1_information/*/*.dat
-s2_information/agency/g4_information/*/*.json
-s2_information/agency/g5_information/*/*.json
-s2_information/agents/*/*/g5_information/session.json
-s2_information/agents/*/*/g5_information/session.json.bak
-
-# Exclude test S2 storage
-s2_information_test/
-
-# Keep sample files and manifest
-!s2_information/agency/g1_information/*/sample-*.dat
-!s2_information/agency/g4_information/*/sample-*.json
-!s2_information/agency/g5_information/*/sample-*.json
-!s2_information/agents/*/*/g4_information/sample-*.json
-!s2_information/agents/*/*/g5_information/sample-*.json
-!s2_information/s2_manifest.json
-
 # Logs and temporary files
 logs/
 *.log
@@ -87,7 +68,6 @@ desktop.ini
 # Testing and coverage
 .pytest_cache/
 .coverage
-htmlcov/
 .tox/
 .coverage.*
 coverage.xml
@@ -95,8 +75,7 @@ coverage.xml
 .hypothesis/
 
 # Documentation builds
-docs/_build/
-docs/build/
+guides/build/
 site/
 
 # Jupyter Notebook
@@ -131,3 +110,14 @@ dmypy.json
 # External dependencies and tools
 codebase-mcp/
 node_modules/
+
+# BabyLM new structure: ignore all thread and key data, but keep directory structure
+memories/private/*/threads/
+memories/private/*/keys/
+!memories/private/
+!memories/private/*/
+!memories/private/*/threads/
+!memories/private/*/keys/
+
+# Ignore htmlcov coverage output
+htmlcov/

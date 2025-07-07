@@ -1,17 +1,15 @@
 {
-  "uuid_registry": {
-    "agent_uuid": "test-agent",
-    "format_uuid": "test-format",
-    "thread_uuids": []
+  "sharding": {
+    "width": 2,
+    "max_files": 30000,
+    "second_level": true
   },
   "storage_config": {
     "max_thread_size_mb": 64,
-    "shard_prefix_length": 2,
     "encryption_algorithm": "AES-256-GCM"
   },
   "format_config": {
     "default_cgm_version": "1.0.0",
-    "resonance_threshold": 1.5707963267948966,
     "max_semantic_label_length": 128
   }
 }

@@ -6,7 +6,7 @@ representing the Inference (S3) layer of the Common Governance Model.
 """
 
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import os
 from baby.governance import (
     apply_operation,
@@ -42,6 +42,9 @@ class InferenceEngine:
 
         # Perform initial stateless mutation
         self._initialize_epigenome()
+
+        # Track recent pattern indices (up to 20)
+        self.recent_patterns = []
 
     def _load_patterns(self) -> Tuple[np.ndarray, List[str]]:
         """
@@ -146,6 +149,11 @@ class InferenceEngine:
         # 3. Find matching canonical pattern
         key_index = self.find_closest_pattern_index()
 
+        # Track recent patterns
+        if len(self.recent_patterns) >= 20:  # Keep last 20 patterns
+            self.recent_patterns.pop(0)
+        self.recent_patterns.append(key_index)
+
         # 4. Increment cycle counter
         self.cycle_counter += 1
 
@@ -190,3 +198,38 @@ class InferenceEngine:
             resonances.append(dist)
 
         return resonances
+
+    def compute_contextual_resonances(self, pattern_contexts: Dict = None) -> List[float]:
+        """
+        Compute resonances with historical context weighting.
+        This makes inference "aware" of successful historical patterns.
+
+        Args:
+            pattern_contexts: Dictionary mapping pattern indices to their historical contexts
+
+        Returns:
+            List[float]: Modified resonance values weighted by historical context
+        """
+        # Get base resonances
+        base_resonances = self.compute_pattern_resonances()
+
+        if not pattern_contexts or not self.recent_patterns:
+            return base_resonances
+
+        # Weight by historical success
+        weighted_resonances = base_resonances.copy()
+
+        # Get likely next patterns from context
+        last_pattern = self.recent_patterns[-1]
+        if last_pattern in pattern_contexts:
+            after_patterns = pattern_contexts[last_pattern].get("after", {})
+            total = sum(after_patterns.values()) if after_patterns else 0
+
+            if total > 0:
+                # Boost resonance for historically successful patterns
+                for pattern_idx, count in after_patterns.items():
+                    probability = count / total
+                    # Reduce distance (increase likelihood) based on historical probability
+                    weighted_resonances[pattern_idx] *= 1.0 - 0.5 * probability
+
+        return weighted_resonances

@@ -214,115 +214,182 @@ def classify_pattern_resonance(mask: int) -> str:
 
 ### 3.3 File Organization
 
-#### 3.3.1 Directory Structure
+#### 3.3.1 System Responsibilities
+
+- **Information Engine (S2 / information.py):**
+  - Responsible for creation, registry, and management of all persistent objects: agents, threads, keys, and formats.
+  - Handles deterministic UUID generation and registry file creation for agents and files.
+  - Ensures all objects are sharded and recorded according to the specification.
+  - Provides a persistent agent UUID, automatically generated on first run, with a managed routine to allow reassignment if needed.
+- **Intelligence Engine (S3 / intelligence.py):**
+  - Acts as the main I/O endpoint, calling the S2-provided helpers for all persistent read and write operations.
+
+#### 3.3.2 Terminology
+
+| Term | Definition |
+| --- | --- |
+| UUID | Lower-case RFC 4122 string (36 chars, 4 hyphens). Unique and never reused for any object. |
+| Object type | One of: `agent`, `key`, `thread`, `format`. |
+| Shard | Directory named by the first two (or four) hex digits of the UUID, to spread files evenly. |
+| Registry | JSON file named `registry.json`, lists immediate children in the current directory. |
+
+#### 3.3.3 Directory Structure
 
 ```
-baby/                          # Core intelligence (the "brain")
-├── baby_preferences.json      # Agent-specific configuration
-├── governance.py              # S1 - Core tensor operations
-├── information.py             # S2 - Information processing
-├── inference.py               # S3 - Pattern recognition
-└── intelligence.py            # S4 - Orchestration, file I/O
-
-memories/                      # Persistent storage
-├── memory_preferences.json    # Memory configuration
-├── public/                    # Shared components
-│   ├── masks/                 # Core intelligence framework
-│   │   ├── epigenome.dat      # Epigenome Mask (12,288 bytes)
-│   │   └── genome.dat         # Genome Mask (256 bytes)
-│   └── formats/               # Communication ability
-│       └── formats-<format_uuid>.json # Pattern metadata
-└── private/<uuid>/            # Agent-specific private data
-    ├── keys/                  # Personal learning history
-    │   └── keys-<uuid>.json.enc # Gene Keys
-    └── threads/               # Personal conversations
-        └── <shard>/           # Sharded for performance
-            └── thread-<uuid>.enc # Thread files (≤64 MiB)
-
-toys/                          # Development environment
+memories/
+├── memory_preferences.json                      # Tuning parameters including sharding
+├── public/
+│   ├── masks/
+│   │   ├── epigenome.dat                       # 12,288 bytes
+│   │   └── genome.dat                          # 256 bytes
+│   └── formats/
+│       └── <dd>[/<ee>]/format-<uuid>.json      # Sharded by format UUID
+└── private/
+    └── agents/
+        └── <aa>[/<bb>]/agent-<agent‑uuid>/
+            ├── threads/
+            │   ├── registry.json
+            │   └── <tt>[/<uu>]/                # Thread shards
+            │       ├── registry.json
+            │       ├── thread-<uuid>.enc       # Encrypted thread
+            │       └── thread-<uuid>.json      # Thread metadata
+            ├── keys/
+            │   ├── registry.json
+            │   └── <tt>[/<uu>]/                # Key shards (match thread UUIDs)
+            │       ├── registry.json
+            │       └── key-<thread‑uuid>.bin.enc # Encrypted key blob
 ```
 
-#### 3.3.2 File Metadata Requirements
+- **Sharding:** `aa`, `bb`, `tt`, `uu`, `dd`, `ee` are two-character hex directories (first two, then next two hex of UUID as needed).
+- **Second-level shards** are created only when the first-level shard exceeds the configured maximum (see below).
 
-**Epigenome Mask (`public/masks/epigenome.dat`):**
-- Pattern Array: 256×48 float32 patterns (12,288 bytes)
-- Pattern Index: Sequential 0-255 indexing for each pattern
-- Derivation Source: Reference to base tensor `gene_add` and operation set
+#### 3.3.4 Naming Conventions
 
-**Genome Mask (`public/masks/genome.dat`):**
-- Output Mapping: 256-byte array mapping pattern indices to output bytes
-- Mapping Index: Sequential 0-255 indexing corresponding to pattern indices
+- All files: `<type>-<uuid>[.<ext>]`, where `type` ∈ {agent, thread, key, format}.
+  - `.json` for structured data, `.dat` or `.bin.enc` for binary or encrypted content.
+- No additional separators, suffixes, or directories beyond those specified.
 
-**Gyronorm Formats (`public/formats/formats-<format_uuid>.json`):**
-- Format UUID: Unique identifier for this semantic mapping
-- CGM Version: Version string ensuring compatibility
-- CGM Policies: Explicit mapping of operations to governance principles
-- Pattern Metadata Array: 256 entries with index, semantic, frequency, etc.
+#### 3.3.5 Sharding Parameters
 
-**Gene Keys (`private/<uuid>/keys/keys-<uuid>.json.enc`):**
-- Thread Mapping: Dictionary mapping thread UUIDs to observation arrays
-- Observation Entry: Cycle number and pattern index for each observation
+| Parameter | Default | Description |
+| --- | --- | --- |
+| SHARD_WIDTH | 2 | First-level shard, 256 subdirectories per object type. |
+| SHARD_MAX_FILES | 30,000 | Promote to next-level shard if entries exceed this count in one directory. |
+| SHARD_SECOND_LEVEL | true | Enables a second 2-char hex shard after limit is exceeded. |
 
-**Thread Files (`private/<uuid>/threads/<shard>/thread-<uuid>.enc`):**
-- Encrypted Content: Raw encrypted conversation data
-- Thread UUID: Embedded in filename for identification
-- Shard Prefix: First 2 characters of UUID for organization
-
-#### 3.3.3 UUID Registry and Management
-
-The `memories/memory_preferences.json` file serves as the central registry:
+**Configurable in** `memories/memory_preferences.json` under key `"sharding"`:
 
 ```json
 {
-  "uuid_registry": {
-    "agent_uuid": "5f2c1e8c-8e62-49f7-9bde-967dfb6e320a",
-    "format_uuid": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
-    "thread_uuids": [
-      "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"
-    ]
-  },
-  "storage_config": {
-    "max_thread_size_mb": 64,
-    "shard_prefix_length": 2,
-    "encryption_algorithm": "AES-256-GCM"
-  },
-  "format_config": {
-    "default_cgm_version": "1.0.0",
-    "resonance_threshold": 1.5707963267948966,
-    "max_semantic_label_length": 128
+  "sharding": {
+    "width": 2,
+    "max_files": 30000,
+    "second_level": true
   }
 }
 ```
 
-**UUID Generation and Persistence:**
-```python
-def ensure_uuid_registry():
-    registry_path = "memories/memory_preferences.json"
+#### 3.3.6 Registry Files
+
+- Every directory directly containing persistent objects (files or shards) contains a `registry.json` file.
+- Each registry lists only immediate children, never recurses, and must always be kept in sync with actual contents.
+- **Example structure:**
+  
+  ```json
+  {
+    "count": 2,
+    "uuids": [
+      "67d9e4c4-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "ab12c3d4-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    ]
+  }
+  ```
+
+#### 3.3.7 Thread Metadata Files
+
+- Each thread has a `thread-<uuid>.json` file in the same shard as its payload.
+  - Fields: `thread_uuid`, `agent_uuid`, `parent_uuid`, `child_uuids`, `format_uuid`, `created_at`, `last_updated`, `size_bytes`.
+  - Fields are updated or appended, but never deleted, to ensure crash-tolerance and auditability.
+
+#### 3.3.8 Key Files
+
+- Each thread has a matching key file named `key-<thread‑uuid>.bin.enc`, 256 bytes encrypted with AES-256-GCM (PBKDF2-HMAC-SHA256 with agent secret, salt = agent UUID).
+- Located under the agent's key shard, using the thread UUID as the basis for sharding.
+- Each key is written atomically; only the containing registry is touched.
+
+#### 3.3.9 Format Files
+
+- **All formats are global and live only under** `memories/public/formats/` using the sharding convention.
+- No agent stores or references formats in any private directory.
+
+#### 3.3.10 Agent UUID Lifecycle
+
+- **Persistent agent UUID:** S2 generates and persists the agent UUID at first run, stored under `agent-<uuid>/` in the appropriate shard.
+- **Managed re-assignment:** S2 provides a function to generate a new UUID and rebind the agent, including appropriate registry and directory updates.
+- **CLI/Interface access:** S2 exposes all agent/UUID management, including reassignment and inspection, via callable functions.
+
+#### 3.3.11 Creation, Atomicity, and Consistency
+
+- **All object creation is performed using a single helper:** `store_object(obj_type, payload, ext="dat")`, with correct UUID, filename, and atomic write with `.tmp` suffix and `fsync` before `rename()`.
+- **Registry update:** Always update the local `registry.json` after object creation, with appropriate directory lock.
+- **Crash recovery:** On startup, remove orphan `.tmp` files and rebuild any missing registries by scanning the folder.
+
+#### 3.3.12 Helper Functions (API Contract)
+
+All persistent store logic is encapsulated in deterministic, reusable helpers. These are always called by S2 (information.py); S3 (intelligence.py) interacts with persistent state only through these APIs.
+
+- **Sharding and atomic I/O:**
     
-    try:
-        with open(registry_path, 'r') as f:
-            prefs = json.load(f)
-    except FileNotFoundError:
-        prefs = {"uuid_registry": {}, "storage_config": {}, "format_config": {}}
+  ```python
+  def shard_path(root: Path, uuid_: str, width=2, limit=30_000) -> Path
+  def atomic_write(path: Path, data: bytes) -> None
+  def update_registry(dirpath: Path, uuid_: str) -> None
+  ```
     
-    # Ensure agent UUID exists
-    if "agent_uuid" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["agent_uuid"] = str(uuid.uuid4())
+- **Agent/Thread lifecycle:**
     
-    # Ensure format UUID exists
-    if "format_uuid" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["format_uuid"] = str(uuid.uuid4())
+  ```python
+  def ensure_agent_uuid() -> str
+  def assign_agent_uuid(new_uuid: str) -> None
+  def create_thread(agent_uuid: str, parent_uuid: str | None, format_uuid: str) -> str
+  def save_thread(agent_uuid: str, thread_uuid: str, ciphertext: bytes, size: int) -> None
+  def load_thread(agent_uuid: str, thread_uuid: str) -> bytes | None
+  ```
     
-    # Ensure thread_uuids list exists
-    if "thread_uuids" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["thread_uuids"] = []
+- **Key storage:**
     
-    # Save updated registry
-    with open(registry_path, 'w') as f:
-        json.dump(prefs, f, indent=2)
+  ```python
+  def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes) -> None
+  def load_thread_key(agent_uuid: str, thread_uuid: str) -> bytes | None
+  ```
     
-    return prefs["uuid_registry"]
-```
+- **Relationship traversal:**
+    
+  ```python
+  def parent(agent_uuid: str, thread_uuid: str) -> str | None
+  def children(agent_uuid: str, thread_uuid: str) -> list[str]
+  ```
+    
+- **Format listing/lookup:**
+    
+  ```python
+  def list_formats() -> list[str]
+  def load_format(format_uuid: str) -> dict | None
+  ```
+
+#### 3.3.13 Concurrency Contract
+
+- Every persistent write touches **exactly one shard**, with atomic file/registry update and directory lock.
+- Reads never lock and must retry if an incomplete `.tmp` file is detected.
+- No global registry or monolithic file exists at any level.
+
+#### 3.3.14 System Goals
+
+1. All directories remain small and efficient even with 10⁶ + objects per type.
+2. Any thread, key, or format can be located in O(1) using its UUID.
+3. The parent↔child relationship graph persists without ever-growing global files.
+4. Atomic updates allow many concurrent writers with no risk of corruption.
+5. Only the specified helpers are used for path, sharding, and registry access—no hand-coded paths or side tables.
 
 ## 4. Engine Implementation
 

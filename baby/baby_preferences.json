@@ -1,7 +1,6 @@
 {
-    "agent_secret": "e8f5c2b3-a6d9-47e5-8f1a-2b3c4d5e6f7a",
-    "log_level": "info",
-    "response_length": 100,
-    "learning_rate": 1.0,
-    "default_resonance_threshold": 1.5707963267948966
-  }
+  "agent_secret": "4291da2f-87df-48f8-910f-6d94ba3255eb",
+  "log_level": "info",
+  "response_length": 100,
+  "learning_rate": 1.0
+}

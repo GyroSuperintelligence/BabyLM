@@ -12,16 +12,41 @@ import uuid
 import numpy as np
 import random
 import datetime
-import glob
-from typing import List, Dict, Any, Optional, Tuple
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple, cast
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+from baby.governance import gene_stateless
 
-from baby.governance import apply_operation, gene_stateless, gene_add
 from baby.inference import InferenceEngine
-from baby.information import InformationEngine
+from baby.information import (
+    InformationEngine,
+    ensure_agent_uuid,
+    create_thread,
+    save_thread,
+    load_thread,
+    store_thread_key,
+    load_thread_key,
+    store_gene_keys,
+    parent,
+    children,
+    list_formats,
+    load_format,
+    store_format,
+    load_pattern_distances,
+    get_memory_preferences,
+    shard_path,
+    PatternIndex,
+)
+from baby.types import PatternMetadata, FormatMetadata
+
+__all__ = [
+    "IntelligenceEngine",
+    "weighted_choice",
+    "initialize_intelligence_engine",
+]
 
 
 class IntelligenceEngine:
@@ -36,10 +61,10 @@ class IntelligenceEngine:
         self,
         agent_uuid: str,
         agent_secret: str,
-        format_uuid: str,
         inference_engine: InferenceEngine,
         information_engine: InformationEngine,
-        formats: Optional[Dict] = None,
+        format_uuid: Optional[str] = None,
+        formats: Optional[FormatMetadata] = None,
     ):
         """
         Initialize the Intelligence Engine
@@ -47,35 +72,98 @@ class IntelligenceEngine:
         Args:
             agent_uuid: UUID of the current agent
             agent_secret: Persistent secret for encryption
-            format_uuid: UUID of the active format
             inference_engine: The InferenceEngine instance
             information_engine: The InformationEngine instance
+            format_uuid: UUID of the active format
             formats: Optional format metadata dictionary
         """
-        # Assign engines
+        if agent_uuid is None:
+            raise ValueError("agent_uuid must not be None")
+        if agent_secret is None:
+            raise ValueError("agent_secret must not be None")
+        if inference_engine is None:
+            raise ValueError("inference_engine must not be None")
+        if information_engine is None:
+            raise ValueError("information_engine must not be None")
         self.inference_engine = inference_engine
         self.information_engine = information_engine
-
-        # Store agent identity
         self.agent_uuid = agent_uuid
         self.agent_secret = agent_secret
-
-        # Format information
-        self.format_uuid = format_uuid
-
-        # Thread state
+        self.format_uuid = format_uuid or self._get_or_create_format_uuid()
         self.thread_uuid = None
         self.thread_file_key = None
         self.current_thread_keys = []
-
-        # Load or initialize format metadata
-        self.M = formats if formats else self._load_or_init_formats()
-
-        # Load memory preferences for configuration
-        self.memory_prefs = self._load_memory_preferences()
-
-        # Validate format compatibility
+        self.current_thread_size = 0
+        self.active_thread_content = bytearray()
+        self.parent_thread_uuid = None
+        self.child_thread_uuids = []
+        self.M: FormatMetadata = formats if formats else self._load_or_init_formats()
+        self.memory_prefs = get_memory_preferences()
         self._validate_format_compatibility()
+        self.pattern_index = PatternIndex(self.agent_uuid, self.agent_secret) if self.agent_secret else None
+        self.pattern_distances = None
+        if self.M and "pattern_distances" in self.M and "path" in self.M["pattern_distances"]:
+            self.pattern_distances = load_pattern_distances(self.format_uuid)
+
+    def _get_or_create_format_uuid(self) -> str:
+        """
+        Get an existing format UUID or create a new one.
+
+        Returns:
+            str: Format UUID
+        """
+        formats = list_formats()
+        if formats:
+            return formats[0]
+
+        # Create a default format
+        format_data = {
+            "format_uuid": str(uuid.uuid4()),
+            "format_name": "default_format",
+            "cgm_version": "1.0.0",
+            "format_version": "1.0.0",
+            "stability": "experimental",
+            "compatibility": {
+                "min_cgm_version": "0.9.0",
+                "max_cgm_version": "1.0.0",
+                "depends_on": [],
+                "conflicts_with": [],
+            },
+            "metadata": {
+                "author": f"agent_{self.agent_uuid[:8]}",
+                "description": "Default format initialized automatically",
+                "tags": ["default", "auto_generated"],
+                "created_at": datetime.datetime.now().isoformat(),
+                "last_updated": datetime.datetime.now().isoformat(),
+                "usage_count": 0,
+                "validation_status": "unverified",
+            },
+            "cgm_policies": {
+                "governance": {"operation": "L0", "bits": [0, 7], "policy": "traceability"},
+                "information": {"operation": "LI", "bits": [1, 6], "policy": "variety"},
+                "inference": {"operation": "FG", "bits": [2, 5], "policy": "accountability"},
+                "intelligence": {"operation": "BG", "bits": [3, 4], "policy": "integrity"},
+            },
+            "patterns": [],
+        }
+
+        # Initialize pattern metadata
+        patterns: list[PatternMetadata] = []
+        for i in range(256):
+            pattern: PatternMetadata = {
+                "index": i,
+                "semantic": None,
+                "count": 0,
+                "first_cycle": None,
+                "last_cycle": None,
+                "resonance_class": self.inference_engine.resonance_classes[i],
+                "confidence": 0.0,
+            }
+            patterns.append(pattern)
+
+        format_data["patterns"] = patterns
+
+        return store_format(cast(FormatMetadata, format_data))
 
     def _validate_format_compatibility(self) -> None:
         """
@@ -116,71 +204,23 @@ class IntelligenceEngine:
                 if policy not in policies:
                     raise ValueError(f"Required CGM policy '{policy}' missing from format")
 
-    def _load_or_init_formats(self) -> Dict:
+    def _load_or_init_formats(self) -> FormatMetadata:
         """
         Load format metadata from file or initialize if not present
 
         Returns:
             Dict: Format metadata
         """
-        formats_path = f"memories/public/formats/formats-{self.format_uuid}.json"
+        format_data = load_format(self.format_uuid)
 
-        # Create directories if they don't exist
-        os.makedirs(os.path.dirname(formats_path), exist_ok=True)
-
-        try:
-            # Try to load formats from file
-            with open(formats_path, "r") as f:
-                M = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+        if not format_data:
             # Initialize new format metadata
-            M = self._initialize_format_metadata()
+            format_data = self._initialize_format_metadata()
+            store_format(format_data)
 
-            # Save to file
-            with open(formats_path, "w") as f:
-                json.dump(M, f, indent=2)
+        return format_data
 
-        return M
-
-    def _load_memory_preferences(self) -> Dict:
-        """
-        Load memory preferences or initialize with defaults
-
-        Returns:
-            Dict: Memory preferences
-        """
-        registry_path = "memories/memory_preferences.json"
-
-        # Create directories if they don't exist
-        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
-
-        try:
-            # Try to load preferences
-            with open(registry_path, "r") as f:
-                prefs = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            # Initialize with defaults
-            prefs = {
-                "uuid_registry": {"agent_uuid": self.agent_uuid, "format_uuid": self.format_uuid, "thread_uuids": []},
-                "storage_config": {
-                    "max_thread_size_mb": 64,
-                    "shard_prefix_length": 2,
-                    "encryption_algorithm": "AES-256-GCM",
-                },
-                "format_config": {
-                    "default_cgm_version": "1.0.0",
-                    "resonance_threshold": float(np.pi / 2),
-                    "max_semantic_label_length": 128,
-                },
-            }
-
-            # Save defaults
-            with open(registry_path, "w") as f:
-                json.dump(prefs, f, indent=2)
-
-        return prefs
-
-    def _initialize_format_metadata(self) -> Dict:
+    def _initialize_format_metadata(self) -> FormatMetadata:
         """
         Initialize new format metadata
 
@@ -188,7 +228,7 @@ class IntelligenceEngine:
             Dict: Initialized format metadata
         """
         # Create format metadata structure
-        M = {
+        M: FormatMetadata = {
             "format_uuid": self.format_uuid,
             "format_name": "default_format",
             "cgm_version": "1.0.0",
@@ -219,9 +259,9 @@ class IntelligenceEngine:
         }
 
         # Initialize pattern metadata
-        patterns = []
+        patterns: list[PatternMetadata] = []
         for i in range(256):
-            pattern = {
+            pattern: PatternMetadata = {
                 "index": i,
                 "semantic": None,
                 "count": 0,
@@ -238,45 +278,35 @@ class IntelligenceEngine:
 
     def start_new_thread(self) -> str:
         """
-        Start a new thread
+        Start a new thread, setting its parent to the current thread if one exists.
 
         Returns:
-            str: UUID of the new thread
+            str: UUID of the newly created active thread.
         """
-        # 1. Capture Epigenome state
-        epigenome_snapshot = self.inference_engine.T.copy()
+        # This method's job is to unconditionally start a new thread.
+        # The decision to do so is made by the calling code (e.g., _append_to_thread).
 
-        # 2. Generate thread UUID
-        self.thread_uuid = str(uuid.uuid4())
+        # Create a new thread, linking it to the previous one.
+        parent_uuid = self.thread_uuid if self.thread_uuid else None
+        new_thread_uuid = create_thread(self.agent_uuid, parent_uuid, self.format_uuid)
 
-        # 3. Derive thread file key
-        self.thread_file_key = self._derive_file_key(epigenome_snapshot, self.agent_uuid, self.thread_uuid)
-
-        # 4. Reset observation log
+        # Reset the engine's state for the new thread.
+        self.thread_uuid = new_thread_uuid
+        self.thread_file_key = self._derive_file_key(self.inference_engine.T.copy(), self.agent_uuid, new_thread_uuid)
         self.current_thread_keys = []
+        self.current_thread_size = 0
+        self.active_thread_content = bytearray()
+        self.parent_thread_uuid = parent_uuid
+        self.child_thread_uuids = []
 
-        # 5. Update UUID registry
-        self._update_uuid_registry()
+        # Store the new thread's key for future use.
+        store_thread_key(self.agent_uuid, new_thread_uuid, self.thread_file_key, self.agent_secret)
 
-        return self.thread_uuid
-
-    def _update_uuid_registry(self) -> None:
-        """Update the UUID registry with the current thread"""
-        # Add thread UUID if not already present
-        if self.thread_uuid not in self.memory_prefs["uuid_registry"]["thread_uuids"]:
-            self.memory_prefs["uuid_registry"]["thread_uuids"].append(self.thread_uuid)
-
-        # Update last_updated timestamp
-        self.M["metadata"]["last_updated"] = datetime.datetime.now().isoformat()
-        self.M["metadata"]["usage_count"] += 1
-
-        # Save updated registry
-        with open("memories/memory_preferences.json", "w") as f:
-            json.dump(self.memory_prefs, f, indent=2)
+        return new_thread_uuid
 
     def process_input_stream(self, input_stream: bytes) -> Tuple[bytes, bytes]:
         """
-        Process an external input stream and save as a thread
+        Process an external input stream and append to current thread or create new one
 
         Args:
             input_stream: Bytes to process
@@ -286,19 +316,59 @@ class IntelligenceEngine:
             - plaintext: Original input
             - intermediate_ciphertext: Encrypted form
         """
-        # 1. Start a new thread
-        self.start_new_thread()
-
-        # 2. Process the stream
+        # 1. Process the stream
         intermediate_ciphertext, dynamic_keystream = self.information_engine.process_stream(
             self.inference_engine, self.update_learning_state, input_stream
         )
 
-        # 3. End the thread, saving the original input as content
-        self.end_current_thread(plaintext_to_save=input_stream)
+        # 2. Append to current thread content
+        self._append_to_thread(input_stream)
 
-        # 4. Return processed data for convenience
+        # 3. Return processed data for convenience
         return input_stream, intermediate_ciphertext
+
+    def _append_to_thread(self, new_content: bytes) -> None:
+        """
+        Append new content to the current thread, creating a new one if capacity is exceeded.
+
+        Args:
+            new_content: Content to append to the thread
+        """
+        # 1. Ensure a thread exists.
+        if not self.thread_uuid:
+            self.start_new_thread()
+        # else: do nothing; assume state is already loaded
+
+        # 2. Decide if a new thread is needed BEFORE modifying the current one.
+        max_size_bytes = self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
+
+        # A new thread is needed if the current thread has content AND adding the new
+        # content would exceed the capacity.
+        if self.current_thread_size > 0 and (self.current_thread_size + len(new_content) > max_size_bytes):
+            # The current thread is full. Save it and start a new one.
+            self._save_current_thread()
+            self.start_new_thread()
+            # The engine state (thread_uuid, current_thread_size, etc.) is now reset.
+
+        # 3. Append content to the active thread (which might be the original or a new one).
+        # Add a separator only if the thread we are about to write to is not empty.
+        if self.active_thread_content:
+            separator = b"\n---\n"
+            self.active_thread_content.extend(separator)
+
+        self.active_thread_content.extend(new_content)
+
+        # 4. Reliably update the size and save the thread's current state.
+        self.current_thread_size = len(self.active_thread_content)
+        self._save_current_thread()
+
+    def _save_current_thread(self) -> None:
+        """Save the current thread content to disk"""
+        if not self.active_thread_content or not self.thread_uuid:
+            return
+
+        # Use the existing end_current_thread logic but with accumulated content
+        self.end_current_thread(plaintext_to_save=bytes(self.active_thread_content))
 
     def end_current_thread(self, plaintext_to_save: bytes) -> None:
         """
@@ -309,60 +379,36 @@ class IntelligenceEngine:
         Args:
             plaintext_to_save: Content to encrypt and save
         """
-        # Defensive: ensure memory_prefs and storage_config are present
-        if not self.memory_prefs or not self.memory_prefs.get("storage_config"):
-            raise RuntimeError("Memory preferences or storage config not initialized.")
         if not self.thread_uuid:
             raise RuntimeError("Thread UUID is not set.")
-        shard = str(self.thread_uuid)[: self.memory_prefs["storage_config"]["shard_prefix_length"]]
 
-        # 1. Re-encrypt with thread key
         if self.thread_file_key is None:
             raise RuntimeError("Thread file key is not set. Call start_new_thread() first.")
-        # At this point, thread_file_key is guaranteed to be not None
+
+        # 1. Re-encrypt with thread key
         thread_file_key: bytes = self.thread_file_key
         final_encrypted_data = bytearray(len(plaintext_to_save))
         for i in range(len(plaintext_to_save)):
             final_encrypted_data[i] = plaintext_to_save[i] ^ thread_file_key[i % 256]
 
-        # 2. Save thread file
-        thread_dir = f"memories/private/{self.agent_uuid}/threads/{shard}"
-        os.makedirs(thread_dir, exist_ok=True)
+        # 2. Save thread file using information.py helper
+        save_thread(self.agent_uuid, self.thread_uuid, bytes(final_encrypted_data), len(plaintext_to_save))
 
-        thread_path = f"{thread_dir}/thread-{self.thread_uuid}.enc"
-        with open(thread_path, "wb") as f:
-            f.write(final_encrypted_data)
+        # 3. Store gene keys in encrypted form
+        store_gene_keys(self.agent_uuid, self.thread_uuid, self.current_thread_keys, self.agent_secret)
 
-        # 3. Save Gene Keys
-        keys_dir = f"memories/private/{self.agent_uuid}/keys"
-        os.makedirs(keys_dir, exist_ok=True)
+        # 4. Update format metadata
+        self.M.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
+        self.M.setdefault("metadata", {})["usage_count"] = self.M.get("metadata", {}).get("usage_count", 0) + 1
+        store_format(self.M)
 
-        keys_path = f"{keys_dir}/keys-{self.agent_uuid}.json.enc"
-        agent_key = self._derive_agent_key()
-
-        try:
-            with open(keys_path, "rb") as f:
-                encrypted_keys = f.read()
-            decrypted_json_str = self._decrypt_data(encrypted_keys, agent_key)
-            all_keys_data = json.loads(decrypted_json_str)
-        except (FileNotFoundError, json.JSONDecodeError):
-            all_keys_data = {}
-
-        all_keys_data[str(self.thread_uuid)] = self.current_thread_keys
-
-        updated_json_str = json.dumps(all_keys_data)
-        encrypted_updated_keys = self._encrypt_data(updated_json_str.encode("utf-8"), agent_key)
-        with open(keys_path, "wb") as f:
-            f.write(encrypted_updated_keys)
-
-        # 4. Save formats metadata
-        formats_path = f"memories/public/formats/formats-{self.format_uuid}.json"
-        with open(formats_path, "w") as f:
-            json.dump(self.M, f, indent=2)
+        # 5. Update pattern index for faster inference
+        if self.pattern_index:
+            self.pattern_index.update_from_thread(self.thread_uuid, self.current_thread_keys)
 
     def generate_and_save_response(self, length: int = 100) -> bytes:
         """
-        Generate a response and save the generation process as a thread
+        Generate a response and append to current thread or create new one
 
         Args:
             length: Number of bytes to generate
@@ -370,14 +416,11 @@ class IntelligenceEngine:
         Returns:
             bytes: Generated response
         """
-        # Start a new thread for this generation
-        self.start_new_thread()
-
         # Generate the response using the intelligent selection algorithm
         response_bytes = self._generate_response_bytes(length)
 
-        # End the thread, saving the generated response as content
-        self.end_current_thread(plaintext_to_save=response_bytes)
+        # Append to current thread content
+        self._append_to_thread(response_bytes)
 
         return response_bytes
 
@@ -411,30 +454,74 @@ class IntelligenceEngine:
 
     def _generate_response_byte(self) -> Tuple[int, int]:
         """
-        Generate a single, intelligently-selected response byte
+        Generate a single, intelligently-selected response byte using contextual awareness.
 
         This is the S4 "conscious choice" mechanism, implementing section 4.5.3
-        of the specification.
+        of the specification with added historical context awareness.
 
         Returns:
             Tuple containing:
             - output_byte: Selected byte value (0-255)
             - key_index: Index of the selected pattern (0-255)
         """
-        # Always use the canonical pattern-matching route
-        G = self.inference_engine.G
+        # Get contextual resonances if pattern index is available
+        if self.pattern_index and self.pattern_index.pattern_contexts:
+            resonances = self.inference_engine.compute_contextual_resonances(self.pattern_index.pattern_contexts)
+        else:
+            resonances = self.inference_engine.compute_pattern_resonances()
 
-        # FIX: Call the correct method to get the index.
-        # self.information_engine.tensor_to_output_byte returns the final byte, not the index.
-        # We need the index directly from the inference engine.
-        key_index = self.inference_engine.find_closest_pattern_index()
+        # Apply π/2 threshold for resonant patterns
+        resonant_threshold = np.pi / 2
+        resonant_patterns = [j for j in range(256) if resonances[j] < resonant_threshold]
 
-        output_byte = G[key_index]
-        # Use .item() for numpy scalars (output_byte may be a numpy type)
+        # Handle no resonant patterns
+        if len(resonant_patterns) == 0:
+            closest_pattern = int(np.argmin(resonances))
+            resonant_patterns = [closest_pattern]
+
+        # Apply contextual weighting
+        pattern_weights = []
+        for pattern_idx in resonant_patterns:
+            # Base weight from usage frequency
+            usage_count = self.M.get("patterns", [])[pattern_idx].get("count", 0) + 1  # Add 1 to avoid zeros
+
+            # Recency bias
+            last_cycle = self.M.get("patterns", [])[pattern_idx].get("last_cycle")
+            recency_factor = 1.0 if last_cycle is None else 1.0 / (self.inference_engine.cycle_counter - last_cycle + 1)
+
+            # Resonance strength (closer = stronger)
+            resonance_strength = 1.0 / (resonances[pattern_idx] + 0.1)
+
+            # Historical context bias from pattern index
+            historical_bias = 1.0
+            if self.pattern_index and self.inference_engine.recent_patterns:
+                last_pattern = self.inference_engine.recent_patterns[-1]
+                likely_next = self.pattern_index.get_likely_next_patterns(last_pattern)
+                for likely_pattern, probability in likely_next:
+                    if likely_pattern == pattern_idx:
+                        historical_bias = 1.0 + probability * 3.0  # Boost by up to 4x
+                        break
+
+            # Combined weight
+            weight = usage_count * recency_factor * resonance_strength * historical_bias
+            pattern_weights.append(weight)
+
+        # Select pattern
+        total_weight = sum(pattern_weights)
+        if total_weight > 0:
+            normalized_weights = [w / total_weight for w in pattern_weights]
+            selected_pattern = weighted_choice(resonant_patterns, normalized_weights)
+        else:
+            selected_pattern = random.choice(resonant_patterns)
+
+        # Get output byte
+        output_byte = self.inference_engine.G[selected_pattern]
+
+        # Ensure integers
         if hasattr(output_byte, "item"):
             output_byte = output_byte.item()
-        # key_index is already an int from find_closest_pattern_index()
-        return int(output_byte), int(key_index)
+
+        return int(output_byte), int(selected_pattern)
 
     def update_learning_state(self, key_index: int, inference_engine: InferenceEngine) -> None:
         """
@@ -445,10 +532,11 @@ class IntelligenceEngine:
             inference_engine: The InferenceEngine instance
         """
         # 1. Update pattern metadata
-        self.M["patterns"][key_index]["count"] += 1
-        self.M["patterns"][key_index]["last_cycle"] = inference_engine.cycle_counter
-        if self.M["patterns"][key_index]["first_cycle"] is None:
-            self.M["patterns"][key_index]["first_cycle"] = inference_engine.cycle_counter
+        pattern = self.M.get("patterns", [])[key_index]
+        pattern["count"] = pattern.get("count", 0) + 1
+        pattern["last_cycle"] = inference_engine.cycle_counter
+        if pattern.get("first_cycle") is None:
+            pattern["first_cycle"] = inference_engine.cycle_counter
 
         # 2. Record Gene Key
         gene_key_entry = {"cycle": inference_engine.cycle_counter, "pattern_index": key_index}
@@ -464,8 +552,9 @@ class IntelligenceEngine:
         Returns:
             int: Pattern index or None if not found
         """
-        for index, pattern in enumerate(self.M["patterns"]):
-            if pattern.get("semantic") == semantic_label:
+        for index, pattern in enumerate(self.M.get("patterns", [])):
+            semantic = pattern.get("semantic")
+            if isinstance(semantic, str) and semantic == semantic_label:
                 return index
         return None
 
@@ -479,11 +568,15 @@ class IntelligenceEngine:
         Returns:
             str: Semantic label or None if not set
         """
-        return self.M["patterns"][key_index].get("semantic")
+        pattern = self.M.get("patterns", [])[key_index]
+        semantic = pattern.get("semantic")
+        if isinstance(semantic, str):
+            return semantic
+        return None
 
-    def load_thread(self, thread_uuid: str) -> Optional[bytes]:
+    def load_thread_content(self, thread_uuid: str) -> Optional[bytes]:
         """
-        Load a thread's content with full state reconstruction
+        Load a thread's decrypted content.
 
         Args:
             thread_uuid: UUID of thread to load
@@ -491,60 +584,16 @@ class IntelligenceEngine:
         Returns:
             bytes: Decrypted thread content, or None if not found
         """
-        # 1. Validate thread UUID
-        if thread_uuid not in self.memory_prefs["uuid_registry"]["thread_uuids"]:
+        encrypted_data = load_thread(self.agent_uuid, thread_uuid)
+        if not encrypted_data:
             return None
-
-        # 2. Determine shard and path
-        shard = str(thread_uuid)[: self.memory_prefs["storage_config"]["shard_prefix_length"]]
-        thread_path = f"memories/private/{self.agent_uuid}/threads/{shard}/thread-{thread_uuid}.enc"
-
-        try:
-            # 3. Load encrypted content
-            with open(thread_path, "rb") as f:
-                encrypted_data = f.read()
-
-            # 4. Load thread keys to determine the initial state
-            keys_path = f"memories/private/{self.agent_uuid}/keys/keys-{self.agent_uuid}.json.enc"
-            agent_key = self._derive_agent_key()
-
-            with open(keys_path, "rb") as f:
-                encrypted_keys = f.read()
-
-            decrypted_keys = self._decrypt_data(encrypted_keys, agent_key)
-            all_keys = json.loads(decrypted_keys.decode("utf-8"))
-
-            if thread_uuid not in all_keys:
-                return None
-
-            # 5. Replay operations to recreate the Epigenome state at thread creation
-            # (thread_keys is not used, so do not assign it)
-
-            # 6. Derive thread file key from reconstructed state
-            initial_tensor = gene_add.copy().astype(np.float32)
-
-            # Apply the stateless gene cycle (required initialization)
-            # This should match exactly what happens in _initialize_epigenome
-            gene_mutated = gene_stateless
-            for i in range(8):
-                if gene_mutated & (1 << i):
-                    apply_operation(initial_tensor, i)
-
-            # Note: We don't replay the thread operations because we only have pattern_index,
-            # not the input bytes that were processed. The thread file key is derived from
-            # the initial state, not the final state after processing.
-
-            thread_file_key = self._derive_file_key(initial_tensor, self.agent_uuid, thread_uuid)
-
-            # 7. Decrypt the thread content
-            plaintext = bytearray(len(encrypted_data))
-            for i in range(len(encrypted_data)):
-                plaintext[i] = encrypted_data[i] ^ thread_file_key[i % 256]
-
-            return bytes(plaintext)
-
-        except Exception:
+        thread_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret)
+        if not thread_key:
             return None
+        plaintext = bytearray(len(encrypted_data))
+        for i in range(len(encrypted_data)):
+            plaintext[i] = encrypted_data[i] ^ thread_key[i % 256]
+        return bytes(plaintext)
 
     def select_stable_format(self, domain: str, stability: str = "stable") -> Optional[str]:
         """
@@ -557,46 +606,27 @@ class IntelligenceEngine:
         Returns:
             str: UUID of selected format, or None if not found
         """
-        # Search formats directory for matching formats
-        formats_dir = "memories/public/formats/"
-
-        try:
-            # Get all format files
-            format_files = glob.glob(f"{formats_dir}formats-*.json")
-
-            matching_formats = []
-
-            for format_file in format_files:
-                try:
-                    with open(format_file, "r") as f:
-                        format_data = json.load(f)
-
-                    # Check if format matches criteria
-                    if format_data.get("stability") == stability:
-                        # Check if domain is in tags or description
-                        tags = format_data.get("metadata", {}).get("tags", [])
-                        description = format_data.get("metadata", {}).get("description", "")
-
-                        if domain in tags or domain.lower() in description.lower():
-                            matching_formats.append(
-                                {
-                                    "uuid": format_data.get("format_uuid"),
-                                    "name": format_data.get("format_name"),
-                                    "usage_count": format_data.get("metadata", {}).get("usage_count", 0),
-                                }
-                            )
-                except (json.JSONDecodeError, IOError):
-                    continue
-
-            # Return the most used matching format
-            if matching_formats:
-                matching_formats.sort(key=lambda x: x["usage_count"], reverse=True)
-                return matching_formats[0]["uuid"]
-
-            return None
-
-        except Exception:
-            return None
+        format_uuids = list_formats()
+        matching_formats = []
+        for format_uuid in format_uuids:
+            format_data = load_format(format_uuid)
+            if not format_data:
+                continue
+            if format_data.get("stability") == stability:
+                tags = format_data.get("metadata", {}).get("tags", [])
+                description = format_data.get("metadata", {}).get("description", "")
+                if domain in tags or domain.lower() in description.lower():
+                    matching_formats.append(
+                        {
+                            "uuid": format_uuid,
+                            "name": format_data.get("format_name"),
+                            "usage_count": format_data.get("metadata", {}).get("usage_count", 0),
+                        }
+                    )
+        if matching_formats:
+            matching_formats.sort(key=lambda x: x["usage_count"], reverse=True)
+            return matching_formats[0]["uuid"]
+        return None
 
     def discover_formats_from_agent(self, agent_uuid: str) -> List[str]:
         """
@@ -608,43 +638,16 @@ class IntelligenceEngine:
         Returns:
             List[str]: List of discovered format UUIDs
         """
-        try:
-            # Check if agent exists in memory
-            memory_path = "memories/memory_preferences.json"
-
-            with open(memory_path, "r") as f:
-                all_prefs = json.load(f)
-
-            # Search for agents that have registry entries
-            discovered_formats = []
-
-            # If the specific agent is in the registry
-            if agent_uuid in str(all_prefs):
-                # Look for the agent's format UUID
-                if "format_uuid" in all_prefs.get("uuid_registry", {}):
-                    discovered_formats.append(all_prefs["uuid_registry"]["format_uuid"])
-
-                # Try to find public formats used by this agent
-                formats_dir = "memories/public/formats/"
-                format_files = glob.glob(f"{formats_dir}formats-*.json")
-
-                for format_file in format_files:
-                    try:
-                        with open(format_file, "r") as f:
-                            format_data = json.load(f)
-
-                        # Check if format is associated with this agent
-                        author = format_data.get("metadata", {}).get("author", "")
-                        if agent_uuid in author:
-                            discovered_formats.append(format_data.get("format_uuid"))
-                    except:
-                        continue
-
-            # Remove duplicates and return
-            return list(set(discovered_formats))
-
-        except Exception:
-            return []
+        format_uuids = list_formats()
+        discovered_formats = []
+        for format_uuid in format_uuids:
+            format_data = load_format(format_uuid)
+            if not format_data:
+                continue
+            author = format_data.get("metadata", {}).get("author", "")
+            if agent_uuid in author:
+                discovered_formats.append(format_uuid)
+        return list(set(discovered_formats))
 
     def compose_formats(self, primary_format: str, secondary_formats: List[str]) -> Optional[str]:
         """
@@ -659,31 +662,29 @@ class IntelligenceEngine:
         """
         try:
             # Load the primary format
-            primary_path = f"memories/public/formats/formats-{primary_format}.json"
-            with open(primary_path, "r") as f:
-                primary_data = json.load(f)
+            primary_data = load_format(primary_format)
+            if not primary_data:
+                return None
 
             # Create a new composed format
             composed_format = primary_data.copy()
             composed_format["format_uuid"] = str(uuid.uuid4())
-            composed_format["format_name"] = f"composed_{primary_data['format_name']}"
+            composed_format["format_name"] = f"composed_{primary_data.get('format_name', '')}"
             composed_format["stability"] = "experimental"
-            composed_format["metadata"]["created_at"] = datetime.datetime.now().isoformat()
-            composed_format["metadata"]["last_updated"] = datetime.datetime.now().isoformat()
-            composed_format["metadata"]["usage_count"] = 0
-            composed_format["metadata"]["author"] = f"agent_{self.agent_uuid[:8]}"
-            composed_format["metadata"]["description"] = "Composed format from multiple sources"
+            composed_format.setdefault("metadata", {})["created_at"] = datetime.datetime.now().isoformat()
+            composed_format.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
+            composed_format.setdefault("metadata", {})["usage_count"] = 0
+            composed_format.setdefault("metadata", {})["author"] = f"agent_{self.agent_uuid[:8]}"
+            composed_format.setdefault("metadata", {})["description"] = "Composed format from multiple sources"
 
             # Update dependencies
-            composed_format["compatibility"]["depends_on"] = [primary_format] + secondary_formats
+            composed_format.setdefault("compatibility", {})["depends_on"] = [primary_format] + secondary_formats
 
             # Process each secondary format
             for secondary_uuid in secondary_formats:
-                secondary_path = f"memories/public/formats/formats-{secondary_uuid}.json"
-
-                try:
-                    with open(secondary_path, "r") as f:
-                        secondary_data = json.load(f)
+                secondary_data = load_format(secondary_uuid)
+                if not secondary_data:
+                    continue
 
                     # Merge pattern metadata
                     for i in range(256):
@@ -708,17 +709,16 @@ class IntelligenceEngine:
                             ) / total_count
 
                     # Add secondary format's tags
-                    composed_format["metadata"]["tags"].extend(secondary_data.get("metadata", {}).get("tags", []))
+                    composed_format.setdefault("metadata", {}).setdefault("tags", []).extend(
+                        secondary_data.get("metadata", {}).get("tags", [])
+                    )
                     # Remove duplicates
-                    composed_format["metadata"]["tags"] = list(set(composed_format["metadata"]["tags"]))
-
-                except (FileNotFoundError, json.JSONDecodeError):
-                    continue
+                    composed_format.setdefault("metadata", {})["tags"] = list(
+                        set(composed_format.get("metadata", {}).get("tags", []))
+                    )
 
             # Save the composed format
-            composed_path = f"memories/public/formats/formats-{composed_format['format_uuid']}.json"
-            with open(composed_path, "w") as f:
-                json.dump(composed_format, f, indent=2)
+            store_format(composed_format)
 
             return composed_format["format_uuid"]
 
@@ -824,6 +824,231 @@ class IntelligenceEngine:
 
         return plaintext
 
+    def get_thread_relationships(self, thread_uuid: str) -> Dict:
+        """
+        Get the relationships for a specific thread
+
+        Args:
+            thread_uuid: UUID of the thread
+
+        Returns:
+            Dict: Thread relationships including parent and children
+        """
+        parent_uuid = parent(self.agent_uuid, thread_uuid)
+        child_uuids = children(self.agent_uuid, thread_uuid)
+
+        return {"parent": parent_uuid, "children": child_uuids}
+
+    def get_thread_chain(self, thread_uuid: str, max_depth: int = 5) -> List[str]:
+        """
+        Get a chain of related threads (parent -> current -> children)
+
+        Args:
+            thread_uuid: UUID of the starting thread
+            max_depth: Maximum depth to traverse
+
+        Returns:
+            List[str]: Chain of thread UUIDs
+        """
+        chain = []
+        current_uuid = thread_uuid
+        depth = 0
+
+        # Go up the chain to find the root
+        while current_uuid and depth < max_depth:
+            chain.insert(0, current_uuid)  # Add to front of chain
+            parent_uuid = parent(self.agent_uuid, current_uuid)
+            if parent_uuid:
+                current_uuid = parent_uuid
+                depth += 1
+            else:
+                break
+
+        # Now go down the chain from original thread (add children)
+        self._add_children_to_chain(thread_uuid, chain, max_depth - depth)
+
+        return chain
+
+    def _add_children_to_chain(self, parent_uuid: str, chain: List[str], max_depth: int) -> None:
+        """Recursively add children to the chain"""
+        if max_depth <= 0:
+            return
+
+        child_uuids = children(self.agent_uuid, parent_uuid)
+        for child_uuid in child_uuids:
+            if child_uuid not in chain:  # Avoid cycles
+                chain.append(child_uuid)
+                self._add_children_to_chain(child_uuid, chain, max_depth - 1)
+
+    def load_thread_with_context(self, thread_uuid: str, include_related: bool = True) -> Dict:
+        """
+        Load a thread with its related context from parent and child threads
+
+        Args:
+            thread_uuid: UUID of the thread to load
+            include_related: Whether to include related threads
+
+        Returns:
+            Dict: Thread content with context information
+        """
+        # Load the main thread
+        main_content = self.load_thread_content(thread_uuid)
+        if main_content is None:
+            return {"error": f"Thread {thread_uuid} not found"}
+
+        result = {
+            "thread_uuid": thread_uuid,
+            "content": main_content,
+            "size_bytes": len(main_content),
+            "relationships": self.get_thread_relationships(thread_uuid),
+        }
+
+        if include_related:
+            # Load related threads
+            chain = self.get_thread_chain(thread_uuid)
+            related_threads = []
+
+            for related_uuid in chain:
+                if related_uuid != thread_uuid:
+                    related_content = self.load_thread_content(related_uuid)
+                    if related_content:
+                        parent_uuid = parent(self.agent_uuid, related_uuid)
+                        relationship = "parent" if related_uuid == parent_uuid else "child"
+
+                        related_threads.append(
+                            {
+                                "thread_uuid": related_uuid,
+                                "content": related_content,
+                                "size_bytes": len(related_content),
+                                "relationship": relationship,
+                            }
+                        )
+
+            result["related_threads"] = related_threads
+
+        return result
+
+    def get_thread_statistics(self) -> Dict:
+        """
+        Get comprehensive statistics about all threads
+
+        Returns:
+            Dict: Thread statistics including sizes, relationships, and capacity usage
+        """
+        # List all threads for this agent
+        thread_uuids = []
+
+        # Get agent directory
+        private_dir = Path("memories/private/agents")
+        agent_shard = shard_path(private_dir, self.agent_uuid)
+        agent_dir = agent_shard / f"agent-{self.agent_uuid}"
+        threads_dir = agent_dir / "threads"
+
+        # Read registry
+        registry_path = threads_dir / "registry.json"
+        if registry_path.exists():
+            with open(registry_path, "r") as f:
+                registry = json.load(f)
+            thread_uuids = registry.get("uuids", [])
+
+        max_size_bytes = self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
+
+        stats = {
+            "total_threads": len(thread_uuids),
+            "total_size_bytes": 0,
+            "capacity_usage_percent": 0,
+            "thread_details": [],
+            "relationship_stats": {"threads_with_parents": 0, "threads_with_children": 0, "isolated_threads": 0},
+        }
+
+        for thread_uuid in thread_uuids:
+            # Get thread metadata
+            thread_shard = shard_path(threads_dir, thread_uuid)
+            meta_path = thread_shard / f"thread-{thread_uuid}.json"
+
+            try:
+                with open(meta_path, "r") as f:
+                    meta = json.load(f)
+
+                size = meta.get("size_bytes", 0)
+                stats["total_size_bytes"] += size
+
+                # Get relationships
+                has_parent = meta.get("parent_uuid") is not None
+                has_children = len(meta.get("child_uuids", [])) > 0
+
+                if has_parent:
+                    stats["relationship_stats"]["threads_with_parents"] += 1
+                if has_children:
+                    stats["relationship_stats"]["threads_with_children"] += 1
+                if not has_parent and not has_children:
+                    stats["relationship_stats"]["isolated_threads"] += 1
+
+                thread_detail = {
+                    "thread_uuid": thread_uuid,
+                    "size_bytes": size,
+                    "capacity_percent": (size / max_size_bytes) * 100,
+                    "has_parent": has_parent,
+                    "has_children": has_children,
+                    "child_count": len(meta.get("child_uuids", [])),
+                }
+                stats["thread_details"].append(thread_detail)
+
+            except FileNotFoundError:
+                continue
+
+        # Calculate overall capacity usage
+        if stats["total_threads"] > 0:
+            stats["capacity_usage_percent"] = (
+                stats["total_size_bytes"] / (max_size_bytes * stats["total_threads"])
+            ) * 100
+
+        return stats
+
+    def get_pattern_statistics(self, pattern_index: int) -> Dict:
+        """
+        Get comprehensive statistics about a specific pattern
+
+        Args:
+            pattern_index: The pattern index to analyze
+
+        Returns:
+            Dict: Pattern statistics including usage, relationships, and contexts
+        """
+        # Get pattern metadata from format
+        pattern_meta = self.M.get("patterns", [])[pattern_index]
+
+        # Get historical contexts from pattern index
+        contexts = {}
+        if self.pattern_index and pattern_index in self.pattern_index.pattern_contexts:
+            pattern_contexts = self.pattern_index.pattern_contexts[pattern_index]
+
+            # Get most common preceding patterns
+            before_patterns = sorted(pattern_contexts["before"].items(), key=lambda x: x[1], reverse=True)[:10]
+
+            # Get most common following patterns
+            after_patterns = sorted(pattern_contexts["after"].items(), key=lambda x: x[1], reverse=True)[:10]
+
+            contexts = {"before": before_patterns, "after": after_patterns}
+
+        # Get resonance with current state
+        current_resonance = None
+        if self.inference_engine:
+            resonances = self.inference_engine.compute_pattern_resonances()
+            current_resonance = resonances[pattern_index]
+
+        return {
+            "pattern_index": pattern_index,
+            "semantic": pattern_meta.get("semantic"),
+            "count": pattern_meta.get("count", 0),
+            "first_cycle": pattern_meta.get("first_cycle"),
+            "last_cycle": pattern_meta.get("last_cycle"),
+            "resonance_class": pattern_meta.get("resonance_class"),
+            "confidence": pattern_meta.get("confidence", 0.0),
+            "current_resonance": current_resonance,
+            "contexts": contexts,
+        }
+
 
 def weighted_choice(items: List[Any], weights: List[float]) -> Any:
     """
@@ -855,59 +1080,6 @@ def weighted_choice(items: List[Any], weights: List[float]) -> Any:
     return items[-1]
 
 
-def ensure_uuid_registry() -> Dict:
-    """
-    Ensure the UUID registry exists and contains necessary UUIDs
-
-    Returns:
-        Dict: UUID registry
-    """
-    registry_path = "memories/memory_preferences.json"
-
-    # Create directories if they don't exist
-    os.makedirs(os.path.dirname(registry_path), exist_ok=True)
-
-    try:
-        with open(registry_path, "r") as f:
-            prefs = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        prefs = {
-            "uuid_registry": {},
-            "storage_config": {
-                "max_thread_size_mb": 64,
-                "shard_prefix_length": 2,
-                "encryption_algorithm": "AES-256-GCM",
-            },
-            "format_config": {
-                "default_cgm_version": "1.0.0",
-                "resonance_threshold": float(np.pi / 2),
-                "max_semantic_label_length": 128,
-            },
-        }
-
-    # Ensure uuid_registry exists
-    if "uuid_registry" not in prefs:
-        prefs["uuid_registry"] = {}
-
-    # Ensure agent UUID exists
-    if "agent_uuid" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["agent_uuid"] = str(uuid.uuid4())
-
-    # Ensure format UUID exists
-    if "format_uuid" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["format_uuid"] = str(uuid.uuid4())
-
-    # Ensure thread_uuids list exists
-    if "thread_uuids" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["thread_uuids"] = []
-
-    # Save updated registry
-    with open(registry_path, "w") as f:
-        json.dump(prefs, f, indent=2)
-
-    return prefs["uuid_registry"]
-
-
 def initialize_intelligence_engine() -> IntelligenceEngine:
     """
     Initialize the complete intelligence engine
@@ -915,14 +1087,12 @@ def initialize_intelligence_engine() -> IntelligenceEngine:
     Returns:
         IntelligenceEngine: Initialized intelligence engine
     """
-    # 1. Ensure UUID registry exists and load it
-    uuid_registry = ensure_uuid_registry()
-    agent_uuid = uuid_registry["agent_uuid"]
-    format_uuid = uuid_registry["format_uuid"]
+    # 1. Get agent UUID
+    agent_uuid = ensure_agent_uuid()
 
     # 2. Load agent preferences
-    baby_prefs_path = "baby/baby_preferences.json"
-    os.makedirs(os.path.dirname(baby_prefs_path), exist_ok=True)
+    baby_prefs_path = Path("baby/baby_preferences.json")
+    baby_prefs_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         with open(baby_prefs_path, "r") as f:
@@ -934,7 +1104,6 @@ def initialize_intelligence_engine() -> IntelligenceEngine:
             "log_level": "info",
             "response_length": 100,
             "learning_rate": 1.0,
-            "default_resonance_threshold": float(np.pi / 2),
         }
         with open(baby_prefs_path, "w") as f:
             json.dump(baby_prefs, f, indent=2)
@@ -949,7 +1118,6 @@ def initialize_intelligence_engine() -> IntelligenceEngine:
     intelligence_engine = IntelligenceEngine(
         agent_uuid=agent_uuid,
         agent_secret=agent_secret,
-        format_uuid=format_uuid,
         inference_engine=inference_engine,
         information_engine=information_engine,
     )
