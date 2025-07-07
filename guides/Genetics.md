@@ -77,6 +77,16 @@ Policy:          GT   IV   IA   II   II   IA   IV   GT
 - Operations are cumulative per cycle
 - Only the rows affected by the relevant transformation are modified
 
+### 2.4 Gyrodistance Calculation
+
+The gyroscopic distance between two tensors is calculated as the angular distance derived from their normalized dot product:
+
+```
+gyrodistance(T1, T2) = arccos(dot(T1_flat, T2_flat) / T1_flat.size)
+```
+
+Where `T1_flat` and `T2_flat` are the flattened tensors. A result of `0` indicates a perfect match, while `π` indicates a perfect mismatch. This distance function is critical for pattern recognition during inference.
+
 ## 3. System Architecture
 
 ### 3.1 Tensor Structures
@@ -129,7 +139,7 @@ Type: float32
 Mapping: 4 rotational phases × 2 nestings × 3 axes × 2 polarities
 ```
 
-**Initialization:** At system boot, the Epigenome tensor is set to all zeros and mutated using the public invariant `gene_stateless = 0xAA`, simulating one full inference cycle without user input.
+**Initialization:** At system boot, the Epigenome tensor is initialized with a copy of the `gene_add` base tensor and then immediately mutated using the public invariant `gene_stateless = 0xAA`. This simulates one full inference cycle without user input, after which the cycle counter is reset to 0.
 
 #### 3.1.5 Canonical Pattern Derivation
 
@@ -197,7 +207,7 @@ def classify_pattern_resonance(mask: int) -> str:
 | **Epigenome Mask** | `public/masks/epigenome.dat` | 12,288 bytes | Canonical patterns for matching | **Complete intelligence framework** |
 | **Genome Mask** | `public/masks/genome.dat` | 256 bytes | Output byte mappings | **Totality of all intelligence** |
 | **Gyronorm Formats** | `public/formats/<shard>/format-<uuid>.json` | Variable | Pattern usage metadata | **Ability to speak, decode, encode** |
-| **Gene Keys** | `private/agents/<shard>/agent-<uuid>/keys/<shard>/key-<uuid>.bin.enc` | Variable | Pattern observation logs | **Personal learning history** |
+| **Gene Keys** | `private/agents/<shard>/agent-<uuid>/keys/<shard>/gene-<uuid>.bin.enc` | Variable | Encrypted pattern observation logs | **Personal learning history** |
 | **Thread Files** | `private/agents/<shard>/agent-<uuid>/threads/<shard>/thread-<uuid>.enc` | ≤64 MiB | Encrypted conversation data | **Personal conversations** |
 
 #### 3.2.3 Security Model
@@ -214,104 +224,46 @@ def classify_pattern_resonance(mask: int) -> str:
 
 ### 3.3 File Organization
 
-#### 3.3.1 Directory Structure
+#### 3.3.1 System Responsibilities
+
+- **Information Engine (S2):** Manages all persistent storage operations, including object creation, registry management, and sharding.
+- **Intelligence Engine (S4):** Calls the Information Engine's helpers for all read/write operations, focusing on orchestration rather than file management.
+
+#### 3.3.2 Directory Structure
 
 ```
 memories/
-├── memory_preferences.json      # Sharding configuration and tuning parameters
+├── memory_preferences.json       # Tuning parameters including sharding
 ├── public/
 │   ├── masks/
-│   │   ├── epigenome.dat        # 12,288 bytes
-│   │   └── genome.dat           # 256 bytes
+│   │   ├── epigenome.dat         # 12,288 bytes
+│   │   └── genome.dat            # 256 bytes
 │   └── formats/
-│       └── <dd>[/<ee>]/         # Format shards
-│           ├── registry.json
-│           └── format-<uuid>.json
+│       └── <shard>/format-<uuid>.json  # Sharded formats
 └── private/
     └── agents/
-        └── <aa>[/<bb>]/         # Agent shards
-            └── agent-<uuid>/
-                ├── threads/
-                │   ├── registry.json
-                │   └── <tt>[/<uu>]/    # Thread shards
-                │       ├── registry.json
-                │       ├── thread-<uuid>.enc
-                │       └── thread-<uuid>.json
-                └── keys/
-                    ├── registry.json
-                    └── <tt>[/<uu>]/    # Key shards
-                        ├── registry.json
-                        └── key-<uuid>.bin.enc
+        └── <shard>/agent-<uuid>/
+            ├── threads/
+            │   └── <shard>/
+            │       ├── thread-<uuid>.enc    # Encrypted data
+            │       └── thread-<uuid>.json   # Metadata
+            └── keys/
+                └── <shard>/
+                    ├── key-<uuid>.bin.enc   # Thread key
+                    └── gene-<uuid>.bin.enc  # Gene keys
 ```
 
-- `<aa>`, `<bb>`, `<dd>`, `<ee>`, `<tt>`, `<uu>` are two-character hex shards based on the first characters of the UUID.
-- Second-level shards (e.g., `<bb>`, `<ee>`, `<uu>`) are created only when the first-level shards exceed a configured maximum.
+#### 3.3.3 Sharding and Registry System
 
-#### 3.3.2 Information Engine Responsibility
+1. **Sharded Storage:** Objects are stored in subdirectories based on the first 2-4 characters of their UUID hexadecimal representation. This prevents directories from growing too large.
 
-The Information Engine (S2) handles creation, registry, and management of all persistent objects:
+2. **Registry Files:** Each directory contains a `registry.json` file that lists the UUIDs of its immediate children. This enables fast object discovery without directory scanning.
 
-- Deterministic UUID generation and registry file creation
-- Agent identity management (creation, persistence, reassignment)
-- Sharded storage of all files for efficient scaling
-- Registry maintenance for all object types
-- Atomic file operations with crash recovery
-- Thread relationship tracking (parent/child)
+3. **Atomic File Operations:** All writes use a two-phase commit process with temporary files to ensure crash resilience.
 
-#### 3.3.3 Intelligence Engine Responsibility
+4. **Thread Metadata:** Each thread has a JSON metadata file tracking its parent, children, format, and timestamps, creating a navigable graph of relationships.
 
-The Intelligence Engine (S4) acts as the main I/O endpoint, calling S2-provided helpers for all persistent read and write operations. This separation ensures:
-
-- Consistent file handling across the system
-- Clean separation between intelligence operations and storage
-- Atomic, crash-resistant file operations
-- Scalable storage that remains efficient with millions of objects
-
-#### 3.3.4 Registry Files
-
-Every directory containing persistent objects includes a `registry.json` file that lists its immediate children:
-
-```json
-{
-  "count": 2,
-  "uuids": [
-    "67d9e4c4-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "ab12c3d4-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  ]
-}
-```
-
-Registries only track immediate children, never recursing deeper, and are atomically updated with each file operation.
-
-#### 3.3.5 Thread and Key Management
-
-- Each thread has a matching key file named `key-<thread‑uuid>.bin.enc`
-- Thread metadata tracks parentage, format association, and timestamps
-- Keys are encrypted using AES-256-GCM with a key derived from the agent secret
-- All file operations are atomic and include appropriate registry updates
-
-#### 3.3.6 Concurrency and Consistency
-
-- File operations use atomic write patterns with temporary files and rename
-- Directory locking ensures consistency during updates
-- Registry files are kept in sync with actual directory contents
-- Startup includes crash recovery to resolve any incomplete operations
-
-#### 3.3.7 API Contract
-
-```python
-# Core API functions for persistent storage
-def ensure_agent_uuid() -> str
-def create_thread(agent_uuid: str, parent_uuid: str | None, format_uuid: str) -> str
-def save_thread(agent_uuid: str, thread_uuid: str, ciphertext: bytes, size: int) -> None
-def load_thread(agent_uuid: str, thread_uuid: str) -> bytes | None
-def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes) -> None
-def load_thread_key(agent_uuid: str, thread_uuid: str) -> bytes | None
-def parent(agent_uuid: str, thread_uuid: str) -> str | None
-def children(agent_uuid: str, thread_uuid: str) -> list[str]
-def list_formats() -> list[str]
-def load_format(format_uuid: str) -> dict | None
-```
+5. **Encryption:** Thread keys and gene keys are stored separately and encrypted using AES-256-GCM with keys derived via PBKDF2-HMAC-SHA256 from the agent secret.
 
 ## 4. Engine Implementation
 
@@ -333,19 +285,12 @@ def initialize_intelligence_engine():
     inference_engine = InferenceEngine()
     information_engine = InformationEngine()
     
-    # 4. Load formats
-    formats = list_formats()
-    format_uuid = formats[0] if formats else create_default_format()
-    format_data = load_format(format_uuid)
-    
-    # 5. Create Intelligence Engine
+    # 4. Create Intelligence Engine
     intelligence_engine = IntelligenceEngine(
         agent_uuid=agent_uuid,
         agent_secret=agent_secret,
-        format_uuid=format_uuid,
         inference_engine=inference_engine,
-        information_engine=information_engine,
-        formats=format_data
+        information_engine=information_engine
     )
     
     return intelligence_engine
@@ -372,15 +317,21 @@ def apply_operation(T, bit_index):
 
 ### 4.3 S2: Information Engine
 
-**Purpose:** Information processing and stream handling  
+**Purpose:** Information processing, persistent storage, and stream handling  
 **State Variables:**
 - `stream_pointer`: Current position in active thread
 - `output_buffer`: Accumulator for generated bytes
 
+The Information Engine is responsible for:
+1. Managing all persistent objects (threads, keys, formats)
+2. Handling UUID generation and registry maintenance
+3. Implementing the sharding system for efficient storage
+4. Providing atomic file operations with crash recovery
+
 ```python
 def process_stream(
     inference_engine: InferenceEngine, 
-    intelligence_engine: IntelligenceEngine,
+    update_callback,
     input_stream: bytes
 ) -> (bytes, bytes):
     intermediate_ciphertext = bytearray()
@@ -390,8 +341,8 @@ def process_stream(
         # 1. Call S3 for pure inference
         key_index = inference_engine.process_byte(P_n)
         
-        # 2. Call S4 to update state
-        intelligence_engine.update_learning_state(key_index, inference_engine)
+        # 2. Call update callback to update state
+        update_callback(key_index, inference_engine)
 
         # 3. Get keystream byte
         keystream_byte = inference_engine.G[key_index] 
@@ -412,6 +363,7 @@ def process_stream(
 - `F[256][48]`: Canonical Pattern list
 - `G[256]`: Genome Mask
 - `cycle_counter`: Global cycle index
+- `recent_patterns`: List of recently matched patterns (up to 20)
 
 ```python
 def process_byte(P_n):
@@ -425,16 +377,19 @@ def process_byte(P_n):
 
     # 3. Find matching canonical pattern
     key_index = find_closest_pattern_index(T, F)
+    
+    # 4. Track recent patterns
+    if len(recent_patterns) >= 20:
+        recent_patterns.pop(0)
+    recent_patterns.append(key_index)
 
-    # 4. Increment cycle counter
+    # 5. Increment cycle counter
     cycle_counter += 1
     
     return key_index
-
-def compute_pattern_resonances(current_T, all_patterns_F):
-    """Computes resonance values between current tensor and all patterns"""
-    return [gyrodistance(current_T, all_patterns_F[j]) for j in range(256)]
 ```
+
+**Contextual Resonance:** The engine can compute pattern resonances with historical context weighting. This allows it to adjust pattern selection based on observed patterns in past threads, providing a form of implicit memory.
 
 ### 4.4.1 Canonical Byte Emission
 
@@ -444,7 +399,6 @@ The only canonical, spec-compliant way to convert the Epigenome tensor to a byte
 def tensor_to_output_byte(T, F, G):
     """
     Canonical tensor-to-byte conversion using epigenome pattern matching.
-    This is the only spec-compliant method for deriving a byte from the current tensor state.
     """
     key_index = find_closest_pattern_index(T, F)
     return G[key_index]
@@ -454,8 +408,6 @@ def tensor_to_output_byte(T, F, G):
 - **Epigenome coherence:** The evolving tensor T is always compared against the closure set of 256 canonical patterns.
 - **Reversibility & auditability:** Every output byte is traceable to the exact canonical pattern that produced it.
 - **Thread/file keys:** The same output_byte stream is reused for encryption, ensuring unity between generation and security.
-
-All code and engines must use this route for byte emission, ensuring epigenome coherence, reversibility, and security.
 
 ### 4.5 S4: Intelligence Engine
 
@@ -467,85 +419,57 @@ All code and engines must use this route for byte emission, ensuring epigenome c
 - `thread_file_key`: 256-byte key for encrypting the current thread
 - `M`: Pattern Metadata
 - `current_thread_keys`: List of dictionaries for the active thread
+- `pattern_index`: Index of patterns to thread locations for fast retrieval
 
 #### 4.5.1 Thread Lifecycle Operations
 
-```python
-def start_new_thread(parent_uuid=None):
-    # 1. Capture Epigenome state
-    epigenome_snapshot = inference_engine.T.copy()
-    
-    # 2. Create new thread
-    thread_uuid = create_thread(agent_uuid, parent_uuid, format_uuid)
+Threads are persistent, versioned conversation objects with parent-child relationships:
 
-    # 3. Derive thread file key
-    thread_file_key = derive_file_key(
-        epigenome_snapshot, agent_uuid, thread_uuid, gene_stateless=0xAA
-    )
+1. **Thread Creation:** New threads are created with a reference to their parent (if any), forming a conversational chain.
 
-    # 4. Reset observation log
-    current_thread_keys = []
-    
-    return thread_uuid
+2. **Thread Appending:** Content is appended to the active thread until it reaches the maximum size (default 64MiB).
 
-def process_and_end_thread(input_stream: bytes):
-    # 1. Process the stream
-    intermediate_ciphertext, dynamic_keystream = info_engine.process_stream(
-        inference_engine, self, input_stream
-    )
-    
-    # 2. End the thread
-    end_current_thread(intermediate_ciphertext, dynamic_keystream)
+3. **Thread Branching:** When a thread is full, a new child thread is automatically created, maintaining conversation continuity.
 
-def end_current_thread(intermediate_ciphertext: bytes, dynamic_keystream: bytes):
-    # 1. Decrypt intermediate ciphertext
-    plaintext = bytearray(len(intermediate_ciphertext))
-    for i in range(len(intermediate_ciphertext)):
-        plaintext[i] = intermediate_ciphertext[i] ^ dynamic_keystream[i]
-
-    # 2. Re-encrypt with thread key
-    final_encrypted_data = bytearray(len(plaintext))
-    for i in range(len(plaintext)):
-        final_encrypted_data[i] = plaintext[i] ^ thread_file_key[i % 256]
-
-    # 3. Save thread and key
-    save_thread(agent_uuid, thread_uuid, final_encrypted_data, len(final_encrypted_data))
-    store_thread_key(agent_uuid, thread_uuid, thread_file_key)
-
-def update_learning_state(key_index: int, inference_engine: InferenceEngine):
-    # 1. Update pattern metadata
-    M["patterns"][key_index]["frequency"] += 1
-    M["patterns"][key_index]["last_seen"] = inference_engine.cycle_counter
-    
-    # 2. Record Gene Key
-    gene_key_entry = {
-        "cycle": inference_engine.cycle_counter,
-        "pattern_index": key_index
-    }
-    current_thread_keys.append(gene_key_entry)
-```
-
-#### 4.5.2 Encode/Decode Operations
+4. **Thread Storage:** Threads are encrypted and stored in the sharded filesystem with their metadata.
 
 ```python
-def encode(semantic_label: str) -> int | None:
-    """Finds pattern index for semantic label"""
-    for index, pattern in enumerate(M["patterns"]):
-        if pattern.get("translation") == semantic_label:
-            return index
-    return None
-
-def decode(key_index: int) -> str | None:
-    """Finds semantic label for pattern index"""
-    return M["patterns"][key_index].get("translation")
+def _append_to_thread(new_content: bytes):
+    # 1. Ensure a thread exists
+    if not self.thread_uuid:
+        self.start_new_thread()
+        
+    # 2. Check if current thread would exceed capacity
+    max_size_bytes = get_max_thread_size()
+    if (self.current_thread_size + len(new_content) > max_size_bytes):
+        # Save current thread and start a new one
+        self._save_current_thread()
+        self.start_new_thread()
+        
+    # 3. Append content
+    self.active_thread_content.extend(new_content)
+    self.current_thread_size = len(self.active_thread_content)
+    
+    # 4. Save current state
+    self._save_current_thread()
 ```
+
+#### 4.5.2 Active Memory Components
+
+The Intelligence Engine utilizes two key components to make historical data actively influence inference:
+
+1. **Pattern Index:** Maps patterns to every location they've appeared, with statistical tracking of which patterns tend to follow others. This enables the system to weight pattern selection based on successful historical sequences.
+
+2. **Thread Chain Awareness:** The system can traverse parent-child relationships between threads, providing context from related conversations during inference.
 
 #### 4.5.3 Intelligent Response Generation
 
 ```python
-def generate_response_byte() -> int:
-    # 1. Get resonance data
-    resonances = inference_engine.compute_pattern_resonances(inference_engine.T, inference_engine.F)
+def _generate_response_byte():
+    # 1. Get resonance data (with historical context)
+    resonances = inference_engine.compute_contextual_resonances(
+        self.pattern_index.pattern_contexts
+    )
     
     # 2. Apply π/2 threshold
     resonant_threshold = np.pi / 2
@@ -560,35 +484,36 @@ def generate_response_byte() -> int:
     pattern_weights = []
     for pattern_idx in resonant_patterns:
         # Base weight from usage frequency
-        usage_count = M["patterns"][pattern_idx]["frequency"]
+        usage_count = M["patterns"][pattern_idx]["count"] + 1
         
         # Recency bias
-        last_cycle = M["patterns"][pattern_idx]["last_seen"]
-        recency_factor = 1.0 if last_cycle is None else 1.0 / (inference_engine.cycle_counter - last_cycle + 1)
-        
-        # Chirality bias
-        left_ops = bin(pattern_idx).count('1') & 1
-        chirality_bias = 1.5 if left_ops else 1.0
+        last_cycle = M["patterns"][pattern_idx]["last_cycle"]
+        recency_factor = 1.0 if last_cycle is None else 1.0 / (cycle_counter - last_cycle + 1)
         
         # Resonance strength
         resonance_strength = 1.0 / (resonances[pattern_idx] + 0.1)
         
+        # Historical context bias
+        historical_bias = 1.0
+        if self.pattern_index and recent_patterns:
+            last_pattern = recent_patterns[-1]
+            likely_next = self.pattern_index.get_likely_next_patterns(last_pattern)
+            for likely_pattern, probability in likely_next:
+                if likely_pattern == pattern_idx:
+                    historical_bias = 1.0 + probability * 3.0  # Boost by up to 4x
+                    break
+        
         # Combined weight
-        weight = usage_count * recency_factor * chirality_bias * resonance_strength
+        weight = usage_count * recency_factor * resonance_strength * historical_bias
         pattern_weights.append(weight)
     
     # 5. Select pattern
-    total_weight = sum(pattern_weights)
-    if total_weight > 0:
-        normalized_weights = [w / total_weight for w in pattern_weights]
-        selected_pattern = weighted_choice(resonant_patterns, normalized_weights)
-    else:
-        selected_pattern = random.choice(resonant_patterns)
+    selected_pattern = weighted_choice(resonant_patterns, pattern_weights)
     
     # 6. Get output byte
     output_byte = inference_engine.G[selected_pattern]
     
-    return output_byte
+    return output_byte, selected_pattern
 ```
 
 ## 5. Formats & Learning
@@ -628,10 +553,10 @@ The Gyronorm Formats structure serves as the **semantic bridge** connecting the 
   "patterns": [
     {
       "index": 0,
-      "namespace": null,
-      "translation": null,
-      "frequency": 0,
-      "last_seen": null,
+      "semantic": null,
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
       "resonance_class": "identity",
       "confidence": 0.0
     }
@@ -639,6 +564,8 @@ The Gyronorm Formats structure serves as the **semantic bridge** connecting the 
   ]
 }
 ```
+
+**Note:** For formats that include a pre-computed pattern distance matrix (256x256), the large binary data is stored in a separate file (`pattern-distances-<uuid>.dat`) in the same shard, with the main JSON file containing only a reference.
 
 **Format Stability Levels:**
 - **stable**: Community-verified, version-locked formats
@@ -671,59 +598,35 @@ The learning mechanism is a two-fold process:
 1. **Implicit/Unconscious Learning:** Continuous, irreversible mutation of the `T` tensor by the input stream
 2. **Explicit/Conscious Learning:** Recording and statistical weighting of which `key_index` patterns are triggered
 
-**Curriculum Thread Protocol:**
-- The agent may be exposed to "curriculum threads" (structured data streams)
-- Learning is fully agnostic: structure emerges from resonance and Hebbian updates
-- No semantic labeling or annotation is required
-- The entire process is logged and reproducible
+**Pattern Memory:**
+- Each pattern's historical usage is tracked including frequency and position
+- Pattern sequences (which patterns tend to follow others) are indexed
+- This provides a form of procedural memory that influences future inference
+
+**Thread Chain Learning:**
+- Conversations are maintained as chains of threads
+- Each thread knows its parent and children
+- This conversational context provides a form of episodic memory
 
 **Attention Mechanism:**
 - Current state of `T` tensor is an "attended" summary of entire past history
-- Pattern selection uses explicit weighting by frequency and recency
-- Resonance-based selection provides physics-grounded attention
+- Pattern selection uses explicit weighting by frequency, recency, and historical context
+- The pattern index provides a fast, O(1) lookup for historical pattern relationships
 
 ## 6. Implementation Requirements
 
-### 6.1 Required Helper Functions
+### 6.1 Critical Implementation Notes
 
-```python
-# Core tensor operations
-def apply_operation(T, bit_index)
-def find_closest_pattern_index(T, F)
-def gyrodistance(T1, T2)
-
-# Thread lifecycle
-def generate_new_uuid()
-def derive_file_key(epigenome_snapshot, agent_uuid, thread_uuid, gene_stateless)
-def derive_agent_key(agent_uuid, agent_secret)
-def encrypt_data(data, key)
-def decrypt_data(encrypted_data, key)
-
-# Pattern selection
-def weighted_choice(items, weights)
-def argmin(values)
-
-# Registry management
-def ensure_agent_uuid()
-def create_thread(agent_uuid, parent_uuid, format_uuid)
-def save_thread(agent_uuid, thread_uuid, ciphertext, size)
-def load_thread(agent_uuid, thread_uuid)
-def store_thread_key(agent_uuid, thread_uuid, key)
-def load_thread_key(agent_uuid, thread_uuid)
-```
-
-### 6.2 Critical Implementation Notes
-
-1. **Epigenome Initialization:** Must start from all zeros and apply one cycle with the stateless gene.
+1. **Epigenome Initialization:** Must initialize from a copy of `gene_add` and apply one cycle with the stateless gene.
 2. **Pattern Matching:** Must use gyrodistance with π/2 threshold.
 3. **File Encryption:** Two-phase process (dynamic keystream then static thread key).
-4. **UUID Registry:** Must use centralized registry to maintain consistency.
+4. **Thread Lifecycle:** Each thread must have a maximum size and link to its parent/children when that size is exceeded.
 5. **Thread Isolation:** Each thread must have its own file key derived from the Epigenome state.
 6. **Gene Keys Privacy:** Must encrypt with agent key derived from persistent secret.
-7. **Atomic File Operations:** All file writes must be atomic using temporary files and rename.
-8. **Registry Consistency:** Registry files must be kept in sync with actual directory contents.
+7. **Atomic File Operations:** All file writes must use atomic operations with temporary files to prevent corruption.
+8. **Registry Consistency:** Registry files must be kept in sync with directory contents.
 
-### 6.3 State Variable Metadata Requirements
+### 6.2 State Variable Metadata Requirements
 
 | Variable | Type | Required Metadata | Notes |
 |----------|------|-------------------|-------|
