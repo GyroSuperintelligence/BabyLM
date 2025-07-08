@@ -1,3 +1,18 @@
+# Changelog
+
+## [08 July 2025]
+  We have expanded our global format library! Formats are shared global knowledge and are available to all agents, though they do not contain contextual information. (Scripts Available at: toys/learning/formats)
+  - **ASCII Curriculum:** 256 foundational ASCII characters  
+  - **Emoji Curriculum:** Over 5,000 Unicode emoji  
+  - **Mathematical Symbols Curriculum:** All Unicode mathematical symbols (excluding ASCII)  
+  - *(More curricula can be added as the system grows)*
+- Adopted NDJSON format for all gene keys and threads, supporting both public (unencrypted) and private (encrypted) storage for agent-agnostic knowledge sharing and curriculum learning.
+- Refactored IntelligenceEngine initialization to support full agent, read-only, and public/curation modes for flexible batch processing and knowledge sharing.
+- Integrated fast JSON parsing with orjson (and ujson fallback), using unified json_loads/json_dumps wrappers in all core modules for performance.
+- Ensured type safety and Pyright compliance throughout the codebase, especially for Optional[str] and None handling in public/curation mode.
+- Suppressed harmless linter warnings for optional imports (e.g., ujson).
+- Improved overall codebase robustness, maintainability, and compatibility for both private and public agent operation.
+
 All notable changes to this project will be documented in this file.
 
 [0.9.4] – 2025-Jul-07
