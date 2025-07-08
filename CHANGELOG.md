@@ -64,3 +64,10 @@ All notable changes to this project will be documented in this file.
 
 📄 Added s1_governance files: README.md, LICENSE, pyproject.toml, requirements.txt, Makefile, CHANGELOG.md
 
+[0.9.5] – 2025-Jul-08
+### Added
+🌐 Expanded Global Format Library
+- **ASCII Curriculum:** 256 foundational ASCII characters
+- **Emoji Curriculum:** Over 5,000 Unicode emoji
+- **Mathematical Symbols Curriculum:** All Unicode mathematical symbols (excluding ASCII)
+
