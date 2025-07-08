@@ -10,6 +10,6 @@
   },
   "format_config": {
     "default_cgm_version": "1.0.0",
-    "max_semantic_label_length": 128
+    "max_character_label_length": 128
   }
 }

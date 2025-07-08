@@ -120,12 +120,11 @@ class IntelligenceEngine:
         format_data = {
             "format_uuid": str(uuid.uuid4()),
             "format_name": "default_format",
-            "cgm_version": "1.0.0",
             "format_version": "1.0.0",
             "stability": "experimental",
             "compatibility": {
-                "min_cgm_version": "0.9.0",
-                "max_cgm_version": "1.0.0",
+                "min_format_version": "1.0.0",
+                "max_format_version": "1.0.0",
                 "depends_on": [],
                 "conflicts_with": [],
             },
@@ -152,11 +151,13 @@ class IntelligenceEngine:
         for i in range(256):
             pattern: PatternMetadata = {
                 "index": i,
-                "semantic": None,
+                "character": None,
+                "description": None,
+                "type": None,
                 "count": 0,
                 "first_cycle": None,
                 "last_cycle": None,
-                "resonance_class": self.inference_engine.resonance_classes[i],
+                "gyration_feature": self.inference_engine.gyration_featurees[i],
                 "confidence": 0.0,
             }
             patterns.append(pattern)
@@ -167,32 +168,32 @@ class IntelligenceEngine:
 
     def _validate_format_compatibility(self) -> None:
         """
-        Validate the loaded format for compatibility with current CGM version
+        Validate the loaded format for compatibility with current format version
 
         Raises:
-            ValueError: If the format is incompatible with the current CGM version
+            ValueError: If the format is incompatible with the current format version
         """
         # Check format exists
         if not self.M:
             return  # New format will be created
 
-        # Get current CGM version from preferences
-        current_cgm_version = self.memory_prefs["format_config"]["default_cgm_version"]
+        # Get current format version from preferences (if any)
+        current_format_version = self.memory_prefs["format_config"].get("default_format_version", "1.0.0")
 
         # Check format compatibility
         if "compatibility" in self.M:
-            min_version = self.M["compatibility"].get("min_cgm_version")
-            max_version = self.M["compatibility"].get("max_cgm_version")
+            min_version = self.M["compatibility"].get("min_format_version")
+            max_version = self.M["compatibility"].get("max_format_version")
 
             # Simple version comparison (this could be enhanced with proper semver comparison)
-            if min_version and current_cgm_version < min_version:
+            if min_version and current_format_version < min_version:
                 raise ValueError(
-                    f"Format requires minimum CGM version {min_version}, but current is {current_cgm_version}"
+                    f"Format requires minimum format version {min_version}, but current is {current_format_version}"
                 )
 
-            if max_version and current_cgm_version > max_version:
+            if max_version and current_format_version > max_version:
                 raise ValueError(
-                    f"Format requires maximum CGM version {max_version}, but current is {current_cgm_version}"
+                    f"Format requires maximum format version {max_version}, but current is {current_format_version}"
                 )
 
         # Validate policy mapping
@@ -231,12 +232,11 @@ class IntelligenceEngine:
         M: FormatMetadata = {
             "format_uuid": self.format_uuid,
             "format_name": "default_format",
-            "cgm_version": "1.0.0",
             "format_version": "1.0.0",
             "stability": "experimental",
             "compatibility": {
-                "min_cgm_version": "0.9.0",
-                "max_cgm_version": "1.0.0",
+                "min_format_version": "1.0.0",
+                "max_format_version": "1.0.0",
                 "depends_on": [],
                 "conflicts_with": [],
             },
@@ -263,11 +263,13 @@ class IntelligenceEngine:
         for i in range(256):
             pattern: PatternMetadata = {
                 "index": i,
-                "semantic": None,
+                "character": None,
+                "description": None,
+                "type": None,
                 "count": 0,
                 "first_cycle": None,
                 "last_cycle": None,
-                "resonance_class": self.inference_engine.resonance_classes[i],
+                "gyration_feature": self.inference_engine.gyration_featurees[i],
                 "confidence": 0.0,
             }
             patterns.append(pattern)
@@ -542,36 +544,32 @@ class IntelligenceEngine:
         gene_key_entry = {"cycle": inference_engine.cycle_counter, "pattern_index": key_index}
         self.current_thread_keys.append(gene_key_entry)
 
-    def encode(self, semantic_label: str) -> Optional[int]:
+    def encode(self, character_label: str) -> Optional[int]:
         """
-        Find pattern index for semantic label
-
+        Find pattern index for character label
         Args:
-            semantic_label: Semantic label to search for
-
+            character_label: Character label to search for
         Returns:
             int: Pattern index or None if not found
         """
         for index, pattern in enumerate(self.M.get("patterns", [])):
-            semantic = pattern.get("semantic")
-            if isinstance(semantic, str) and semantic == semantic_label:
+            character = pattern.get("character")
+            if isinstance(character, str) and character == character_label:
                 return index
         return None
 
     def decode(self, key_index: int) -> Optional[str]:
         """
-        Find semantic label for pattern index
-
+        Find character label for pattern index
         Args:
             key_index: Pattern index to decode
-
         Returns:
-            str: Semantic label or None if not set
+            str: Character label or None if not set
         """
         pattern = self.M.get("patterns", [])[key_index]
-        semantic = pattern.get("semantic")
-        if isinstance(semantic, str):
-            return semantic
+        character = pattern.get("character")
+        if isinstance(character, str):
+            return character
         return None
 
     def load_thread_content(self, thread_uuid: str) -> Optional[bytes]:
@@ -691,9 +689,9 @@ class IntelligenceEngine:
                         primary_pattern = composed_format["patterns"][i]
                         secondary_pattern = secondary_data["patterns"][i]
 
-                        # If primary doesn't have semantic but secondary does, use secondary's
-                        if primary_pattern.get("semantic") is None and secondary_pattern.get("semantic") is not None:
-                            primary_pattern["semantic"] = secondary_pattern["semantic"]
+                        # If primary doesn't have character but secondary does, use secondary's
+                        if primary_pattern.get("character") is None and secondary_pattern.get("character") is not None:
+                            primary_pattern["character"] = secondary_pattern["character"]
 
                         # Merge counts and confidences (weighted average)
                         p_count = primary_pattern.get("count", 0)
@@ -1039,11 +1037,11 @@ class IntelligenceEngine:
 
         return {
             "pattern_index": pattern_index,
-            "semantic": pattern_meta.get("semantic"),
+            "character": pattern_meta.get("character"),
             "count": pattern_meta.get("count", 0),
             "first_cycle": pattern_meta.get("first_cycle"),
             "last_cycle": pattern_meta.get("last_cycle"),
-            "resonance_class": pattern_meta.get("resonance_class"),
+            "gyration_feature": pattern_meta.get("gyration_feature"),
             "confidence": pattern_meta.get("confidence", 0.0),
             "current_resonance": current_resonance,
             "contexts": contexts,

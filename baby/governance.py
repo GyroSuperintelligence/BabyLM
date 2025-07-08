@@ -94,10 +94,10 @@ def derive_canonical_patterns() -> Tuple[np.ndarray, List[str]]:
     Returns:
         Tuple containing:
         - patterns: Array of shape [256, 48] containing all canonical patterns
-        - resonance_classes: List of 256 class labels for each pattern
+        - gyration_featurees: List of 256 class labels for each pattern
     """
     patterns = []
-    resonance_classes = []
+    gyration_featurees = []
 
     # Start with base tensor
     base_tensor = gene_add.copy().astype(np.float32)
@@ -116,13 +116,13 @@ def derive_canonical_patterns() -> Tuple[np.ndarray, List[str]]:
         patterns.append(T.flatten())
 
         # Classify the pattern's resonance
-        resonance_class = classify_pattern_resonance(mask)
-        resonance_classes.append(resonance_class)
+        gyration_feature = classify_pattern_resonance(mask)
+        gyration_featurees.append(gyration_feature)
 
     # Convert list to numpy array
     patterns_array = np.array(patterns, dtype=np.float32)
 
-    return patterns_array, resonance_classes
+    return patterns_array, gyration_featurees
 
 
 def classify_pattern_resonance(mask: int) -> str:

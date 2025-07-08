@@ -55,6 +55,19 @@ This approach draws inspiration from:
 - **Quantum mechanics** (discrete state transformations)
 - **Information theory** (pattern recognition and compression)
 
+---
+
+## Updates
+
+- **8 July 2025:**  
+  We have expanded our global format library! Formats are shared global knowledge and are available to all agents, though they do not contain contextual information. (Scripts Available at: toys/learning/formats)
+  - **ASCII Curriculum:** 256 foundational ASCII characters  
+  - **Emoji Curriculum:** Over 5,000 Unicode emoji  
+  - **Mathematical Symbols Curriculum:** All Unicode mathematical symbols (excluding ASCII)  
+  - *(More curricula can be added as the system grows)*
+
+---
+
 ## 🚀 Quick Start
 
 ```bash

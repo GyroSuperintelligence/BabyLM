@@ -154,7 +154,7 @@ def mock_env(tmp_path):
     mem_prefs = {
         "sharding": {"width": 2, "max_files": 30000, "second_level": True},
         "storage_config": {"max_thread_size_mb": 64, "encryption_algorithm": "AES-256-GCM"},
-        "format_config": {"default_cgm_version": "1.0.0", "max_semantic_label_length": 128},
+        "format_config": {"default_cgm_version": "1.0.0", "max_character_label_length": 128},
     }
     with open(memories_dir / "memory_preferences.json", "w") as f:
         json.dump(mem_prefs, f, indent=2)
@@ -340,18 +340,18 @@ class TestGovernance:
 
     def test_derive_canonical_patterns(self):
         """Test derivation of canonical patterns"""
-        patterns, resonance_classes = derive_canonical_patterns()
+        patterns, gyration_featurees = derive_canonical_patterns()
 
         # Check dimensions
         assert patterns.shape == (256, 48)  # 256 patterns, each 48 elements
-        assert len(resonance_classes) == 256
+        assert len(gyration_featurees) == 256
 
         # Check pattern content
         assert patterns.dtype == np.float32
 
         # Check that all resonance classes are valid
         valid_classes = ["identity", "inverse", "forward", "backward"]
-        for cls in resonance_classes:
+        for cls in gyration_featurees:
             assert cls in valid_classes
 
     @pytest.mark.parametrize(
@@ -366,8 +366,8 @@ class TestGovernance:
     )
     def test_classify_pattern_resonance(self, mask, expected_class):
         """Test pattern resonance classification with various bit patterns"""
-        resonance_class = classify_pattern_resonance(mask)
-        assert resonance_class == expected_class
+        gyration_feature = classify_pattern_resonance(mask)
+        assert gyration_feature == expected_class
 
 
 # ------------------------------------------------------------------------------
@@ -390,7 +390,7 @@ class TestInference:
 
             assert engine.T.shape == (4, 2, 3, 2)
             assert engine.cycle_counter == 0
-            assert len(engine.resonance_classes) == 256
+            assert len(engine.gyration_featurees) == 256
             assert engine.F.shape == (256, 48)
             assert engine.G.shape == (256,)
 
@@ -410,7 +410,7 @@ class TestInference:
 
         # Verify loaded patterns
         assert engine.F.shape == (256, 48)
-        assert len(engine.resonance_classes) == 256
+        assert len(engine.gyration_featurees) == 256
 
         # Clean up
         pattern_file.unlink()
@@ -428,7 +428,7 @@ class TestInference:
 
             # Verify generated patterns
             assert engine.F.shape == (256, 48)
-            assert len(engine.resonance_classes) == 256
+            assert len(engine.gyration_featurees) == 256
 
     def test_load_genome_mask_file_exists(self, mock_memories_dir):
         """Test loading genome mask when file exists"""
@@ -861,7 +861,7 @@ class TestInformationStorage:
             "format_uuid": format_uuid,
             "format_name": "Test Format",
             "metadata": {"author": "test_author", "description": "Test format for unit tests"},
-            "patterns": [{"index": i, "semantic": None} for i in range(10)],
+            "patterns": [{"index": i, "character": None} for i in range(10)],
         }
 
         # Store format
@@ -1217,18 +1217,18 @@ class TestIntelligence:
         assert initialized_intelligence_engine.M["patterns"][pattern_index]["last_cycle"] == 10
 
     def test_encode_decode(self, initialized_intelligence_engine):
-        """Test semantic encoding and decoding"""
-        # Setup pattern with semantic label
+        """Test character encoding and decoding"""
+        # Setup pattern with character label
         pattern_index = 42
-        semantic_label = "test_semantic"
-        initialized_intelligence_engine.M["patterns"][pattern_index]["semantic"] = [semantic_label]
+        character_label = "test_character"
+        initialized_intelligence_engine.M["patterns"][pattern_index]["character"] = [character_label]
 
         # Test encode
-        assert initialized_intelligence_engine.encode(semantic_label) == pattern_index
+        assert initialized_intelligence_engine.encode(character_label) == pattern_index
         assert initialized_intelligence_engine.encode("nonexistent") is None
 
         # Test decode
-        assert initialized_intelligence_engine.decode(pattern_index) == semantic_label
+        assert initialized_intelligence_engine.decode(pattern_index) == character_label
         assert initialized_intelligence_engine.decode(99) is None
 
     def test_load_thread_content(self, initialized_intelligence_engine):

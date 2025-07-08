@@ -295,7 +295,7 @@ class BabyLMCLI:
         else:
             patterns = []
         total = len(patterns)
-        labeled = sum(1 for p in patterns if p.get("semantic") is not None)
+        labeled = sum(1 for p in patterns if p.get("character") is not None)
         active = sum(1 for p in patterns if p.get("count", 0) > 0)
 
         return {"total": total, "labeled": labeled, "active": active}
@@ -636,8 +636,8 @@ Chat Commands:
                     table.add_row(
                         str(idx),
                         str(pattern.get("count", 0)),
-                        pattern.get("semantic") or "-",
-                        pattern.get("resonance_class", "-"),
+                        pattern.get("character", "") or "-",
+                        pattern.get("gyration_feature", "-"),
                     )
 
                 console.print(table)
@@ -646,8 +646,8 @@ Chat Commands:
                 for idx, pattern in active_patterns:
                     print(
                         f"  {idx}: count={pattern.get('count', 0)}, "
-                        f"semantic={pattern.get('semantic') or '-'}, "
-                        f"class={pattern.get('resonance_class', '-')}"
+                        f"character={pattern.get('character', '') or '-'}, "
+                        f"class={pattern.get('gyration_feature', '-')}"
                     )
         else:
             # Show specific pattern
@@ -657,11 +657,11 @@ Chat Commands:
                 if RICH_AVAILABLE and console is not None:
                     info = f"""
 [cyan]Index:[/cyan] {stats['pattern_index']}
-[cyan]Semantic:[/cyan] {stats['semantic'] or 'None'}
+[cyan]Semantic:[/cyan] {stats['character'] or 'None'}
 [cyan]Count:[/cyan] {stats['count']}
 [cyan]First Cycle:[/cyan] {stats['first_cycle'] or 'Never'}
 [cyan]Last Cycle:[/cyan] {stats['last_cycle'] or 'Never'}
-[cyan]Resonance Class:[/cyan] {stats['resonance_class']}
+[cyan]Resonance Class:[/cyan] {stats['gyration_feature']}
 [cyan]Confidence:[/cyan] {stats['confidence']:.4f}
 [cyan]Current Resonance:[/cyan] {stats['current_resonance']:.4f if stats['current_resonance'] else 'N/A'}
                     """
@@ -680,9 +680,9 @@ Chat Commands:
                                 console.print(f"    Pattern {succ_idx}: {count} times")
                 else:
                     print(f"\nPattern {pattern_idx}:")
-                    print(f"  Semantic: {stats['semantic'] or 'None'}")
+                    print(f"  Semantic: {stats['character'] or 'None'}")
                     print(f"  Count: {stats['count']}")
-                    print(f"  Resonance Class: {stats['resonance_class']}")
+                    print(f"  Resonance Class: {stats['gyration_feature']}")
                     print(f"  Confidence: {stats['confidence']:.4f}")
             else:
                 if RICH_AVAILABLE and console is not None:
@@ -1216,7 +1216,7 @@ Chat Commands:
 
             # Pattern statistics
             patterns = format_data.get("patterns", [])
-            labeled = sum(1 for p in patterns if p.get("semantic"))
+            labeled = sum(1 for p in patterns if p.get("character"))
             active = sum(1 for p in patterns if p.get("count", 0) > 0)
 
             pattern_info = f"""

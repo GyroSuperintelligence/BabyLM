@@ -3,18 +3,19 @@ from typing import TypedDict, List, Optional, Dict, Any, Union
 
 class PatternMetadata(TypedDict, total=False):
     index: int
-    semantic: Optional[Union[str, List[str], int]]
+    character: Optional[Union[str, List[str], int]]
+    description: Optional[str]
+    type: Optional[str]
     count: int
     first_cycle: Optional[int]
     last_cycle: Optional[int]
-    resonance_class: str
+    gyration_feature: str
     confidence: float
 
 
 class FormatMetadata(TypedDict, total=False):
     format_uuid: str
     format_name: str
-    cgm_version: str
     format_version: str
     stability: str
     compatibility: Dict[str, Any]

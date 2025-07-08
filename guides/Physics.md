@@ -1073,7 +1073,7 @@
     
     - Respect for encryption that protects legitimate privacy
     - Exposure of encryption used to hide harmful activities
-    - Development of new forms of semantic security
+    - Development of new forms of character security
     
     ### Structural Ethics
     

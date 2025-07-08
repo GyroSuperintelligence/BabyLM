@@ -64,7 +64,7 @@ def get_memory_preferences() -> Dict:
         prefs = {
             "sharding": {"width": 2, "max_files": 30000, "second_level": True},
             "storage_config": {"max_thread_size_mb": 64, "encryption_algorithm": "AES-256-GCM"},
-            "format_config": {"default_cgm_version": "1.0.0", "max_semantic_label_length": 128},
+            "format_config": {"default_cgm_version": "1.0.0", "max_character_label_length": 128},
         }
 
         with open(prefs_path, "w") as f:

@@ -148,7 +148,7 @@ The 256 canonical patterns represent the exhaustive set of all possible operatio
 ```python
 def derive_canonical_patterns():
     patterns = []
-    resonance_classes = []
+    gyration_featurees = []
     base_tensor = gene_add.copy()
     
     for mask in range(256):
@@ -160,10 +160,10 @@ def derive_canonical_patterns():
                 apply_operation(T, i)
         
         patterns.append(T.flatten())
-        resonance_class = classify_pattern_resonance(mask)
-        resonance_classes.append(resonance_class)
+        gyration_feature = classify_pattern_resonance(mask)
+        gyration_featurees.append(gyration_feature)
     
-    return patterns, resonance_classes
+    return patterns, gyration_featurees
 ```
 
 **Pattern Classification:**
@@ -213,7 +213,7 @@ def classify_pattern_resonance(mask: int) -> str:
 #### 3.2.3 Security Model
 
 ✅ **Public (Safe to Share):**
-- **Formats** - Communication ability, semantic understanding
+- **Formats** - Communication ability, character understanding
 - **Masks** - Complete intelligence framework (12,544 bytes total)
 
 ✅ **Private (Keep Encrypted):**
@@ -520,18 +520,17 @@ def _generate_response_byte():
 
 ### 5.1 Gyronorm Formats Specification
 
-The Gyronorm Formats structure serves as the **semantic bridge** connecting the system's internal physics with external semantics:
+The Gyronorm Formats structure serves as the **character bridge** connecting the system's internal physics with external characters:
 
 ```json
 {
   "format_uuid": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
   "format_name": "standard_english_v1",
-  "cgm_version": "1.0.0",
   "format_version": "1.2.0",
   "stability": "stable",
   "compatibility": {
-    "min_cgm_version": "0.9.0",
-    "max_cgm_version": "1.0.0",
+    "min_format_version": "1.0.0",
+    "max_format_version": "1.2.0",
     "depends_on": ["base_ascii_v1.0"],
     "conflicts_with": []
   },
@@ -553,11 +552,13 @@ The Gyronorm Formats structure serves as the **semantic bridge** connecting the 
   "patterns": [
     {
       "index": 0,
-      "semantic": null,
+      "character": "A",
+      "description": "LATIN CAPITAL LETTER A",
+      "type": "Lu",
       "count": 0,
       "first_cycle": null,
       "last_cycle": null,
-      "resonance_class": "identity",
+      "gyration_feature": "identity",
       "confidence": 0.0
     }
     /* ... repeated for each of the 256 pattern indices ... */
@@ -590,6 +591,14 @@ def compose_formats(primary_format: str, secondary_formats: List[str]) -> str:
     """Compose multiple formats for multi-domain capability"""
     return merge_format_capabilities(primary_format, secondary_formats)
 ```
+
+Format versioning is managed by the 'format_version' field and the 'min_format_version'/'max_format_version' fields in the 'compatibility' section. There is no longer a 'cgm_version' field in format metadata.
+
+**Pattern Metadata Fields:**
+- `character`: The output/print/translation character for this pattern (e.g., "A", "\x0a", "😊").
+- `description`: Human-readable Unicode name or description (e.g., "LATIN CAPITAL LETTER A", "LINE FEED").
+- `type`: Unicode category (e.g., "Lu" for uppercase letter, "Cc" for control character).
+- `count`, `first_cycle`, `last_cycle`, `gyration_feature`, `confidence`: System learning and structural fields as before.
 
 ### 5.2 Learning Mechanisms
 

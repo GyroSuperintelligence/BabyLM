@@ -35,7 +35,7 @@ class InferenceEngine:
         self.cycle_counter = 0
 
         # Load or generate canonical patterns
-        self.F, self.resonance_classes = self._load_patterns()
+        self.F, self.gyration_featurees = self._load_patterns()
 
         # Load genome mask (output byte mappings)
         self.G = self._load_genome_mask()
@@ -53,7 +53,7 @@ class InferenceEngine:
         Returns:
             Tuple containing:
             - patterns: Array of shape [256, 48]
-            - resonance_classes: List of 256 class labels
+            - gyration_featurees: List of 256 class labels
         """
         pattern_file = "memories/public/masks/epigenome.dat"
 
@@ -66,18 +66,18 @@ class InferenceEngine:
             patterns = patterns.reshape((256, 48))
 
             # Regenerate resonance classes (these are deterministic)
-            resonance_classes = [classify_pattern_resonance(i) for i in range(256)]
+            gyration_featurees = [classify_pattern_resonance(i) for i in range(256)]
 
-            return patterns, resonance_classes
+            return patterns, gyration_featurees
 
         except (FileNotFoundError, ValueError, IOError):
             # Generate patterns if file doesn't exist or is corrupted
-            patterns, resonance_classes = derive_canonical_patterns()
+            patterns, gyration_featurees = derive_canonical_patterns()
 
             # Save patterns to file
             patterns.tofile(pattern_file)
 
-            return patterns, resonance_classes
+            return patterns, gyration_featurees
 
     def _load_genome_mask(self) -> np.ndarray:
         """
