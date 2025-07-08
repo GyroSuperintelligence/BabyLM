@@ -24,7 +24,27 @@ from cryptography.hazmat.backends import default_backend
 
 from baby.inference import InferenceEngine
 from baby.governance import gyrodistance
-from baby.types import FormatMetadata
+from baby.types import FormatMetadata, ThreadMetadata, GeneKeysMetadata
+
+# pyright: reportMissingModuleSource=false
+try:
+    import orjson as json
+    # orjson API: loads(bytes), dumps(obj) -> bytes
+    def json_loads(s):
+        if isinstance(s, str):
+            s = s.encode("utf-8")
+        return json.loads(s)
+    def json_dumps(obj):
+        return json.dumps(obj).decode("utf-8")
+except ImportError:
+    try:
+        import ujson as json
+        json_loads = json.loads
+        json_dumps = json.dumps
+    except ImportError:
+        import json
+        json_loads = json.loads
+        json_dumps = json.dumps
 
 
 def find_closest_pattern_index(T, F):
@@ -58,7 +78,7 @@ def get_memory_preferences() -> Dict:
 
     try:
         with open(prefs_path, "r") as f:
-            prefs = json.load(f)
+            prefs = json_loads(f.read())
     except (FileNotFoundError, json.JSONDecodeError):
         # Create default preferences
         prefs = {
@@ -68,7 +88,7 @@ def get_memory_preferences() -> Dict:
         }
 
         with open(prefs_path, "w") as f:
-            json.dump(prefs, f, indent=2)
+            f.write(json_dumps(prefs))
 
     return prefs
 
@@ -106,7 +126,7 @@ def shard_path(root: Path, uuid_: str, width=2, limit=30_000) -> Path:
         if registry_path.exists():
             try:
                 with open(registry_path, "r") as f:
-                    registry = json.load(f)
+                    registry = json_loads(f.read())
                 count = registry.get("count", 0)
             except (json.JSONDecodeError, IOError):
                 pass
@@ -178,7 +198,7 @@ def update_registry(dirpath: Path, uuid_: str, update_parent: bool = True) -> No
 
         # Read existing registry or create new one
         try:
-            registry = json.load(f)
+            registry = json_loads(f.read())
         except (json.JSONDecodeError, ValueError):
             registry = {"count": 0, "uuids": []}
 
@@ -190,7 +210,7 @@ def update_registry(dirpath: Path, uuid_: str, update_parent: bool = True) -> No
             # Truncate file and write updated registry
             f.seek(0)
             f.truncate()
-            json.dump(registry, f, indent=2)
+            f.write(json_dumps(registry))
             f.flush()
             os.fsync(f.fileno())
 
@@ -266,7 +286,7 @@ def rebuild_registry(dirpath: Path) -> None:
     # Write registry
     registry_path = dirpath / "registry.json"
     with open(registry_path, "w") as f:
-        json.dump(registry, f, indent=2)
+        f.write(json_dumps(registry))
 
 
 # ====================================================================
@@ -349,156 +369,163 @@ def assign_agent_uuid(new_uuid: str) -> str:
 # ====================================================================
 
 
-def create_thread(agent_uuid: str, parent_uuid: Optional[str], format_uuid: str) -> str:
-    """
-    Create a new thread for an agent.
+def _get_thread_path(thread_uuid: str, agent_uuid: Optional[str]) -> Path:
+    if agent_uuid:
+        root_dir = Path("memories/private/agents")
+        agent_shard = shard_path(root_dir, agent_uuid)
+        agent_dir = agent_shard / f"agent-{agent_uuid}"
+        return agent_dir / "threads"
+    else:
+        return Path("memories/public/threads")
 
+
+def create_thread(
+    agent_uuid: Optional[str],
+    parent_uuid: Optional[str],
+    format_uuid: str,
+    thread_name: Optional[str] = None,
+    curriculum: Optional[str] = None,
+    tags: Optional[list] = None,
+) -> str:
+    """
+    Create a new thread (public or private).
     Args:
-        agent_uuid: Agent UUID
+        agent_uuid: Agent UUID (None for public thread)
         parent_uuid: Optional parent thread UUID
         format_uuid: Format UUID to use for the thread
-
+        thread_name: Optional human-friendly name for the thread
+        curriculum: Optional curriculum label
+        tags: Optional list of tags
     Returns:
         str: New thread UUID
     """
-    # Generate new thread UUID
     thread_uuid = str(uuid.uuid4())
-
-    # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
-    agent_dir = agent_shard / f"agent-{agent_uuid}"
-
-    # Calculate thread shard
-    threads_dir = agent_dir / "threads"
+    threads_dir = _get_thread_path(thread_uuid, agent_uuid)
     thread_shard = shard_path(threads_dir, thread_uuid)
     thread_shard.mkdir(parents=True, exist_ok=True)
-
-    # Create thread metadata
+    parent_name = None
+    if parent_uuid:
+        parent_shard = shard_path(threads_dir, parent_uuid)
+        parent_meta_path = parent_shard / f"thread-{parent_uuid}.json"
+        if parent_meta_path.exists():
+            with open(parent_meta_path, "r") as f:
+                parent_meta = json_loads(f.read())
+            parent_name = parent_meta.get("thread_name")
     now = datetime.now().isoformat()
-    thread_meta = {
+    thread_meta: ThreadMetadata = {
         "thread_uuid": thread_uuid,
+        "thread_name": thread_name,
         "agent_uuid": agent_uuid,
         "parent_uuid": parent_uuid,
+        "parent_name": parent_name,
         "child_uuids": [],
+        "child_names": [],
         "format_uuid": format_uuid,
+        "curriculum": curriculum,
+        "tags": tags,
         "created_at": now,
         "last_updated": now,
         "size_bytes": 0,
     }
-
-    # Write thread metadata file
     thread_meta_path = thread_shard / f"thread-{thread_uuid}.json"
     with open(thread_meta_path, "w") as f:
-        json.dump(thread_meta, f, indent=2)
-
-    # Update registries including parent
+        f.write(json_dumps(thread_meta))
     update_registry(threads_dir, thread_uuid)
     update_registry(thread_shard, thread_uuid)
-
-    # If there's a parent, update its metadata
     if parent_uuid:
         parent_shard = shard_path(threads_dir, parent_uuid)
         parent_meta_path = parent_shard / f"thread-{parent_uuid}.json"
-
         if parent_meta_path.exists():
             with open(parent_meta_path, "r") as f:
-                parent_meta = json.load(f)
-
+                parent_meta = json_loads(f.read())
             if "child_uuids" not in parent_meta:
                 parent_meta["child_uuids"] = []
-
+            if "child_names" not in parent_meta:
+                parent_meta["child_names"] = []
             if thread_uuid not in parent_meta["child_uuids"]:
                 parent_meta["child_uuids"].append(thread_uuid)
+                parent_meta["child_names"].append(thread_name)
                 parent_meta["last_updated"] = now
-
                 with open(parent_meta_path, "w") as f:
-                    json.dump(parent_meta, f, indent=2)
-
+                    f.write(json_dumps(parent_meta))
     return thread_uuid
 
 
-def save_thread(agent_uuid: str, thread_uuid: str, ciphertext: bytes, size: int) -> None:
+def save_thread(
+    agent_uuid: Optional[str],
+    thread_uuid: str,
+    content: bytes,
+    size: int,
+    thread_name: Optional[str] = None,
+    curriculum: Optional[str] = None,
+    tags: Optional[list] = None,
+) -> None:
     """
-    Save thread content to disk.
-
+    Save thread content to disk (public or private).
     Args:
-        agent_uuid: Agent UUID
+        agent_uuid: Agent UUID (None for public thread)
         thread_uuid: Thread UUID
-        ciphertext: Encrypted thread content
+        content: Thread content (encrypted for private, plaintext for public)
         size: Size of the original unencrypted content
+        thread_name: Optional human-friendly name for the thread
+        curriculum: Optional curriculum label
+        tags: Optional list of tags
     """
-    # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
-    agent_dir = agent_shard / f"agent-{agent_uuid}"
-
-    # Calculate thread shard
-    threads_dir = agent_dir / "threads"
+    threads_dir = _get_thread_path(thread_uuid, agent_uuid)
     thread_shard = shard_path(threads_dir, thread_uuid)
     thread_shard.mkdir(parents=True, exist_ok=True)
-
-    # Write thread file
-    thread_path = thread_shard / f"thread-{thread_uuid}.enc"
-    atomic_write(thread_path, ciphertext)
-
-    # Update thread metadata
+    ext = ".enc" if agent_uuid else ".dat"
+    thread_path = thread_shard / f"thread-{thread_uuid}{ext}"
+    atomic_write(thread_path, content)
     meta_path = thread_shard / f"thread-{thread_uuid}.json"
-
     if meta_path.exists():
         with open(meta_path, "r") as f:
-            meta = json.load(f)
+            meta = json_loads(f.read())
     else:
-        # Create new metadata if missing
-        meta = {
+        now = datetime.now().isoformat()
+        meta: ThreadMetadata = {
             "thread_uuid": thread_uuid,
+            "thread_name": thread_name,
             "agent_uuid": agent_uuid,
             "parent_uuid": None,
+            "parent_name": None,
             "child_uuids": [],
-            "format_uuid": "",  # Should be set by caller
-            "created_at": datetime.now().isoformat(),
-            "last_updated": datetime.now().isoformat(),
+            "child_names": [],
+            "format_uuid": "",
+            "curriculum": curriculum,
+            "tags": tags,
+            "created_at": now,
+            "last_updated": now,
             "size_bytes": 0,
         }
-
-    # Update metadata
     meta["last_updated"] = datetime.now().isoformat()
     meta["size_bytes"] = size
-
+    if thread_name is not None:
+        meta["thread_name"] = thread_name
+    if curriculum is not None:
+        meta["curriculum"] = curriculum
+    if tags is not None:
+        meta["tags"] = tags
     with open(meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
-
-    # Update registry
+        f.write(json_dumps(meta))
     update_registry(thread_shard, thread_uuid)
 
 
-def load_thread(agent_uuid: str, thread_uuid: str) -> Optional[bytes]:
+def load_thread(agent_uuid: Optional[str], thread_uuid: str) -> Optional[bytes]:
     """
-    Load thread content from disk.
-
+    Load thread content from disk (public or private).
     Args:
-        agent_uuid: Agent UUID
+        agent_uuid: Agent UUID (None for public thread)
         thread_uuid: Thread UUID
-
     Returns:
         bytes: Thread content or None if not found
     """
-    # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
-    agent_dir = agent_shard / f"agent-{agent_uuid}"
-
-    # Calculate thread shard
-    threads_dir = agent_dir / "threads"
+    threads_dir = _get_thread_path(thread_uuid, agent_uuid)
     thread_shard = shard_path(threads_dir, thread_uuid)
-
-    # Check if thread exists
-    thread_path = thread_shard / f"thread-{thread_uuid}.enc"
-
+    ext = ".enc" if agent_uuid else ".dat"
+    thread_path = thread_shard / f"thread-{thread_uuid}{ext}"
     if not thread_path.exists():
         return None
-
-    # Read thread content
     with open(thread_path, "rb") as f:
         return f.read()
 
@@ -560,150 +587,154 @@ def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes, agent_secret
     update_registry(key_shard, thread_uuid)
 
 
-def store_gene_keys(agent_uuid: str, thread_uuid: str, gene_keys: List[Dict], agent_secret: str) -> None:
+def store_gene_keys(
+    thread_uuid: str,
+    gene_keys: list[GeneKeysMetadata],
+    agent_uuid: Optional[str] = None,
+    agent_secret: Optional[str] = None,
+) -> None:
     """
-    Store gene keys (observation history) in an encrypted key file.
+    Store gene keys (pattern observation logs) in the appropriate location (public or private).
+    If agent_uuid and agent_secret are provided, encrypt and store privately. Otherwise, store unencrypted in public.
+    """
+    if agent_uuid and agent_secret:
+        # PRIVATE (encrypted)
+        private_dir = Path("memories/private/agents")
+        agent_shard = shard_path(private_dir, agent_uuid)
+        agent_dir = agent_shard / f"agent-{agent_uuid}"
+        keys_dir = agent_dir / "keys"
+        key_shard = shard_path(keys_dir, thread_uuid)
+        key_shard.mkdir(parents=True, exist_ok=True)
+        # Serialize as NDJSON (one JSON object per line)
+        ndjson_str = "\n".join(json_dumps(gk) for gk in gene_keys)
+        ndjson_bytes = ndjson_str.encode("utf-8")
+        # Encrypt as before
+        salt = (agent_uuid + thread_uuid + "gene_keys").encode("utf-8")
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
+        encryption_key = kdf.derive(agent_secret.encode("utf-8"))
+        nonce = os.urandom(12)
+        cipher = Cipher(algorithms.AES(encryption_key), modes.GCM(nonce), backend=default_backend())
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(ndjson_bytes) + encryptor.finalize()
+        encrypted_blob = nonce + encryptor.tag + ciphertext
+        gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson.enc"
+        atomic_write(gene_keys_path, encrypted_blob)
+        update_registry(key_shard, thread_uuid)
+    else:
+        # PUBLIC (unencrypted)
+        keys_dir = Path("memories/public/keys")
+        key_shard = shard_path(keys_dir, thread_uuid)
+        key_shard.mkdir(parents=True, exist_ok=True)
+        gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson"
+        with open(gene_keys_path, "w", encoding="utf-8") as f:
+            for gk in gene_keys:
+                f.write(json_dumps(gk) + "\n")
+        update_registry(key_shard, thread_uuid)
 
-    Args:
-        agent_uuid: Agent UUID
-        thread_uuid: Thread UUID
-        gene_keys: List of gene key observations
-        agent_secret: Agent secret for encryption
+
+def load_gene_keys(
+    thread_uuid: str,
+    agent_uuid: Optional[str] = None,
+    agent_secret: Optional[str] = None,
+) -> list[GeneKeysMetadata]:
     """
+    Load gene keys from the appropriate location (public or private).
+    If agent_uuid and agent_secret are provided, decrypt and load privately. Otherwise, load unencrypted from public.
+    """
+    if agent_uuid and agent_secret:
+        # PRIVATE (encrypted)
+        private_dir = Path("memories/private/agents")
+        agent_shard = shard_path(private_dir, agent_uuid)
+        agent_dir = agent_shard / f"agent-{agent_uuid}"
+        keys_dir = agent_dir / "keys"
+        key_shard = shard_path(keys_dir, thread_uuid)
+        private_path = key_shard / f"gene-{thread_uuid}.ndjson.enc"
+        if not private_path.exists():
+            # Fallback: Try public path
+            public_dir = Path("memories/public/keys")
+            public_shard = shard_path(public_dir, thread_uuid)
+            public_path = public_shard / f"gene-{thread_uuid}.ndjson"
+            if public_path.exists():
+                with open(public_path, "r", encoding="utf-8") as f:
+                    return [json_loads(line) for line in f if line.strip()]
+            return []
+        # If we get here, the private file exists. Load and decrypt it.
+        with open(private_path, "rb") as f:
+            encrypted_blob = f.read()
+        salt = (agent_uuid + thread_uuid + "gene_keys").encode("utf-8")
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
+        decryption_key = kdf.derive(agent_secret.encode("utf-8"))
+        nonce = encrypted_blob[:12]
+        tag = encrypted_blob[12:28]
+        ciphertext = encrypted_blob[28:]
+        cipher = Cipher(algorithms.AES(decryption_key), modes.GCM(nonce, tag), backend=default_backend())
+        decryptor = cipher.decryptor()
+        try:
+            decrypted_data = decryptor.update(ciphertext) + decryptor.finalize()
+            ndjson_str = decrypted_data.decode("utf-8")
+            return [json_loads(line) for line in ndjson_str.splitlines() if line.strip()]
+        except Exception:
+            return []
+    else:
+        # PUBLIC (unencrypted)
+        keys_dir = Path("memories/public/keys")
+        key_shard = shard_path(keys_dir, thread_uuid)
+        gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson"
+        if not gene_keys_path.exists():
+            return []
+        with open(gene_keys_path, "r", encoding="utf-8") as f:
+            return [json_loads(line) for line in f if line.strip()]
+
+
+def load_thread_key(
+    agent_uuid: str,
+    thread_uuid: str,
+    agent_secret: str,
+) -> Optional[bytes]:
+    """
+    Load and decrypt the thread key for a private thread.
+    Returns the 256-byte key, or None if not found or decryption fails.
+    """
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes
+    import os
+
     # Get agent directory
     private_dir = Path("memories/private/agents")
     agent_shard = shard_path(private_dir, agent_uuid)
     agent_dir = agent_shard / f"agent-{agent_uuid}"
-
-    # Calculate key shard
     keys_dir = agent_dir / "keys"
     key_shard = shard_path(keys_dir, thread_uuid)
-    key_shard.mkdir(parents=True, exist_ok=True)
-
-    # Convert gene keys to JSON and encrypt
-    gene_keys_json = json.dumps(gene_keys).encode("utf-8")
-
-    # Derive encryption key
-    salt = (agent_uuid + thread_uuid + "gene_keys").encode("utf-8")
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
-    encryption_key = kdf.derive(agent_secret.encode("utf-8"))
-
-    # Encrypt with AES-256-GCM
-    nonce = os.urandom(12)
-    cipher = Cipher(algorithms.AES(encryption_key), modes.GCM(nonce), backend=default_backend())
-    encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(gene_keys_json) + encryptor.finalize()
-
-    # Store as: nonce (12) + tag (16) + ciphertext
-    encrypted_blob = nonce + encryptor.tag + ciphertext
-
-    # Write gene keys file
-    gene_keys_path = key_shard / f"gene-{thread_uuid}.bin.enc"
-    atomic_write(gene_keys_path, encrypted_blob)
-
-    # Update registries
-    update_registry(key_shard, thread_uuid)
-
-
-def load_thread_key(agent_uuid: str, thread_uuid: str, agent_secret: str) -> Optional[bytes]:
-    """
-    Load an encryption key for a thread.
-
-    Args:
-        agent_uuid: Agent UUID
-        thread_uuid: Thread UUID
-        agent_secret: Agent secret for decryption
-
-    Returns:
-        bytes: Key or None if not found
-    """
-    # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
-    agent_dir = agent_shard / f"agent-{agent_uuid}"
-
-    # Calculate key shard
-    keys_dir = agent_dir / "keys"
-    key_shard = shard_path(keys_dir, thread_uuid)
-
-    # Check if key exists
     key_path = key_shard / f"key-{thread_uuid}.bin.enc"
-
     if not key_path.exists():
         return None
-
-    # Read key
     with open(key_path, "rb") as f:
         encrypted_blob = f.read()
-
-    # Derive decryption key
+    # Derive encryption key using PBKDF2-HMAC-SHA256
     salt = agent_uuid.encode("utf-8")
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,  # 256-bit key for AES-256
+        salt=salt,
+        iterations=100000,
+        backend=default_backend(),
+    )
     agent_key = kdf.derive(agent_secret.encode("utf-8"))
-
-    # Decrypt
+    # Decrypt with AES-256-GCM
     nonce = encrypted_blob[:12]
     tag = encrypted_blob[12:28]
     ciphertext = encrypted_blob[28:]
-
     cipher = Cipher(algorithms.AES(agent_key), modes.GCM(nonce, tag), backend=default_backend())
     decryptor = cipher.decryptor()
-
     try:
-        return decryptor.update(ciphertext) + decryptor.finalize()
+        key = decryptor.update(ciphertext) + decryptor.finalize()
+        if len(key) != 256:
+            return None
+        return key
     except Exception:
         return None
-
-
-def load_gene_keys(agent_uuid: str, thread_uuid: str, agent_secret: str) -> List[Dict]:
-    """
-    Load gene keys from encrypted storage.
-
-    Args:
-        agent_uuid: Agent UUID
-        thread_uuid: Thread UUID
-        agent_secret: Agent secret for decryption
-
-    Returns:
-        List[Dict]: Gene key observations
-    """
-    # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
-    agent_dir = agent_shard / f"agent-{agent_uuid}"
-
-    # Calculate key shard
-    keys_dir = agent_dir / "keys"
-    key_shard = shard_path(keys_dir, thread_uuid)
-
-    # Check if gene keys file exists
-    gene_keys_path = key_shard / f"gene-{thread_uuid}.bin.enc"
-
-    if not gene_keys_path.exists():
-        return []
-
-    # Read encrypted gene keys
-    with open(gene_keys_path, "rb") as f:
-        encrypted_blob = f.read()
-
-    # Derive decryption key
-    salt = (agent_uuid + thread_uuid + "gene_keys").encode("utf-8")
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
-    decryption_key = kdf.derive(agent_secret.encode("utf-8"))
-
-    # Decrypt
-    nonce = encrypted_blob[:12]
-    tag = encrypted_blob[12:28]
-    ciphertext = encrypted_blob[28:]
-
-    cipher = Cipher(algorithms.AES(decryption_key), modes.GCM(nonce, tag), backend=default_backend())
-    decryptor = cipher.decryptor()
-
-    try:
-        decrypted_data = decryptor.update(ciphertext) + decryptor.finalize()
-        return json.loads(decrypted_data.decode("utf-8"))
-    except Exception:
-        return []
 
 
 # ====================================================================
@@ -738,7 +769,7 @@ def parent(agent_uuid: str, thread_uuid: str) -> Optional[str]:
         return None
 
     with open(meta_path, "r") as f:
-        meta = json.load(f)
+        meta = json_loads(f.read())
 
     return meta.get("parent_uuid")
 
@@ -770,7 +801,7 @@ def children(agent_uuid: str, thread_uuid: str) -> List[str]:
         return []
 
     with open(meta_path, "r") as f:
-        meta = json.load(f)
+        meta = json_loads(f.read())
 
     return meta.get("child_uuids", [])
 
@@ -818,7 +849,7 @@ def load_format(format_uuid: str) -> Optional[FormatMetadata]:
     if not format_path.exists():
         return None
     with open(format_path, "r") as f:
-        format_data = json.load(f)
+        format_data = json_loads(f.read())
     return format_data  # type: ignore
 
 
@@ -852,7 +883,7 @@ def store_format(format_data: FormatMetadata) -> str:
             }
     format_path = format_shard / f"format-{format_uuid}.json"
     with open(format_path, "w") as f:
-        json.dump(format_data, f, indent=2)
+        f.write(json_dumps(format_data))
     update_registry(formats_dir, format_uuid)
     update_registry(format_shard, format_uuid)
     return format_uuid
@@ -926,7 +957,7 @@ def store_object(obj_type: str, payload: Union[bytes, Dict], ext: str = "dat") -
     # Write data
     if isinstance(payload, dict):
         with open(file_path, "w") as f:
-            json.dump(payload, f, indent=2)
+            f.write(json_dumps(payload))
     else:
         atomic_write(file_path, payload)
 
@@ -1021,10 +1052,10 @@ class ThreadChainCache:
             meta_path = thread_shard / f"thread-{thread_uuid}.json"
 
             with open(meta_path, "r") as f:
-                meta = json.load(f)
+                meta = json_loads(f.read())
 
             # Load gene keys
-            gene_keys = load_gene_keys(self.agent_uuid, thread_uuid, self.agent_secret)
+            gene_keys = load_gene_keys(thread_uuid, self.agent_uuid, self.agent_secret)
 
             # Add gene keys to metadata (in memory only)
             meta["gene_keys"] = gene_keys
@@ -1167,7 +1198,7 @@ class PatternIndex:
         if thread_uuid in self._thread_gene_keys_cache:
             gene_keys = self._thread_gene_keys_cache[thread_uuid]
         else:
-            gene_keys = load_gene_keys(self.agent_uuid, thread_uuid, self.agent_secret)
+            gene_keys = load_gene_keys(thread_uuid, self.agent_uuid, self.agent_secret)
             self._thread_gene_keys_cache[thread_uuid] = gene_keys
 
         # Check surrounding patterns
@@ -1205,7 +1236,7 @@ class InformationEngine:
     def process_stream(
         self,
         inference_engine: InferenceEngine,
-        update_callback: Callable[[int, InferenceEngine], None],
+        update_callback: Callable[[int, int, float, str], None],
         input_stream: bytes,
     ) -> Tuple[bytes, bytes]:
         """
@@ -1223,34 +1254,21 @@ class InformationEngine:
         """
         intermediate_ciphertext = bytearray()
         dynamic_keystream = bytearray()
-
-        # Reset stream pointer
         self.stream_pointer = 0
-
         for P_n in input_stream:
-            # 1. Call S3 for pure inference
-            key_index = inference_engine.process_byte(P_n)
-
-            # 2. Call update callback (S4) to update state
-            update_callback(key_index, inference_engine)
-
-            # 3. Get keystream byte
+            key_index, resonance = inference_engine.process_byte(P_n)
+            update_callback(P_n, key_index, resonance, "INPUT")
             keystream_byte = inference_engine.G[key_index]
-
-            # 4. Encrypt the byte
             C_n = P_n ^ keystream_byte
             intermediate_ciphertext.append(C_n)
             dynamic_keystream.append(keystream_byte)
-
-            # 5. Increment stream pointer
             self.stream_pointer += 1
-
         return bytes(intermediate_ciphertext), bytes(dynamic_keystream)
 
     def process_generated_bytes(
         self,
         inference_engine: InferenceEngine,
-        update_callback: Callable[[int, InferenceEngine], None],
+        update_callback: Callable[[int, int, float, str], None],
         bytes_to_process: bytes,
     ) -> None:
         """
@@ -1265,8 +1283,8 @@ class InformationEngine:
             bytes_to_process: Sequence of bytes to process
         """
         for byte in bytes_to_process:
-            key_index = inference_engine.process_byte(byte)
-            update_callback(key_index, inference_engine)
+            key_index, resonance = inference_engine.process_byte(byte)
+            update_callback(byte, key_index, resonance, "OUTPUT")
             self.stream_pointer += 1
 
     def tensor_to_output_byte(self, T, F, G):

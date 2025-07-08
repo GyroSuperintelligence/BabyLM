@@ -9,7 +9,6 @@ tools and user-friendly language model functionality.
 import argparse
 import os
 import sys
-import json
 import logging
 import readline
 import atexit
@@ -46,6 +45,24 @@ from baby import initialize_intelligence_engine
 from baby.information import ensure_agent_uuid, assign_agent_uuid, list_formats, load_format, get_memory_preferences
 from baby.governance import gene_stateless
 
+# Use the fastest available JSON library (orjson > ujson > stdlib json)
+try:
+    import orjson as json
+    def json_loads(s):
+        if isinstance(s, str):
+            s = s.encode("utf-8")
+        return json.loads(s)
+    def json_dumps(obj):
+        return json.dumps(obj).decode("utf-8")
+except ImportError:
+    try:
+        import ujson as json
+        json_loads = json.loads
+        json_dumps = json.dumps
+    except ImportError:
+        import json
+        json_loads = json.loads
+        json_dumps = json.dumps
 
 # Setup logging with color
 class ColoredFormatter(logging.Formatter):
@@ -228,7 +245,7 @@ class BabyLMCLI:
         prefs_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(prefs_path, "w") as f:
-            json.dump(metadata, f, indent=2)
+            json_dumps(metadata, f, indent=2)
 
     def show_system_status(self):
         """Show comprehensive system status"""
@@ -497,7 +514,7 @@ Chat Commands:
         Path("conversations").mkdir(exist_ok=True)
 
         with open(filename, "w") as f:
-            json.dump(
+            json_dumps(
                 {
                     "agent_uuid": self.engine.agent_uuid,
                     "thread_uuid": self.engine.thread_uuid,
@@ -559,7 +576,7 @@ Chat Commands:
         filename = f"conversations/{name}.json"
         try:
             with open(filename, "r") as f:
-                data = json.load(f)
+                data = json_loads(f.read())
 
             self.conversation_history = data["history"]
 
@@ -596,10 +613,18 @@ Chat Commands:
 
         stats = self.engine.get_thread_statistics()
         relationships = self.engine.get_thread_relationships(self.engine.thread_uuid)
+        # Find current thread detail
+        thread_detail = next((d for d in stats["thread_details"] if d["thread_uuid"] == self.engine.thread_uuid), None)
+        name = thread_detail.get("thread_name") if thread_detail else "-"
+        curriculum = thread_detail.get("curriculum") if thread_detail else "-"
+        tags = ", ".join(thread_detail.get("tags") or []) if thread_detail and thread_detail.get("tags") else "-"
 
         if RICH_AVAILABLE and console is not None:
             info = f"""
 [cyan]Thread UUID:[/cyan] {self.engine.thread_uuid}
+[cyan]Name:[/cyan] {name}
+[cyan]Curriculum:[/cyan] {curriculum}
+[cyan]Tags:[/cyan] {tags}
 [cyan]Size:[/cyan] {self.engine.current_thread_size} bytes
 [cyan]Parent:[/cyan] {relationships['parent'] or 'None'}
 [cyan]Children:[/cyan] {len(relationships['children'])}
@@ -609,6 +634,9 @@ Chat Commands:
         else:
             print(f"\nCurrent Thread:")
             print(f"  UUID: {self.engine.thread_uuid}")
+            print(f"  Name: {name}")
+            print(f"  Curriculum: {curriculum}")
+            print(f"  Tags: {tags}")
             print(f"  Size: {self.engine.current_thread_size} bytes")
             print(f"  Parent: {relationships['parent'] or 'None'}")
             print(f"  Children: {len(relationships['children'])}")
@@ -864,6 +892,9 @@ Chat Commands:
             table = Table(title=f"Threads for Agent {self.engine.agent_uuid[:8]}...")
             table.add_column("Index", style="cyan", no_wrap=True)
             table.add_column("Thread UUID", style="magenta")
+            table.add_column("Name", style="white")
+            table.add_column("Curriculum", style="green")
+            table.add_column("Tags", style="yellow")
             table.add_column("Size", style="green", justify="right")
             table.add_column("Parent", style="yellow")
             table.add_column("Children", style="blue", justify="center")
@@ -872,8 +903,19 @@ Chat Commands:
                 size_kb = detail["size_bytes"] / 1024
                 parent = "✓" if detail["has_parent"] else "-"
                 children = str(detail["child_count"]) if detail["has_children"] else "-"
-
-                table.add_row(str(i), detail["thread_uuid"][:8] + "...", f"{size_kb:.1f} KB", parent, children)
+                name = detail.get("thread_name") or "-"
+                curriculum = detail.get("curriculum") or "-"
+                tags = ", ".join(detail.get("tags") or []) if detail.get("tags") else "-"
+                table.add_row(
+                    str(i),
+                    detail["thread_uuid"][:8] + "...",
+                    name,
+                    curriculum,
+                    tags,
+                    f"{size_kb:.1f} KB",
+                    parent,
+                    children,
+                )
 
             console.print(table)
 
@@ -884,11 +926,15 @@ Chat Commands:
             console.print(f"  Capacity usage: {stats['capacity_usage_percent']:.1f}%")
         else:
             print(f"\nThreads for Agent {self.engine.agent_uuid[:8]}...")
-            print("-" * 60)
-
+            print("-" * 80)
             for i, detail in enumerate(stats["thread_details"], 1):
                 size_kb = detail["size_bytes"] / 1024
-                print(f"{i}. {detail['thread_uuid'][:8]}... - {size_kb:.1f} KB")
+                name = detail.get("thread_name") or "-"
+                curriculum = detail.get("curriculum") or "-"
+                tags = ", ".join(detail.get("tags") or []) if detail.get("tags") else "-"
+                print(
+                    f"{i}. {detail['thread_uuid'][:8]}... | Name: {name} | Curriculum: {curriculum} | Tags: {tags} | Size: {size_kb:.1f} KB"
+                )
                 if detail["has_parent"] or detail["has_children"]:
                     print(f"   Parent: {detail['has_parent']}, Children: {detail['child_count']}")
 

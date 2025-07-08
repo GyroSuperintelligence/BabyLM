@@ -6,7 +6,7 @@ representing the Inference (S3) layer of the Common Governance Model.
 """
 
 import numpy as np
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 import os
 from baby.governance import (
     apply_operation,
@@ -128,43 +128,12 @@ class InferenceEngine:
         # Reset cycle counter after initialization
         self.cycle_counter = 0
 
-    def process_byte(self, P_n: int) -> int:
-        """
-        Process a single input byte
-
-        Args:
-            P_n: Input byte (0-255)
-
-        Returns:
-            int: Index of the closest matching pattern (0-255)
-        """
-        # 1. Compute gene_mutated = P_n ^ 0xAA
-        gene_mutated = P_n ^ gene_stateless
-
-        # 2. Apply gyroscopic operations to tensor T
-        for i in range(8):
-            if gene_mutated & (1 << i):
-                apply_operation(self.T, i)
-
-        # 3. Find matching canonical pattern
-        key_index = self.find_closest_pattern_index()
-
-        # Track recent patterns
-        if len(self.recent_patterns) >= 20:  # Keep last 20 patterns
-            self.recent_patterns.pop(0)
-        self.recent_patterns.append(key_index)
-
-        # 4. Increment cycle counter
-        self.cycle_counter += 1
-
-        return key_index
-
-    def find_closest_pattern_index(self) -> int:
+    def find_closest_pattern_index(self) -> Tuple[int, float]:
         """
         Find index of canonical pattern closest to current tensor state
 
         Returns:
-            int: Index of closest matching pattern (0-255)
+            Tuple[int, float]: (Index of closest matching pattern (0-255), resonance/gyrodistance)
         """
         # Flatten current tensor for comparison
         flat_T = self.T.flatten()
@@ -177,8 +146,40 @@ class InferenceEngine:
 
         # Find index of minimum distance
         closest_index = int(np.argmin(distances))
+        min_distance = float(distances[closest_index])
 
-        return closest_index
+        return closest_index, min_distance
+
+    def process_byte(self, P_n: int) -> Tuple[int, float]:
+        """
+        Process a single input byte
+
+        Args:
+            P_n: Input byte (0-255)
+
+        Returns:
+            Tuple[int, float]: (Index of the closest matching pattern (0-255), resonance/gyrodistance)
+        """
+        # 1. Compute gene_mutated = P_n ^ gene_stateless
+        gene_mutated = P_n ^ gene_stateless
+
+        # 2. Apply gyroscopic operations to tensor T
+        for i in range(8):
+            if gene_mutated & (1 << i):
+                apply_operation(self.T, i)
+
+        # 3. Find matching canonical pattern and resonance
+        key_index, resonance = self.find_closest_pattern_index()
+
+        # Track recent patterns
+        if len(self.recent_patterns) >= 20:  # Keep last 20 patterns
+            self.recent_patterns.pop(0)
+        self.recent_patterns.append(key_index)
+
+        # 4. Increment cycle counter
+        self.cycle_counter += 1
+
+        return key_index, resonance
 
     def compute_pattern_resonances(self) -> List[float]:
         """
@@ -199,7 +200,7 @@ class InferenceEngine:
 
         return resonances
 
-    def compute_contextual_resonances(self, pattern_contexts: Dict = None) -> List[float]:
+    def compute_contextual_resonances(self, pattern_contexts: Optional[Dict] = None) -> List[float]:
         """
         Compute resonances with historical context weighting.
         This makes inference "aware" of successful historical patterns.

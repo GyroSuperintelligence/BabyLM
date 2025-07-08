@@ -5,7 +5,7 @@
 | System         | File/Component                | Responsibility                |
 |----------------|------------------------------|-------------------------------|
 | Governance     | Thread files                  | Macro context, gating         |
-| Information    | Gene Keys (private)           | Micro context, embedding      |
+| Information    | Gene Keys                     | Micro context, embedding      |
 | Inference      | Formats file                  | Translation, gating           |
 | Intelligence   | Epigenome mask                | Read: macro gene (state)      |
 | Intelligence   | Genome mask                   | Write: micro gene (output)    |
@@ -207,18 +207,49 @@ def classify_pattern_resonance(mask: int) -> str:
 | **Epigenome Mask** | `public/masks/epigenome.dat` | 12,288 bytes | Canonical patterns for matching | **Complete intelligence framework** |
 | **Genome Mask** | `public/masks/genome.dat` | 256 bytes | Output byte mappings | **Totality of all intelligence** |
 | **Gyronorm Formats** | `public/formats/<shard>/format-<uuid>.json` | Variable | Pattern usage metadata | **Ability to speak, decode, encode** |
-| **Gene Keys** | `private/agents/<shard>/agent-<uuid>/keys/<shard>/gene-<uuid>.bin.enc` | Variable | Encrypted pattern observation logs | **Personal learning history** |
-| **Thread Files** | `private/agents/<shard>/agent-<uuid>/threads/<shard>/thread-<uuid>.enc` | ≤64 MiB | Encrypted conversation data | **Personal conversations** |
+| **Gene Keys** | `private/agents/<shard>/agent-<uuid>/keys/<shard>/gene-<uuid>.ndjson.enc` (private) or `public/keys/<shard>/gene-<uuid>.ndjson` (public) | Variable | Pattern observation logs (event log, NDJSON) | **Personal or shared learning history** |
+| **Thread Files (Private)** | `private/agents/<shard>/agent-<uuid>/threads/<shard>/thread-<uuid>.ndjson.enc` | ≤64 MiB | Encrypted conversation data (NDJSON) | **Personal conversations** |
+| **Thread Files (Public)** | `public/threads/<shard>/thread-<uuid>.ndjson` | Variable | Unencrypted curriculum/shared data (NDJSON) | **Shared knowledge base** |
+
+### Gene Keys Metadata Specification
+
+Each Gene Key event is a dictionary with the following fields:
+
+```python
+class GeneKeysMetadata(TypedDict, total=False):
+    # --- Core Identity ---
+    cycle: int
+    pattern_index: int
+
+    # --- Contextual Links ---
+    thread_uuid: str
+    agent_uuid: Optional[str]  # Optional for public/agent-agnostic keys
+    format_uuid: str
+
+    # --- Analytical Payload ---
+    event_type: str           # 'INPUT' or 'OUTPUT'
+    source_byte: int          # The raw input byte (0-255)
+    resonance: float          # Gyrodistance/confidence of the match
+
+    # --- Standard Metadata ---
+    created_at: str
+```
+
+- If `agent_uuid` is present, the gene key is private and encrypted (stored in `private/` as `.ndjson.enc`).
+- If `agent_uuid` is omitted or None, the gene key is public and unencrypted (stored in `public/` as `.ndjson`).
+- Gene key files are NDJSON event streams (one event per line), not lists or binary blobs. These are essential for learning, context, and memory in the IntelligenceEngine.
 
 #### 3.2.3 Security Model
 
 ✅ **Public (Safe to Share):**
 - **Formats** - Communication ability, character understanding
 - **Masks** - Complete intelligence framework (12,544 bytes total)
+- **Public Gene Keys** - Shared observation history
+- **Public Threads** - Shared/curriculum conversations and content
 
 ✅ **Private (Keep Encrypted):**
-- **Gene Keys** - Personal observation history
-- **Threads** - Personal conversations and content
+- **Private Gene Keys** - Personal observation history
+- **Private Threads** - Personal conversations and content
 
 **Key Insight:** The model's power comes from public components, not private "weights".
 
@@ -238,19 +269,23 @@ memories/
 │   ├── masks/
 │   │   ├── epigenome.dat         # 12,288 bytes
 │   │   └── genome.dat            # 256 bytes
-│   └── formats/
-│       └── <shard>/format-<uuid>.json  # Sharded formats
+│   ├── formats/
+│   │   └── <shard>/format-<uuid>.json  # Sharded formats
+│   ├── threads/
+│   │   └── <shard>/
+│   │       └── thread-<uuid>.ndjson    # Unencrypted NDJSON thread content
+│   └── keys/
+│       └── <shard>/
+│           └── gene-<uuid>.ndjson      # Unencrypted NDJSON gene keys
 └── private/
     └── agents/
         └── <shard>/agent-<uuid>/
             ├── threads/
             │   └── <shard>/
-            │       ├── thread-<uuid>.enc    # Encrypted data
-            │       └── thread-<uuid>.json   # Metadata
+            │       └── thread-<uuid>.ndjson.enc    # Encrypted NDJSON thread content
             └── keys/
                 └── <shard>/
-                    ├── key-<uuid>.bin.enc   # Thread key
-                    └── gene-<uuid>.bin.enc  # Gene keys
+                    └── gene-<uuid>.ndjson.enc      # Encrypted NDJSON gene keys
 ```
 
 #### 3.3.3 Sharding and Registry System
@@ -263,7 +298,7 @@ memories/
 
 4. **Thread Metadata:** Each thread has a JSON metadata file tracking its parent, children, format, and timestamps, creating a navigable graph of relationships.
 
-5. **Encryption:** Thread keys and gene keys are stored separately and encrypted using AES-256-GCM with keys derived via PBKDF2-HMAC-SHA256 from the agent secret.
+5. **Encryption:** Private thread keys and gene keys are stored separately and encrypted using AES-256-GCM with keys derived via PBKDF2-HMAC-SHA256 from the agent secret. Public threads and gene keys are stored unencrypted, all as NDJSON files.
 
 ## 4. Engine Implementation
 
@@ -355,6 +390,8 @@ def process_stream(
     return bytes(intermediate_ciphertext), bytes(dynamic_keystream)
 ```
 
+**Note on Encryption:** The `intermediate_ciphertext` returned by this function is the result of XORing the input with the `dynamic_keystream` derived from inference. For **private threads**, this byte stream is then subject to a second layer of encryption using a static `thread_file_key` and AES-256-GCM before being written to disk. Public threads omit this second AES encryption step.
+
 ### 4.4 S3: Inference Engine
 
 **Purpose:** Pure pattern recognition and learning  
@@ -418,7 +455,7 @@ def tensor_to_output_byte(T, F, G):
 - `thread_uuid`: UUID of active thread
 - `thread_file_key`: 256-byte key for encrypting the current thread
 - `M`: Pattern Metadata
-- `current_thread_keys`: List of dictionaries for the active thread
+- `current_thread_keys`: An in-memory list of `GeneKeysMetadata` dictionaries for the current session. This acts as a write-buffer that is flushed to the persistent, append-only Gene Key file (`gene-<uuid>.ndjson.enc` or `gene-<uuid>.ndjson`) when the thread is saved or closed.
 - `pattern_index`: Index of patterns to thread locations for fast retrieval
 
 #### 4.5.1 Thread Lifecycle Operations
@@ -600,6 +637,9 @@ Format versioning is managed by the 'format_version' field and the 'min_format_v
 - `type`: Unicode category (e.g., "Lu" for uppercase letter, "Cc" for control character).
 - `count`, `first_cycle`, `last_cycle`, `gyration_feature`, `confidence`: System learning and structural fields as before.
 
+**Relationship between `resonance` and `confidence`:**
+The `GeneKeysMetadata` stores the raw `resonance` (gyrodistance) for each individual event. The `confidence` field within the `FormatMetadata`'s pattern list represents a long-term, aggregate statistical measure derived from the `resonance` of all events for that pattern. For example, it could be calculated as `1 - (average_resonance / π)`. This makes `confidence` a summary of how reliably a pattern has been identified over its entire history.
+
 ### 5.2 Learning Mechanisms
 
 The learning mechanism is a two-fold process:
@@ -616,6 +656,9 @@ The learning mechanism is a two-fold process:
 - Conversations are maintained as chains of threads
 - Each thread knows its parent and children
 - This conversational context provides a form of episodic memory
+
+**Curriculum Thread Protocol:**
+- Bootstrap of Structured Data streams such as datasets from wordnet, wikipedia, khan academy, books, etc.
 
 **Attention Mechanism:**
 - Current state of `T` tensor is an "attended" summary of entire past history
@@ -646,4 +689,5 @@ The learning mechanism is a two-fold process:
 | `agent_uuid` | string | UUID format | Must persist across restarts |
 | `thread_uuid` | string | UUID format | Must be registered in central registry |
 | `thread_file_key` | bytes[256] | Key integrity | Must be derived deterministically |
-| `current_thread_keys` | array | Observation structure | Must record cycle and pattern_index |
+| `current_thread_keys` | array | `GeneKeysMetadata` dicts | In-memory write-buffer for events before flushing to a persistent file. |
+

@@ -7,7 +7,6 @@ of the Common Governance Model.
 """
 
 import os
-import json
 import uuid
 import numpy as np
 import random
@@ -28,7 +27,6 @@ from baby.information import (
     save_thread,
     load_thread,
     store_thread_key,
-    load_thread_key,
     store_gene_keys,
     parent,
     children,
@@ -39,8 +37,28 @@ from baby.information import (
     get_memory_preferences,
     shard_path,
     PatternIndex,
+    load_thread_key,
 )
-from baby.types import PatternMetadata, FormatMetadata
+from baby.types import PatternMetadata, FormatMetadata, GeneKeysMetadata
+
+# pyright: reportMissingModuleSource=false
+try:
+    import orjson as json
+    def json_loads(s):
+        if isinstance(s, str):
+            s = s.encode("utf-8")
+        return json.loads(s)
+    def json_dumps(obj):
+        return json.dumps(obj).decode("utf-8")
+except ImportError:
+    try:
+        import ujson as json
+        json_loads = json.loads
+        json_dumps = json.dumps
+    except ImportError:
+        import json
+        json_loads = json.loads
+        json_dumps = json.dumps
 
 __all__ = [
     "IntelligenceEngine",
@@ -59,8 +77,8 @@ class IntelligenceEngine:
 
     def __init__(
         self,
-        agent_uuid: str,
-        agent_secret: str,
+        agent_uuid: Optional[str],
+        agent_secret: Optional[str],
         inference_engine: InferenceEngine,
         information_engine: InformationEngine,
         format_uuid: Optional[str] = None,
@@ -77,14 +95,7 @@ class IntelligenceEngine:
             format_uuid: UUID of the active format
             formats: Optional format metadata dictionary
         """
-        if agent_uuid is None:
-            raise ValueError("agent_uuid must not be None")
-        if agent_secret is None:
-            raise ValueError("agent_secret must not be None")
-        if inference_engine is None:
-            raise ValueError("inference_engine must not be None")
-        if information_engine is None:
-            raise ValueError("information_engine must not be None")
+        # Allow None for public mode
         self.inference_engine = inference_engine
         self.information_engine = information_engine
         self.agent_uuid = agent_uuid
@@ -100,7 +111,7 @@ class IntelligenceEngine:
         self.M: FormatMetadata = formats if formats else self._load_or_init_formats()
         self.memory_prefs = get_memory_preferences()
         self._validate_format_compatibility()
-        self.pattern_index = PatternIndex(self.agent_uuid, self.agent_secret) if self.agent_secret else None
+        self.pattern_index = PatternIndex(self.agent_uuid, self.agent_secret) if (self.agent_uuid is not None and self.agent_secret is not None) else None
         self.pattern_distances = None
         if self.M and "pattern_distances" in self.M and "path" in self.M["pattern_distances"]:
             self.pattern_distances = load_pattern_distances(self.format_uuid)
@@ -129,7 +140,7 @@ class IntelligenceEngine:
                 "conflicts_with": [],
             },
             "metadata": {
-                "author": f"agent_{self.agent_uuid[:8]}",
+                "author": f"agent_{self.agent_uuid[:8]}" if self.agent_uuid else "public",
                 "description": "Default format initialized automatically",
                 "tags": ["default", "auto_generated"],
                 "created_at": datetime.datetime.now().isoformat(),
@@ -241,7 +252,7 @@ class IntelligenceEngine:
                 "conflicts_with": [],
             },
             "metadata": {
-                "author": f"agent_{self.agent_uuid[:8]}",
+                "author": f"agent_{self.agent_uuid[:8]}" if self.agent_uuid else "public",
                 "description": "Default format initialized automatically",
                 "tags": ["default", "auto_generated"],
                 "created_at": datetime.datetime.now().isoformat(),
@@ -302,31 +313,24 @@ class IntelligenceEngine:
         self.child_thread_uuids = []
 
         # Store the new thread's key for future use.
-        store_thread_key(self.agent_uuid, new_thread_uuid, self.thread_file_key, self.agent_secret)
+        if self.agent_uuid is not None and self.agent_secret is not None and self.thread_file_key is not None:
+            store_thread_key(self.agent_uuid, new_thread_uuid, self.thread_file_key, self.agent_secret)
 
         return new_thread_uuid
 
     def process_input_stream(self, input_stream: bytes) -> Tuple[bytes, bytes]:
         """
         Process an external input stream and append to current thread or create new one
-
-        Args:
-            input_stream: Bytes to process
-
-        Returns:
-            Tuple containing:
-            - plaintext: Original input
-            - intermediate_ciphertext: Encrypted form
         """
-        # 1. Process the stream
+
+        # 1. Process the stream with new callback contract
+        def callback(source_byte, key_index, resonance, event_type):
+            self.update_learning_state(source_byte, key_index, resonance, event_type)
+
         intermediate_ciphertext, dynamic_keystream = self.information_engine.process_stream(
-            self.inference_engine, self.update_learning_state, input_stream
+            self.inference_engine, callback, input_stream
         )
-
-        # 2. Append to current thread content
         self._append_to_thread(input_stream)
-
-        # 3. Return processed data for convenience
         return input_stream, intermediate_ciphertext
 
     def _append_to_thread(self, new_content: bytes) -> None:
@@ -396,8 +400,8 @@ class IntelligenceEngine:
         # 2. Save thread file using information.py helper
         save_thread(self.agent_uuid, self.thread_uuid, bytes(final_encrypted_data), len(plaintext_to_save))
 
-        # 3. Store gene keys in encrypted form
-        store_gene_keys(self.agent_uuid, self.thread_uuid, self.current_thread_keys, self.agent_secret)
+        # 3. Store gene keys (public or private)
+        store_gene_keys(self.thread_uuid, self.current_thread_keys, self.agent_uuid, self.agent_secret)
 
         # 4. Update format metadata
         self.M.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
@@ -427,31 +431,14 @@ class IntelligenceEngine:
         return response_bytes
 
     def _generate_response_bytes(self, length: int) -> bytes:
-        """
-        Generate a sequence of bytes using intelligent selection
-
-        Args:
-            length: Number of bytes to generate
-
-        Returns:
-            bytes: Generated response
-        """
         response_bytes = bytearray()
-
         for _ in range(length):
-            # 1. S4 makes an intelligent choice for the next byte
             output_byte, key_index = self._generate_response_byte()
-
-            # 2. Append the byte to our response
             response_bytes.append(output_byte)
-
-            # 3. S4 instructs S3 to process this self-generated byte, creating a feedback loop
-            # This mutates the Epigenome tensor based on the system's own output
-            self.inference_engine.process_byte(output_byte)
-
-            # 4. S4 updates its own learning state based on this "conscious" action
-            self.update_learning_state(key_index, self.inference_engine)
-
+            # S4 instructs S3 to process this self-generated byte, creating a feedback loop
+            _key_index, resonance = self.inference_engine.process_byte(output_byte)
+            # Update learning state for this self-generated event
+            self.update_learning_state(output_byte, _key_index, resonance, "OUTPUT")
         return bytes(response_bytes)
 
     def _generate_response_byte(self) -> Tuple[int, int]:
@@ -525,24 +512,29 @@ class IntelligenceEngine:
 
         return int(output_byte), int(selected_pattern)
 
-    def update_learning_state(self, key_index: int, inference_engine: InferenceEngine) -> None:
+    def update_learning_state(self, source_byte: int, key_index: int, resonance: float, event_type: str) -> None:
         """
         Update learning state based on processed byte
-
-        Args:
-            key_index: Index of matched pattern
-            inference_engine: The InferenceEngine instance
         """
         # 1. Update pattern metadata
         pattern = self.M.get("patterns", [])[key_index]
         pattern["count"] = pattern.get("count", 0) + 1
-        pattern["last_cycle"] = inference_engine.cycle_counter
+        pattern["last_cycle"] = self.inference_engine.cycle_counter
         if pattern.get("first_cycle") is None:
-            pattern["first_cycle"] = inference_engine.cycle_counter
-
-        # 2. Record Gene Key
-        gene_key_entry = {"cycle": inference_engine.cycle_counter, "pattern_index": key_index}
-        self.current_thread_keys.append(gene_key_entry)
+            pattern["first_cycle"] = self.inference_engine.cycle_counter
+        # 2. Record the FULL Gene Key
+        gene_key_event: GeneKeysMetadata = {
+            "cycle": self.inference_engine.cycle_counter,
+            "pattern_index": int(key_index),
+            "thread_uuid": self.thread_uuid or "",
+            "agent_uuid": self.agent_uuid,
+            "format_uuid": self.format_uuid,
+            "event_type": event_type,
+            "source_byte": int(source_byte),
+            "resonance": float(resonance),
+            "created_at": datetime.datetime.now().isoformat(),
+        }
+        self.current_thread_keys.append(gene_key_event)
 
     def encode(self, character_label: str) -> Optional[int]:
         """
@@ -575,23 +567,21 @@ class IntelligenceEngine:
     def load_thread_content(self, thread_uuid: str) -> Optional[bytes]:
         """
         Load a thread's decrypted content.
-
-        Args:
-            thread_uuid: UUID of thread to load
-
-        Returns:
-            bytes: Decrypted thread content, or None if not found
         """
-        encrypted_data = load_thread(self.agent_uuid, thread_uuid)
-        if not encrypted_data:
+        thread_content_raw = load_thread(self.agent_uuid, thread_uuid)
+        if not thread_content_raw:
             return None
-        thread_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret)
-        if not thread_key:
-            return None
-        plaintext = bytearray(len(encrypted_data))
-        for i in range(len(encrypted_data)):
-            plaintext[i] = encrypted_data[i] ^ thread_key[i % 256]
-        return bytes(plaintext)
+        if self.agent_uuid and self.agent_secret:
+            thread_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret)
+            if not thread_key:
+                return None
+            plaintext = bytearray(len(thread_content_raw))
+            for i in range(len(thread_content_raw)):
+                plaintext[i] = thread_content_raw[i] ^ thread_key[i % 256]
+            return bytes(plaintext)
+        else:
+            # Public threads are not encrypted
+            return thread_content_raw
 
     def select_stable_format(self, domain: str, stability: str = "stable") -> Optional[str]:
         """
@@ -672,7 +662,7 @@ class IntelligenceEngine:
             composed_format.setdefault("metadata", {})["created_at"] = datetime.datetime.now().isoformat()
             composed_format.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
             composed_format.setdefault("metadata", {})["usage_count"] = 0
-            composed_format.setdefault("metadata", {})["author"] = f"agent_{self.agent_uuid[:8]}"
+            composed_format.setdefault("metadata", {})["author"] = f"agent_{self.agent_uuid[:8]}" if self.agent_uuid else "public"
             composed_format.setdefault("metadata", {})["description"] = "Composed format from multiple sources"
 
             # Update dependencies
@@ -723,54 +713,25 @@ class IntelligenceEngine:
         except Exception:
             return None
 
-    def _derive_file_key(self, epigenome_snapshot: np.ndarray, agent_uuid: str, thread_uuid: str) -> bytes:
-        """
-        Derive a file encryption key from Epigenome state
-
-        Args:
-            epigenome_snapshot: Current Epigenome tensor
-            agent_uuid: Agent UUID
-            thread_uuid: Thread UUID
-
-        Returns:
-            bytes: 256-byte key for thread file encryption
-        """
-        # Convert tensor to bytes
+    def _derive_file_key(
+        self, epigenome_snapshot: np.ndarray, agent_uuid: Optional[str], thread_uuid: str
+    ) -> Optional[bytes]:
+        if agent_uuid is None:
+            return None
         tensor_bytes = epigenome_snapshot.tobytes()
-
-        # Create a salt from UUID combination
         salt = (agent_uuid + thread_uuid).encode("utf-8")
-
-        # Use PBKDF2 to derive key
         kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=256, salt=salt, iterations=100000, backend=default_backend())
-
-        # Derive key from tensor bytes and gene_stateless
         stateless_bytes = bytes([gene_stateless])
         key_material = tensor_bytes + stateless_bytes
-
-        # Generate the key
         key = kdf.derive(key_material)
-
         return key
 
-    def _derive_agent_key(self) -> bytes:
-        """
-        Derive encryption key for agent's private data
-
-        Returns:
-            bytes: 32-byte key for agent file encryption
-        """
-        # Create a salt from agent UUID
+    def _derive_agent_key(self) -> Optional[bytes]:
+        if self.agent_uuid is None or self.agent_secret is None:
+            return None
         salt = self.agent_uuid.encode("utf-8")
-
-        # Use PBKDF2 to derive key
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend()  # 256 bits
-        )
-
-        # Derive key from agent secret
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
         key = kdf.derive(self.agent_secret.encode("utf-8"))
-
         return key
 
     def _encrypt_data(self, data: bytes, key: bytes) -> bytes:
@@ -823,58 +784,36 @@ class IntelligenceEngine:
         return plaintext
 
     def get_thread_relationships(self, thread_uuid: str) -> Dict:
-        """
-        Get the relationships for a specific thread
-
-        Args:
-            thread_uuid: UUID of the thread
-
-        Returns:
-            Dict: Thread relationships including parent and children
-        """
+        if self.agent_uuid is None:
+            return {"parent": None, "children": []}
         parent_uuid = parent(self.agent_uuid, thread_uuid)
         child_uuids = children(self.agent_uuid, thread_uuid)
-
         return {"parent": parent_uuid, "children": child_uuids}
 
     def get_thread_chain(self, thread_uuid: str, max_depth: int = 5) -> List[str]:
-        """
-        Get a chain of related threads (parent -> current -> children)
-
-        Args:
-            thread_uuid: UUID of the starting thread
-            max_depth: Maximum depth to traverse
-
-        Returns:
-            List[str]: Chain of thread UUIDs
-        """
+        if self.agent_uuid is None:
+            return []
         chain = []
         current_uuid = thread_uuid
         depth = 0
-
-        # Go up the chain to find the root
         while current_uuid and depth < max_depth:
-            chain.insert(0, current_uuid)  # Add to front of chain
+            chain.insert(0, current_uuid)
             parent_uuid = parent(self.agent_uuid, current_uuid)
             if parent_uuid:
                 current_uuid = parent_uuid
-                depth += 1
             else:
                 break
-
-        # Now go down the chain from original thread (add children)
-        self._add_children_to_chain(thread_uuid, chain, max_depth - depth)
-
+            depth += 1
         return chain
 
     def _add_children_to_chain(self, parent_uuid: str, chain: List[str], max_depth: int) -> None:
-        """Recursively add children to the chain"""
+        if self.agent_uuid is None:
+            return
         if max_depth <= 0:
             return
-
         child_uuids = children(self.agent_uuid, parent_uuid)
         for child_uuid in child_uuids:
-            if child_uuid not in chain:  # Avoid cycles
+            if child_uuid not in chain:
                 chain.append(child_uuid)
                 self._add_children_to_chain(child_uuid, chain, max_depth - 1)
 
@@ -910,7 +849,7 @@ class IntelligenceEngine:
                 if related_uuid != thread_uuid:
                     related_content = self.load_thread_content(related_uuid)
                     if related_content:
-                        parent_uuid = parent(self.agent_uuid, related_uuid)
+                        parent_uuid = parent(self.agent_uuid, related_uuid) if self.agent_uuid is not None else None
                         relationship = "parent" if related_uuid == parent_uuid else "child"
 
                         related_threads.append(
@@ -927,30 +866,25 @@ class IntelligenceEngine:
         return result
 
     def get_thread_statistics(self) -> Dict:
-        """
-        Get comprehensive statistics about all threads
-
-        Returns:
-            Dict: Thread statistics including sizes, relationships, and capacity usage
-        """
-        # List all threads for this agent
-        thread_uuids = []
-
-        # Get agent directory
+        if self.agent_uuid is None:
+            return {}
         private_dir = Path("memories/private/agents")
         agent_shard = shard_path(private_dir, self.agent_uuid)
+        if agent_shard is None:
+            return {}
         agent_dir = agent_shard / f"agent-{self.agent_uuid}"
         threads_dir = agent_dir / "threads"
-
-        # Read registry
         registry_path = threads_dir / "registry.json"
-        if registry_path.exists():
-            with open(registry_path, "r") as f:
-                registry = json.load(f)
-            thread_uuids = registry.get("uuids", [])
-
-        max_size_bytes = self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
-
+        if not registry_path.exists():
+            return {}
+        with open(registry_path, "r") as f:
+            registry = json_loads(f.read())
+        thread_uuids = registry.get("uuids", [])
+        max_size_bytes = (
+            self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
+            if self.memory_prefs and "storage_config" in self.memory_prefs
+            else 1
+        )
         stats = {
             "total_threads": len(thread_uuids),
             "total_size_bytes": 0,
@@ -958,49 +892,40 @@ class IntelligenceEngine:
             "thread_details": [],
             "relationship_stats": {"threads_with_parents": 0, "threads_with_children": 0, "isolated_threads": 0},
         }
-
         for thread_uuid in thread_uuids:
-            # Get thread metadata
             thread_shard = shard_path(threads_dir, thread_uuid)
             meta_path = thread_shard / f"thread-{thread_uuid}.json"
-
             try:
                 with open(meta_path, "r") as f:
-                    meta = json.load(f)
-
+                    meta = json_loads(f.read())
                 size = meta.get("size_bytes", 0)
                 stats["total_size_bytes"] += size
-
-                # Get relationships
                 has_parent = meta.get("parent_uuid") is not None
                 has_children = len(meta.get("child_uuids", [])) > 0
-
                 if has_parent:
                     stats["relationship_stats"]["threads_with_parents"] += 1
                 if has_children:
                     stats["relationship_stats"]["threads_with_children"] += 1
                 if not has_parent and not has_children:
                     stats["relationship_stats"]["isolated_threads"] += 1
-
                 thread_detail = {
                     "thread_uuid": thread_uuid,
+                    "thread_name": meta.get("thread_name"),
+                    "curriculum": meta.get("curriculum"),
+                    "tags": meta.get("tags"),
                     "size_bytes": size,
-                    "capacity_percent": (size / max_size_bytes) * 100,
+                    "capacity_percent": (size / max_size_bytes) * 100 if max_size_bytes else 0,
                     "has_parent": has_parent,
                     "has_children": has_children,
                     "child_count": len(meta.get("child_uuids", [])),
                 }
                 stats["thread_details"].append(thread_detail)
-
             except FileNotFoundError:
                 continue
-
-        # Calculate overall capacity usage
-        if stats["total_threads"] > 0:
+        if stats["total_threads"] > 0 and max_size_bytes:
             stats["capacity_usage_percent"] = (
                 stats["total_size_bytes"] / (max_size_bytes * stats["total_threads"])
             ) * 100
-
         return stats
 
     def get_pattern_statistics(self, pattern_index: int) -> Dict:
@@ -1078,23 +1003,66 @@ def weighted_choice(items: List[Any], weights: List[float]) -> Any:
     return items[-1]
 
 
-def initialize_intelligence_engine() -> IntelligenceEngine:
+def initialize_intelligence_engine(
+    agent_uuid: Optional[str] = None,
+    agent_secret: Optional[str] = None,
+    format_uuid: Optional[str] = None,
+    formats: Optional[FormatMetadata] = None,
+) -> IntelligenceEngine:
     """
-    Initialize the complete intelligence engine
+    Initialize the complete intelligence engine.
+
+    Args:
+        agent_uuid: UUID of the agent (None for public/curation mode)
+        agent_secret: Agent secret (None for public/curation or read-only mode)
+        format_uuid: Format UUID (optional, for advanced use)
+        formats: Format metadata (optional, for advanced use)
 
     Returns:
         IntelligenceEngine: Initialized intelligence engine
     """
-    # 1. Get agent UUID
-    agent_uuid = ensure_agent_uuid()
-
-    # 2. Load agent preferences
+    # Flexible initialization logic
+    if agent_uuid is None and agent_secret is None:
+        # Public/curation mode: no private state
+        inference_engine = InferenceEngine()
+        information_engine = InformationEngine()
+        return IntelligenceEngine(
+            agent_uuid=None,
+            agent_secret=None,
+            inference_engine=inference_engine,
+            information_engine=information_engine,
+            format_uuid=format_uuid,
+            formats=formats,
+        )
+    # If agent_uuid is provided but agent_secret is not, read-only mode
+    if agent_uuid is not None and agent_secret is None:
+        # Try to load agent_secret if available, else stay read-only
+        baby_prefs_path = Path("baby/baby_preferences.json")
+        if baby_prefs_path.exists():
+            try:
+                with open(baby_prefs_path, "r") as f:
+                    baby_prefs = json_loads(f.read())
+                agent_secret = baby_prefs.get("agent_secret")
+            except Exception:
+                agent_secret = None
+        inference_engine = InferenceEngine()
+        information_engine = InformationEngine()
+        return IntelligenceEngine(
+            agent_uuid=agent_uuid,
+            agent_secret=agent_secret,
+            inference_engine=inference_engine,
+            information_engine=information_engine,
+            format_uuid=format_uuid,
+            formats=formats,
+        )
+    # Default: full agent mode (current behavior)
+    if agent_uuid is None:
+        agent_uuid = ensure_agent_uuid()
     baby_prefs_path = Path("baby/baby_preferences.json")
     baby_prefs_path.parent.mkdir(parents=True, exist_ok=True)
-
     try:
         with open(baby_prefs_path, "r") as f:
-            baby_prefs = json.load(f)
+            baby_prefs = json_loads(f.read())
     except (FileNotFoundError, json.JSONDecodeError):
         # Create default preferences
         baby_prefs = {
@@ -1104,20 +1072,16 @@ def initialize_intelligence_engine() -> IntelligenceEngine:
             "learning_rate": 1.0,
         }
         with open(baby_prefs_path, "w") as f:
-            json.dump(baby_prefs, f, indent=2)
-
-    agent_secret = baby_prefs["agent_secret"]
-
-    # 3. Initialize engines
+            f.write(json_dumps(baby_prefs))
+    if agent_secret is None:
+        agent_secret = baby_prefs["agent_secret"]
     inference_engine = InferenceEngine()
     information_engine = InformationEngine()
-
-    # 4. Create Intelligence Engine
-    intelligence_engine = IntelligenceEngine(
+    return IntelligenceEngine(
         agent_uuid=agent_uuid,
         agent_secret=agent_secret,
         inference_engine=inference_engine,
         information_engine=information_engine,
+        format_uuid=format_uuid,
+        formats=formats,
     )
-
-    return intelligence_engine

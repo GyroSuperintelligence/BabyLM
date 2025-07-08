@@ -22,3 +22,31 @@ class FormatMetadata(TypedDict, total=False):
     metadata: Dict[str, Any]
     cgm_policies: Dict[str, Any]
     patterns: List[PatternMetadata]
+
+
+class ThreadMetadata(TypedDict, total=False):
+    thread_uuid: str
+    thread_name: Optional[str]
+    agent_uuid: Optional[str]
+    parent_uuid: Optional[str]
+    parent_name: Optional[str]
+    child_uuids: List[str]
+    child_names: List[Optional[str]]
+    format_uuid: str
+    curriculum: Optional[str]
+    tags: Optional[List[str]]
+    created_at: str
+    last_updated: str
+    size_bytes: int
+
+
+class GeneKeysMetadata(TypedDict):
+    cycle: int
+    pattern_index: int
+    thread_uuid: str
+    agent_uuid: Optional[str]
+    format_uuid: str
+    event_type: str
+    source_byte: int
+    resonance: float
+    created_at: str
