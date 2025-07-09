@@ -495,62 +495,63 @@ def _append_to_thread(new_content: bytes):
 
 The Intelligence Engine utilizes two key components to make historical data actively influence inference:
 
-1. **Pattern Index:** Maps patterns to every location they've appeared, with statistical tracking of which patterns tend to follow others. This enables the system to weight pattern selection based on successful historical sequences.
+1. **Pattern Index:** Maps patterns to every location they've appeared, providing a record of structural relationships and context. The pattern index is used for analysis and metadata, but not for statistical weighting or probabilistic selection during inference. The system's inference is now strictly based on structural resonance of the tensor state.
 
 2. **Thread Chain Awareness:** The system can traverse parent-child relationships between threads, providing context from related conversations during inference.
 
-#### 4.5.3 Intelligent Response Generation
+#### 4.5.3 Intelligent Response Generation (Spec-Compliant)
 
 ```python
-def _generate_response_byte():
-    # 1. Get resonance data (with historical context)
-    resonances = inference_engine.compute_contextual_resonances(
-        self.pattern_index.pattern_contexts
-    )
-    
-    # 2. Apply π/2 threshold
-    resonant_threshold = np.pi / 2
-    resonant_patterns = [j for j in range(256) if resonances[j] < resonant_threshold]
-    
-    # 3. Handle no resonant patterns
-    if len(resonant_patterns) == 0:
-        closest_pattern = argmin(resonances)
-        resonant_patterns = [closest_pattern]
-    
-    # 4. Apply contextual weighting
-    pattern_weights = []
-    for pattern_idx in resonant_patterns:
-        # Base weight from usage frequency
-        usage_count = M["patterns"][pattern_idx]["count"] + 1
-        
-        # Recency bias
-        last_cycle = M["patterns"][pattern_idx]["last_cycle"]
-        recency_factor = 1.0 if last_cycle is None else 1.0 / (cycle_counter - last_cycle + 1)
-        
-        # Resonance strength
-        resonance_strength = 1.0 / (resonances[pattern_idx] + 0.1)
-        
-        # Historical context bias
-        historical_bias = 1.0
-        if self.pattern_index and recent_patterns:
-            last_pattern = recent_patterns[-1]
-            likely_next = self.pattern_index.get_likely_next_patterns(last_pattern)
-            for likely_pattern, probability in likely_next:
-                if likely_pattern == pattern_idx:
-                    historical_bias = 1.0 + probability * 3.0  # Boost by up to 4x
-                    break
-        
-        # Combined weight
-        weight = usage_count * recency_factor * resonance_strength * historical_bias
-        pattern_weights.append(weight)
-    
-    # 5. Select pattern
-    selected_pattern = weighted_choice(resonant_patterns, pattern_weights)
-    
-    # 6. Get output byte
-    output_byte = inference_engine.G[selected_pattern]
-    
-    return output_byte, selected_pattern
+    def _generate_response_byte(self) -> Tuple[int, int]:
+        """
+        Generate a single, spec-compliant response byte based on structural resonance.
+
+        This method adheres to the GyroSI principle of selecting the single most
+        resonant pattern to the current Epigenome state, without statistical weighting
+        or randomization. The "intelligence" emerges from the tensor's path-dependent
+        state, not from historical frequency counts.
+
+        Returns:
+            Tuple containing:
+            - output_byte: Selected byte value (0-255)
+            - key_index: Index of the selected pattern (0-255)
+        """
+        # 1. Measure the resonance (gyrodistance) of the current tensor state
+        #    against all 256 canonical patterns. We use the pure, non-contextual
+        #    resonances, as historical context is a statistical layer.
+        resonances = self.inference_engine.compute_pattern_resonances()
+
+        # 2. Apply the π/2 resonance threshold to identify the set of all
+        #    patterns that are structurally "in-phase" with the current state.
+        resonant_threshold = np.pi / 2
+        resonant_indices = [
+            j for j, dist in enumerate(resonances) if dist < resonant_threshold
+        ]
+
+        # 3. From the pool of resonant patterns, select the ONE with the
+        #    minimum distance (i.e., the strongest resonance).
+        if resonant_indices:
+            # Find the minimum resonance *among the resonant candidates*
+            min_dist_in_resonance = float("inf")
+            selected_pattern = -1
+            for idx in resonant_indices:
+                if resonances[idx] < min_dist_in_resonance:
+                    min_dist_in_resonance = resonances[idx]
+                    selected_pattern = idx
+        else:
+            # Fallback specified in the spec: if no patterns are resonant,
+            # select the single closest pattern from the entire set.
+            selected_pattern = int(np.argmin(resonances))
+
+        # 4. Get the output byte mapped to the selected canonical pattern.
+        #    This is the deterministic emission from the chosen state.
+        output_byte = self.inference_engine.G[selected_pattern]
+
+        # Ensure integers
+        if hasattr(output_byte, "item"):
+            output_byte = output_byte.item()
+
+        return int(output_byte), int(selected_pattern)
 ```
 
 ## 5. Formats & Learning
@@ -645,10 +646,10 @@ The `GeneKeysMetadata` stores the raw `resonance` (gyrodistance) for each indivi
 The learning mechanism is a two-fold process:
 
 1. **Implicit/Unconscious Learning:** Continuous, irreversible mutation of the `T` tensor by the input stream
-2. **Explicit/Conscious Learning:** Recording and statistical weighting of which `key_index` patterns are triggered
+2. **Explicit/Conscious Learning:** Recording of which `key_index` patterns are triggered, tracked for analysis and metadata only. This does not influence inference or pattern selection.
 
 **Pattern Memory:**
-- Each pattern's historical usage is tracked including frequency and position
+- Each pattern's historical usage is tracked including frequency and position, for analysis and curriculum design, not for inference.
 - Pattern sequences (which patterns tend to follow others) are indexed
 - This provides a form of procedural memory that influences future inference
 
@@ -662,8 +663,8 @@ The learning mechanism is a two-fold process:
 
 **Attention Mechanism:**
 - Current state of `T` tensor is an "attended" summary of entire past history
-- Pattern selection uses explicit weighting by frequency, recency, and historical context
-- The pattern index provides a fast, O(1) lookup for historical pattern relationships
+- Pattern selection is determined solely by the current state of the T tensor and its resonance with canonical patterns.
+- The pattern index provides a fast lookup for historical pattern relationships for analysis and debugging, but does not affect inference.
 
 ## 6. Implementation Requirements
 
@@ -690,4 +691,7 @@ The learning mechanism is a two-fold process:
 | `thread_uuid` | string | UUID format | Must be registered in central registry |
 | `thread_file_key` | bytes[256] | Key integrity | Must be derived deterministically |
 | `current_thread_keys` | array | `GeneKeysMetadata` dicts | In-memory write-buffer for events before flushing to a persistent file. |
+
+**Degeneracy:**
+A fundamental property of the system is that multiple different input masks (gene mutations) can produce identical tensor states. This is called degeneracy: a many-to-one mapping from mask to tensor. For example, F[2] and F[100] may be mathematically identical, and the system will always select the lowest index among degenerate patterns. This is a feature, not a flaw, and mirrors the redundancy found in biological genetic codes.
 

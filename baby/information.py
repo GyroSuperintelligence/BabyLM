@@ -29,20 +29,25 @@ from baby.types import FormatMetadata, ThreadMetadata, GeneKeysMetadata
 # pyright: reportMissingModuleSource=false
 try:
     import orjson as json
+
     # orjson API: loads(bytes), dumps(obj) -> bytes
     def json_loads(s):
         if isinstance(s, str):
             s = s.encode("utf-8")
         return json.loads(s)
+
     def json_dumps(obj):
         return json.dumps(obj).decode("utf-8")
+
 except ImportError:
     try:
         import ujson as json
+
         json_loads = json.loads
         json_dumps = json.dumps
     except ImportError:
-        import json
+        import json  # noqa: F811
+
         json_loads = json.loads
         json_dumps = json.dumps
 
@@ -777,11 +782,9 @@ def parent(agent_uuid: str, thread_uuid: str) -> Optional[str]:
 def children(agent_uuid: str, thread_uuid: str) -> List[str]:
     """
     Get the child thread UUIDs for a thread.
-
     Args:
         agent_uuid: Agent UUID
         thread_uuid: Thread UUID
-
     Returns:
         list[str]: List of child UUIDs
     """
@@ -789,21 +792,29 @@ def children(agent_uuid: str, thread_uuid: str) -> List[str]:
     private_dir = Path("memories/private/agents")
     agent_shard = shard_path(private_dir, agent_uuid)
     agent_dir = agent_shard / f"agent-{agent_uuid}"
-
     # Calculate thread shard
     threads_dir = agent_dir / "threads"
     thread_shard = shard_path(threads_dir, thread_uuid)
-
     # Check thread metadata
     meta_path = thread_shard / f"thread-{thread_uuid}.json"
-
     if not meta_path.exists():
         return []
-
     with open(meta_path, "r") as f:
         meta = json_loads(f.read())
-
-    return meta.get("child_uuids", [])
+    val = meta.get("child_uuids", [])
+    # Always return a flat list of strings
+    if isinstance(val, list):
+        flat = []
+        for v in val:
+            if isinstance(v, str):
+                flat.append(v)
+            elif isinstance(v, list):
+                flat.extend([x for x in v if isinstance(x, str)])
+        return flat
+    elif isinstance(val, str):
+        return [val]
+    else:
+        return []
 
 
 # ====================================================================

@@ -51,11 +51,11 @@ babylm = "babylm:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["baby*", "memories*", "toys*"]
-exclude = ["tests*", "venv*", "__pycache__*"]
+exclude = ["venv*", "__pycache__*"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-testpaths = ["toys"]
+testpaths = ["toys/health"]
 python_files = ["*_tests.py", "test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

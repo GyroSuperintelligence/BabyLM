@@ -44,19 +44,24 @@ from baby.types import PatternMetadata, FormatMetadata, GeneKeysMetadata
 # pyright: reportMissingModuleSource=false
 try:
     import orjson as json
+
     def json_loads(s):
         if isinstance(s, str):
             s = s.encode("utf-8")
         return json.loads(s)
+
     def json_dumps(obj):
         return json.dumps(obj).decode("utf-8")
+
 except ImportError:
     try:
         import ujson as json
+
         json_loads = json.loads
         json_dumps = json.dumps
     except ImportError:
         import json
+
         json_loads = json.loads
         json_dumps = json.dumps
 
@@ -111,7 +116,11 @@ class IntelligenceEngine:
         self.M: FormatMetadata = formats if formats else self._load_or_init_formats()
         self.memory_prefs = get_memory_preferences()
         self._validate_format_compatibility()
-        self.pattern_index = PatternIndex(self.agent_uuid, self.agent_secret) if (self.agent_uuid is not None and self.agent_secret is not None) else None
+        self.pattern_index = (
+            PatternIndex(self.agent_uuid, self.agent_secret)
+            if (self.agent_uuid is not None and self.agent_secret is not None)
+            else None
+        )
         self.pattern_distances = None
         if self.M and "pattern_distances" in self.M and "path" in self.M["pattern_distances"]:
             self.pattern_distances = load_pattern_distances(self.format_uuid)
@@ -322,15 +331,16 @@ class IntelligenceEngine:
         """
         Process an external input stream and append to current thread or create new one
         """
+        # 1. First, ensure the thread state is ready (creates new thread if needed).
+        self._append_to_thread(input_stream)
 
-        # 1. Process the stream with new callback contract
+        # 2. Now, process the stream and log gene keys to the *active* thread.
         def callback(source_byte, key_index, resonance, event_type):
             self.update_learning_state(source_byte, key_index, resonance, event_type)
 
         intermediate_ciphertext, dynamic_keystream = self.information_engine.process_stream(
             self.inference_engine, callback, input_stream
         )
-        self._append_to_thread(input_stream)
         return input_stream, intermediate_ciphertext
 
     def _append_to_thread(self, new_content: bytes) -> None:
@@ -378,27 +388,25 @@ class IntelligenceEngine:
 
     def end_current_thread(self, plaintext_to_save: bytes) -> None:
         """
-        End the current thread, encrypting the provided plaintext and saving all data
-
-        This method is generalized to handle both input processing and self-generation.
-
-        Args:
-            plaintext_to_save: Content to encrypt and save
+        End the current thread, encrypting the provided plaintext (if in private mode)
+        and saving all data.
         """
         if not self.thread_uuid:
             raise RuntimeError("Thread UUID is not set.")
 
-        if self.thread_file_key is None:
-            raise RuntimeError("Thread file key is not set. Call start_new_thread() first.")
-
-        # 1. Re-encrypt with thread key
-        thread_file_key: bytes = self.thread_file_key
-        final_encrypted_data = bytearray(len(plaintext_to_save))
-        for i in range(len(plaintext_to_save)):
-            final_encrypted_data[i] = plaintext_to_save[i] ^ thread_file_key[i % 256]
+        final_data_to_save = plaintext_to_save
+        # Only perform encryption if in private mode (agent_uuid exists)
+        if self.agent_uuid:
+            if self.thread_file_key is None:
+                raise RuntimeError("Thread file key is not set for a private thread. Call start_new_thread() first.")
+            thread_file_key: bytes = self.thread_file_key
+            encrypted_data = bytearray(len(plaintext_to_save))
+            for i in range(len(plaintext_to_save)):
+                encrypted_data[i] = plaintext_to_save[i % 256] ^ thread_file_key[i % 256]
+            final_data_to_save = bytes(encrypted_data)
 
         # 2. Save thread file using information.py helper
-        save_thread(self.agent_uuid, self.thread_uuid, bytes(final_encrypted_data), len(plaintext_to_save))
+        save_thread(self.agent_uuid, self.thread_uuid, final_data_to_save, len(plaintext_to_save))
 
         # 3. Store gene keys (public or private)
         store_gene_keys(self.thread_uuid, self.current_thread_keys, self.agent_uuid, self.agent_secret)
@@ -443,70 +451,68 @@ class IntelligenceEngine:
 
     def _generate_response_byte(self) -> Tuple[int, int]:
         """
-        Generate a single, intelligently-selected response byte using contextual awareness.
+        Generates a single, intelligent response byte by selecting the most
+        semantically meaningful pattern from the set of physically resonant candidates.
 
-        This is the S4 "conscious choice" mechanism, implementing section 4.5.3
-        of the specification with added historical context awareness.
+        This method combines S3's physical resonance with S4's learned knowledge.
 
         Returns:
-            Tuple containing:
-            - output_byte: Selected byte value (0-255)
-            - key_index: Index of the selected pattern (0-255)
+            A tuple containing:
+            - output_byte (int): The selected byte value (0-255).
+            - key_index (int): The index of the winning canonical pattern (0-255).
         """
-        # Get contextual resonances if pattern index is available
-        if self.pattern_index and self.pattern_index.pattern_contexts:
-            resonances = self.inference_engine.compute_contextual_resonances(self.pattern_index.pattern_contexts)
-        else:
-            resonances = self.inference_engine.compute_pattern_resonances()
-
-        # Apply π/2 threshold for resonant patterns
+        # 1. S3 Physics: Get all physically plausible next states.
+        resonances = self.inference_engine.compute_pattern_resonances()
         resonant_threshold = np.pi / 2
-        resonant_patterns = [j for j in range(256) if resonances[j] < resonant_threshold]
 
-        # Handle no resonant patterns
-        if len(resonant_patterns) == 0:
-            closest_pattern = int(np.argmin(resonances))
-            resonant_patterns = [closest_pattern]
+        candidate_indices = [i for i, dist in enumerate(resonances) if dist < resonant_threshold]
 
-        # Apply contextual weighting
-        pattern_weights = []
-        for pattern_idx in resonant_patterns:
-            # Base weight from usage frequency
-            usage_count = self.M.get("patterns", [])[pattern_idx].get("count", 0) + 1  # Add 1 to avoid zeros
+        # If no patterns are physically resonant, fall back to the single closest one.
+        if not candidate_indices:
+            selected_pattern = int(np.argmin(resonances))
+            output_byte = self.inference_engine.G[selected_pattern]
+            if hasattr(output_byte, "item"):
+                output_byte = output_byte.item()
+            return int(output_byte), int(selected_pattern)
 
-            # Recency bias
-            last_cycle = self.M.get("patterns", [])[pattern_idx].get("last_cycle")
-            recency_factor = 1.0 if last_cycle is None else 1.0 / (self.inference_engine.cycle_counter - last_cycle + 1)
+        # 2. S4 Linguistics: Evaluate the candidates based on learned meaning.
+        best_candidate_index = -1
+        max_combined_score = -1.0
 
-            # Resonance strength (closer = stronger)
-            resonance_strength = 1.0 / (resonances[pattern_idx] + 0.1)
+        for index in candidate_indices:
+            # Physical Score: How good is the physical match? (0 to 1)
+            physical_score = 1.0 - (resonances[index] / np.pi)
 
-            # Historical context bias from pattern index
-            historical_bias = 1.0
-            if self.pattern_index and self.inference_engine.recent_patterns:
-                last_pattern = self.inference_engine.recent_patterns[-1]
-                likely_next = self.pattern_index.get_likely_next_patterns(last_pattern)
-                for likely_pattern, probability in likely_next:
-                    if likely_pattern == pattern_idx:
-                        historical_bias = 1.0 + probability * 3.0  # Boost by up to 4x
-                        break
+            # Semantic Score: How meaningful is this pattern, based on long-term learning?
+            # We use the pattern's learned confidence from the format metadata.
+            pattern_meta = self.M.get("patterns", [])[index]
+            # A pattern is only meaningful if it has an assigned character and some confidence.
+            if pattern_meta.get("character") is not None:
+                semantic_score = pattern_meta.get("confidence", 0.0)
+            else:
+                semantic_score = 0.0  # No character mapping means no semantic value.
 
-            # Combined weight
-            weight = usage_count * recency_factor * resonance_strength * historical_bias
-            pattern_weights.append(weight)
+            # Combined Score: A pattern is a great choice if it is both
+            # physically resonant AND semantically meaningful.
+            combined_score = physical_score * semantic_score
 
-        # Select pattern
-        total_weight = sum(pattern_weights)
-        if total_weight > 0:
-            normalized_weights = [w / total_weight for w in pattern_weights]
-            selected_pattern = weighted_choice(resonant_patterns, normalized_weights)
-        else:
-            selected_pattern = random.choice(resonant_patterns)
+            if combined_score > max_combined_score:
+                max_combined_score = combined_score
+                best_candidate_index = index
 
-        # Get output byte
+        # If no candidate had any semantic meaning, fall back to the most resonant one.
+        if best_candidate_index == -1:
+            # We must choose from the original candidate_indices list.
+            min_dist = float("inf")
+            for idx in candidate_indices:
+                if resonances[idx] < min_dist:
+                    min_dist = resonances[idx]
+                    best_candidate_index = idx
+
+        selected_pattern = best_candidate_index
+
+        # 3. Get the final output byte for the winning pattern.
         output_byte = self.inference_engine.G[selected_pattern]
-
-        # Ensure integers
         if hasattr(output_byte, "item"):
             output_byte = output_byte.item()
 
@@ -514,14 +520,27 @@ class IntelligenceEngine:
 
     def update_learning_state(self, source_byte: int, key_index: int, resonance: float, event_type: str) -> None:
         """
-        Update learning state based on processed byte
+        Update learning state based on processed byte, including pattern
+        statistics and confidence.
         """
         # 1. Update pattern metadata
         pattern = self.M.get("patterns", [])[key_index]
-        pattern["count"] = pattern.get("count", 0) + 1
+
+        # Increment count
+        current_count = pattern.get("count", 0)
+        pattern["count"] = current_count + 1
+
+        # Update cycle info
         pattern["last_cycle"] = self.inference_engine.cycle_counter
         if pattern.get("first_cycle") is None:
             pattern["first_cycle"] = self.inference_engine.cycle_counter
+
+        # --- Update confidence as a moving average of resonance ---
+        current_confidence = pattern.get("confidence", 0.0)
+        new_event_confidence = 1.0 - (resonance / np.pi)
+        alpha = 0.01
+        pattern["confidence"] = (1 - alpha) * current_confidence + alpha * new_event_confidence
+
         # 2. Record the FULL Gene Key
         gene_key_event: GeneKeysMetadata = {
             "cycle": self.inference_engine.cycle_counter,
@@ -549,6 +568,41 @@ class IntelligenceEngine:
             if isinstance(character, str) and character == character_label:
                 return index
         return None
+
+    def intelligent_encode(self, character_label: str) -> Optional[int]:
+        """
+        Intelligently finds the best pattern index for a character label
+        by leveraging learned statistics (count and confidence).
+
+        Args:
+            character_label: The character to encode (e.g., "A").
+
+        Returns:
+            The pattern index that is the most reliable representation, or None.
+        """
+        candidate_patterns = []
+        for index, p_meta in enumerate(self.M.get("patterns", [])):
+            if p_meta.get("character") == character_label:
+                candidate_patterns.append(p_meta)
+
+        if not candidate_patterns:
+            return None  # No pattern maps to this character
+
+        if len(candidate_patterns) == 1:
+            return candidate_patterns[0].get("index")  # Only one choice
+
+        # Disambiguate using count and confidence
+        best_candidate = None
+        max_score = -1.0
+        for candidate in candidate_patterns:
+            count = candidate.get("count", 0)
+            confidence = candidate.get("confidence", 0.0)
+            score = count * confidence
+            if score > max_score:
+                max_score = score
+                best_candidate = candidate
+
+        return best_candidate.get("index") if best_candidate else None
 
     def decode(self, key_index: int) -> Optional[str]:
         """
@@ -662,7 +716,9 @@ class IntelligenceEngine:
             composed_format.setdefault("metadata", {})["created_at"] = datetime.datetime.now().isoformat()
             composed_format.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
             composed_format.setdefault("metadata", {})["usage_count"] = 0
-            composed_format.setdefault("metadata", {})["author"] = f"agent_{self.agent_uuid[:8]}" if self.agent_uuid else "public"
+            composed_format.setdefault("metadata", {})["author"] = (
+                f"agent_{self.agent_uuid[:8]}" if self.agent_uuid else "public"
+            )
             composed_format.setdefault("metadata", {})["description"] = "Composed format from multiple sources"
 
             # Update dependencies
@@ -893,6 +949,9 @@ class IntelligenceEngine:
             "relationship_stats": {"threads_with_parents": 0, "threads_with_children": 0, "isolated_threads": 0},
         }
         for thread_uuid in thread_uuids:
+            # A full UUID is 36 characters. Shard names are 2. This filters them out.
+            if len(thread_uuid) < 36:
+                continue
             thread_shard = shard_path(threads_dir, thread_uuid)
             meta_path = thread_shard / f"thread-{thread_uuid}.json"
             try:
@@ -1011,70 +1070,51 @@ def initialize_intelligence_engine(
 ) -> IntelligenceEngine:
     """
     Initialize the complete intelligence engine.
-
-    Args:
-        agent_uuid: UUID of the agent (None for public/curation mode)
-        agent_secret: Agent secret (None for public/curation or read-only mode)
-        format_uuid: Format UUID (optional, for advanced use)
-        formats: Format metadata (optional, for advanced use)
-
-    Returns:
-        IntelligenceEngine: Initialized intelligence engine
+    - No args: Auto-detects mode. Private if 'baby_preferences.json' has a secret, else Public.
+    - Explicit args: Initializes based on provided uuid/secret.
     """
-    # Flexible initialization logic
+    # This is the ambiguous case: called with no arguments, or with explicit Nones.
     if agent_uuid is None and agent_secret is None:
-        # Public/curation mode: no private state
-        inference_engine = InferenceEngine()
-        information_engine = InformationEngine()
-        return IntelligenceEngine(
-            agent_uuid=None,
-            agent_secret=None,
-            inference_engine=inference_engine,
-            information_engine=information_engine,
-            format_uuid=format_uuid,
-            formats=formats,
-        )
-    # If agent_uuid is provided but agent_secret is not, read-only mode
-    if agent_uuid is not None and agent_secret is None:
-        # Try to load agent_secret if available, else stay read-only
         baby_prefs_path = Path("baby/baby_preferences.json")
+        # Try to enter auto-private mode by checking preferences file.
         if baby_prefs_path.exists():
             try:
                 with open(baby_prefs_path, "r") as f:
-                    baby_prefs = json_loads(f.read())
-                agent_secret = baby_prefs.get("agent_secret")
-            except Exception:
-                agent_secret = None
-        inference_engine = InferenceEngine()
-        information_engine = InformationEngine()
-        return IntelligenceEngine(
-            agent_uuid=agent_uuid,
-            agent_secret=agent_secret,
-            inference_engine=inference_engine,
-            information_engine=information_engine,
-            format_uuid=format_uuid,
-            formats=formats,
-        )
-    # Default: full agent mode (current behavior)
+                    baby_prefs = json.loads(f.read())
+                loaded_secret = baby_prefs.get("agent_secret")
+                if loaded_secret:
+                    # Success: A secret exists. We are in auto-private mode.
+                    # Set the parameters and let the private-mode logic below handle it.
+                    agent_uuid = ensure_agent_uuid()
+                    agent_secret = loaded_secret
+                # If no secret in file, fall through to public mode init.
+            except (json.JSONDecodeError, IOError):
+                # Corrupt or unreadable file, fall through to public mode init.
+                pass
+        # If after the above, uuid is still None, it must be public mode.
+        if agent_uuid is None:
+            inference_engine = InferenceEngine()
+            information_engine = InformationEngine()
+            return IntelligenceEngine(
+                agent_uuid=None,
+                agent_secret=None,
+                inference_engine=inference_engine,
+                information_engine=information_engine,
+                format_uuid=format_uuid,
+                formats=formats,
+            )
+    # --- If we reach here, we are in a private mode (explicitly or auto-detected) ---
+    # Ensure we have a UUID (for cases where only a secret was passed, or for auto-mode)
     if agent_uuid is None:
         agent_uuid = ensure_agent_uuid()
-    baby_prefs_path = Path("baby/baby_preferences.json")
-    baby_prefs_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with open(baby_prefs_path, "r") as f:
-            baby_prefs = json_loads(f.read())
-    except (FileNotFoundError, json.JSONDecodeError):
-        # Create default preferences
-        baby_prefs = {
-            "agent_secret": str(uuid.uuid4()),
-            "log_level": "info",
-            "response_length": 100,
-            "learning_rate": 1.0,
-        }
-        with open(baby_prefs_path, "w") as f:
-            f.write(json_dumps(baby_prefs))
+    # Try to load secret if not provided (read-only private mode)
     if agent_secret is None:
-        agent_secret = baby_prefs["agent_secret"]
+        try:
+            with open(Path("baby/baby_preferences.json"), "r") as f:
+                agent_secret = json.loads(f.read()).get("agent_secret")
+        except (FileNotFoundError, json.JSONDecodeError, IOError):
+            agent_secret = None  # Remain read-only if file not found/invalid
+    # Initialize the private engine
     inference_engine = InferenceEngine()
     information_engine = InformationEngine()
     return IntelligenceEngine(

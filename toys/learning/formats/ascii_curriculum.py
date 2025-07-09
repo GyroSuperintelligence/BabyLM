@@ -19,20 +19,14 @@ for i in range(256):
         except ValueError:
             name = f"CONTROL CHARACTER {i}" if i < 32 else "DELETE"
         category = unicodedata.category(char)
-        ascii_chars.append({
-            "character": f"\\x{i:02x}" if not char.isprintable() else char,
-            "description": name,
-            "type": category
-        })
+        ascii_chars.append(
+            {"character": f"\\x{i:02x}" if not char.isprintable() else char, "description": name, "type": category}
+        )
     else:
         char = chr(i)
         name = unicodedata.name(char, f"ASCII {i}")
         category = unicodedata.category(char)
-        ascii_chars.append({
-            "character": char,
-            "description": name,
-            "type": category
-        })
+        ascii_chars.append({"character": char, "description": name, "type": category})
 
 # Build the patterns list with proper resonance classification
 patterns = [
@@ -45,7 +39,7 @@ patterns = [
         "first_cycle": None,
         "last_cycle": None,
         "gyration_feature": classify_pattern_resonance(i),
-        "confidence": 0.0
+        "confidence": 0.0,
     }
     for i, entry in enumerate(ascii_chars)
 ]
@@ -70,7 +64,7 @@ format_data = {
         "created_at": timestamp,
         "last_updated": timestamp,
         "usage_count": 0,
-        "validation_status": "verified"
+        "validation_status": "verified",
     },
     "cgm_policies": {
         "governance": {"operation": "L0", "bits": [0, 7], "policy": "traceability"},
@@ -78,7 +72,7 @@ format_data = {
         "inference": {"operation": "FG", "bits": [2, 5], "policy": "accountability"},
         "intelligence": {"operation": "BG", "bits": [3, 4], "policy": "integrity"},
     },
-    "patterns": patterns
+    "patterns": patterns,
 }
 
 # Store the format using the system's helper
@@ -89,4 +83,4 @@ if __name__ == "__main__":
     print("📦  Location: memories/public/formats/")
     print("🔤  Characters: 256 (ASCII + Unicode extensions)")
     print("📝  Each entry includes: character, description, type, gyration_feature, and stats.")
-    print("✨  Ready for learning, encryption, and curriculum composition! ✨\n") 
+    print("✨  Ready for learning, encryption, and curriculum composition! ✨\n")

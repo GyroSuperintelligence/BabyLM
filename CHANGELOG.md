@@ -1,4 +1,5 @@
 # Changelog
+All notable changes to this project will be documented in this file.
 
 ## [08 July 2025]
   We have expanded our global format library! Formats are shared global knowledge and are available to all agents, though they do not contain contextual information. (Scripts Available at: toys/learning/formats)
@@ -13,7 +14,6 @@
 - Suppressed harmless linter warnings for optional imports (e.g., ujson).
 - Improved overall codebase robustness, maintainability, and compatibility for both private and public agent operation.
 
-All notable changes to this project will be documented in this file.
 
 [0.9.4] – 2025-Jul-07
 
@@ -85,4 +85,13 @@ All notable changes to this project will be documented in this file.
 - **ASCII Curriculum:** 256 foundational ASCII characters
 - **Emoji Curriculum:** Over 5,000 Unicode emoji
 - **Mathematical Symbols Curriculum:** All Unicode mathematical symbols (excluding ASCII)
+
+## [0.9.6] – 2025-Jul-09
+### Changed
+🧠 **Major S3/S4 Refactor:**
+- Inference (S3) is now purely resonance-based, with all statistical/contextual weighting removed.
+- S3 (physics) and S4 (intelligence/semantics) responsibilities are now cleanly separated.
+- S4 uses pattern metadata (`count`, `confidence`, etc.) for intelligent encoding, decoding, and generation.
+- Learning loop closed: resonance → confidence → generation → resonance.
+- Documentation and tests updated to reflect new architecture and learning behavior.
 

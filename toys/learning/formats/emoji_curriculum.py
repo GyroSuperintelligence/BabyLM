@@ -87,10 +87,10 @@ for pack_num in range(num_packs):
         "patterns": patterns,
     }
     format_uuid = store_format(cast(FormatMetadata, format_data))
-    print(f"\n🎉😃 Emoji Curriculum Format Learned! 😃🎉")
+    print("\n🎉😃 Emoji Curriculum Format Learned! 😃🎉")
     print(f"🆔  UUID: {format_uuid}")
-    print(f"📦  Location: memories/public/formats/")
+    print("📦  Location: memories/public/formats/")
     print(f"😀  Pack: {pack_num+1} of {num_packs} | Emojis: {len(patterns)}")
     print(f"🏷️  Format Name: {make_format_name(pack_num)}")
-    print(f"📝  Each entry includes: character, description, type, gyration_feature, and stats.")
-    print(f"✨  Ready for learning, encryption, and curriculum composition! ✨\n")
+    print("📝  Each entry includes: character, description, type, gyration_feature, and stats.")
+    print("✨  Ready for learning, encryption, and curriculum composition! ✨\n")

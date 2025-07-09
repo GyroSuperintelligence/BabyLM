@@ -13,24 +13,20 @@ import logging
 import readline
 import atexit
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple, Any
+from typing import List, Optional, Dict
 from datetime import datetime
 import textwrap
-import shutil
 
 # Rich terminal output
 try:
     from rich.console import Console
     from rich.table import Table
     from rich.panel import Panel
-    from rich.syntax import Syntax
     from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.prompt import Prompt, Confirm
     from rich.tree import Tree
     from rich.layout import Layout
     from rich.live import Live
-    from rich.markdown import Markdown
-    from rich import print as rprint
 
     RICH_AVAILABLE = True
     console = Console()
@@ -42,27 +38,33 @@ except ImportError:
 
 # Import Baby LM components
 from baby import initialize_intelligence_engine
-from baby.information import ensure_agent_uuid, assign_agent_uuid, list_formats, load_format, get_memory_preferences
+from baby.information import assign_agent_uuid, list_formats, load_format
 from baby.governance import gene_stateless
 
 # Use the fastest available JSON library (orjson > ujson > stdlib json)
 try:
     import orjson as json
+
     def json_loads(s):
         if isinstance(s, str):
             s = s.encode("utf-8")
         return json.loads(s)
+
     def json_dumps(obj):
         return json.dumps(obj).decode("utf-8")
+
 except ImportError:
     try:
-        import ujson as json
+        import ujson as json  # type: ignore
+
         json_loads = json.loads
         json_dumps = json.dumps
     except ImportError:
         import json
+
         json_loads = json.loads
         json_dumps = json.dumps
+
 
 # Setup logging with color
 class ColoredFormatter(logging.Formatter):
@@ -158,9 +160,11 @@ class BabyLMCLI:
             if self.engine is not None:
                 self.current_agent = self.engine.agent_uuid
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[green]✓[/green] Agent initialized: [cyan]{self.current_agent[:8]}...[/cyan]")
+                    console.print(
+                        f"[green]✓[/green] Agent initialized: [cyan]{self.current_agent[:8] if self.current_agent else 'None'}...[/cyan]"
+                    )
                 else:
-                    print(f"✓ Agent initialized: {self.current_agent[:8]}...")
+                    print("✓ Agent initialized: {self.current_agent[:8] if self.current_agent else 'None'}...")
                 return True
             return False
 
@@ -169,7 +173,7 @@ class BabyLMCLI:
             if RICH_AVAILABLE and console is not None:
                 console.print(f"[red]✗ Failed to initialize: {e}[/red]")
             else:
-                print(f"✗ Failed to initialize: {e}")
+                print("✗ Failed to initialize: {e}")
             return False
 
     def list_agents(self):
@@ -245,7 +249,7 @@ class BabyLMCLI:
         prefs_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(prefs_path, "w") as f:
-            json_dumps(metadata, f, indent=2)
+            f.write(json_dumps(metadata))
 
     def show_system_status(self):
         """Show comprehensive system status"""
@@ -297,7 +301,7 @@ class BabyLMCLI:
                 print(f"Gene Stateless: 0x{gene_stateless:02X}")
 
                 pattern_stats = self._get_pattern_statistics()
-                print(f"\nPattern Statistics:")
+                print("\nPattern Statistics:")
                 print(f"  Total: {pattern_stats['total']}")
                 print(f"  Labeled: {pattern_stats['labeled']}")
                 print(f"  Active: {pattern_stats['active']}")
@@ -308,7 +312,7 @@ class BabyLMCLI:
             return {"total": 0, "labeled": 0, "active": 0}
 
         if self.engine and self.engine.M:
-            patterns = self.engine.M["patterns"]
+            patterns = self.engine.M.get("patterns", [])
         else:
             patterns = []
         total = len(patterns)
@@ -514,16 +518,14 @@ Chat Commands:
         Path("conversations").mkdir(exist_ok=True)
 
         with open(filename, "w") as f:
-            json_dumps(
+            f.write(json_dumps(
                 {
                     "agent_uuid": self.engine.agent_uuid,
                     "thread_uuid": self.engine.thread_uuid,
                     "timestamp": datetime.now().isoformat(),
                     "history": self.conversation_history,
-                },
-                f,
-                indent=2,
-            )
+                }
+            ))
 
         if RICH_AVAILABLE and console is not None:
             console.print(f"[green]Conversation saved to {filename}[/green]")
@@ -632,12 +634,12 @@ Chat Commands:
             """
             console.print(Panel(info.strip(), title="Current Thread", border_style="cyan"))
         else:
-            print(f"\nCurrent Thread:")
+            print("\nCurrent Thread:")
             print(f"  UUID: {self.engine.thread_uuid}")
             print(f"  Name: {name}")
             print(f"  Curriculum: {curriculum}")
             print(f"  Tags: {tags}")
-            print(f"  Size: {self.engine.current_thread_size} bytes")
+            print("  Size: {self.engine.current_thread_size} bytes")
             print(f"  Parent: {relationships['parent'] or 'None'}")
             print(f"  Children: {len(relationships['children'])}")
             print(f"  Gene Keys: {len(self.engine.current_thread_keys)}")
@@ -650,7 +652,7 @@ Chat Commands:
 
         if pattern_idx is None:
             # Show most active patterns
-            patterns = [(i, p) for i, p in enumerate(self.engine.M["patterns"])]
+            patterns = [(i, p) for i, p in enumerate(self.engine.M.get("patterns", []))]
             active_patterns = sorted(patterns, key=lambda x: x[1].get("count", 0), reverse=True)[:10]
 
             if RICH_AVAILABLE and console is not None:
@@ -661,11 +663,11 @@ Chat Commands:
                 table.add_column("Class", style="yellow")
 
                 for idx, pattern in active_patterns:
-                    table.add_row(
+                    table.add_row(  # type: ignore
                         str(idx),
                         str(pattern.get("count", 0)),
-                        pattern.get("character", "") or "-",
-                        pattern.get("gyration_feature", "-"),
+                        str(pattern.get("character", "") or "-"),
+                        str(pattern.get("gyration_feature", "-")),
                     )
 
                 console.print(table)
@@ -889,7 +891,7 @@ Chat Commands:
         stats = self.engine.get_thread_statistics()
 
         if RICH_AVAILABLE and console is not None:
-            table = Table(title=f"Threads for Agent {self.engine.agent_uuid[:8]}...")
+            table = Table(title=f"Threads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}...")
             table.add_column("Index", style="cyan", no_wrap=True)
             table.add_column("Thread UUID", style="magenta")
             table.add_column("Name", style="white")
@@ -925,7 +927,9 @@ Chat Commands:
             console.print(f"  Total size: {stats['total_size_bytes'] / 1024:.1f} KB")
             console.print(f"  Capacity usage: {stats['capacity_usage_percent']:.1f}%")
         else:
-            print(f"\nThreads for Agent {self.engine.agent_uuid[:8]}...")
+            print(
+                f"\nThreads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}..."
+            )
             print("-" * 80)
             for i, detail in enumerate(stats["thread_details"], 1):
                 size_kb = detail["size_bytes"] / 1024
@@ -933,7 +937,8 @@ Chat Commands:
                 curriculum = detail.get("curriculum") or "-"
                 tags = ", ".join(detail.get("tags") or []) if detail.get("tags") else "-"
                 print(
-                    f"{i}. {detail['thread_uuid'][:8]}... | Name: {name} | Curriculum: {curriculum} | Tags: {tags} | Size: {size_kb:.1f} KB"
+                    f"{i}. {detail['thread_uuid'][:8]}... | Name: {name} | Curriculum: {curriculum} | Tags: {tags} | "
+                    f"Size: {size_kb:.1f} KB"
                 )
                 if detail["has_parent"] or detail["has_children"]:
                     print(f"   Parent: {detail['has_parent']}, Children: {detail['child_count']}")
@@ -1241,11 +1246,11 @@ Chat Commands:
         if RICH_AVAILABLE and console is not None:
             # Basic info
             basic_info = f"""
-[cyan]UUID:[/cyan] {format_data['format_uuid']}
-[cyan]Name:[/cyan] {format_data['format_name']}
-[cyan]Version:[/cyan] {format_data['format_version']}
-[cyan]CGM Version:[/cyan] {format_data['cgm_version']}
-[cyan]Stability:[/cyan] {format_data['stability']}
+[cyan]UUID:[/cyan] {format_data.get('format_uuid', 'Unknown')}
+[cyan]Name:[/cyan] {format_data.get('format_name', 'Unknown')}
+[cyan]Version:[/cyan] {format_data.get('format_version', 'Unknown')}
+[cyan]CGM Version:[/cyan] {format_data.get('cgm_version', 'Unknown')}
+[cyan]Stability:[/cyan] {format_data.get('stability', 'Unknown')}
             """
             console.print(Panel(basic_info.strip(), title="Format Information", border_style="cyan"))
 
@@ -1272,10 +1277,10 @@ Chat Commands:
             """
             console.print(Panel(pattern_info.strip(), title="Pattern Statistics", border_style="magenta"))
         else:
-            print(f"\nFormat: {format_data['format_uuid']}")
-            print(f"Name: {format_data['format_name']}")
-            print(f"Version: {format_data['format_version']}")
-            print(f"Stability: {format_data['stability']}")
+            print(f"\nFormat: {format_data.get('format_uuid', 'Unknown')}")
+            print(f"Name: {format_data.get('format_name', 'Unknown')}")
+            print(f"Version: {format_data.get('format_version', 'Unknown')}")
+            print(f"Stability: {format_data.get('stability', 'Unknown')}")
             print(f"Author: {format_data.get('metadata', {}).get('author', 'Unknown')}")
             print(f"Description: {format_data.get('metadata', {}).get('description', 'None')}")
 
@@ -1384,7 +1389,6 @@ Chat Commands:
                 console.print(f"[green]✓ Processed and saved to thread [unknown]...[/green]")
             if self.developer_mode:
                 # Show processing details
-                import numpy as np
 
                 recent_patterns = self.engine.inference_engine.recent_patterns
                 if recent_patterns:
@@ -1422,8 +1426,6 @@ Chat Commands:
         if self.engine is None:
             print("Error: No engine initialized.")
             return
-
-        import numpy as np
 
         if RICH_AVAILABLE and console is not None:
             with console.status(f"Generating {length} bytes...", spinner="dots"):
