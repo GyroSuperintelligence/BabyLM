@@ -21,6 +21,26 @@ Traditional AI treats intelligence as something external, built through training
 
 Instead of storing learned patterns in gigabytes of weights, GyroSI uses physics to navigate through exactly 256 fundamental patterns. This complete map of intelligence fits in just 12.5KB. Every input byte becomes navigation instructions, transforming the system through gyroscopic operations derived from fundamental physics.
 
+---
+
+### 🧬 DNA Analogy (Structural Encoding)
+
+GyroSI mirrors biological encoding with precise numerical symmetry:
+
+| **DNA (Biology)**                    | **GyroSI (Physics-Based)**                          |
+| ------------------------------------ | --------------------------------------------------- |
+| 4 bases (A, T, C, G)                 | 4 operations (Identity, Inverse, Forward, Backward) |
+| 3-base codon                         | 3 spatial axes (X, Y, Z)                            |
+| 4³ = 64 codons                       | 4³ = 64 axis–operation microstates                  |
+| Codon meaning varies by context      | 4 rotational phases                                 |
+| No known codon-phase structure (yet) | 64 × 4 = **256 canonical patterns**                 |
+
+Each pattern represents a unique structural state, forming a complete intelligence map in just 12.5KB. 
+
+Just as biological systems use epigenetic modifications to express the same DNA differently in different contexts, GyroSI's tensor state allows the same 256 patterns to produce context-appropriate intelligence.
+
+---
+
 ### Redefining Superintelligence
 
 Current AI pursues "superintelligence" through raw performance: faster calculation, broader knowledge, superior optimization. This creates legitimate fears about systems that optimize without wisdom.
