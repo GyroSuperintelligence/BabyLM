@@ -52,6 +52,8 @@ Current language models require massive resources, opaque training, and billions
 - **Structural navigation** rather than statistical optimization
 - **Intrinsic alignment** through physics-based constraints
 
+---
+
 ## 🔬 The Core Idea: From Byte to Intelligence Spectrum
 
 Data isn't just information here. It's a physical force that transforms structure. The entire architecture unfolds from one concept: a single byte is a complete set of instructions for navigating gyroscopic spacetime.
@@ -128,6 +130,8 @@ Two simultaneous mechanisms:
 1. **Structural** (Unconscious): Each byte permanently alters tensor state, creating irreversible history
 2. **Statistical** (Conscious): System tracks pattern contexts, building navigation maps
 
+---
+
 ## 🔬 Theoretical Foundation
 
 GyroSI implements the **Common Governance Model (CGM)**, where intelligence emerges through recursive structural alignment. The model derives three-dimensional space with six degrees of freedom from a single axiom, with time emerging as the memory of recursive operations.
@@ -167,6 +171,8 @@ python3 babylm.py --generate 100
 
 The CLI provides an interactive experience where you can chat with the model, process text, generate responses, and explore the system's capabilities through various commands. Remember: like an actual baby, it starts with no language knowledge and learns through interaction.
 
+---
+
 ## 🏗️ Architecture
 
 The system consists of four interconnected engines based on CGM principles:
@@ -176,7 +182,7 @@ The system consists of four interconnected engines based on CGM principles:
 - **S3: Inference** - Performs pattern matching and tensor evolution (accountability)
 - **S4: Intelligence** - Orchestrates learning and response generation (integrity)
 
-  ---
+---
 
 ## 🔄 Current Status & Expectations
 
@@ -254,11 +260,9 @@ The convergence of GyroSI's physics-based architecture with biological structure
 
 The following are testable hypotheses inspired by this convergence.
 
----
-
 ### 1. Non-coding DNA as a Navigational Landscape
 
-**Hypothesis:** The primary function of much non-coding ("junk") DNA is to define a deterministic gyroscopic navigation path for cellular machinery.
+**Hypothesis:** The primary function of much non-coding ("junk") DNA is to define a dynamo-gyroscopic navigation path for cellular machinery.
 
 **Rationale:** Chromatin conformation data (Hi-C) show that non-coding sequences fold the genome into specific 3D loop paths, gating access to genes. GyroSI predicts that this folding isn't just passive structure but an active, computable navigational route that guides components like RNA polymerase through the correct sequence of spatial transformations to find and express a target gene with precise timing.
 
@@ -280,6 +284,8 @@ The following are testable hypotheses inspired by this convergence.
 
 MIT License - see [LICENSE](LICENSE) for details.
 
+---
+
 ## 📖 Citation
 
 ```bibtex
@@ -297,8 +303,20 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**Architected by Basil Korompilias**
+**Architected with ❤️ by Basil Korompilias**
 
 *Redefining Intelligence and Ethics through Physics*
 
 </div>
+
+## 🤖 AI Disclosure
+All code, documentation, and theoretical models in this project were authored and architected by Basil Korompilias.
+
+Artificial intelligence was employed solely as a technical assistant, limited to code drafting, formatting, verification, and editorial services, always under direct human supervision.
+
+All foundational ideas, design decisions, and conceptual frameworks originate from the Author.
+
+Responsibility for the validity, coherence, and ethical direction of this project remains fully human.
+
+### Acknowledgements: 
+This project benefited from AI language model services accessed through Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).
