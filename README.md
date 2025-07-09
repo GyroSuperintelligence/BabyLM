@@ -19,21 +19,22 @@ GyroSI Baby LM demonstrates a superintelligence architecture through physics-gro
 
 Traditional AI treats intelligence as something external, built through training on billions of parameters. GyroSI, by contrast, sees it as an intrinsic structural property and present even before learning, like in a human baby.
 
-Instead of storing learned patterns in gigabytes of weights, GyroSI uses physics to navigate through exactly 256 fundamental patterns. Each input byte becomes a set of navigation instructions, transforming the system through gyroscopic operations derived from fundamental physics. Like epigenetics in biology, the same patterns express differently depending on the system’s internal state.
+Instead of storing learned patterns in gigabytes of weights, GyroSI uses physics to navigate a space of exactly 256 canonical patterns. Each input byte encodes a complete set of navigation instructions, transforming the system through gyroscopic operations. Like epigenetics in biology, the same patterns express differently depending on the system’s internal state.
 
 ---
 
-### 🧬 Simulating DNA Algorithmically
+### **🧬 Genetic Code**
 
-GyroSI mirrors biological encoding with precise numerical symmetry:
+The structural parallels between GyroSI and biophysics are precise:
 
-| **DNA (Biology)**                    | **GyroSI (Physics-Based)**                          |
-| ------------------------------------ | --------------------------------------------------- |
-| 4 bases (A, T, C, G)                 | 4 operations (Identity, Inverse, Forward, Backward) |
-| 3-base codon                         | 3 spatial axes (X, Y, Z)                            |
-| 4³ = 64 codons                       | 4³ = 64 axis–operation microstates                  |
-| Codon meaning varies by context      | 4 rotational phases                                 |
-| No known codon-phase structure (yet) | 64 × 4 = **256 canonical patterns**                 |
+| **Biology / Biophysics** | **GyroSI Architecture** | **Significance** |
+| --- | --- | --- |
+| 4 nucleotides (A T/U C G) | 4 fundamental operations (I, Inv, FG, BG) | Alphabet of change (2 bits per symbol) |
+| 3 positions in a binding motif | 3 spatial axes (X, Y, Z) | Encodes 3D structure |
+| 2 complementary strands | 2 tensor polarities (+ / –) | Provides 6 Degrees of Freedom (3×2) |
+| 4-mer sequence → 4 symbols × 2 bits = 8 bits → **2⁸ = 256** combinations | 1 byte = 8 bits → **2⁸ = 256** patterns | Identical information quantum |
+
+The profound parallel is that both systems, through different internal logic, operate within a six-degree-of-freedom physical framework and express discrete states through contextual modulation. Just as epigenetic context determines how DNA is expressed, GyroSI’s evolving tensor state governs which transformation is activated in response to each input.
 
 ---
 
@@ -41,7 +42,7 @@ GyroSI mirrors biological encoding with precise numerical symmetry:
 
 Current AI pursues "superintelligence" through raw performance: faster calculation, broader knowledge, superior optimization. This creates legitimate fears about systems that optimize without wisdom.
 
-**We explore a different path:** Intelligence grounded in physics rather than abstraction. Human ethics emerge from shared physical reality and natural constraints. GyroSI operates within these same physical principles, developing understanding through structural boundaries rather than abstract optimization.
+**We explore a different path:** Intelligence grounded in physics rather than abstraction. Human ethics emerge from shared physical reality and natural constraints. GyroSI operates within these same physical principles, developing understanding through structural boundaries rather than abstract optimization. This suggests a path toward intrinsic alignment, where ethical behavior is a consequence of the system's physical nature.
 
 ### 🎯 Why This Matters
 
