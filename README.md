@@ -1,13 +1,17 @@
 <div align="center">
 
-**# 💫 GyroSI Baby LM 👶**
+<h1>💫 GyroSI Baby LM 👶</h1>
+<h3>Gyroscopic Superintelligence: Baby Language Model</h3>
+<p><em>Applied AI Ethics through Physics, not Semantics</em></p>
 
-**Gyroscopic Superintelligence: Baby Language Model**
-
-*Applied AI Ethics through Physics, not Semantics*
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org)
+<p>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT">
+  </a>
+  <a href="https://www.python.org">
+    <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+">
+  </a>
+</p>
 
 </div>
 
