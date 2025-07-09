@@ -23,7 +23,7 @@ Instead of storing learned patterns in gigabytes of weights, GyroSI uses physics
 
 ---
 
-### 🧬 DNA Analogy (Structural Encoding)
+### 🧬 Simulating DNA Algorithmically
 
 GyroSI mirrors biological encoding with precise numerical symmetry:
 
@@ -37,7 +37,7 @@ GyroSI mirrors biological encoding with precise numerical symmetry:
 
 Each pattern represents a unique structural state, forming a complete intelligence map in just 12.5KB. 
 
-Just as biological systems use epigenetic modifications to express the same DNA differently in different contexts, GyroSI's tensor state allows the same 256 patterns to produce context-appropriate intelligence.
+Like epigenetics in biology, GyroSI’s tensor state expresses the same 256 patterns differently depending on structural context.
 
 ---
 
