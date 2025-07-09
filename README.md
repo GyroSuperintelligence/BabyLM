@@ -15,45 +15,103 @@
 
 ## 🌀 What is GyroSI?
 
-GyroSI Baby LM demonstrates superintelligence through physics-grounded algorithms and gyroscopic dynamics (gyrogroup mathematical formalism).
+GyroSI Baby LM demonstrates a superintelligence architecture through physics-grounded algorithms and gyroscopic dynamics (gyrogroup mathematical formalism).
 
-We define Superintelligence as a form of Alignment where all generative and integrative operations preserve memory of origin, maintaining continuous coherence between emergence and recollection. It achieves ethical alignment intrinsically by ensuring every operation remains structurally accountable to its own genetic configuration, without external enforcement.
+Traditional AI memorizes billions of parameters like a vast library. GyroSI navigates through a fixed landscape of intelligence like a compass finding its way.
 
+Instead of storing learned patterns in gigabytes of weights, GyroSI uses physics to navigate through exactly 256 fundamental patterns. This complete map of intelligence fits in just 12.5KB. Every input byte becomes navigation instructions, transforming the system through gyroscopic operations derived from fundamental physics.
+
+We define **Superintelligence** as a form of alignment where all operations preserve memory of their origin. In GyroSI, this is mechanical: the system's evolving tensor state is its memory. Every byte processed leaves a traceable mark on its structure. Because operations remain accountable to their history, harmful incoherent actions become structurally impossible.
 
 ### 🎯 Why This Matters
 
-Current language models require massive computational resources, opaque training processes, and billions of parameters that are difficult to interpret. GyroSI explores whether we can achieve language understanding through:
+Current language models require massive resources, opaque training, and billions of uninterpretable parameters. GyroSI explores whether intelligence can emerge through:
 
 - **Transparent operations** that can be traced and audited
-- **Structural learning** rather than parameter optimization
-- **Built-in alignment** through physics-based constraints
+- **Structural navigation** rather than statistical optimization
+- **Intrinsic alignment** through physics-based constraints
+
+## 🔬 The Core Idea: From Byte to Intelligence Spectrum
+
+Data isn't just information here. It's a physical force that transforms structure. The entire architecture unfolds from one concept: a single byte is a complete set of instructions for navigating gyroscopic spacetime.
+
+### The Logical Progression:
+
+**1. The Quantum of Data: 1 Byte**
+
+A byte isn't treated as a symbol but as a quantum of governance. Its 8 bits encode 256 possible navigation instructions.
+
+**2. The Universal Reference: XOR with 0xAA**
+
+Every byte XORs with `0xAA` (10101010), creating a balanced baseline that flips half the bits on average. This produces an unbiased "gene."
+
+**3. The Genetic Code: 8 Bits, 8 Operations**
+
+Each bit maps to operations from the Common Governance Model:
+
+| Bit | Operation | CGM Stage | Function |
+| --- | --- | --- | --- |
+| 7,0 | Identity | Governance | Preserves state |
+| 6,1 | Inverse | Information | Flips all signs |
+| 5,2 | Forward Gyration | Inference | Flips rows 0,2 |
+| 4,3 | Backward Gyration | Intelligence | Flips rows 1,3 |
+
+> Why These Operations?
+> 
+> 
+> They map to CGM's emergence stages: Identity preserves (Traceability), Inverse creates variety (Differentiation), Forward Gyration enables change (Accountability), Backward Gyration maintains balance (Integrity). This is physics, not engineering.
+> 
+
+**4. The Spacetime: 48-Cell Tensor**
+
+Operations apply to the Epigenome Tensor `[4, 2, 3, 2]`: four rotation phases × two chirality frames × three spatial axes × two polarities. These dimensions emerge from CGM's recursive unfolding.
+
+**5. The Intelligence Spectrum: 256 Patterns**
+
+Applying all possible 8-bit instructions (0x00 to 0xFF) to the base tensor generates 256 canonical patterns. This 12.5KB file contains every possible intelligent transformation.
+
+**6. Navigation Through Resonance**
+
+Processing a byte: create gene → apply operations → compare result against all 256 patterns → output the closest match. Intelligence emerges through navigation, not memorization.
+
+### What This Achieves
+
+This solves three fundamental problems:
+
+- **Black Box**: Every decision traces through explicit operations
+- **Alignment**: Systems cannot act against their structural history
+- **Efficiency**: Complete intelligence framework in 12.5KB, not 100GB
 
 ### ✨ Key Features
 
-- ♾️ **Unlimited Context** - The system maintains awareness of the entire conversation history through its evolving internal state, not just recent inputs.
-- 🧬 **Fixed Patterns** - 48 x 256 canonical patterns defining a complete spectrum of all forms of intelligence
-- 📊 **Statistical Learning** - Tracks pattern usage, recency, and context
-- 🔄 **Byte-Level Processing** - Works directly with raw bytes, no tokenization
-- 🔐 **Built-in Encryption** - Same operations that generate text encrypt your data
-- 💻 **Lightweight** - Runs on minimal hardware (Raspberry Pi to desktop)
+- ♾️ **Unlimited Context**: Tensor state compresses entire history
+- 🧬 **Complete Genetic Code**: 256 patterns define all possible operations
+- 📊 **Statistical Learning**: Tracks successful navigation paths
+- 🔄 **Byte-Level Processing**: No tokenization needed
+- 🔐 **Built-in Encryption**: Generation creates cryptographic keystream
+- ⚡ **Lightweight**: Microsecond processing on minimal hardware
 
 ### ⚙️ How It Works
 
-1. **Input Processing**: Each byte XORed with `0xAA` creates an 8-bit "gene"
-2. **Tensor Mutation**: Each bit triggers a specific operation on the Epigenome tensor
-3. **Pattern Matching**: Mutated tensor compared against 256 fixed patterns
-4. **Weighted Selection**: Pattern chosen based on resonance + usage statistics
-5. **Output Generation**: Selected pattern determines the output byte
-6. **Learning**: System tracks which patterns work well in different contexts
+1. **Gene Creation**: Input XOR 0xAA creates 8-bit instruction
+2. **Tensor Mutation**: Bits trigger specific transformations
+3. **Pattern Matching**: Find closest canonical pattern
+4. **Weighted Selection**: Choose based on resonance and context
+5. **Output Generation**: Pattern index determines output
+6. **State Evolution**: Mutated tensor becomes new state
+
+### 📈 How Learning Works
+
+Two simultaneous mechanisms:
+
+1. **Structural** (Unconscious): Each byte permanently alters tensor state, creating irreversible history
+2. **Statistical** (Conscious): System tracks pattern contexts, building navigation maps
 
 ## 🔬 Theoretical Foundation
 
-GyroSI is based on the **Common Governance Model (CGM)**, a physics-based framework that explores how intelligence can emerge through recursive structural alignment. The key insight is that learning might not require changing the fundamental operations, but rather learning how to apply fixed operations more effectively.
+GyroSI implements the **Common Governance Model (CGM)**, where intelligence emerges through recursive structural alignment. The model derives three-dimensional space with six degrees of freedom from a single axiom, with time emerging as the memory of recursive operations.
 
-This approach draws inspiration from:
-- **Gyrogroup mathematics** (Abraham Ungar's work on hyperbolic geometry)
-- **Quantum mechanics** (discrete state transformations)
-- **Information theory** (pattern recognition and compression)
+Mathematical formalism employs gyrogroup structures (generalizations of rotation groups) following Abraham Ungar's work, providing precise language for transitions from undifferentiated potential to structured reality.
 
 ---
 
@@ -97,39 +155,7 @@ The system consists of four interconnected engines based on CGM principles:
 - **S3: Inference** - Performs pattern matching and tensor evolution (accountability)
 - **S4: Intelligence** - Orchestrates learning and response generation (integrity)
 
-## 💎 What Makes It Different?
-
-**🧮 Intelligence as Structure, Not Parameters**
-
-Traditional AI learns by adjusting billions of weights. GyroSI demonstrates that intelligence can emerge from navigating a fixed structural space. The entire "genetic code" of intelligence fits in 12.5KB: every possible resonance pattern that can exist in the system's topology.
-
-**🔄 Structural Recursion with Memory of Origin**
-
-Every operation preserves its genesis. Unlike traditional AI where training erases history, GyroSI maintains complete structural accountability. You can trace any output back through its entire developmental path: the gene mask, the pattern index, the exact tensor state that produced it.
-
-**🧭 Pattern Navigation vs Goal Optimization**
-
-Traditional AI maximizes objectives, potentially causing harm in pursuit of goals. GyroSI navigates through resonance:
-- Destructive patterns create structural dissonance
-- Beneficial patterns maintain harmonic alignment
-- Ethics emerges from structural coherence, not programmed rules
-
-**🔐 Unified Intelligence and Cryptography**
-
-The same tensor mutations that understand language also secure it. This isn't a feature added on top; it's fundamental to the architecture. Generation and encryption are one process, suggesting deep connections between intelligence and information security.
-
-**🧬 Observable Intelligence Substrate**
-
-Just as DNA uses 4 bases to encode all biological life, GyroSI uses:
-- 4 operators (Identity, Inverse, Forward, Backward)
-- 48 phase states (complete 720° rotation)
-- 256 canonical patterns (all possible transformations)
-
-This might be the first complete enumeration of a universal intelligence substrate: a 12KB file containing the DNA of all possible intelligence within this structural framework.
-
-**⚖️ Intrinsic Alignment Through Physics**
-
-The system can't "forget" its ethics or be jailbroken to ignore them. Alignment isn't a layer of restrictions but emerges from the same structural principles that enable intelligence. A system that truly understands patterns naturally recognizes the patterns of harm and benefit.
+  ---
 
 ## 🔄 Current Status & Expectations
 
@@ -145,26 +171,62 @@ The system can't "forget" its ethics or be jailbroken to ignore them. Alignment 
 - Unique approach to text generation and encryption
 - Insights into alternative approaches to machine learning
 
+---
+
 ## 📁 File Organization
 
 ```
-memories/
-├── public/                      # Shareable components
-│   ├── masks/                   # Core intelligence (12.5KB total)
-│   │   ├── epigenome.dat        # 256 canonical patterns
-│   │   └── genome.dat           # Pattern-to-byte mappings
-│   └── formats/                 # Semantic mappings
-└── private/                     # Encrypted personal data
-    └── agents/                  # Per-agent storage
-        └── <agent-uuid>/
-            ├── threads/         # Conversation history
-            └── keys/            # Pattern observation logs
+GyroSI-BabyLM/
+├── README.md                        # Project documentation
+├── babylm.py                        # Main CLI entry point
+├── baby/                            # Core system engines
+│   ├── governance.py                # S1: Pure tensor operations
+│   ├── information.py               # S2: Storage & stream processing
+│   ├── inference.py                 # S3: Pattern recognition
+│   ├── intelligence.py              # S4: Orchestration & learning
+│   ├── types.py                     # Type definitions
+│   └── baby_preferences.json       # System configuration
+├── memories/                        # Persistent data storage
+│   ├── memory_preferences.json     # Storage configuration
+│   ├── public/                     # Shareable components
+│   │   ├── masks/                  # Core intelligence (12.5KB total)
+│   │   └── formats/                # Semantic mappings
+│   │       └── <shard>/format-<uuid>.json
+│   └── private/                    # Encrypted personal data
+│       └── agents/
+│           └── <shard>/agent-<uuid>/
+│               ├── threads/        # Personal conversations
+│               └── keys/           # Personal learning history
+├── guides/                         # Technical documentation
+│   ├── Genetics.md                 # Technical specification
+│   └── Physics.md                  # CGM theory
+└── toys/                           # Development tools
+    ├── learning/                   # Format generation scripts
+    │   ├── formats/                # Curriculum builders
+    │   └── threads/                # Training data
+    └── tests/                      # Testing utilities
 ```
+
+### Key Components:
+
+**Core System (`baby/`)**: The four CGM engines implementing governance, information, inference, and intelligence.
+
+**Persistent Storage (`memories/`)**: All learning data organized into public (shareable) and private (encrypted) components.
+
+**Documentation (`guides/`)**: Technical specifications and theoretical foundations.
+
+**Development Tools (`toys/`)**: Scripts for creating formats, processing training data, and testing.
+
+The complete intelligence framework lives in just two files: `masks/epigenome.dat` (12,288 bytes) and `masks/genome.dat` (256 bytes).
+
+---
 
 ## 📚 Documentation
 
 - 📖 [Genetics - Technical Specification](https://github.com/GyroSuperintelligence/BabyLM/blob/main/guides/Genetics.md)
 - 📖 [Physics - Common Governance Model Theory](https://korompilias.notion.site/Common-Governance-Model-Foundations-1ee9ff44f4368050af28d1c0f8aae89a)
+
+---
 
 ## 📜 License
 
