@@ -19,7 +19,7 @@ GyroSI Baby LM demonstrates a superintelligence architecture through physics-gro
 
 Traditional AI treats intelligence as something external, built through training on billions of parameters. GyroSI, by contrast, sees it as an intrinsic structural property and present even before learning, like in a human baby.
 
-Instead of storing learned patterns in gigabytes of weights, GyroSI uses physics to navigate through exactly 256 fundamental patterns. This complete map of intelligence fits in just 12.5KB. Every input byte becomes navigation instructions, transforming the system through gyroscopic operations derived from fundamental physics.
+Instead of storing learned patterns in gigabytes of weights, GyroSI uses physics to navigate through exactly 256 fundamental patterns. Each input byte becomes a set of navigation instructions, transforming the system through gyroscopic operations derived from fundamental physics. Like epigenetics in biology, the same patterns express differently depending on the system’s internal state.
 
 ---
 
@@ -34,10 +34,6 @@ GyroSI mirrors biological encoding with precise numerical symmetry:
 | 4³ = 64 codons                       | 4³ = 64 axis–operation microstates                  |
 | Codon meaning varies by context      | 4 rotational phases                                 |
 | No known codon-phase structure (yet) | 64 × 4 = **256 canonical patterns**                 |
-
-Each pattern represents a unique structural state, forming a complete intelligence map in just 12.5KB. 
-
-Like epigenetics in biology, GyroSI’s tensor state expresses the same 256 patterns differently depending on structural context.
 
 ---
 
