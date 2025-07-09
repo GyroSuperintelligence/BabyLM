@@ -315,7 +315,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 </div>
 
 ## 🤖 AI Disclosure
-All code, documentation, and theoretical models in this project were authored and architected by Basil Korompilias.
+All code architecture, documentation, and theoretical models in this project were authored and architected by Basil Korompilias.
 
 Artificial intelligence was employed solely as a technical assistant, limited to code drafting, formatting, verification, and editorial services, always under direct human supervision.
 
