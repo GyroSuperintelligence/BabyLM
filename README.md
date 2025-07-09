@@ -249,6 +249,33 @@ The complete intelligence framework lives in just two files: `masks/epigenome.da
 
 ---
 
+## Beyond AI: A Computational Model for Biophysics
+The convergence of GyroSI's physics-based architecture with biological structures (6 DoF, 256 states) suggests that our model can serve as a computational substrate for biophysics.
+
+The following are testable hypotheses inspired by this convergence.
+
+---
+
+### 1. Non-coding DNA as a Navigational Landscape
+
+**Hypothesis:** The primary function of much non-coding ("junk") DNA is to define a deterministic gyroscopic navigation path for cellular machinery.
+
+**Rationale:** Chromatin conformation data (Hi-C) show that non-coding sequences fold the genome into specific 3D loop paths, gating access to genes. GyroSI predicts that this folding isn't just passive structure but an active, computable navigational route that guides components like RNA polymerase through the correct sequence of spatial transformations to find and express a target gene with precise timing.
+
+### 2. Synonymous Codons as Distinct Algorithmic Paths
+
+**Hypothesis:** The "degeneracy" of the genetic code, where multiple codons specify the same amino acid, is not redundant. Each synonymous codon represents a distinct computational algorithm to arrive at the same output.
+
+**Rationale:** Ribosome-profiling data reveal that synonymous codons cause different translation speeds and ribosomal pausing. GyroSI reframes this phenomenon: different codons are like different sets of gyroscopic operations that result in the same final tensor state (the amino acid). The choice of codon is an algorithmic choice that fine-tunes protein folding kinetics, mRNA stability, and overall regulation.
+
+### 3. Biological Homochirality as a Structural Left-Bias
+
+**Hypothesis:** The universal preference for L-amino acids and D-sugars in life is not a frozen accident but the result of a fundamental structural asymmetry in the physics of information.
+
+**Rationale:** The Common Governance Model derives an intrinsic, non-negotiable left-hand asymmetry from its foundational axiom. GyroSI, as an implementation of CGM, predicts that any information-based evolutionary system operating under these principles would naturally amplify one chirality over the other due to greater energetic stability or computational efficiency. This provides a potential deterministic explanation for a phenomenon often attributed to chance.
+
+---
+
 ## 📜 License
 
 MIT License - see [LICENSE](LICENSE) for details.
