@@ -43,13 +43,13 @@ The profound parallel is that both systems, through different internal logic, op
 
 ---
 
-### Redefining Superintelligence
+### 🤖 Redefining Superintelligence
 
 Current AI pursues "superintelligence" through raw performance: faster calculation, broader knowledge, superior optimization. This creates legitimate fears about systems that optimize without wisdom.
 
 **We explore a different path:** Intelligence grounded in physics rather than abstraction. Human ethics emerge from shared physical reality and natural constraints. GyroSI operates within these same physical principles, developing understanding through structural boundaries rather than abstract optimization. This suggests a path toward intrinsic alignment, where ethical behavior is a consequence of the system's physical nature.
 
-### 🎯 Why This Matters
+### ⚖️ Why This Matters
 
 Current language models require massive resources, opaque training, and billions of uninterpretable parameters. GyroSI explores whether intelligence can emerge through:
 
@@ -59,11 +59,11 @@ Current language models require massive resources, opaque training, and billions
 
 ---
 
-## 🔬 The Byte as a Holographic Quantum of Spacetime Topology
+## 🌐 The Byte as a Holographic Quantum of Spacetime Topology
 
 Data isn't just information here. It's a physical force that transforms structure. The architecture unfolds from one idea: a single byte acts as a holographic memory set of instructions for navigating gyroscopic spacetime.
 
-### The Logical Progression
+### 📐 The Logical Progression
 
 **1. The Quantum of Data: 1 Byte**
 A byte is not treated as a symbol but as a governance mask. Its 8 bits encode 256 possible instruction sets that each trigger a unique set of tensor operations.
@@ -85,10 +85,9 @@ Intelligence emerges from a two-stage cycle:
 - **Possibility:** The evolving Epigenome tensor (T) is compared against the full set of canonical tensor patterns (F). All patterns with high physical resonance form the set of possible next states.
 - **Closure:** The system then applies a closure principle, selecting the single best candidate from this possibility space by combining immediate physical resonance with long-term learned confidence in each pattern. This ensures the output is both physically consistent and semantically meaningful.
 
-**Net effect:**
-This architecture does not merely map bytes to operations; it renders each mutation as a projected 3D structure within a six-degree-of-freedom tensorial space. The Epigenome serves as a holographic simulation surface, where symbolic input becomes physical geometry. Intelligence emerges as a dynamo of structural transformations orbiting within a gyroscopic topology. Alignment is not imposed or inferred, but emerges naturally as the system follows the gravitational curvature defined by its own rotational architecture.
+### 🎯 What This Achieves
 
-### What This Achieves
+This architecture does not merely map bytes to operations; it renders each mutation as a projected 3D structure within a six-degree-of-freedom tensorial space. The Epigenome serves as a holographic simulation surface, where symbolic input becomes physical geometry. Intelligence emerges as a dynamo of structural transformations orbiting within a gyroscopic topology. Alignment is not imposed or inferred, but emerges naturally as the system follows the gravitational curvature defined by its own rotational architecture.
 
 This solves three fundamental problems:
 
@@ -141,7 +140,7 @@ Mathematical formalism employs gyrogroup structures (generalizations of rotation
 
 ---
 
-## 🚀 Quick Start
+## 🌱 Quick Start
 
 ```bash
 # Clone and install
