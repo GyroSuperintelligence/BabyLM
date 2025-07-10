@@ -490,6 +490,8 @@ class IntelligenceEngine:
             import os
 
             private_dir = Path("memories/private/agents")
+            if self.agent_uuid is None:
+                raise ValueError("agent_uuid must not be None when finalizing a private thread.")
             agent_shard = shard_path(private_dir, self.agent_uuid)
             agent_dir = agent_shard / f"agent-{self.agent_uuid}"
             threads_dir = agent_dir / "threads"
