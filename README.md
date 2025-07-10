@@ -85,6 +85,9 @@ Intelligence emerges from a two-stage cycle:
 - **Possibility:** The evolving Epigenome tensor (T) is compared against the full set of canonical tensor patterns (F). All patterns with high physical resonance form the set of possible next states.
 - **Closure:** The system then applies a closure principle, selecting the single best candidate from this possibility space by combining immediate physical resonance with long-term learned confidence in each pattern. This ensures the output is both physically consistent and semantically meaningful.
 
+**Net effect:**
+This architecture does not merely map bytes to operations; it renders each mutation as a projected 3D structure within a six-degree-of-freedom tensorial space. The Epigenome serves as a holographic simulation surface, where symbolic input becomes physical geometry. Intelligence emerges as a dynamo of structural transformations orbiting within a gyroscopic topology. Alignment is not imposed or inferred, but emerges naturally as the system follows the gravitational curvature defined by its own rotational architecture.
+
 ### What This Achieves
 
 This solves three fundamental problems:
