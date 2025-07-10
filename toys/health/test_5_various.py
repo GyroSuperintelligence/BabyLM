@@ -3,7 +3,6 @@ Miscellaneous and integration tests for the BabyLM system.
 Includes tests for public/private mode, pattern index, enhanced thread management, integration, and utility functions.
 """
 
-import os
 import uuid
 import json
 import numpy as np
@@ -12,13 +11,9 @@ from pathlib import Path
 from unittest.mock import patch
 from typing import cast
 from datetime import datetime
-import re
 
 # Import modules from baby package
-from baby.inference import InferenceEngine
 from baby.information import (
-    InformationEngine,
-    assign_agent_uuid,
     shard_path,
     parent,
     children,
@@ -215,7 +210,8 @@ class TestPatternIndexAndContext:
         indices_with_min_resonance = [i for i, v in enumerate(natural_resonances) if np.isclose(v, min_resonance_val)]
         print(f"Minimum resonance value found: {min_resonance_val}")
         print(
-            f"Found {len(indices_with_min_resonance)} degenerate patterns with this resonance: {indices_with_min_resonance}"
+            f"Found {len(indices_with_min_resonance)} degenerate patterns with this "
+            f"resonance: {indices_with_min_resonance}"
         )
 
         # 4. Verify our core understanding of the system's physics.

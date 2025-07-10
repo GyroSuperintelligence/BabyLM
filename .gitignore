@@ -74,6 +74,9 @@ coverage.xml
 *.cover
 .hypothesis/
 
+toys/health/memories/
+toys/health/htmlcov/
+
 # Documentation builds
 guides/build/
 site/

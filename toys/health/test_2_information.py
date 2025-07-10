@@ -3,27 +3,14 @@ Tests for information storage, thread management, and registry operations in the
 Covers memory preferences, sharding, atomic writes, registry updates, and thread relationships.
 """
 
-import os
-import json
 import numpy as np
 import pytest
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 # Import modules from baby package
-from baby.inference import InferenceEngine
 from baby.information import (
     InformationEngine,
-    load_format,
-    store_format,
-    get_memory_preferences,
-    update_registry,
-    atomic_write,
-    PatternIndex,
-    shard_path,
 )
-from baby.intelligence import initialize_intelligence_engine
-from baby.governance import derive_canonical_patterns
 
 
 # ------------------------------------------------------------------------------

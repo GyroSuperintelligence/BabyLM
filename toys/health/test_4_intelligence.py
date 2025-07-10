@@ -3,7 +3,6 @@ Tests for the intelligence engine, learning state, and thread processing in the 
 Covers format management, input processing, response generation, and thread statistics.
 """
 
-import os
 import uuid
 import json
 import numpy as np
@@ -13,11 +12,8 @@ from unittest.mock import patch
 from typing import cast
 
 # Import modules from baby package
-from baby.inference import InferenceEngine
-from baby.information import assign_agent_uuid, shard_path
-from baby.intelligence import initialize_intelligence_engine
-from baby.governance import derive_canonical_patterns
-from baby.types import ThreadMetadata, ChildRef
+from baby.information import shard_path
+from baby.types import ThreadMetadata
 from baby.intelligence import weighted_choice
 
 

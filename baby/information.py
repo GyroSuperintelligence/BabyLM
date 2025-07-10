@@ -8,6 +8,7 @@ operations and registry management.
 """
 
 import os
+import json  # Always import standard json for type safety
 import uuid
 import numpy as np
 import fcntl
@@ -26,28 +27,22 @@ from baby.types import FormatMetadata, ThreadMetadata, GeneKeysMetadata
 
 # pyright: reportMissingModuleSource=false
 try:
-    import orjson as json
-
-    # orjson API: loads(bytes), dumps(obj) -> bytes
+    import orjson as fast_json
     def json_loads(s):
         if isinstance(s, str):
             s = s.encode("utf-8")
-        return json.loads(s)
-
+        return fast_json.loads(s)
     def json_dumps(obj):
-        return json.dumps(obj).decode("utf-8")
-
+        return fast_json.dumps(obj).decode("utf-8")
 except ImportError:
     try:
-        import ujson as json
-
+        import ujson as fast_json
+        json_loads = fast_json.loads
+        json_dumps = fast_json.dumps
+    except ImportError:
+        fast_json = None
         json_loads = json.loads
         json_dumps = json.dumps
-    except ImportError:
-        import json as std_json
-
-        json_loads = std_json.loads
-        json_dumps = std_json.dumps
 
 
 # ====================================================================

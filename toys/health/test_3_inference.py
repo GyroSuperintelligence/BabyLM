@@ -3,8 +3,6 @@ Tests for the inference engine and related tensor operations in the BabyLM syste
 Includes pattern loading, genome mask handling, epigenome initialization, and pattern matching logic.
 """
 
-import os
-import json
 import numpy as np
 import pytest
 from pathlib import Path
@@ -12,8 +10,6 @@ from unittest.mock import patch
 
 # Import modules from baby package
 from baby.inference import InferenceEngine
-from baby.information import assign_agent_uuid, shard_path, InformationEngine
-from baby.intelligence import IntelligenceEngine, weighted_choice, initialize_intelligence_engine
 from baby.governance import derive_canonical_patterns, apply_operation, gene_add
 
 

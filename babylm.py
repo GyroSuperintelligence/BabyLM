@@ -39,7 +39,6 @@ except ImportError:
 # Import Baby LM components
 from baby import initialize_intelligence_engine
 from baby.information import assign_agent_uuid, list_formats, load_format
-from baby.governance import gene_stateless
 
 # Use the fastest available JSON library (orjson > ujson > stdlib json)
 try:
@@ -81,7 +80,7 @@ class ColoredFormatter(logging.Formatter):
 
     def format(self, record):
         log_color = self.COLORS.get(record.levelname, self.RESET)
-        record.levelname = f"{log_color}{record.levelname}{self.RESET}"
+        record.levelname = "{log_color}{record.levelname}{self.RESET}"
         return super().format(record)
 
 
@@ -160,18 +159,18 @@ class BabyLMCLI:
             if self.engine is not None:
                 self.current_agent = self.engine.agent_uuid
                 if RICH_AVAILABLE and console is not None:
-                    console.print(
-                        f"[green]✓[/green] Agent initialized: [cyan]{self.current_agent[:8] if self.current_agent else 'None'}...[/cyan]"
-                    )
+                    agent_display = f"{self.current_agent[:8] if self.current_agent else 'None'}..."
+                    console.print(f"[green]✓[/green] Agent initialized: [cyan]{agent_display}[/cyan]")
                 else:
-                    print("✓ Agent initialized: {self.current_agent[:8] if self.current_agent else 'None'}...")
+                    agent_display = f"{self.current_agent[:8] if self.current_agent else 'None'}..."
+                    print(f"✓ Agent initialized: {agent_display}")
                 return True
             return False
 
         except Exception as e:
-            logger.error(f"Failed to initialize engine: {e}")
+            logger.error("Failed to initialize engine: {e}")
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[red]✗ Failed to initialize: {e}[/red]")
+                console.print("[red]✗ Failed to initialize: {e}[/red]")
             else:
                 print("✗ Failed to initialize: {e}")
             return False
@@ -209,16 +208,16 @@ class BabyLMCLI:
             print("\nAvailable Agents:")
             for i, agent_uuid in enumerate(agents, 1):
                 status = " (Active)" if agent_uuid == self.current_agent else ""
-                print(f"{i}. {agent_uuid}{status}")
+                print("{i}. {agent_uuid}{status}")
 
     def create_new_agent(self):
         """Create a new agent interactively"""
         if RICH_AVAILABLE and console is not None:
             agent_name = Prompt.ask("Enter a name for the new agent", default="default")
-            confirm = Confirm.ask(f"Create new agent '{agent_name}'?")
+            confirm = Confirm.ask("Create new agent '{agent_name}'?")
         else:
             agent_name = input("Enter a name for the new agent (default): ") or "default"
-            confirm = input(f"Create new agent '{agent_name}'? (y/n): ").lower() == "y"
+            confirm = input("Create new agent '{agent_name}'? (y/n): ").lower() == "y"
 
         if confirm:
             import uuid
@@ -231,9 +230,9 @@ class BabyLMCLI:
                 self._save_agent_metadata(new_uuid, agent_name)
 
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[green]✓ Created agent '{agent_name}' ({new_uuid[:8]}...)[/green]")
+                    console.print("[green]✓ Created agent '{agent_name}' ({new_uuid[:8]}...)[/green]")
                 else:
-                    print(f"✓ Created agent '{agent_name}' ({new_uuid[:8]}...)")
+                    print("✓ Created agent '{agent_name}' ({new_uuid[:8]}...)")
 
     def _save_agent_metadata(self, agent_uuid: str, agent_name: str):
         """Save agent metadata"""
@@ -245,7 +244,7 @@ class BabyLMCLI:
         }
 
         # Save to agent preferences
-        prefs_path = Path(f"memories/private/agents/{agent_uuid[:2]}/agent-{agent_uuid}/preferences.json")
+        prefs_path = Path("memories/private/agents/{agent_uuid[:2]}/agent-{agent_uuid}/preferences.json")
         prefs_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(prefs_path, "w") as f:
@@ -263,26 +262,26 @@ class BabyLMCLI:
         if RICH_AVAILABLE and console is not None:
             # Create status panels
             agent_info = Panel(
-                f"[cyan]UUID:[/cyan] {self.engine.agent_uuid}\n"
-                f"[cyan]Format:[/cyan] {self.engine.format_uuid[:8]}...\n"
-                f"[cyan]Thread:[/cyan] {self.engine.thread_uuid[:8] if self.engine.thread_uuid else 'None'}...",
+                "[cyan]UUID:[/cyan] {self.engine.agent_uuid}\n"
+                "[cyan]Format:[/cyan] {self.engine.format_uuid[:8]}...\n"
+                "[cyan]Thread:[/cyan] {self.engine.thread_uuid[:8] if self.engine.thread_uuid else 'None'}...",
                 title="Agent Information",
                 border_style="cyan",
             )
 
             tensor_info = Panel(
-                f"[green]Shape:[/green] {self.engine.inference_engine.T.shape}\n"
-                f"[green]Cycles:[/green] {self.engine.inference_engine.cycle_counter}\n"
-                f"[green]Gene Stateless:[/green] 0x{gene_stateless:02X}",
+                "[green]Shape:[/green] {self.engine.inference_engine.T.shape}\n"
+                "[green]Cycles:[/green] {self.engine.inference_engine.cycle_counter}\n"
+                "[green]Gene Stateless:[/green] 0x{gene_stateless:02X}",
                 title="Tensor State",
                 border_style="green",
             )
 
             pattern_stats = self._get_pattern_statistics()
             pattern_info = Panel(
-                f"[magenta]Total:[/magenta] {pattern_stats['total']}\n"
-                f"[magenta]Labeled:[/magenta] {pattern_stats['labeled']}\n"
-                f"[magenta]Active:[/magenta] {pattern_stats['active']}",
+                "[magenta]Total:[/magenta] {pattern_stats['total']}\n"
+                "[magenta]Labeled:[/magenta] {pattern_stats['labeled']}\n"
+                "[magenta]Active:[/magenta] {pattern_stats['active']}",
                 title="Pattern Statistics",
                 border_style="magenta",
             )
@@ -293,18 +292,18 @@ class BabyLMCLI:
         else:
             print("\n=== System Status ===")
             if self.engine:
-                print(f"Agent UUID: {self.engine.agent_uuid}")
-                print(f"Format UUID: {self.engine.format_uuid[:8]}...")
-                print(f"Thread UUID: {self.engine.thread_uuid[:8] if self.engine.thread_uuid else 'None'}...")
-                print(f"Tensor Shape: {self.engine.inference_engine.T.shape}")
-                print(f"Cycles: {self.engine.inference_engine.cycle_counter}")
-                print(f"Gene Stateless: 0x{gene_stateless:02X}")
+                print("Agent UUID: {self.engine.agent_uuid}")
+                print("Format UUID: {self.engine.format_uuid[:8]}...")
+                print("Thread UUID: {self.engine.thread_uuid[:8] if self.engine.thread_uuid else 'None'}...")
+                print("Tensor Shape: {self.engine.inference_engine.T.shape}")
+                print("Cycles: {self.engine.inference_engine.cycle_counter}")
+                print("Gene Stateless: 0x{gene_stateless:02X}")
 
                 pattern_stats = self._get_pattern_statistics()
                 print("\nPattern Statistics:")
-                print(f"  Total: {pattern_stats['total']}")
-                print(f"  Labeled: {pattern_stats['labeled']}")
-                print(f"  Active: {pattern_stats['active']}")
+                print("  Total: {pattern_stats['total']}")
+                print("  Labeled: {pattern_stats['labeled']}")
+                print("  Active: {pattern_stats['active']}")
 
     def _get_pattern_statistics(self) -> Dict[str, int]:
         """Get pattern statistics"""
@@ -364,11 +363,11 @@ class BabyLMCLI:
                     if input("Exit chat mode? (y/n): ").lower() == "y":
                         break
             except Exception as e:
-                logger.error(f"Error in chat: {e}")
+                logger.error("Error in chat: {e}")
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[red]Error: {e}[/red]")
+                    console.print("[red]Error: {e}[/red]")
                 else:
-                    print(f"Error: {e}")
+                    print("Error: {e}")
 
     def _handle_command(self, command: str):
         """Handle chat commands"""
@@ -392,9 +391,9 @@ class BabyLMCLI:
             commands[cmd]()
         else:
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[yellow]Unknown command: {cmd}[/yellow]")
+                console.print("[yellow]Unknown command: {cmd}[/yellow]")
             else:
-                print(f"Unknown command: {cmd}")
+                print("Unknown command: {cmd}")
 
     def _show_chat_help(self):
         """Show chat help"""
@@ -440,7 +439,7 @@ Chat Commands:
                 )
 
                 # Show input
-                layout["input"].update(Panel(f"Input: {user_input}", border_style="cyan"))
+                layout["input"].update(Panel("Input: {user_input}", border_style="cyan"))
 
                 # Process with visualization
                 import numpy as np  # noqa: F401
@@ -448,9 +447,9 @@ Chat Commands:
                 plaintext, encrypted = self.engine.process_input_stream(input_bytes)
 
                 # Show tensor state
-                tensor_state = f"Tensor norm: {np.linalg.norm(self.engine.inference_engine.T):.4f}\n"
-                tensor_state += f"Cycles: {self.engine.inference_engine.cycle_counter}\n"
-                tensor_state += f"Recent patterns: {self.engine.inference_engine.recent_patterns[-5:]}"
+                tensor_state = "Tensor norm: {np.linalg.norm(self.engine.inference_engine.T):.4f}\n"
+                tensor_state += "Cycles: {self.engine.inference_engine.cycle_counter}\n"
+                tensor_state += "Recent patterns: {self.engine.inference_engine.recent_patterns[-5:]}"
 
                 layout["processing"].update(Panel(tensor_state, title="Processing", border_style="yellow"))
                 live.update(layout)
@@ -463,7 +462,7 @@ Chat Commands:
                 try:
                     response_text = response_bytes.decode("utf-8")
                 except UnicodeDecodeError:
-                    response_text = f"[Binary response: {len(response_bytes)} bytes]"
+                    response_text = "[Binary response: {len(response_bytes)} bytes]"
 
                 layout["output"].update(Panel(response_text, title="Response", border_style="green"))
                 live.update(layout)
@@ -484,7 +483,7 @@ Chat Commands:
         try:
             response_text = response_bytes.decode("utf-8")
         except UnicodeDecodeError:
-            response_text = f"[Binary response: {len(response_bytes)} bytes]"
+            response_text = "[Binary response: {len(response_bytes)} bytes]"
 
         # Add to history
         self.conversation_history.append(
@@ -493,9 +492,9 @@ Chat Commands:
 
         # Display
         if RICH_AVAILABLE and console is not None:
-            console.print(f"\n[bold green]Baby LM[/bold green]: {response_text}\n")
+            console.print("\n[bold green]Baby LM[/bold green]: {response_text}\n")
         else:
-            print(f"\nBaby LM: {response_text}\n")
+            print("\nBaby LM: {response_text}\n")
 
     def _clear_conversation(self):
         """Clear conversation history"""
@@ -514,7 +513,7 @@ Chat Commands:
         if not name:
             name = datetime.now().strftime("conversation_%Y%m%d_%H%M%S")
 
-        filename = f"conversations/{name}.json"
+        filename = "conversations/{name}.json"
         Path("conversations").mkdir(exist_ok=True)
 
         with open(filename, "w") as f:
@@ -530,9 +529,9 @@ Chat Commands:
             )
 
         if RICH_AVAILABLE and console is not None:
-            console.print(f"[green]Conversation saved to {filename}[/green]")
+            console.print("[green]Conversation saved to {filename}[/green]")
         else:
-            print(f"Conversation saved to {filename}")
+            print("Conversation saved to {filename}")
 
     def _load_conversation(self, name: Optional[str] = None):
         """Load conversation from file"""
@@ -572,12 +571,12 @@ Chat Commands:
             else:
                 print("\nSaved Conversations:")
                 for i, conv in enumerate(conversations, 1):
-                    print(f"{i}. {conv.stem}")
+                    print("{i}. {conv.stem}")
 
                 idx = input("Select conversation: ")
                 name = conversations[int(idx) - 1].stem
 
-        filename = f"conversations/{name}.json"
+        filename = "conversations/{name}.json"
         try:
             with open(filename, "r") as f:
                 data = json_loads(f.read())
@@ -585,26 +584,26 @@ Chat Commands:
             self.conversation_history = data["history"]
 
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[green]Loaded conversation from {filename}[/green]")
-                console.print(f"[dim]Contains {len(self.conversation_history)} messages[/dim]")
+                console.print("[green]Loaded conversation from {filename}[/green]")
+                console.print("[dim]Contains {len(self.conversation_history)} messages[/dim]")
             else:
-                print(f"Loaded conversation from {filename}")
-                print(f"Contains {len(self.conversation_history)} messages")
+                print("Loaded conversation from {filename}")
+                print("Contains {len(self.conversation_history)} messages")
 
             # Display conversation
             for msg in self.conversation_history[-5:]:  # Show last 5 messages
                 role = "You" if msg["role"] == "user" else "Baby LM"
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[bold]{role}[/bold]: {msg['content']}")
+                    console.print("[bold]{role}[/bold]: {msg['content']}")
                 else:
-                    print(f"{role}: {msg['content']}")
+                    print("{role}: {msg['content']}")
 
         except Exception as e:
-            logger.error(f"Failed to load conversation: {e}")
+            logger.error("Failed to load conversation: {e}")
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[red]Failed to load conversation: {e}[/red]")
+                console.print("[red]Failed to load conversation: {e}[/red]")
             else:
-                print(f"Failed to load conversation: {e}")
+                print("Failed to load conversation: {e}")
 
     def _show_thread_info(self):
         """Show current thread information"""
@@ -637,14 +636,14 @@ Chat Commands:
             console.print(Panel(info.strip(), title="Current Thread", border_style="cyan"))
         else:
             print("\nCurrent Thread:")
-            print(f"  UUID: {self.engine.thread_uuid}")
-            print(f"  Name: {name}")
-            print(f"  Curriculum: {curriculum}")
-            print(f"  Tags: {tags}")
+            print("  UUID: {self.engine.thread_uuid}")
+            print("  Name: {name}")
+            print("  Curriculum: {curriculum}")
+            print("  Tags: {tags}")
             print("  Size: {self.engine.current_thread_size} bytes")
-            print(f"  Parent: {relationships['parent'] or 'None'}")
-            print(f"  Children: {len(relationships['children'])}")
-            print(f"  Gene Keys: {len(self.engine.current_thread_keys)}")
+            print("  Parent: {relationships['parent'] or 'None'}")
+            print("  Children: {len(relationships['children'])}")
+            print("  Gene Keys: {len(self.engine.current_thread_keys)}")
 
     def _show_pattern_info(self, pattern_idx: Optional[int] = None):
         """Show pattern information"""
@@ -677,9 +676,9 @@ Chat Commands:
                 print("\nMost Active Patterns:")
                 for idx, pattern in active_patterns:
                     print(
-                        f"  {idx}: count={pattern.get('count', 0)}, "
-                        f"character={pattern.get('character', '') or '-'}, "
-                        f"class={pattern.get('gyration_feature', '-')}"
+                        "  {idx}: count={pattern.get('count', 0)}, "
+                        "character={pattern.get('character', '') or '-'}, "
+                        "class={pattern.get('gyration_feature', '-')}"
                     )
         else:
             # Show specific pattern
@@ -697,7 +696,7 @@ Chat Commands:
 [cyan]Confidence:[/cyan] {stats['confidence']:.4f}
 [cyan]Current Resonance:[/cyan] {stats['current_resonance']:.4f if stats['current_resonance'] else 'N/A'}
                     """
-                    console.print(Panel(info.strip(), title=f"Pattern {pattern_idx}", border_style="cyan"))
+                    console.print(Panel(info.strip(), title="Pattern {pattern_idx}", border_style="cyan"))
 
                     # Show contexts if available
                     if stats["contexts"]:
@@ -705,22 +704,22 @@ Chat Commands:
                         if stats["contexts"]["before"]:
                             console.print("  [cyan]Common predecessors:[/cyan]")
                             for pred_idx, count in stats["contexts"]["before"][:5]:
-                                console.print(f"    Pattern {pred_idx}: {count} times")
+                                console.print("    Pattern {pred_idx}: {count} times")
                         if stats["contexts"]["after"]:
                             console.print("  [cyan]Common successors:[/cyan]")
                             for succ_idx, count in stats["contexts"]["after"][:5]:
-                                console.print(f"    Pattern {succ_idx}: {count} times")
+                                console.print("    Pattern {succ_idx}: {count} times")
                 else:
-                    print(f"\nPattern {pattern_idx}:")
-                    print(f"  Semantic: {stats['character'] or 'None'}")
-                    print(f"  Count: {stats['count']}")
-                    print(f"  Resonance Class: {stats['gyration_feature']}")
-                    print(f"  Confidence: {stats['confidence']:.4f}")
+                    print("\nPattern {pattern_idx}:")
+                    print("  Semantic: {stats['character'] or 'None'}")
+                    print("  Count: {stats['count']}")
+                    print("  Resonance Class: {stats['gyration_feature']}")
+                    print("  Confidence: {stats['confidence']:.4f}")
             else:
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[red]Invalid pattern index: {pattern_idx}[/red]")
+                    console.print("[red]Invalid pattern index: {pattern_idx}[/red]")
                 else:
-                    print(f"Invalid pattern index: {pattern_idx}")
+                    print("Invalid pattern index: {pattern_idx}")
 
     def _toggle_developer_mode(self):
         """Toggle developer mode"""
@@ -728,9 +727,9 @@ Chat Commands:
         mode = "enabled" if self.developer_mode else "disabled"
 
         if RICH_AVAILABLE and console is not None:
-            console.print(f"[green]Developer mode {mode}[/green]")
+            console.print("[green]Developer mode {mode}[/green]")
         else:
-            print(f"Developer mode {mode}")
+            print("Developer mode {mode}")
 
     def _exit_chat(self):
         """Exit chat mode"""
@@ -772,7 +771,7 @@ Chat Commands:
         parser.add_argument("--thread", "-t", nargs="+", help="Thread operations: list, show <uuid>, stats")
 
         # Format management
-        parser.add_argument("--format", "-f", nargs="+", help="Format operations: list, show <uuid>, discover <domain>")
+        parser.add_argument("--format", "-", nargs="+", help="Format operations: list, show <uuid>, discover <domain>")
 
         # System operations
         parser.add_argument("--status", "-s", action="store_true", help="Show system status")
@@ -851,14 +850,14 @@ Chat Commands:
             agent_uuid = agent_args[1]
             if self.initialize_engine(agent_uuid):
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[green]Switched to agent {agent_uuid[:8]}...[/green]")
+                    console.print("[green]Switched to agent {agent_uuid[:8]}...[/green]")
                 else:
-                    print(f"Switched to agent {agent_uuid[:8]}...")
+                    print("Switched to agent {agent_uuid[:8]}...")
         else:
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[red]Unknown agent operation: {operation}[/red]")
+                console.print("[red]Unknown agent operation: {operation}[/red]")
             else:
-                print(f"Unknown agent operation: {operation}")
+                print("Unknown agent operation: {operation}")
 
     def _handle_thread_operations(self, thread_args: List[str]):
         """Handle thread-related operations"""
@@ -880,9 +879,9 @@ Chat Commands:
             self._export_thread(thread_args[1])
         else:
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[red]Unknown thread operation: {operation}[/red]")
+                console.print("[red]Unknown thread operation: {operation}[/red]")
             else:
-                print(f"Unknown thread operation: {operation}")
+                print("Unknown thread operation: {operation}")
 
     def _list_threads(self):
         """List all threads with rich formatting"""
@@ -894,7 +893,7 @@ Chat Commands:
 
         if RICH_AVAILABLE and console is not None:
             table = Table(
-                title=f"Threads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}..."
+                title="Threads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}..."
             )
             table.add_column("Index", style="cyan", no_wrap=True)
             table.add_column("Thread UUID", style="magenta")
@@ -918,7 +917,7 @@ Chat Commands:
                     name,
                     curriculum,
                     tags,
-                    f"{size_kb:.1f} KB",
+                    "{size_kb:.1f} KB",
                     parent,
                     children,
                 )
@@ -926,12 +925,12 @@ Chat Commands:
             console.print(table)
 
             # Summary
-            console.print(f"\n[bold]Summary:[/bold]")
-            console.print(f"  Total threads: {stats['total_threads']}")
-            console.print(f"  Total size: {stats['total_size_bytes'] / 1024:.1f} KB")
-            console.print(f"  Capacity usage: {stats['capacity_usage_percent']:.1f}%")
+            console.print("\n[bold]Summary:[/bold]")
+            console.print("  Total threads: {stats['total_threads']}")
+            console.print("  Total size: {stats['total_size_bytes'] / 1024:.1f} KB")
+            console.print("  Capacity usage: {stats['capacity_usage_percent']:.1f}%")
         else:
-            print(f"\nThreads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}...")
+            print("\nThreads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}...")
             print("-" * 80)
             for i, detail in enumerate(stats["thread_details"], 1):
                 size_kb = detail["size_bytes"] / 1024
@@ -939,11 +938,11 @@ Chat Commands:
                 curriculum = detail.get("curriculum") or "-"
                 tags = ", ".join(detail.get("tags") or []) if detail.get("tags") else "-"
                 print(
-                    f"{i}. {detail['thread_uuid'][:8]}... | Name: {name} | Curriculum: {curriculum} | Tags: {tags} | "
-                    f"Size: {size_kb:.1f} KB"
+                    "{i}. {detail['thread_uuid'][:8]}... | Name: {name} | Curriculum: {curriculum} | Tags: {tags} | "
+                    "Size: {size_kb:.1f} KB"
                 )
                 if detail["has_parent"] or detail["has_children"]:
-                    print(f"   Parent: {detail['has_parent']}, Children: {detail['child_count']}")
+                    print("   Parent: {detail['has_parent']}, Children: {detail['child_count']}")
 
     def _show_thread(self, thread_uuid: str):
         """Show thread content with context"""
@@ -959,19 +958,19 @@ Chat Commands:
 
             if len(matches) == 0:
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[red]No thread found matching: {thread_uuid}[/red]")
+                    console.print("[red]No thread found matching: {thread_uuid}[/red]")
                 else:
-                    print(f"No thread found matching: {thread_uuid}")
+                    print("No thread found matching: {thread_uuid}")
                 return
             elif len(matches) > 1:
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[yellow]Multiple threads match: {thread_uuid}[/yellow]")
+                    console.print("[yellow]Multiple threads match: {thread_uuid}[/yellow]")
                     for match in matches:
-                        console.print(f"  - {match}")
+                        console.print("  - {match}")
                 else:
-                    print(f"Multiple threads match: {thread_uuid}")
+                    print("Multiple threads match: {thread_uuid}")
                     for match in matches:
-                        print(f"  - {match}")
+                        print("  - {match}")
                 return
 
             thread_uuid = matches[0]
@@ -981,7 +980,7 @@ Chat Commands:
 
         if "error" in result:
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[red]{result['error']}[/red]")
+                console.print("[red]{result['error']}[/red]")
             else:
                 print(result["error"])
             return
@@ -991,7 +990,7 @@ Chat Commands:
         if RICH_AVAILABLE and console is not None:
             from rich.table import Table
 
-            table = Table(title=f"Thread {thread_uuid[:8]}... ({result['size_bytes']} bytes)")
+            table = Table(title="Thread {thread_uuid[:8]}... ({result['size_bytes']} bytes)")
             table.add_column("#", style="dim", width=4)
             table.add_column("Type", style="cyan", width=8)
             table.add_column("Data (decoded)", style="white")
@@ -1008,7 +1007,7 @@ Chat Commands:
                 table.add_row(str(i + 1), typ, data_str)
             console.print(table)
         else:
-            print(f"\nThread {thread_uuid[:8]}... ({result['size_bytes']} bytes)")
+            print("\nThread {thread_uuid[:8]}... ({result['size_bytes']} bytes)")
             print("-" * 60)
             for i, event in enumerate(events):
                 typ = event.get("type", "?")
@@ -1020,11 +1019,11 @@ Chat Commands:
                         data_str = str(data)
                 else:
                     data_str = str(data)
-                print(f"[{i+1:03}] {typ}: {data_str}")
+                print("[{i+1:03}] {typ}: {data_str}")
 
-        print(f"\nRelationships:")
-        print(f"  Parent: {result['relationships']['parent'] or 'None'}")
-        print(f"  Children: {len(result['relationships']['children'])}")
+        print("\nRelationships:")
+        print("  Parent: {result['relationships']['parent'] or 'None'}")
+        print("  Children: {len(result['relationships']['children'])}")
 
     def _show_thread_stats(self):
         """Show detailed thread statistics"""
@@ -1037,17 +1036,17 @@ Chat Commands:
         if RICH_AVAILABLE and console is not None:
             # Create statistics panels
             overview = Panel(
-                f"[cyan]Total Threads:[/cyan] {stats['total_threads']}\n"
-                f"[cyan]Total Size:[/cyan] {stats['total_size_bytes'] / 1024:.1f} KB\n"
-                f"[cyan]Capacity Usage:[/cyan] {stats['capacity_usage_percent']:.1f}%",
+                "[cyan]Total Threads:[/cyan] {stats['total_threads']}\n"
+                "[cyan]Total Size:[/cyan] {stats['total_size_bytes'] / 1024:.1f} KB\n"
+                "[cyan]Capacity Usage:[/cyan] {stats['capacity_usage_percent']:.1f}%",
                 title="Overview",
                 border_style="cyan",
             )
 
             relationships = Panel(
-                f"[green]With Parents:[/green] {stats['relationship_stats']['threads_with_parents']}\n"
-                f"[green]With Children:[/green] {stats['relationship_stats']['threads_with_children']}\n"
-                f"[green]Isolated:[/green] {stats['relationship_stats']['isolated_threads']}",
+                "[green]With Parents:[/green] {stats['relationship_stats']['threads_with_parents']}\n"
+                "[green]With Children:[/green] {stats['relationship_stats']['threads_with_children']}\n"
+                "[green]Isolated:[/green] {stats['relationship_stats']['isolated_threads']}",
                 title="Relationships",
                 border_style="green",
             )
@@ -1063,9 +1062,9 @@ Chat Commands:
                 min_size = min(sizes)
 
                 size_dist = Panel(
-                    f"[magenta]Average:[/magenta] {avg_size / 1024:.1f} KB\n"
-                    f"[magenta]Maximum:[/magenta] {max_size / 1024:.1f} KB\n"
-                    f"[magenta]Minimum:[/magenta] {min_size / 1024:.1f} KB",
+                    "[magenta]Average:[/magenta] {avg_size / 1024:.1f} KB\n"
+                    "[magenta]Maximum:[/magenta] {max_size / 1024:.1f} KB\n"
+                    "[magenta]Minimum:[/magenta] {min_size / 1024:.1f} KB",
                     title="Size Distribution",
                     border_style="magenta",
                 )
@@ -1073,13 +1072,13 @@ Chat Commands:
         else:
             print("\nThread Statistics")
             print("-" * 40)
-            print(f"Total Threads: {stats['total_threads']}")
-            print(f"Total Size: {stats['total_size_bytes'] / 1024:.1f} KB")
-            print(f"Capacity Usage: {stats['capacity_usage_percent']:.1f}%")
-            print(f"\nRelationships:")
-            print(f"  With Parents: {stats['relationship_stats']['threads_with_parents']}")
-            print(f"  With Children: {stats['relationship_stats']['threads_with_children']}")
-            print(f"  Isolated: {stats['relationship_stats']['isolated_threads']}")
+            print("Total Threads: {stats['total_threads']}")
+            print("Total Size: {stats['total_size_bytes'] / 1024:.1f} KB")
+            print("Capacity Usage: {stats['capacity_usage_percent']:.1f}%")
+            print("\nRelationships:")
+            print("  With Parents: {stats['relationship_stats']['threads_with_parents']}")
+            print("  With Children: {stats['relationship_stats']['threads_with_children']}")
+            print("  Isolated: {stats['relationship_stats']['isolated_threads']}")
 
     def _show_thread_tree(self):
         """Show thread relationship tree"""
@@ -1099,9 +1098,9 @@ Chat Commands:
             nodes = {}
             for uuid in chain:
                 if uuid == self.engine.thread_uuid:
-                    node = tree.add(f"[bold cyan]{uuid[:8]}... (CURRENT)[/bold cyan]")
+                    node = tree.add("[bold cyan]{uuid[:8]}... (CURRENT)[/bold cyan]")
                 else:
-                    node = tree.add(f"{uuid[:8]}...")
+                    node = tree.add("{uuid[:8]}...")
                 nodes[uuid] = node
 
             console.print(tree)
@@ -1110,9 +1109,9 @@ Chat Commands:
             for i, uuid in enumerate(chain):
                 indent = "  " * i
                 if uuid == self.engine.thread_uuid:
-                    print(f"{indent}→ {uuid[:8]}... (CURRENT)")
+                    print("{indent}→ {uuid[:8]}... (CURRENT)")
                 else:
-                    print(f"{indent}  {uuid[:8]}...")
+                    print("{indent}  {uuid[:8]}...")
 
     def _export_thread(self, thread_uuid: str):
         """Export thread content to file"""
@@ -1124,12 +1123,12 @@ Chat Commands:
 
         if content is None:
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[red]Thread {thread_uuid} not found[/red]")
+                console.print("[red]Thread {thread_uuid} not found[/red]")
             else:
-                print(f"Thread {thread_uuid} not found")
+                print("Thread {thread_uuid} not found")
             return
 
-        filename = f"thread_{thread_uuid[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        filename = "thread_{thread_uuid[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
 
         # Ensure content is bytes before writing
         to_write = content
@@ -1151,9 +1150,9 @@ Chat Commands:
             f.write(to_write)
 
         if RICH_AVAILABLE and console is not None:
-            console.print(f"[green]Thread exported to {filename}[/green]")
+            console.print("[green]Thread exported to {filename}[/green]")
         else:
-            print(f"Thread exported to {filename}")
+            print("Thread exported to {filename}")
 
     def _handle_format_operations(self, format_args: List[str]):
         """Handle format-related operations"""
@@ -1169,9 +1168,9 @@ Chat Commands:
             self._compose_formats(format_args[1:])
         else:
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[red]Unknown format operation: {operation}[/red]")
+                console.print("[red]Unknown format operation: {operation}[/red]")
             else:
-                print(f"Unknown format operation: {operation}")
+                print("Unknown format operation: {operation}")
 
     def _list_formats(self):
         """List all available formats"""
@@ -1207,7 +1206,7 @@ Chat Commands:
             for i, format_uuid in enumerate(format_uuids, 1):
                 format_data = load_format(format_uuid)
                 if format_data:
-                    print(f"{i}. {format_uuid[:8]}... - {format_data.get('format_name', 'Unknown')}")
+                    print("{i}. {format_uuid[:8]}... - {format_data.get('format_name', 'Unknown')}")
 
     def _show_format(self, format_uuid: str):
         """Show detailed format information"""
@@ -1218,15 +1217,15 @@ Chat Commands:
 
             if len(matches) == 0:
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[red]No format found matching: {format_uuid}[/red]")
+                    console.print("[red]No format found matching: {format_uuid}[/red]")
                 else:
-                    print(f"No format found matching: {format_uuid}")
+                    print("No format found matching: {format_uuid}")
                 return
             elif len(matches) > 1:
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[yellow]Multiple formats match: {format_uuid}[/yellow]")
+                    console.print("[yellow]Multiple formats match: {format_uuid}[/yellow]")
                 else:
-                    print(f"Multiple formats match: {format_uuid}")
+                    print("Multiple formats match: {format_uuid}")
                 return
 
             format_uuid = matches[0]
@@ -1234,9 +1233,9 @@ Chat Commands:
         format_data = load_format(format_uuid)
         if not format_data:
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[red]Format {format_uuid} not found[/red]")
+                console.print("[red]Format {format_uuid} not found[/red]")
             else:
-                print(f"Format {format_uuid} not found")
+                print("Format {format_uuid} not found")
             return
 
         if RICH_AVAILABLE and console is not None:
@@ -1273,12 +1272,12 @@ Chat Commands:
             """
             console.print(Panel(pattern_info.strip(), title="Pattern Statistics", border_style="magenta"))
         else:
-            print(f"\nFormat: {format_data.get('format_uuid', 'Unknown')}")
-            print(f"Name: {format_data.get('format_name', 'Unknown')}")
-            print(f"Version: {format_data.get('format_version', 'Unknown')}")
-            print(f"Stability: {format_data.get('stability', 'Unknown')}")
-            print(f"Author: {format_data.get('metadata', {}).get('author', 'Unknown')}")
-            print(f"Description: {format_data.get('metadata', {}).get('description', 'None')}")
+            print("\nFormat: {format_data.get('format_uuid', 'Unknown')}")
+            print("Name: {format_data.get('format_name', 'Unknown')}")
+            print("Version: {format_data.get('format_version', 'Unknown')}")
+            print("Stability: {format_data.get('stability', 'Unknown')}")
+            print("Author: {format_data.get('metadata', {}).get('author', 'Unknown')}")
+            print("Description: {format_data.get('metadata', {}).get('description', 'None')}")
 
     def _discover_format(self, domain: str):
         """Discover format for a domain"""
@@ -1287,35 +1286,35 @@ Chat Commands:
             return
 
         if RICH_AVAILABLE and console is not None:
-            with console.status(f"Discovering format for domain '{domain}'...", spinner="dots"):
+            with console.status("Discovering format for domain '{domain}'...", spinner="dots"):
                 for stability in ["stable", "beta", "experimental"]:
                     format_uuid = self.engine.select_stable_format(domain, stability)
                     if format_uuid:
                         format_data = load_format(format_uuid)
-                        console.print(f"[green]Found {stability} format:[/green]")
-                        console.print(f"  UUID: {format_uuid}")
+                        console.print("[green]Found {stability} format:[/green]")
+                        console.print("  UUID: {format_uuid}")
                         if format_data is not None:
-                            print(f"  Name: {format_data.get('format_name', 'Unknown')}")
+                            print("  Name: {format_data.get('format_name', 'Unknown')}")
                         else:
-                            print(f"  Name: Unknown")
+                            print("  Name: Unknown")
                         return
 
-            console.print(f"[yellow]No format found for domain '{domain}'[/yellow]")
+            console.print("[yellow]No format found for domain '{domain}'[/yellow]")
         else:
-            print(f"Discovering format for domain '{domain}'...")
+            print("Discovering format for domain '{domain}'...")
             for stability in ["stable", "beta", "experimental"]:
                 format_uuid = self.engine.select_stable_format(domain, stability)
                 if format_uuid:
                     format_data = load_format(format_uuid)
-                    print(f"Found {stability} format:")
-                    print(f"  UUID: {format_uuid}")
+                    print("Found {stability} format:")
+                    print("  UUID: {format_uuid}")
                     if format_data is not None:
-                        print(f"  Name: {format_data.get('format_name', 'Unknown')}")
+                        print("  Name: {format_data.get('format_name', 'Unknown')}")
                     else:
-                        print(f"  Name: Unknown")
+                        print("  Name: Unknown")
                     return
 
-            print(f"No format found for domain '{domain}'")
+            print("No format found for domain '{domain}'")
 
     def _compose_formats(self, format_uuids: List[str]):
         """Compose multiple formats"""
@@ -1327,30 +1326,30 @@ Chat Commands:
         secondary = format_uuids[1:]
 
         if RICH_AVAILABLE and console is not None:
-            console.print(f"Composing formats:")
-            console.print(f"  Primary: {primary}")
+            console.print("Composing formats:")
+            console.print("  Primary: {primary}")
             for s in secondary:
-                console.print(f"  Secondary: {s}")
+                console.print("  Secondary: {s}")
 
             with console.status("Composing formats...", spinner="dots"):
                 composed_uuid = self.engine.compose_formats(primary, secondary)
 
             if composed_uuid:
-                console.print(f"[green]✓ Created composed format: {composed_uuid}[/green]")
+                console.print("[green]✓ Created composed format: {composed_uuid}[/green]")
             else:
-                console.print(f"[red]✗ Failed to compose formats[/red]")
+                console.print("[red]✗ Failed to compose formats[/red]")
         else:
-            print(f"Composing formats:")
-            print(f"  Primary: {primary}")
+            print("Composing formats:")
+            print("  Primary: {primary}")
             for s in secondary:
-                print(f"  Secondary: {s}")
+                print("  Secondary: {s}")
 
             composed_uuid = self.engine.compose_formats(primary, secondary)
 
             if composed_uuid:
-                print(f"✓ Created composed format: {composed_uuid}")
+                print("✓ Created composed format: {composed_uuid}")
             else:
-                print(f"✗ Failed to compose formats")
+                print("✗ Failed to compose formats")
 
     def _handle_process(self, text: Optional[str], input_file: Optional[str], output_file: Optional[str]):
         """Handle text processing"""
@@ -1369,28 +1368,28 @@ Chat Commands:
                 source = input_file
             except FileNotFoundError:
                 if RICH_AVAILABLE and console is not None:
-                    console.print(f"[red]Input file not found: {input_file}[/red]")
+                    console.print("[red]Input file not found: {input_file}[/red]")
                 else:
-                    print(f"Input file not found: {input_file}")
+                    print("Input file not found: {input_file}")
                 return
         else:
             return
 
         if RICH_AVAILABLE and console is not None:
-            with console.status(f"Processing {len(data)} bytes from {source}...", spinner="dots"):
+            with console.status("Processing {len(data)} bytes from {source}...", spinner="dots"):
                 plaintext, encrypted = self.engine.process_input_stream(data)
             if self.engine.thread_uuid:
-                console.print(f"[green]✓ Processed and saved to thread {self.engine.thread_uuid[:8]}...[/green]")
+                console.print("[green]✓ Processed and saved to thread {self.engine.thread_uuid[:8]}...[/green]")
             else:
-                console.print(f"[green]✓ Processed and saved to thread [unknown]...[/green]")
+                console.print("[green]✓ Processed and saved to thread [unknown]...[/green]")
             if self.developer_mode:
                 # Show processing details
 
                 recent_patterns = self.engine.inference_engine.recent_patterns
-                if recent_patterns:
+                if recent_patterns and isinstance(recent_patterns, list):
                     recent_patterns_str = recent_patterns[-5:]
                 else:
-                    pass
+                    recent_patterns_str = []
                 info = """
 [cyan]Input size:[/cyan] {len(data)} bytes
 [cyan]Thread UUID:[/cyan] {self.engine.thread_uuid if self.engine.thread_uuid else '[unknown]'}
@@ -1400,12 +1399,12 @@ Chat Commands:
                 """
                 console.print(Panel(info.strip(), title="Processing Details", border_style="yellow"))
         else:
-            print(f"Processing {len(data)} bytes from {source}...")
+            print("Processing {len(data)} bytes from {source}...")
             plaintext, encrypted = self.engine.process_input_stream(data)
             if self.engine.thread_uuid:
-                print(f"✓ Processed and saved to thread {self.engine.thread_uuid[:8]}...")
+                print("✓ Processed and saved to thread {self.engine.thread_uuid[:8]}...")
             else:
-                print(f"✓ Processed and saved to thread [unknown]...")
+                print("✓ Processed and saved to thread [unknown]...")
 
         # Save output if requested
         if output_file:
@@ -1413,9 +1412,9 @@ Chat Commands:
                 f.write(encrypted)
 
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[green]✓ Saved encrypted output to {output_file}[/green]")
+                console.print("[green]✓ Saved encrypted output to {output_file}[/green]")
             else:
-                print(f"✓ Saved encrypted output to {output_file}")
+                print("✓ Saved encrypted output to {output_file}")
 
     def _handle_generate(self, length: int, output_file: Optional[str]):
         """Handle text generation"""
@@ -1424,34 +1423,34 @@ Chat Commands:
             return
 
         if RICH_AVAILABLE and console is not None:
-            with console.status(f"Generating {length} bytes...", spinner="dots"):
+            with console.status("Generating {length} bytes...", spinner="dots"):
                 response = self.engine.generate_and_save_response(length)
             if self.engine.thread_uuid:
-                console.print(f"[green]✓ Generated and saved to thread {self.engine.thread_uuid[:8]}...[/green]")
+                console.print("[green]✓ Generated and saved to thread {self.engine.thread_uuid[:8]}...[/green]")
             else:
-                console.print(f"[green]✓ Generated and saved to thread [unknown]...[/green]")
+                console.print("[green]✓ Generated and saved to thread [unknown]...[/green]")
             # Try to display as text
             try:
                 text = response.decode("utf-8")
                 if len(text) > 200:
                     text = text[:200] + "..."
-                console.print(Panel(text, title=f"Generated Response ({len(response)} bytes)", border_style="green"))
+                console.print(Panel(text, title="Generated Response ({len(response)} bytes)", border_style="green"))
             except UnicodeDecodeError:
-                console.print(f"[yellow]Generated binary response ({len(response)} bytes)[/yellow]")
+                console.print("[yellow]Generated binary response ({len(response)} bytes)[/yellow]")
         else:
-            print(f"Generating {length} bytes...")
+            print("Generating {length} bytes...")
             response = self.engine.generate_and_save_response(length)
             if self.engine.thread_uuid:
-                print(f"✓ Generated and saved to thread {self.engine.thread_uuid[:8]}...")
+                print("✓ Generated and saved to thread {self.engine.thread_uuid[:8]}...")
             else:
-                print(f"✓ Generated and saved to thread [unknown]...")
+                print("✓ Generated and saved to thread [unknown]...")
             try:
                 text = response.decode("utf-8")
                 if len(text) > 200:
                     text = text[:200] + "..."
-                print(f"\nGenerated response:\n{text}")
+                print("\nGenerated response:\n{text}")
             except UnicodeDecodeError:
-                print(f"Generated binary response ({len(response)} bytes)")
+                print("Generated binary response ({len(response)} bytes)")
 
         # Save output if requested
         if output_file:
@@ -1459,9 +1458,9 @@ Chat Commands:
                 f.write(response)
 
             if RICH_AVAILABLE and console is not None:
-                console.print(f"[green]✓ Saved generated response to {output_file}[/green]")
+                console.print("[green]✓ Saved generated response to {output_file}[/green]")
             else:
-                print(f"✓ Saved generated response to {output_file}")
+                print("✓ Saved generated response to {output_file}")
 
 
 def main():
@@ -1482,12 +1481,12 @@ def main():
         print("\n\nInterrupted by user.")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logger.error("Unexpected error: {e}", exc_info=True)
         if RICH_AVAILABLE and console is not None:
-            console.print(f"\n[red]Error: {e}[/red]")
+            console.print("\n[red]Error: {e}[/red]")
             console.print("[dim]Check babylm_cli.log for details[/dim]")
         else:
-            print(f"\nError: {e}")
+            print("\nError: {e}")
             print("Check babylm_cli.log for details")
         sys.exit(1)
 
