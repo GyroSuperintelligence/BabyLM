@@ -24,14 +24,18 @@ class FormatMetadata(TypedDict, total=False):
     patterns: List[PatternMetadata]
 
 
+class ChildRef(TypedDict):
+    uuid: str
+    name: Optional[str]
+
+
 class ThreadMetadata(TypedDict, total=False):
     thread_uuid: str
     thread_name: Optional[str]
     agent_uuid: Optional[str]  # Deprecated: use 'privacy' instead
     parent_uuid: Optional[str]
     parent_name: Optional[str]
-    child_uuids: List[str]
-    child_names: List[Optional[str]]
+    children: List[ChildRef]
     format_uuid: str
     curriculum: Optional[str]
     tags: Optional[List[str]]

@@ -52,20 +52,6 @@ except ImportError:
         json_dumps = json.dumps
 
 
-def find_closest_pattern_index(T, F):
-    """
-    Find index of canonical pattern closest to tensor T.
-    Args:
-        T: Epigenome tensor (any shape that flattens to 48, e.g. (4,2,3,2))
-        F: Canonical pattern bank (256, 48)
-    Returns:
-        int: Index of closest matching pattern (0-255)
-    """
-    flat_T = T.flatten()
-    distances = [gyrodistance(flat_T, pattern) for pattern in F]
-    return int(np.argmin(distances))
-
-
 # ====================================================================
 # Persistent Storage Helpers - Sharding and Registry
 # ====================================================================
@@ -125,26 +111,26 @@ def shard_path(root: Path, uuid_: str, width=2, limit=30_000) -> Path:
     if second_level_enabled and first_path.exists():
         # Count ALL files and directories in first-level shard, not just registry entries
         count = 0
-
-        # Try registry first for efficiency
         registry_path = first_path / "registry.json"
         if registry_path.exists():
             try:
-                with open(registry_path, "r") as f:
+                with open(registry_path, "r+") as f:
+                    fcntl.flock(f, fcntl.LOCK_EX)
+                    try:
                     registry = json_loads(f.read())
                 count = registry.get("count", 0)
             except (json.JSONDecodeError, IOError):
                 pass
-
+                    fcntl.flock(f, fcntl.LOCK_UN)
+            except Exception:
+                pass
         # If registry count is unreliable, count files physically
         if count == 0:
             count = sum(1 for _ in first_path.iterdir())
-
         # Use second-level sharding if over limit
         if count > limit:
             second_level = uuid_[width : width * 2]
             return first_path / second_level
-
     return first_path
 
 
@@ -424,8 +410,7 @@ def create_thread(
         "agent_uuid": agent_uuid,  # Deprecated
         "parent_uuid": parent_uuid,
         "parent_name": parent_name,
-        "child_uuids": [],
-        "child_names": [],
+        "children": [],
         "format_uuid": format_uuid,
         "curriculum": curriculum,
         "tags": tags,
@@ -481,8 +466,7 @@ def save_thread(
             "agent_uuid": agent_uuid,  # Deprecated
             "parent_uuid": None,
             "parent_name": None,
-            "child_uuids": [],
-            "child_names": [],
+            "children": [],
             "format_uuid": "",
             "curriculum": curriculum,
             "tags": tags,
@@ -536,11 +520,11 @@ def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes, agent_secret
     Args:
         agent_uuid: Agent UUID
         thread_uuid: Thread UUID
-        key: Key to store (must be exactly 256 bytes)
+        key: Key to store (must be exactly 32 bytes for AES-256)
         agent_secret: Agent secret for encryption
     """
-    if len(key) != 256:
-        raise ValueError(f"Thread key must be exactly 256 bytes, got {len(key)}")
+    if len(key) != 32:
+        raise ValueError(f"Thread key must be exactly 32 bytes for AES-256, got {len(key)}")
 
     # Get agent directory
     private_dir = Path("memories/private/agents")
@@ -591,29 +575,34 @@ def store_gene_keys(
     Store gene keys (pattern observation logs) in the appropriate location (public or private).
     If privacy is 'private' and agent_secret is provided, encrypt and store privately. Otherwise, store unencrypted in public.
     """
+    import struct
     agent_uuid = None if privacy == "public" else ensure_agent_uuid()
     if privacy == "private" and agent_secret:
-        # PRIVATE (encrypted)
+        if agent_uuid is None:
+            raise ValueError("agent_uuid must not be None for private gene key storage")
+        # PRIVATE (encrypted, append-only per-record)
         private_dir = Path("memories/private/agents")
         agent_shard = shard_path(private_dir, agent_uuid)
         agent_dir = agent_shard / f"agent-{agent_uuid}"
         keys_dir = agent_dir / "keys"
         key_shard = shard_path(keys_dir, thread_uuid)
         key_shard.mkdir(parents=True, exist_ok=True)
-        # Serialize as NDJSON (one JSON object per line)
-        ndjson_str = "\n".join(json_dumps({**gk, "privacy": privacy, "agent_uuid": agent_uuid}) for gk in gene_keys)
-        ndjson_bytes = ndjson_str.encode("utf-8")
-        # Encrypt as before
+        gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson.enc"
         salt = (agent_uuid + thread_uuid + "gene_keys").encode("utf-8")
         kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
         encryption_key = kdf.derive(agent_secret.encode("utf-8"))
+        with open(gene_keys_path, "ab") as f:
+            for gk in gene_keys:
+                ndjson_line = json_dumps({**gk, "privacy": privacy, "agent_uuid": agent_uuid})
+                ndjson_bytes = ndjson_line.encode("utf-8")
         nonce = os.urandom(12)
         cipher = Cipher(algorithms.AES(encryption_key), modes.GCM(nonce), backend=default_backend())
         encryptor = cipher.encryptor()
         ciphertext = encryptor.update(ndjson_bytes) + encryptor.finalize()
         encrypted_blob = nonce + encryptor.tag + ciphertext
-        gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson.enc"
-        atomic_write(gene_keys_path, encrypted_blob)
+                # Write length prefix (4 bytes, big-endian)
+                f.write(struct.pack(">I", len(encrypted_blob)))
+                f.write(encrypted_blob)
         update_registry(key_shard, thread_uuid)
     else:
         # PUBLIC (unencrypted)
@@ -621,7 +610,8 @@ def store_gene_keys(
         key_shard = shard_path(keys_dir, thread_uuid)
         key_shard.mkdir(parents=True, exist_ok=True)
         gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson"
-        with open(gene_keys_path, "w", encoding="utf-8") as f:
+        # Change mode from "w" to "a" for appending
+        with open(gene_keys_path, "a", encoding="utf-8") as f:
             for gk in gene_keys:
                 f.write(json_dumps({**gk, "privacy": privacy, "agent_uuid": None}) + "\n")
         update_registry(key_shard, thread_uuid)
@@ -636,8 +626,9 @@ def load_gene_keys(
     Load gene keys from the appropriate location (public or private).
     If agent_uuid and agent_secret are provided, decrypt and load privately. Otherwise, load unencrypted from public.
     """
+    import struct
     if agent_uuid and agent_secret:
-        # PRIVATE (encrypted)
+        # PRIVATE (encrypted, per-record)
         private_dir = Path("memories/private/agents")
         agent_shard = shard_path(private_dir, agent_uuid)
         agent_dir = agent_shard / f"agent-{agent_uuid}"
@@ -653,12 +644,19 @@ def load_gene_keys(
                 with open(public_path, "r", encoding="utf-8") as f:
                     return [json_loads(line) for line in f if line.strip()]
             return []
-        # If we get here, the private file exists. Load and decrypt it.
-        with open(private_path, "rb") as f:
-            encrypted_blob = f.read()
         salt = (agent_uuid + thread_uuid + "gene_keys").encode("utf-8")
         kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
         decryption_key = kdf.derive(agent_secret.encode("utf-8"))
+        gene_keys = []
+        with open(private_path, "rb") as f:
+            while True:
+                len_bytes = f.read(4)
+                if not len_bytes or len(len_bytes) < 4:
+                    break
+                (blob_len,) = struct.unpack(">I", len_bytes)
+                encrypted_blob = f.read(blob_len)
+                if len(encrypted_blob) != blob_len:
+                    break  # Corrupt or truncated file
         nonce = encrypted_blob[:12]
         tag = encrypted_blob[12:28]
         ciphertext = encrypted_blob[28:]
@@ -666,10 +664,11 @@ def load_gene_keys(
         decryptor = cipher.decryptor()
         try:
             decrypted_data = decryptor.update(ciphertext) + decryptor.finalize()
-            ndjson_str = decrypted_data.decode("utf-8")
-            return [json_loads(line) for line in ndjson_str.splitlines() if line.strip()]
+                    ndjson_line = decrypted_data.decode("utf-8")
+                    gene_keys.append(json_loads(ndjson_line))
         except Exception:
-            return []
+                    continue  # Skip corrupt record
+        return gene_keys
     else:
         # PUBLIC (unencrypted)
         keys_dir = Path("memories/public/keys")
@@ -688,14 +687,9 @@ def load_thread_key(
 ) -> Optional[bytes]:
     """
     Load and decrypt the thread key for a private thread.
-    Returns the 256-byte key, or None if not found or decryption fails.
+    Returns the 32-byte key, or None if not found or decryption fails.
     """
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    from cryptography.hazmat.backends import default_backend
-    from cryptography.hazmat.primitives import hashes
-    import os
-
+    # Use top-level imports, remove redundant imports
     # Get agent directory
     private_dir = Path("memories/private/agents")
     agent_shard = shard_path(private_dir, agent_uuid)
@@ -725,7 +719,7 @@ def load_thread_key(
     decryptor = cipher.decryptor()
     try:
         key = decryptor.update(ciphertext) + decryptor.finalize()
-        if len(key) != 256:
+        if len(key) != 32:
             return None
         return key
     except Exception:
@@ -791,20 +785,9 @@ def children(agent_uuid: str, thread_uuid: str) -> List[str]:
         return []
     with open(meta_path, "r") as f:
         meta = json_loads(f.read())
-    val = meta.get("child_uuids", [])
-    # Always return a flat list of strings
-    if isinstance(val, list):
-        flat = []
-        for v in val:
-            if isinstance(v, str):
-                flat.append(v)
-            elif isinstance(v, list):
-                flat.extend([x for x in v if isinstance(x, str)])
-        return flat
-    elif isinstance(val, str):
-        return [val]
-    else:
-        return []
+    val = [c['uuid'] for c in meta.get('children', [])]
+    # Always return a flat list of strings (write path enforces this)
+    return list(val) if isinstance(val, list) else []
 
 
 # ====================================================================
@@ -1010,7 +993,7 @@ class ThreadChainCache:
             context_threads.append(cached)
 
             # Add child contexts (up to window_size)
-            for child_uuid in cached.get("child_uuids", [])[: window_size - len(context_threads)]:
+            for child_uuid in cached.get("children", [])[: window_size - len(context_threads)]:
                 child_data = self._load_thread_patterns(child_uuid)
                 if child_data:
                     context_threads.append(child_data)
@@ -1173,25 +1156,29 @@ class PatternIndex:
         return probabilities[:top_k]
 
     def find_similar_contexts(self, recent_patterns: List[int], k: int = 5) -> List[Dict]:
-        """Find historical contexts similar to recent pattern sequence"""
-        if len(recent_patterns) < 2:
+        """
+        Find historical contexts where a sequence of recent patterns appeared.
+        If the most recent pattern is very common, sample or cap the number of locations checked for performance.
+        """
+        if not recent_patterns:
             return []
-
-        # Look for matching sequences
-        matches = []
-
-        # Check each historical occurrence of the most recent pattern
-        last_pattern = recent_patterns[-1]
-        if last_pattern in self.pattern_locations:
-            for thread_uuid, offset, cycle in self.pattern_locations[last_pattern]:
+        most_recent = recent_patterns[-1]
+        locations = self.pattern_locations.get(most_recent, [])
+        # Cap the number of locations checked for performance
+        MAX_LOCATIONS = 100
+        if len(locations) > MAX_LOCATIONS:
+            import random
+            locations = random.sample(locations, MAX_LOCATIONS)
+        results = []
+        for thread_uuid, offset, cycle in locations:
                 # Calculate similarity score based on preceding patterns
                 score = self._calculate_context_similarity(thread_uuid, offset, recent_patterns)
                 if score > 0:
-                    matches.append({"thread_uuid": thread_uuid, "offset": offset, "cycle": cycle, "similarity": score})
+                results.append({"thread_uuid": thread_uuid, "offset": offset, "cycle": cycle, "similarity": score})
 
         # Sort by similarity and return top k
-        matches.sort(key=lambda x: x["similarity"], reverse=True)
-        return matches[:k]
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+        return results[:k]
 
     def _calculate_context_similarity(self, thread_uuid: str, offset: int, recent_patterns: List[int]) -> float:
         """Calculate similarity between recent patterns and historical context"""
@@ -1287,11 +1274,3 @@ class InformationEngine:
             key_index, resonance = inference_engine.process_byte(byte)
             update_callback(byte, key_index, resonance, "OUTPUT")
             self.stream_pointer += 1
-
-    def tensor_to_output_byte(self, T, F, G):
-        """
-        Canonical tensor-to-byte conversion using epigenome pattern matching.
-        This is the only spec-compliant method for deriving a byte from the current tensor state.
-        """
-        key_index = find_closest_pattern_index(T, F)
-        return G[key_index]

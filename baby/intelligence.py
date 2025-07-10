@@ -38,6 +38,8 @@ from baby.information import (
     shard_path,
     PatternIndex,
     load_thread_key,
+    json_dumps,  # Ensure json_dumps is always imported
+    json_loads,  # Ensure json_loads is always imported
 )
 from baby.types import PatternMetadata, FormatMetadata, GeneKeysMetadata
 
@@ -126,6 +128,8 @@ class IntelligenceEngine:
         self.pattern_distances = None
         if self.M and "pattern_distances" in self.M and "path" in self.M["pattern_distances"]:
             self.pattern_distances = load_pattern_distances(self.format_uuid)
+        # File handle for public thread NDJSON streaming
+        self._active_public_thread_handle = None
 
     def _get_or_create_format_uuid(self) -> str:
         """
@@ -179,7 +183,7 @@ class IntelligenceEngine:
                 "count": 0,
                 "first_cycle": None,
                 "last_cycle": None,
-                "gyration_feature": self.inference_engine.gyration_featurees[i],
+                "gyration_feature": self.inference_engine.gyration_features[i],
                 "confidence": 0.0,
             }
             patterns.append(pattern)
@@ -291,7 +295,7 @@ class IntelligenceEngine:
                 "count": 0,
                 "first_cycle": None,
                 "last_cycle": None,
-                "gyration_feature": self.inference_engine.gyration_featurees[i],
+                "gyration_feature": self.inference_engine.gyration_features[i],
                 "confidence": 0.0,
             }
             patterns.append(pattern)
@@ -318,6 +322,24 @@ class IntelligenceEngine:
             format_uuid=self.format_uuid,
         )
 
+        # --- NEW: Update parent metadata to add child ---
+        if parent_uuid is not None and self.agent_uuid is not None:
+            private_dir = Path("memories/private/agents")
+            agent_shard = shard_path(private_dir, self.agent_uuid)
+            agent_dir = agent_shard / f"agent-{self.agent_uuid}"
+            threads_dir = agent_dir / "threads"
+            parent_shard = shard_path(threads_dir, parent_uuid)
+            parent_meta_path = parent_shard / f"thread-{parent_uuid}.json"
+            if parent_meta_path.exists():
+                with open(parent_meta_path, "r") as f:
+                    parent_meta = json_loads(f.read())
+                if "children" not in parent_meta or not isinstance(parent_meta["children"], list):
+                    parent_meta["children"] = []
+                if new_thread_uuid not in [c["uuid"] for c in parent_meta["children"]]:
+                    parent_meta["children"].append({"uuid": new_thread_uuid, "name": None})
+                with open(parent_meta_path, "w") as f:
+                    f.write(json_dumps(parent_meta))
+
         # Reset the engine's state for the new thread.
         self.thread_uuid = new_thread_uuid
         self.thread_file_key = self._derive_file_key(self.inference_engine.T.copy(), self.agent_uuid, new_thread_uuid)
@@ -327,6 +349,11 @@ class IntelligenceEngine:
         self.parent_thread_uuid = parent_uuid
         self.child_thread_uuids = []
 
+        # Close any existing handle before starting a new thread
+        if self._active_public_thread_handle:
+            self._active_public_thread_handle.close()
+            self._active_public_thread_handle = None
+
         # Store the new thread's key for future use.
         if (
             privacy == "private"
@@ -335,6 +362,33 @@ class IntelligenceEngine:
             and self.thread_file_key is not None
         ):
             store_thread_key(self.agent_uuid, new_thread_uuid, self.thread_file_key, self.agent_secret)
+
+        if privacy == "public":
+            threads_dir = shard_path(Path("memories/public/threads"), str(new_thread_uuid))
+            thread_shard = shard_path(threads_dir, str(new_thread_uuid))
+            thread_path = thread_shard / f"thread-{new_thread_uuid}.ndjson"
+            # Open the file in append mode and store the handle
+            self._active_public_thread_handle = open(thread_path, "a", encoding="utf-8")
+            # --- NEW: Create public thread metadata file immediately ---
+            meta_path = thread_shard / f"thread-{new_thread_uuid}.json"
+            now = datetime.datetime.now().isoformat()
+            meta = {
+                "thread_uuid": new_thread_uuid,
+                "thread_name": None,
+                "agent_uuid": None,
+                "parent_uuid": None,
+                "parent_name": None,
+                "children": [],
+                "format_uuid": self.format_uuid,
+                "curriculum": None,
+                "tags": None,
+                "created_at": now,
+                "last_updated": now,
+                "size_bytes": 0,
+                "privacy": "public",
+            }
+            with open(meta_path, "w") as f:
+                f.write(json_dumps(meta))
 
         return new_thread_uuid
 
@@ -357,76 +411,105 @@ class IntelligenceEngine:
         return input_stream, intermediate_ciphertext
 
     def _append_to_thread(self, event: dict, privacy: str = "private") -> None:
-        """
-        Append a structured event to the current thread as NDJSON, creating a new one if capacity is exceeded.
-
-        Args:
-            event: Structured event dict to append (e.g., {"type": "input", "data": <base64 str>})
-        """
-        # 1. Ensure a thread exists.
+        # 1. Ensure a thread exists (this will call start_new_thread if needed)
         if not self.thread_uuid:
             self.start_new_thread(privacy=privacy)
-        # else: do nothing; assume state is already loaded
-
-        # 2. Serialize event as NDJSON line
-        json_line = json_dumps(event)
-        if not json_line.endswith("\n"):
-            json_line += "\n"
-        json_bytes = json_line.encode("utf-8")
-
-        # 3. Decide if a new thread is needed BEFORE modifying the current one.
+        # 2. Serialize event
+        json_line = json_dumps(event).encode("utf-8") + b"\n"
+        # 3. Check for thread rotation BEFORE writing
         max_size_bytes = self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
-        if self.current_thread_size > 0 and (self.current_thread_size + len(json_bytes) > max_size_bytes):
-            self._save_current_thread(privacy=privacy)
+        if self.current_thread_size > 0 and (self.current_thread_size + len(json_line) > max_size_bytes):
+            self.finalize_and_save_thread(privacy=privacy)  # This will be refactored in a later step
             self.start_new_thread(privacy=privacy)
+        # 4. Write or Buffer based on privacy
+        if privacy == "public" and self._active_public_thread_handle:
+            if self.thread_uuid is None:
+                raise ValueError("thread_uuid must not be None for public thread metadata update")
+            # For public threads, write directly to the file handle
+            self._active_public_thread_handle.write(json_line.decode("utf-8"))
+            self._active_public_thread_handle.flush()
+            # --- REMOVED: Per-event metadata update for public threads ---
+        else:
+            # For private threads, continue using the in-memory buffer
+            self.active_thread_content.extend(json_line)
+        # 5. Reliably update size
+        self.current_thread_size += len(json_line)
+        # 6. DO NOT save the entire thread here anymore for public threads.
+        # self._save_current_thread(privacy=privacy)  # <-- REMOVED for public threads
 
-        # 4. Append NDJSON line to the active thread
-        self.active_thread_content.extend(json_bytes)
-
-        # 5. Reliably update the size and save the thread's current state.
-        self.current_thread_size = len(self.active_thread_content)
-        self._save_current_thread(privacy=privacy)
-
-    def _save_current_thread(self, privacy: str = "private") -> None:
-        """Save the current thread content to disk (NDJSON or encrypted NDJSON)"""
-        if not self.active_thread_content or not self.thread_uuid:
+    def finalize_and_save_thread(self, privacy: str = "private") -> None:
+        """
+        Finalizes the active thread. For public threads, this closes the file handle.
+        For private threads, this encrypts and writes the in-memory buffer to disk.
+        This method should be called when a thread is full or a session ends.
+        """
+        if not self.thread_uuid:
             return
 
-        # Use the existing end_current_thread logic but with accumulated content
-        # Note: self.active_thread_content is now NDJSON (or encrypted NDJSON), not a binary blob.
-        self.end_current_thread(plaintext_to_save=bytes(self.active_thread_content), privacy=privacy)
+        # --- Finalize Public Thread ---
+        if privacy == "public":
+            if self._active_public_thread_handle:
+                self._active_public_thread_handle.close()
+                self._active_public_thread_handle = None
+                # --- NEW: Update public thread metadata once at finalization ---
+                from baby.information import shard_path, json_loads, json_dumps
+                from pathlib import Path
+                import os
 
-    def end_current_thread(self, plaintext_to_save: bytes, privacy: str = "private") -> None:
-        """
-        End the current thread, encrypting the provided NDJSON (if in private mode)
-        and saving all data.
-        """
-        if not self.thread_uuid:
-            raise RuntimeError("Thread UUID is not set.")
-
-        final_data_to_save = plaintext_to_save
-        if privacy == "private":
+                threads_dir = shard_path(Path("memories/public/threads"), self.thread_uuid)
+                thread_shard = shard_path(threads_dir, self.thread_uuid)
+                meta_path = thread_shard / f"thread-{self.thread_uuid}.json"
+                now = datetime.datetime.now().isoformat()
+                meta = None
+                if os.path.exists(meta_path):
+                    with open(meta_path, "r") as f:
+                        meta = json_loads(f.read())
+                if not meta:
+                    meta = {
+                        "thread_uuid": self.thread_uuid,
+                        "thread_name": None,
+                        "agent_uuid": None,
+                        "parent_uuid": None,
+                        "parent_name": None,
+                        "children": [],
+                        "format_uuid": self.format_uuid,
+                        "curriculum": None,
+                        "tags": None,
+                        "created_at": now,
+                        "last_updated": now,
+                        "size_bytes": 0,
+                        "privacy": "public",
+                    }
+                meta["last_updated"] = now
+                meta["privacy"] = "public"
+                # Update size_bytes (accurate at finalization)
+                thread_path = thread_shard / f"thread-{self.thread_uuid}.ndjson"
+                if os.path.exists(thread_path):
+                    meta["size_bytes"] = os.path.getsize(thread_path)
+                with open(meta_path, "w") as f:
+                    f.write(json_dumps(meta))
+        # --- Finalize Private Thread ---
+        else:  # privacy == "private"
+            if not self.active_thread_content:
+                return  # Nothing to save
+            final_data_to_save = bytes(self.active_thread_content)
             if self.thread_file_key is None:
-                raise RuntimeError("Thread file key is not set for a private thread. Call start_new_thread() first.")
-            # Derive a 32-byte AES key from the 256-byte thread_file_key using PBKDF2HMAC with thread_uuid as salt
-            salt = (self.thread_uuid).encode("utf-8")
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
-                length=32,  # AES-256 requires a 32-byte key
-                salt=salt,
-                iterations=100000,
-                backend=default_backend(),
-            )
-            aes_key = kdf.derive(self.thread_file_key)
-            final_data_to_save = self._encrypt_data(plaintext_to_save, aes_key)
+                raise RuntimeError("Thread file key is not set for a private thread.")
+            # Use thread_file_key directly as the AES-256-GCM key
+            aes_key = self.thread_file_key
+            encrypted_blob = self._encrypt_data(final_data_to_save, aes_key)
+            save_thread(privacy, self.thread_uuid, encrypted_blob, len(final_data_to_save))
 
-        save_thread(privacy, self.thread_uuid, final_data_to_save, len(plaintext_to_save))
-        store_gene_keys(self.thread_uuid, self.current_thread_keys, privacy, self.agent_secret)
+        # --- Common Finalization Logic for BOTH public and private ---
+        if self.current_thread_keys:
+            store_gene_keys(self.thread_uuid, self.current_thread_keys, privacy, self.agent_secret)
         self.M.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
         self.M.setdefault("metadata", {})["usage_count"] = self.M.get("metadata", {}).get("usage_count", 0) + 1
         store_format(self.M)
         if self.pattern_index:
             self.pattern_index.update_from_thread(self.thread_uuid, self.current_thread_keys)
+            self.active_thread_content.clear()
+            self.current_thread_keys.clear()
 
     def generate_and_save_response(self, length: int = 100, privacy: str = "private") -> bytes:
         """
@@ -614,21 +697,21 @@ class IntelligenceEngine:
             if score > max_score:
                 max_score = score
                 best_candidate = candidate
-
-        return best_candidate.get("index") if best_candidate else None
+        if best_candidate is not None:
+            return best_candidate.get("index")
+        return None
 
     def decode(self, key_index: int) -> Optional[str]:
         """
-        Find character label for pattern index
+        Decode a pattern index to its character label
         Args:
             key_index: Pattern index to decode
         Returns:
-            str: Character label or None if not set
+            str: Character label or None if not found
         """
-        pattern = self.M.get("patterns", [])[key_index]
-        character = pattern.get("character")
-        if isinstance(character, str):
-            return character
+        patterns = self.M.get("patterns", [])
+        if 0 <= key_index < len(patterns):
+            return patterns[key_index].get("character")
         return None
 
     def load_thread_content(self, thread_uuid: str) -> Optional[list]:
@@ -642,12 +725,8 @@ class IntelligenceEngine:
             thread_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret)
             if not thread_key:
                 return None
-            # Derive the same 32-byte AES key as in end_current_thread
-            salt = (thread_uuid).encode("utf-8")
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend()
-            )
-            aes_key = kdf.derive(thread_key)
+            # Use thread_key directly as the AES-256-GCM key
+            aes_key = thread_key
             try:
                 thread_content_raw = self._decrypt_data(thread_content_raw, aes_key)
             except Exception:
@@ -763,37 +842,40 @@ class IntelligenceEngine:
                 secondary_data = load_format(secondary_uuid)
                 if not secondary_data:
                     continue
+                # Merge pattern metadata
+                primary_patterns = composed_format.get("patterns", [])
+                secondary_patterns = secondary_data.get("patterns", [])
+                for i in range(256):
+                    if i >= len(primary_patterns) or i >= len(secondary_patterns):
+                        continue
+                    primary_pattern = primary_patterns[i]
+                    secondary_pattern = secondary_patterns[i]
 
-                    # Merge pattern metadata
-                    for i in range(256):
-                        primary_pattern = composed_format["patterns"][i]
-                        secondary_pattern = secondary_data["patterns"][i]
+                    # If primary doesn't have character but secondary does, use secondary's
+                    if primary_pattern.get("character") is None and secondary_pattern.get("character") is not None:
+                        primary_pattern["character"] = secondary_pattern["character"]
 
-                        # If primary doesn't have character but secondary does, use secondary's
-                        if primary_pattern.get("character") is None and secondary_pattern.get("character") is not None:
-                            primary_pattern["character"] = secondary_pattern["character"]
+                    # Merge counts and confidences (weighted average)
+                    p_count = primary_pattern.get("count", 0)
+                    s_count = secondary_pattern.get("count", 0)
+                    total_count = p_count + s_count
 
-                        # Merge counts and confidences (weighted average)
-                        p_count = primary_pattern.get("count", 0)
-                        s_count = secondary_pattern.get("count", 0)
-                        total_count = p_count + s_count
+                    if total_count > 0:
+                        # Update confidence with weighted average
+                        p_conf = primary_pattern.get("confidence", 0.0)
+                        s_conf = secondary_pattern.get("confidence", 0.0)
+                        composed_format["patterns"][i]["confidence"] = (
+                            p_conf * p_count + s_conf * s_count
+                        ) / total_count
 
-                        if total_count > 0:
-                            # Update confidence with weighted average
-                            p_conf = primary_pattern.get("confidence", 0.0)
-                            s_conf = secondary_pattern.get("confidence", 0.0)
-                            composed_format["patterns"][i]["confidence"] = (
-                                p_conf * p_count + s_conf * s_count
-                            ) / total_count
-
-                    # Add secondary format's tags
-                    composed_format.setdefault("metadata", {}).setdefault("tags", []).extend(
-                        secondary_data.get("metadata", {}).get("tags", [])
-                    )
-                    # Remove duplicates
-                    composed_format.setdefault("metadata", {})["tags"] = list(
-                        set(composed_format.get("metadata", {}).get("tags", []))
-                    )
+                # Add secondary format's tags
+                composed_format.setdefault("metadata", {}).setdefault("tags", []).extend(
+                    secondary_data.get("metadata", {}).get("tags", [])
+                )
+                # Remove duplicates
+                composed_format.setdefault("metadata", {})["tags"] = list(
+                    set(composed_format.get("metadata", {}).get("tags", []))
+                )
 
             # Save the composed format
             store_format(composed_format)
@@ -810,11 +892,12 @@ class IntelligenceEngine:
             return None
         tensor_bytes = epigenome_snapshot.tobytes()
         salt = (agent_uuid + thread_uuid).encode("utf-8")
-        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=256, salt=salt, iterations=100000, backend=default_backend())
+        # Derive a 32-byte AES key directly
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
         stateless_bytes = bytes([gene_stateless])
         key_material = tensor_bytes + stateless_bytes
-        key = kdf.derive(key_material)
-        return key
+        aes_key = kdf.derive(key_material)
+        return aes_key
 
     def _derive_agent_key(self) -> Optional[bytes]:
         if self.agent_uuid is None or self.agent_secret is None:
@@ -983,18 +1066,17 @@ class IntelligenceEngine:
             "relationship_stats": {"threads_with_parents": 0, "threads_with_children": 0, "isolated_threads": 0},
         }
         for thread_uuid in thread_uuids:
-            # A full UUID is 36 characters. Shard names are 2. This filters them out.
-            if len(thread_uuid) < 36:
-                continue
             thread_shard = shard_path(threads_dir, thread_uuid)
             meta_path = thread_shard / f"thread-{thread_uuid}.json"
+            if not meta_path.exists():
+                continue
             try:
                 with open(meta_path, "r") as f:
                     meta = json_loads(f.read())
                 size = meta.get("size_bytes", 0)
                 stats["total_size_bytes"] += size
                 has_parent = meta.get("parent_uuid") is not None
-                has_children = len(meta.get("child_uuids", [])) > 0
+                has_children = len(meta.get("children", [])) > 0
                 if has_parent:
                     stats["relationship_stats"]["threads_with_parents"] += 1
                 if has_children:
@@ -1010,7 +1092,7 @@ class IntelligenceEngine:
                     "capacity_percent": (size / max_size_bytes) * 100 if max_size_bytes else 0,
                     "has_parent": has_parent,
                     "has_children": has_children,
-                    "child_count": len(meta.get("child_uuids", [])),
+                    "child_count": len(meta.get("children", [])),
                 }
                 stats["thread_details"].append(thread_detail)
             except FileNotFoundError:
@@ -1032,18 +1114,20 @@ class IntelligenceEngine:
             Dict: Pattern statistics including usage, relationships, and contexts
         """
         # Get pattern metadata from format
-        pattern_meta = self.M.get("patterns", [])[pattern_index]
+        pattern_meta = (
+            self.M.get("patterns", [])[pattern_index] if pattern_index < len(self.M.get("patterns", [])) else {}
+        )
 
         # Get historical contexts from pattern index
         contexts = {}
-        if self.pattern_index and pattern_index in self.pattern_index.pattern_contexts:
+        if self.pattern_index and pattern_index in getattr(self.pattern_index, "pattern_contexts", {}):
             pattern_contexts = self.pattern_index.pattern_contexts[pattern_index]
 
             # Get most common preceding patterns
-            before_patterns = sorted(pattern_contexts["before"].items(), key=lambda x: x[1], reverse=True)[:10]
+            before_patterns = sorted(pattern_contexts.get("before", {}).items(), key=lambda x: x[1], reverse=True)[:10]
 
             # Get most common following patterns
-            after_patterns = sorted(pattern_contexts["after"].items(), key=lambda x: x[1], reverse=True)[:10]
+            after_patterns = sorted(pattern_contexts.get("after", {}).items(), key=lambda x: x[1], reverse=True)[:10]
 
             contexts = {"before": before_patterns, "after": after_patterns}
 
@@ -1051,7 +1135,8 @@ class IntelligenceEngine:
         current_resonance = None
         if self.inference_engine:
             resonances = self.inference_engine.compute_pattern_resonances()
-            current_resonance = resonances[pattern_index]
+            if pattern_index < len(resonances):
+                current_resonance = resonances[pattern_index]
 
         return {
             "pattern_index": pattern_index,
@@ -1064,6 +1149,44 @@ class IntelligenceEngine:
             "current_resonance": current_resonance,
             "contexts": contexts,
         }
+
+    def load_thread_metadata(self, thread_uuid: str, privacy: str = "private") -> dict:
+        """
+        Load thread metadata from disk.
+        """
+        if privacy == "public":
+            threads_dir = shard_path(Path("memories/public/threads"), thread_uuid)
+        else:
+            if self.agent_uuid is None:
+                raise ValueError("agent_uuid must not be None for private thread metadata loading")
+            private_dir = Path("memories/private/agents")
+            agent_shard = shard_path(private_dir, self.agent_uuid)
+            agent_dir = agent_shard / f"agent-{self.agent_uuid}"
+            threads_dir = agent_dir / "threads"
+            threads_dir = shard_path(threads_dir, thread_uuid)
+        meta_path = threads_dir / f"thread-{thread_uuid}.json"
+        if not meta_path.exists():
+            raise FileNotFoundError(f"Thread metadata not found for {thread_uuid}")
+        with open(meta_path, "r") as f:
+            return json_loads(f.read())
+
+    def resume_thread(self, thread_uuid: str, privacy: str = "private") -> None:
+        """
+        Resume appending to an existing thread. Sets current_thread_size and opens file handle if public.
+        """
+        meta = self.load_thread_metadata(thread_uuid, privacy=privacy)
+        self.current_thread_size = meta.get("size_bytes", 0)
+        self.thread_uuid = thread_uuid
+        if privacy == "public":
+            # Close any existing handle first
+            if self._active_public_thread_handle:
+                self._active_public_thread_handle.close()
+                self._active_public_thread_handle = None
+            threads_dir = shard_path(Path("memories/public/threads"), thread_uuid)
+            thread_shard = shard_path(threads_dir, thread_uuid)
+            thread_path = thread_shard / f"thread-{thread_uuid}.ndjson"
+            self._active_public_thread_handle = open(thread_path, "a", encoding="utf-8")
+        # For private: buffer is not loaded for appending, as private threads are not typically resumed for append
 
 
 def weighted_choice(items: List[Any], weights: List[float]) -> Any:
@@ -1107,53 +1230,47 @@ def initialize_intelligence_engine(
     - No args: Auto-detects mode. Private if 'baby_preferences.json' has a secret, else Public.
     - Explicit args: Initializes based on provided uuid/secret.
     """
-    # This is the ambiguous case: called with no arguments, or with explicit Nones.
+    # Default to public mode
+    _agent_uuid = None
+    _agent_secret = None
+
+    # If no explicit args were passed, try to auto-detect private mode
     if agent_uuid is None and agent_secret is None:
         baby_prefs_path = Path("baby/baby_preferences.json")
-        # Try to enter auto-private mode by checking preferences file.
         if baby_prefs_path.exists():
             try:
                 with open(baby_prefs_path, "r") as f:
-                    baby_prefs = json.loads(f.read())
+                    baby_prefs = json_loads(f.read())
                 loaded_secret = baby_prefs.get("agent_secret")
                 if loaded_secret:
-                    # Success: A secret exists. We are in auto-private mode.
-                    # Set the parameters and let the private-mode logic below handle it.
-                    agent_uuid = ensure_agent_uuid()
-                    agent_secret = loaded_secret
-                # If no secret in file, fall through to public mode init.
+                    # Auto-private mode detected
+                    _agent_uuid = ensure_agent_uuid()
+                    _agent_secret = loaded_secret
             except (json.JSONDecodeError, IOError):
-                # Corrupt or unreadable file, fall through to public mode init.
-                pass
-        # If after the above, uuid is still None, it must be public mode.
-        if agent_uuid is None:
-            inference_engine = InferenceEngine()
-            information_engine = InformationEngine()
-            return IntelligenceEngine(
-                agent_uuid=None,
-                agent_secret=None,
-                inference_engine=inference_engine,
-                information_engine=information_engine,
-                format_uuid=format_uuid,
-                formats=formats,
-            )
-    # --- If we reach here, we are in a private mode (explicitly or auto-detected) ---
-    # Ensure we have a UUID (for cases where only a secret was passed, or for auto-mode)
-    if agent_uuid is None:
-        agent_uuid = ensure_agent_uuid()
-    # Try to load secret if not provided (read-only private mode)
-    if agent_secret is None:
-        try:
-            with open(Path("baby/baby_preferences.json"), "r") as f:
-                agent_secret = json.loads(f.read()).get("agent_secret")
-        except (FileNotFoundError, json.JSONDecodeError, IOError):
-            agent_secret = None  # Remain read-only if file not found/invalid
-    # Initialize the private engine
+                pass  # Failed to read prefs, remain in public mode
+    else:
+        # Use explicit args for private mode
+        _agent_uuid = agent_uuid or ensure_agent_uuid()
+        _agent_secret = agent_secret
+        # Optional: attempt to load secret if only UUID was provided
+        if _agent_secret is None:
+            baby_prefs_path = Path("baby/baby_preferences.json")
+            if baby_prefs_path.exists():
+                try:
+                    with open(baby_prefs_path, "r") as f:
+                        baby_prefs = json_loads(f.read())
+                    loaded_secret = baby_prefs.get("agent_secret")
+                    if loaded_secret:
+                        _agent_secret = loaded_secret
+                except (json.JSONDecodeError, IOError):
+                    pass  # Remain with None if cannot load
+
+    # Now, initialize the engines with the determined state
     inference_engine = InferenceEngine()
     information_engine = InformationEngine()
     return IntelligenceEngine(
-        agent_uuid=agent_uuid,
-        agent_secret=agent_secret,
+        agent_uuid=_agent_uuid,
+        agent_secret=_agent_secret,
         inference_engine=inference_engine,
         information_engine=information_engine,
         format_uuid=format_uuid,

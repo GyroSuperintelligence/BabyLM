@@ -18,16 +18,16 @@ from datetime import datetime
 import textwrap
 
 # Rich terminal output
-try:
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich.progress import Progress, SpinnerColumn, TextColumn
-    from rich.prompt import Prompt, Confirm
-    from rich.tree import Tree
-    from rich.layout import Layout
-    from rich.live import Live
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.prompt import Prompt, Confirm
+from rich.tree import Tree
+from rich.layout import Layout
+from rich.live import Live
 
+try:
     RICH_AVAILABLE = True
     console = Console()
 except ImportError:

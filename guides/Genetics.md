@@ -6,9 +6,12 @@
 |----------------|------------------------------|-------------------------------|
 | Governance     | Thread files                  | Macro context, gating         |
 | Information    | Gene Keys                     | Micro context, embedding      |
-| Inference      | Formats file                  | Translation, gating           |
-| Intelligence   | Epigenome mask                | Read: macro gene (state)      |
+| Intelligence   | Formats file                  | Semantic context, closure     |
+| Inference      | Epigenome mask                | Translation, gating           |
+| Intelligence   | Genome mask                   | Read: macro gene (state)      |
 | Intelligence   | Genome mask                   | Write: micro gene (output)    |
+
+*Note: The code architecture maps the Formats file to the Intelligence (S4) layer, not Inference (S3). S4 manages FormatMetadata and provides semantic context for closure, while S3 operates purely on tensor physics. This is more aligned with the CGM philosophy and the actual implementation.*
 
 *Macro context refers to persistent structural memory (e.g., conversation threads), while micro context refers to fine-grained inference events and local input-output cycles.*
 
@@ -133,6 +136,7 @@ This forms a recursive loop: the output of Egress (pattern_index) becomes the in
 | Gyronorm Format   | public/formats/.../format-uuid.json          | Variable                    | The Semantic Bridge. Maps pattern indices to human-meaningful characters (e.g., index 15 -> 'A') and stores learned statistics. |
 | Gene Key          | .../gene-uuid.ndjson                         | Variable                    | The Event Log. A detailed, append-only record of every single inference event (input/output, pattern match, resonance). |
 | Thread            | .../thread-uuid.ndjson                       | ≤64 MiB                     | The Conversation Log. A structured NDJSON file containing the sequence of inputs and outputs that form a conversation. |
+| thread_file_key   | Derived key (32 bytes, 256 bits)             | 32 bytes                    | AES-256 encryption key for private threads. |
 
 ### 3.1 Tensor Structures
 
@@ -193,7 +197,7 @@ The 256 canonical patterns represent the exhaustive set of all possible operatio
 ```python
 def derive_canonical_patterns():
     patterns = []
-    gyration_featurees = []
+    gyration_features = []
     base_tensor = gene_add.copy()
     
     for mask in range(256):
@@ -206,9 +210,9 @@ def derive_canonical_patterns():
         
         patterns.append(T.flatten())
         gyration_feature = classify_pattern_resonance(mask)
-        gyration_featurees.append(gyration_feature)
+        gyration_features.append(gyration_feature)
     
-    return patterns, gyration_featurees
+    return patterns, gyration_features
 ```
 
 **Pattern Classification:**
@@ -515,7 +519,7 @@ def tensor_to_output_byte(T, F, G):
 - `agent_uuid`: UUID of the current agent
 - `agent_secret`: Persistent secret
 - `thread_uuid`: UUID of active thread
-- `thread_file_key`: 256-byte key for encrypting the current thread
+- `thread_file_key`: 32-byte key for AES-256 encryption
 - `M`: Pattern Metadata
 - `current_thread_keys`: An in-memory list of `GeneKeysMetadata` dictionaries for the current session. This acts as a write-buffer that is flushed to the persistent, append-only Gene Key file (`gene-<uuid>.ndjson.enc` or `gene-<uuid>.ndjson`) when the thread is saved or closed.
 - `pattern_index`: Index of patterns to thread locations for fast retrieval
@@ -747,7 +751,7 @@ During inference, the active `format_uuid` is pulled from thread metadata or the
 | `cycle_counter` | integer | Progression | Must maintain sequential integrity |
 | `agent_uuid` | string | UUID format | Must persist across restarts |
 | `thread_uuid` | string | UUID format | Must be registered in central registry |
-| `thread_file_key` | bytes[256] | Key integrity | Must be derived deterministically |
+| `thread_file_key` | bytes[32] | Key integrity | Must be 32 bytes (256 bits) for AES-256, derived deterministically |
 | `current_thread_keys` | array | `GeneKeysMetadata` dicts | In-memory write-buffer for events before flushing to a persistent file. |
 
 **Degeneracy:**

@@ -32,13 +32,16 @@ gene_add = np.array(
 gene_stateless = 0xAA  # 10101010 in binary
 
 
-def apply_operation(T: np.ndarray, bit_index: int) -> None:
+def apply_operation(T: np.ndarray, bit_index: int) -> np.ndarray:
     """
-    Apply tensor operation based on bit index
+    Apply tensor operation based on bit index (pure function).
 
     Args:
-        T: Tensor to modify (expected shape [4, 2, 3, 2])
+        T: Tensor to transform (expected shape [4, 2, 3, 2])
         bit_index: Position (0-7) in the 8-bit gene_mutated mask
+
+    Returns:
+        np.ndarray: New tensor with the operation applied
 
     Operation mapping:
     - bit_index 0,7: L0 (Left Identity) - Do nothing
@@ -46,16 +49,18 @@ def apply_operation(T: np.ndarray, bit_index: int) -> None:
     - bit_index 2,5: FG (Forward Gyration) - Flip rows 0 and 2
     - bit_index 3,4: BG (Backward Gyration) - Flip rows 1 and 3
     """
+    T_new = T.copy()
     if bit_index in [0, 7]:  # L0: Identity
         pass  # Do nothing
     elif bit_index in [1, 6]:  # LI: Global inverse
-        T *= -1
+        T_new *= -1
     elif bit_index in [2, 5]:  # FG: Forward gyration
-        T[0] *= -1
-        T[2] *= -1
+        T_new[0] *= -1
+        T_new[2] *= -1
     elif bit_index in [3, 4]:  # BG: Backward gyration
-        T[1] *= -1
-        T[3] *= -1
+        T_new[1] *= -1
+        T_new[3] *= -1
+    return T_new
 
 
 def gyrodistance(T1: np.ndarray, T2: np.ndarray) -> float:
@@ -94,10 +99,10 @@ def derive_canonical_patterns() -> Tuple[np.ndarray, List[str]]:
     Returns:
         Tuple containing:
         - patterns: Array of shape [256, 48] containing all canonical patterns
-        - gyration_featurees: List of 256 class labels for each pattern
+        - gyration_features: List of 256 class labels for each pattern
     """
     patterns = []
-    gyration_featurees = []
+    gyration_features = []
 
     # Start with base tensor
     base_tensor = gene_add.copy().astype(np.float32)
@@ -110,19 +115,19 @@ def derive_canonical_patterns() -> Tuple[np.ndarray, List[str]]:
         # Apply operations according to bits in the mask
         for i in range(8):
             if mask & (1 << i):
-                apply_operation(T, i)
+                T = apply_operation(T, i)
 
         # Store the flattened pattern
         patterns.append(T.flatten())
 
         # Classify the pattern's resonance
         gyration_feature = classify_pattern_resonance(mask)
-        gyration_featurees.append(gyration_feature)
+        gyration_features.append(gyration_feature)
 
     # Convert list to numpy array
     patterns_array = np.array(patterns, dtype=np.float32)
 
-    return patterns_array, gyration_featurees
+    return patterns_array, gyration_features
 
 
 def classify_pattern_resonance(mask: int) -> str:

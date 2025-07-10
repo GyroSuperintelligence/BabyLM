@@ -255,21 +255,57 @@ class TestPublicMode:
         assert engine.pattern_index is None  # PatternIndex requires an agent
 
     def test_public_thread_and_gene_keys_storage(self, public_intelligence_engine):
-        """Verify that threads and gene_keys are saved unencrypted to public directories."""
+        """Verify that threads and gene_keys are saved unencrypted to public directories and are append-only NDJSON."""
         engine = public_intelligence_engine
-        engine.process_input_stream(b"public data")
+        engine.process_input_stream(b"public data 1")
+        first_thread_uuid = engine.thread_uuid
 
-        assert engine.thread_uuid is not None
+        # Append more data to the same thread (simulate session resume)
+        engine.resume_thread(first_thread_uuid, privacy="public")
+        engine.process_input_stream(b"public data 2")
 
-        # Check for public thread file
-        thread_shard = shard_path(Path("memories/public/threads"), engine.thread_uuid)
-        assert (thread_shard / f"thread-{engine.thread_uuid}.dat").exists()  # Note: .dat, not .enc
-        assert not (thread_shard / f"thread-{engine.thread_uuid}.enc").exists()
+        # Check for public thread NDJSON file
+        thread_shard = shard_path(Path("memories/public/threads"), first_thread_uuid)
+        thread_path = thread_shard / f"thread-{first_thread_uuid}.ndjson"
+        assert thread_path.exists()
+        assert not (thread_shard / f"thread-{first_thread_uuid}.enc").exists()
 
-        # Check for public gene keys file
-        keys_shard = shard_path(Path("memories/public/keys"), engine.thread_uuid)
-        assert (keys_shard / f"gene-{engine.thread_uuid}.ndjson").exists()
-        assert not (keys_shard / f"gene-{engine.thread_uuid}.ndjson.enc").exists()
+        # Check that both events are present (append-only)
+        with open(thread_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        assert any("public data 1" in line for line in lines)
+        assert any("public data 2" in line for line in lines)
+        assert len(lines) >= 2  # At least two events
+
+        # Check for public gene keys NDJSON file
+        keys_shard = shard_path(Path("memories/public/keys"), first_thread_uuid)
+        gene_keys_path = keys_shard / f"gene-{first_thread_uuid}.ndjson"
+        assert gene_keys_path.exists()
+        assert not (keys_shard / f"gene-{first_thread_uuid}.ndjson.enc").exists()
+
+        # Append more gene keys and verify append-only
+        from baby.types import GeneKeysMetadata
+        import datetime
+
+        new_gene_key = GeneKeysMetadata(
+            cycle=999,
+            pattern_index=123,
+            thread_uuid=first_thread_uuid,
+            agent_uuid=None,
+            format_uuid="test-format",
+            event_type="INPUT",
+            source_byte=42,
+            resonance=0.5,
+            created_at=datetime.datetime.now().isoformat(),
+            privacy="public",
+        )
+        from baby.information import store_gene_keys
+
+        store_gene_keys(first_thread_uuid, [new_gene_key], privacy="public")
+        with open(gene_keys_path, "r", encoding="utf-8") as f:
+            gene_key_lines = f.readlines()
+        assert any('"pattern_index": 123' in line for line in gene_key_lines)
+        assert len(gene_key_lines) >= 1  # At least one gene key event
 
     def test_private_operations_fail_in_public_mode(self, public_intelligence_engine):
         """Verify that operations requiring a key fail gracefully."""
@@ -510,15 +546,20 @@ class TestEnhancedThreadManagement:
         engine.process_input_stream(b"First part")
         engine.process_input_stream(b"Second part")
         engine.process_input_stream(b"Third part")
+        # Explicitly finalize to ensure content is written
+        engine.finalize_and_save_thread()
 
         # Should still be in the same thread
         thread_uuid = engine.thread_uuid
 
         # Load the thread content and verify accumulation
         content = engine.load_thread_content(thread_uuid)
-        assert b"First part" in content
-        assert b"Second part" in content
-        assert b"Third part" in content
+        assert content is not None
+        # Check that each part is present in the decoded data fields
+        data_fields = [event["data"] for event in content if "data" in event]
+        assert b"First part" in data_fields
+        assert b"Second part" in data_fields
+        assert b"Third part" in data_fields
 
     def test_thread_metadata_consistency(self, initialized_intelligence_engine):
         """Test that thread metadata remains consistent across operations"""
@@ -526,6 +567,7 @@ class TestEnhancedThreadManagement:
 
         # Create a thread with metadata
         engine.process_input_stream(b"test content")
+        engine.finalize_and_save_thread()  # Ensure thread is saved and metadata is updated
         thread_uuid = engine.thread_uuid
 
         # Verify metadata exists and is consistent
@@ -553,12 +595,12 @@ class TestIntegration:
 
     def test_end_to_end_processing(self, initialized_intelligence_engine):
         """Test end-to-end processing of input data."""
-        # The 'initialized_intelligence_engine' fixture has already done all the setup.
         intelligence_engine = initialized_intelligence_engine
 
         # Process input data
         test_input = b"Test input for end-to-end processing"
         plaintext, ciphertext = intelligence_engine.process_input_stream(test_input)
+        intelligence_engine.finalize_and_save_thread()  # Ensure thread is saved
 
         # Verify results
         assert plaintext == test_input
@@ -567,6 +609,7 @@ class TestIntegration:
 
         # Generate response
         response = intelligence_engine.generate_and_save_response(length=20)
+        intelligence_engine.finalize_and_save_thread()  # Ensure thread is saved
 
         # Verify response
         assert len(response) == 20
@@ -595,13 +638,15 @@ class TestIntegration:
         # 1. Process some input to create a thread
         original_content = b"This content will be saved and then reloaded."
         intelligence_engine.process_input_stream(original_content)
+        intelligence_engine.finalize_and_save_thread()  # Ensure thread is saved
         thread_uuid = intelligence_engine.thread_uuid
 
-        # 2. Load the thread content back
-        loaded_content = intelligence_engine.load_thread_content(thread_uuid)
-
-        # 3. Verify the thread content matches
-        assert loaded_content == original_content
+        # 2. Load the thread content back (as NDJSON event list)
+        loaded_events = intelligence_engine.load_thread_content(thread_uuid)
+        assert loaded_events is not None
+        # 3. Verify the thread content matches (check data fields)
+        data_fields = [event["data"] for event in loaded_events if "data" in event]
+        assert original_content in data_fields
 
     def test_select_stable_format(self, initialized_intelligence_engine):
         """Test selecting a format based on domain and stability."""
@@ -676,9 +721,11 @@ class TestIntegration:
         # Process input to generate gene keys
         test_input = b"Learning cycle test"
         engine.process_input_stream(test_input)
+        engine.finalize_and_save_thread()  # Ensure thread is saved
 
         # Generate response to create more gene keys
         engine.generate_and_save_response(length=10)
+        engine.finalize_and_save_thread()  # Ensure thread is saved
 
         thread_uuid = engine.thread_uuid
 

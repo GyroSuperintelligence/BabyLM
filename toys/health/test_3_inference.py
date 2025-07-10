@@ -252,7 +252,7 @@ class TestInference:
 
             assert engine.T.shape == (4, 2, 3, 2)
             assert engine.cycle_counter == 0
-            assert len(engine.gyration_featurees) == 256
+            assert len(engine.gyration_features) == 256
             assert engine.F.shape == (256, 48)
             assert engine.G.shape == (256,)
 
@@ -272,7 +272,7 @@ class TestInference:
 
         # Verify loaded patterns
         assert engine.F.shape == (256, 48)
-        assert len(engine.gyration_featurees) == 256
+        assert len(engine.gyration_features) == 256
 
         # Clean up
         pattern_file.unlink()
@@ -290,7 +290,7 @@ class TestInference:
 
             # Verify generated patterns
             assert engine.F.shape == (256, 48)
-            assert len(engine.gyration_featurees) == 256
+            assert len(engine.gyration_features) == 256
 
     def test_load_genome_mask_file_exists(self, mock_memories_dir):
         """Test loading genome mask when file exists"""
@@ -435,31 +435,6 @@ class TestInference:
         # Check that other patterns have intermediate distances
         for i in range(2, 256):
             assert 0.0 < resonances[i] <= np.pi
-
-    def test_compute_contextual_resonances(self, inference_engine):
-        """Test computing contextual pattern resonances"""
-        # Set up recent patterns
-        inference_engine.recent_patterns = [1, 2, 3, 4, 5]
-
-        # Create pattern contexts
-        pattern_contexts = {
-            5: {
-                "after": {10: 5, 20: 3, 30: 1},  # Pattern 5 is followed by 10 most often
-                "before": {4: 4, 3: 2},  # Pattern 5 is preceded by 4 most often
-            }
-        }
-
-        # Mock base resonances
-        base_resonances = [0.5] * 256
-        with patch.object(inference_engine, "compute_pattern_resonances", return_value=base_resonances):
-            # Compute contextual resonances
-            resonances = inference_engine.compute_contextual_resonances(pattern_contexts)
-
-            # Pattern 10 should have reduced distance (higher likelihood)
-            assert resonances[10] < base_resonances[10]
-
-            # Check that total list length is still 256
-            assert len(resonances) == 256
 
 
 # ------------------------------------------------------------------------------

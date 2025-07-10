@@ -1,8 +1,17 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
 ## [0.9.6] – 2025-07-10
+- Refactored private gene key storage to use per-record encryption with length prefix for true append-only performance.
+- Public thread metadata is now updated only at finalization, not per event, for better performance.
+- Moved tensor_to_output_byte to InferenceEngine for architectural clarity.
+- Fixed AES key length validation to require 32 bytes (256 bits) for AES-256.
+- Added registry file locking in shard_path to prevent race conditions during sharding.
+- Switched recent_patterns to collections.deque(maxlen=256) for efficient context tracking.
+- PatternIndex.find_similar_contexts now caps locations checked for common patterns to avoid performance bottlenecks.
+- Removed redundant cryptography imports and local JSON helpers.
+- Replaced brittle thread UUID checks with robust file existence checks.
+- Refactored ThreadMetadata to use children: List[ChildRef] instead of parallel child_uuids/child_names; updated all code and tests accordingly.
+- Improved TypedDict access safety and fixed pyright linter errors throughout the codebase.
 - Unified privacy logic using an explicit 'privacy' field ('public'/'private') for threads and gene keys
 - Replaced legacy XOR encryption with robust AES-GCM encryption for private threads, using per-thread derived keys
 - Clarified and retained 'agent_uuid' in gene keys for agent association/ownership (not privacy)

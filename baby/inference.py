@@ -16,6 +16,7 @@ from baby.governance import (
     derive_canonical_patterns,
     classify_pattern_resonance,
 )
+from collections import deque
 
 
 class InferenceEngine:
@@ -35,7 +36,7 @@ class InferenceEngine:
         self.cycle_counter = 0
 
         # The Epigenome Mask (canonical patterns)
-        self.F, self.gyration_featurees = self._load_patterns()
+        self.F, self.gyration_features = self._load_patterns()
 
         # Load genome mask (output byte mappings)
         self.G = self._load_genome_mask()
@@ -44,7 +45,7 @@ class InferenceEngine:
         self._initialize_epigenome()
 
         # Track recent pattern indices (up to 20)
-        self.recent_patterns = []
+        self.recent_patterns = deque(maxlen=256)
 
     def _load_patterns(self) -> Tuple[np.ndarray, List[str]]:
         """
@@ -53,7 +54,7 @@ class InferenceEngine:
         Returns:
             Tuple containing:
             - patterns: Array of shape [256, 48]
-            - gyration_featurees: List of 256 class labels
+            - gyration_features: List of 256 class labels
         """
         pattern_file = "memories/public/masks/epigenome.dat"
 
@@ -66,18 +67,18 @@ class InferenceEngine:
             patterns = patterns.reshape((256, 48))
 
             # Regenerate resonance classes (these are deterministic)
-            gyration_featurees = [classify_pattern_resonance(i) for i in range(256)]
+            gyration_features = [classify_pattern_resonance(i) for i in range(256)]
 
-            return patterns, gyration_featurees
+            return patterns, gyration_features
 
         except (FileNotFoundError, ValueError, IOError):
             # Generate patterns if file doesn't exist or is corrupted
-            patterns, gyration_featurees = derive_canonical_patterns()
+            patterns, gyration_features = derive_canonical_patterns()
 
             # Save patterns to file
             patterns.tofile(pattern_file)
 
-            return patterns, gyration_featurees
+            return patterns, gyration_features
 
     def _load_genome_mask(self) -> np.ndarray:
         """
@@ -124,7 +125,7 @@ class InferenceEngine:
         gene_mutated = gene_stateless
         for i in range(8):
             if gene_mutated & (1 << i):
-                apply_operation(self.T, i)
+                self.T = apply_operation(self.T, i)
         # Reset cycle counter after initialization
         self.cycle_counter = 0
 
@@ -137,17 +138,12 @@ class InferenceEngine:
         """
         # Flatten current tensor for comparison
         flat_T = self.T.flatten()
-
-        # Calculate distances to all patterns
-        distances = []
-        for pattern in self.F:
-            dist = gyrodistance(flat_T, pattern)
-            distances.append(dist)
-
-        # Find index of minimum distance
-        closest_index = int(np.argmin(distances))
-        min_distance = float(distances[closest_index])
-
+        # Vectorized calculation for all distances
+        dot_products = np.dot(self.F, flat_T)
+        normalized_distances = dot_products / flat_T.size
+        angular_distances = np.arccos(np.clip(normalized_distances, -1.0, 1.0))
+        closest_index = int(np.argmin(angular_distances))
+        min_distance = float(angular_distances[closest_index])
         return closest_index, min_distance
 
     def process_byte(self, P_n: int) -> Tuple[int, float]:
@@ -166,14 +162,12 @@ class InferenceEngine:
         # 2. Apply gyroscopic operations to tensor T
         for i in range(8):
             if gene_mutated & (1 << i):
-                apply_operation(self.T, i)
+                self.T = apply_operation(self.T, i)
 
         # 3. Find matching canonical pattern and resonance
         key_index, resonance = self.find_closest_pattern_index()
 
         # Track recent patterns
-        if len(self.recent_patterns) >= 20:  # Keep last 20 patterns
-            self.recent_patterns.pop(0)
         self.recent_patterns.append(key_index)
 
         # 4. Increment cycle counter
@@ -181,21 +175,23 @@ class InferenceEngine:
 
         return key_index, resonance
 
-    def compute_pattern_resonances(self) -> List[float]:
+    def compute_pattern_resonances(self) -> np.ndarray:
         """
         Compute resonance values between current tensor and all patterns
 
         Returns:
-            List of 256 resonance values (distances) between current tensor
-            and each canonical pattern
+            np.ndarray: Array of 256 resonance values (distances) between current tensor and each canonical pattern
         """
-        # Flatten current tensor for comparison
         flat_T = self.T.flatten()
+        dot_products = np.dot(self.F, flat_T)
+        normalized_distances = dot_products / flat_T.size
+        angular_distances = np.arccos(np.clip(normalized_distances, -1.0, 1.0))
+        return angular_distances
 
-        # Calculate distances to all patterns
-        resonances = []
-        for pattern in self.F:
-            dist = gyrodistance(flat_T, pattern)
-            resonances.append(dist)
-
-        return resonances
+    def tensor_to_output_byte(self) -> int:
+        """Canonical tensor-to-byte conversion using epigenome pattern matching."""
+        key_index, _ = self.find_closest_pattern_index()
+        output_byte = self.G[key_index]
+        if hasattr(output_byte, "item"):
+            return int(output_byte.item())
+        return int(output_byte)
