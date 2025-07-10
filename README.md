@@ -59,9 +59,9 @@ Current language models require massive resources, opaque training, and billions
 
 ---
 
-## 🔬 The Core Idea: From Byte to Intelligence Spectrum
+## 🔬 The Byte as a Holographic Quantum of Spacetime Topology
 
-Data isn't just information here. It's a physical force that transforms structure. The architecture unfolds from one idea: a single byte acts as a set of instructions for navigating gyroscopic spacetime.
+Data isn't just information here. It's a physical force that transforms structure. The architecture unfolds from one idea: a single byte acts as a holographic memory set of instructions for navigating gyroscopic spacetime.
 
 ### The Logical Progression
 
@@ -69,12 +69,12 @@ Data isn't just information here. It's a physical force that transforms structur
 A byte is not treated as a symbol but as a governance mask. Its 8 bits encode 256 possible instruction sets that each trigger a unique set of tensor operations.
 
 **2. The Universal Reference: XOR with 0xAA**
-Every byte is first XORed with `0xAA` (10101010), producing a symmetrical alignment with the system’s internal reference frame.
+Every byte is XORed against a universal reference 0xAA (stateless gene hologram) to yield an 8-bit operation mask (mutated gene hologram) that transforms the dynamic tensor (Epigenome - a 3D projection of the mutation), simulating the expression of intelligence through physical modulation.
 
-**3. The Genetic Code: From Byte to Operations**
+**3. The Holographic Gene: From Byte to Operations**
 Each bit of the byte's XOR result maps to a specific gyroscopic operation (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is the "gene" — a complete instruction for transforming the system's state.
 
-**4. The Epigenome: The Dynamic State Tensor**
+**4. The Epigenome Projection: The Dynamic State Tensor**
 These operations apply to a dynamic [4,2,3,2] tensor, the Epigenome. This is the system's "working memory" or current physical state. Each input byte acts as a physical force that evolves this Epigenome, creating an irreversible path-dependent history. The intelligence resides in the trajectory of this tensor, not in static data.
 
 **5. The Intelligence Spectrum: Pattern Matching**
@@ -107,7 +107,7 @@ This solves three fundamental problems:
 - Instruction Creation: Input byte XORs with 0xAA to create an 8-bit instruction set (the "gene").
 - Epigenome Evolution: The gene's operations transform the dynamic Epigenome tensor (T), updating the system's physical state.
 - Possibility Resonance: The new Epigenome state is compared against the entire static Genome (F) to find all physically plausible next patterns.
-- Coherent Closure: The system selects the single best pattern by combining its physical resonance with its learned semantic confidence.
+- Coherent Closure: The system selects the best candidate by weighting physical resonance with learned confidence scores.
 - Output Generation: The winning pattern's index is used to look up the corresponding output byte from a static map.
 - Learning: The confidence score for the winning pattern is updated, completing the feedback loop.
 
