@@ -275,7 +275,9 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 </div>
 
-<div style="border: 1px solid #ccc; padding: 1em; font-size: 0.85em; background-color: #f9f9f9; border-radius: 6px; line-height: 1.5;">
+---
+
+<div style="border: 1px solid #ccc; padding: 1em; font-size: 0.6em; background-color: #f9f9f9; border-radius: 6px; line-height: 1.5;">
   <p><strong>🤖 AI Disclosure</strong></p>
   <p>All code architecture, documentation, and theoretical models in this project were authored and architected by Basil Korompilias.</p>
   <p>Artificial intelligence was employed solely as a technical assistant, limited to code drafting, formatting, verification, and editorial services, always under direct human supervision.</p>
