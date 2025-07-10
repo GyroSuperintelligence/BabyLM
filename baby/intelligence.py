@@ -41,6 +41,8 @@ from baby.information import (
 )
 from baby.types import PatternMetadata, FormatMetadata, GeneKeysMetadata
 
+import base64
+
 # pyright: reportMissingModuleSource=false
 try:
     import orjson as json
@@ -298,7 +300,7 @@ class IntelligenceEngine:
 
         return M
 
-    def start_new_thread(self) -> str:
+    def start_new_thread(self, privacy: str = "private") -> str:
         """
         Start a new thread, setting its parent to the current thread if one exists.
 
@@ -310,7 +312,11 @@ class IntelligenceEngine:
 
         # Create a new thread, linking it to the previous one.
         parent_uuid = self.thread_uuid if self.thread_uuid else None
-        new_thread_uuid = create_thread(self.agent_uuid, parent_uuid, self.format_uuid)
+        new_thread_uuid = create_thread(
+            privacy=privacy,
+            parent_uuid=parent_uuid,
+            format_uuid=self.format_uuid,
+        )
 
         # Reset the engine's state for the new thread.
         self.thread_uuid = new_thread_uuid
@@ -322,105 +328,107 @@ class IntelligenceEngine:
         self.child_thread_uuids = []
 
         # Store the new thread's key for future use.
-        if self.agent_uuid is not None and self.agent_secret is not None and self.thread_file_key is not None:
+        if (
+            privacy == "private"
+            and self.agent_uuid is not None
+            and self.agent_secret is not None
+            and self.thread_file_key is not None
+        ):
             store_thread_key(self.agent_uuid, new_thread_uuid, self.thread_file_key, self.agent_secret)
 
         return new_thread_uuid
 
-    def process_input_stream(self, input_stream: bytes) -> Tuple[bytes, bytes]:
+    def process_input_stream(self, input_stream: bytes, privacy: str = "private") -> Tuple[bytes, bytes]:
         """
         Process an external input stream and append to current thread or create new one
         """
         # 1. First, ensure the thread state is ready (creates new thread if needed).
-        self._append_to_thread(input_stream)
+        self._append_to_thread(
+            {"type": "input", "data": base64.b64encode(input_stream).decode("utf-8")}, privacy=privacy
+        )
 
         # 2. Now, process the stream and log gene keys to the *active* thread.
         def callback(source_byte, key_index, resonance, event_type):
-            self.update_learning_state(source_byte, key_index, resonance, event_type)
+            self.update_learning_state(source_byte, key_index, resonance, event_type, privacy=privacy)
 
         intermediate_ciphertext, dynamic_keystream = self.information_engine.process_stream(
             self.inference_engine, callback, input_stream
         )
         return input_stream, intermediate_ciphertext
 
-    def _append_to_thread(self, new_content: bytes) -> None:
+    def _append_to_thread(self, event: dict, privacy: str = "private") -> None:
         """
-        Append new content to the current thread, creating a new one if capacity is exceeded.
+        Append a structured event to the current thread as NDJSON, creating a new one if capacity is exceeded.
 
         Args:
-            new_content: Content to append to the thread
+            event: Structured event dict to append (e.g., {"type": "input", "data": <base64 str>})
         """
         # 1. Ensure a thread exists.
         if not self.thread_uuid:
-            self.start_new_thread()
+            self.start_new_thread(privacy=privacy)
         # else: do nothing; assume state is already loaded
 
-        # 2. Decide if a new thread is needed BEFORE modifying the current one.
+        # 2. Serialize event as NDJSON line
+        json_line = json_dumps(event)
+        if not json_line.endswith("\n"):
+            json_line += "\n"
+        json_bytes = json_line.encode("utf-8")
+
+        # 3. Decide if a new thread is needed BEFORE modifying the current one.
         max_size_bytes = self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
+        if self.current_thread_size > 0 and (self.current_thread_size + len(json_bytes) > max_size_bytes):
+            self._save_current_thread(privacy=privacy)
+            self.start_new_thread(privacy=privacy)
 
-        # A new thread is needed if the current thread has content AND adding the new
-        # content would exceed the capacity.
-        if self.current_thread_size > 0 and (self.current_thread_size + len(new_content) > max_size_bytes):
-            # The current thread is full. Save it and start a new one.
-            self._save_current_thread()
-            self.start_new_thread()
-            # The engine state (thread_uuid, current_thread_size, etc.) is now reset.
+        # 4. Append NDJSON line to the active thread
+        self.active_thread_content.extend(json_bytes)
 
-        # 3. Append content to the active thread (which might be the original or a new one).
-        # Add a separator only if the thread we are about to write to is not empty.
-        if self.active_thread_content:
-            separator = b"\n---\n"
-            self.active_thread_content.extend(separator)
-
-        self.active_thread_content.extend(new_content)
-
-        # 4. Reliably update the size and save the thread's current state.
+        # 5. Reliably update the size and save the thread's current state.
         self.current_thread_size = len(self.active_thread_content)
-        self._save_current_thread()
+        self._save_current_thread(privacy=privacy)
 
-    def _save_current_thread(self) -> None:
-        """Save the current thread content to disk"""
+    def _save_current_thread(self, privacy: str = "private") -> None:
+        """Save the current thread content to disk (NDJSON or encrypted NDJSON)"""
         if not self.active_thread_content or not self.thread_uuid:
             return
 
         # Use the existing end_current_thread logic but with accumulated content
-        self.end_current_thread(plaintext_to_save=bytes(self.active_thread_content))
+        # Note: self.active_thread_content is now NDJSON (or encrypted NDJSON), not a binary blob.
+        self.end_current_thread(plaintext_to_save=bytes(self.active_thread_content), privacy=privacy)
 
-    def end_current_thread(self, plaintext_to_save: bytes) -> None:
+    def end_current_thread(self, plaintext_to_save: bytes, privacy: str = "private") -> None:
         """
-        End the current thread, encrypting the provided plaintext (if in private mode)
+        End the current thread, encrypting the provided NDJSON (if in private mode)
         and saving all data.
         """
         if not self.thread_uuid:
             raise RuntimeError("Thread UUID is not set.")
 
         final_data_to_save = plaintext_to_save
-        # Only perform encryption if in private mode (agent_uuid exists)
-        if self.agent_uuid:
+        if privacy == "private":
             if self.thread_file_key is None:
                 raise RuntimeError("Thread file key is not set for a private thread. Call start_new_thread() first.")
-            thread_file_key: bytes = self.thread_file_key
-            encrypted_data = bytearray(len(plaintext_to_save))
-            for i in range(len(plaintext_to_save)):
-                encrypted_data[i] = plaintext_to_save[i % 256] ^ thread_file_key[i % 256]
-            final_data_to_save = bytes(encrypted_data)
+            # Derive a 32-byte AES key from the 256-byte thread_file_key using PBKDF2HMAC with thread_uuid as salt
+            salt = (self.thread_uuid).encode("utf-8")
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,  # AES-256 requires a 32-byte key
+                salt=salt,
+                iterations=100000,
+                backend=default_backend(),
+            )
+            aes_key = kdf.derive(self.thread_file_key)
+            final_data_to_save = self._encrypt_data(plaintext_to_save, aes_key)
 
-        # 2. Save thread file using information.py helper
-        save_thread(self.agent_uuid, self.thread_uuid, final_data_to_save, len(plaintext_to_save))
-
-        # 3. Store gene keys (public or private)
-        store_gene_keys(self.thread_uuid, self.current_thread_keys, self.agent_uuid, self.agent_secret)
-
-        # 4. Update format metadata
+        save_thread(privacy, self.thread_uuid, final_data_to_save, len(plaintext_to_save))
+        store_gene_keys(self.thread_uuid, self.current_thread_keys, privacy, self.agent_secret)
         self.M.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
         self.M.setdefault("metadata", {})["usage_count"] = self.M.get("metadata", {}).get("usage_count", 0) + 1
         store_format(self.M)
-
-        # 5. Update pattern index for faster inference
         if self.pattern_index:
             self.pattern_index.update_from_thread(self.thread_uuid, self.current_thread_keys)
 
-    def generate_and_save_response(self, length: int = 100) -> bytes:
+    def generate_and_save_response(self, length: int = 100, privacy: str = "private") -> bytes:
         """
         Generate a response and append to current thread or create new one
 
@@ -434,7 +442,9 @@ class IntelligenceEngine:
         response_bytes = self._generate_response_bytes(length)
 
         # Append to current thread content
-        self._append_to_thread(response_bytes)
+        self._append_to_thread(
+            {"type": "output", "data": base64.b64encode(response_bytes).decode("utf-8")}, privacy=privacy
+        )
 
         return response_bytes
 
@@ -446,7 +456,7 @@ class IntelligenceEngine:
             # S4 instructs S3 to process this self-generated byte, creating a feedback loop
             _key_index, resonance = self.inference_engine.process_byte(output_byte)
             # Update learning state for this self-generated event
-            self.update_learning_state(output_byte, _key_index, resonance, "OUTPUT")
+            self.update_learning_state(output_byte, _key_index, resonance, "OUTPUT", privacy="private")
         return bytes(response_bytes)
 
     def _generate_response_byte(self) -> Tuple[int, int]:
@@ -518,7 +528,9 @@ class IntelligenceEngine:
 
         return int(output_byte), int(selected_pattern)
 
-    def update_learning_state(self, source_byte: int, key_index: int, resonance: float, event_type: str) -> None:
+    def update_learning_state(
+        self, source_byte: int, key_index: int, resonance: float, event_type: str, privacy: str = "private"
+    ) -> None:
         """
         Update learning state based on processed byte, including pattern
         statistics and confidence.
@@ -546,12 +558,13 @@ class IntelligenceEngine:
             "cycle": self.inference_engine.cycle_counter,
             "pattern_index": int(key_index),
             "thread_uuid": self.thread_uuid or "",
-            "agent_uuid": self.agent_uuid,
+            "agent_uuid": self.agent_uuid,  # Deprecated
             "format_uuid": self.format_uuid,
             "event_type": event_type,
             "source_byte": int(source_byte),
             "resonance": float(resonance),
             "created_at": datetime.datetime.now().isoformat(),
+            "privacy": privacy,
         }
         self.current_thread_keys.append(gene_key_event)
 
@@ -618,9 +631,9 @@ class IntelligenceEngine:
             return character
         return None
 
-    def load_thread_content(self, thread_uuid: str) -> Optional[bytes]:
+    def load_thread_content(self, thread_uuid: str) -> Optional[list]:
         """
-        Load a thread's decrypted content.
+        Load a thread's decrypted content as a list of NDJSON event dicts.
         """
         thread_content_raw = load_thread(self.agent_uuid, thread_uuid)
         if not thread_content_raw:
@@ -629,13 +642,34 @@ class IntelligenceEngine:
             thread_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret)
             if not thread_key:
                 return None
-            plaintext = bytearray(len(thread_content_raw))
-            for i in range(len(thread_content_raw)):
-                plaintext[i] = thread_content_raw[i] ^ thread_key[i % 256]
-            return bytes(plaintext)
-        else:
-            # Public threads are not encrypted
-            return thread_content_raw
+            # Derive the same 32-byte AES key as in end_current_thread
+            salt = (thread_uuid).encode("utf-8")
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend()
+            )
+            aes_key = kdf.derive(thread_key)
+            try:
+                thread_content_raw = self._decrypt_data(thread_content_raw, aes_key)
+            except Exception:
+                return None
+        # At this point, thread_content_raw is NDJSON (utf-8 bytes)
+        try:
+            text = thread_content_raw.decode("utf-8")
+            events = []
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                event = json_loads(line)
+                # If the event has a 'data' field, decode base64
+                if "data" in event:
+                    try:
+                        event["data"] = base64.b64decode(event["data"])
+                    except Exception:
+                        pass  # Leave as-is if not valid base64
+                events.append(event)
+            return events
+        except Exception:
+            return None
 
     def select_stable_format(self, domain: str, stability: str = "stable") -> Optional[str]:
         """

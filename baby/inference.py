@@ -28,13 +28,13 @@ class InferenceEngine:
 
     def __init__(self):
         """Initialize the Inference Engine with zero-state tensor and load patterns"""
-        # Initialize Epigenome tensor with zeros (shape [4, 2, 3, 2])
+        # The Epigenome Tensor (dynamic state)
         self.T = np.zeros((4, 2, 3, 2), dtype=np.float32)
 
         # Initialize cycle counter
         self.cycle_counter = 0
 
-        # Load or generate canonical patterns
+        # The Epigenome Mask (canonical patterns)
         self.F, self.gyration_featurees = self._load_patterns()
 
         # Load genome mask (output byte mappings)

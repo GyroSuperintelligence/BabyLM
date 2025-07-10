@@ -518,14 +518,16 @@ Chat Commands:
         Path("conversations").mkdir(exist_ok=True)
 
         with open(filename, "w") as f:
-            f.write(json_dumps(
-                {
-                    "agent_uuid": self.engine.agent_uuid,
-                    "thread_uuid": self.engine.thread_uuid,
-                    "timestamp": datetime.now().isoformat(),
-                    "history": self.conversation_history,
-                }
-            ))
+            f.write(
+                json_dumps(
+                    {
+                        "agent_uuid": self.engine.agent_uuid,
+                        "thread_uuid": self.engine.thread_uuid,
+                        "timestamp": datetime.now().isoformat(),
+                        "history": self.conversation_history,
+                    }
+                )
+            )
 
         if RICH_AVAILABLE and console is not None:
             console.print(f"[green]Conversation saved to {filename}[/green]")
@@ -891,7 +893,9 @@ Chat Commands:
         stats = self.engine.get_thread_statistics()
 
         if RICH_AVAILABLE and console is not None:
-            table = Table(title=f"Threads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}...")
+            table = Table(
+                title=f"Threads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}..."
+            )
             table.add_column("Index", style="cyan", no_wrap=True)
             table.add_column("Thread UUID", style="magenta")
             table.add_column("Name", style="white")
@@ -927,9 +931,7 @@ Chat Commands:
             console.print(f"  Total size: {stats['total_size_bytes'] / 1024:.1f} KB")
             console.print(f"  Capacity usage: {stats['capacity_usage_percent']:.1f}%")
         else:
-            print(
-                f"\nThreads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}..."
-            )
+            print(f"\nThreads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}...")
             print("-" * 80)
             for i, detail in enumerate(stats["thread_details"], 1):
                 size_kb = detail["size_bytes"] / 1024
@@ -984,67 +986,45 @@ Chat Commands:
                 print(result["error"])
             return
 
-        # Display thread content
+        # Display thread content as NDJSON events
+        events = result["content"]
         if RICH_AVAILABLE and console is not None:
-            # Main thread
-            try:
-                content = result["content"].decode("utf-8")
-                if len(content) > 500:
-                    content = content[:500] + "..."
+            from rich.table import Table
 
-                console.print(
-                    Panel(
-                        content,
-                        title=f"Thread {thread_uuid[:8]}... ({result['size_bytes']} bytes)",
-                        border_style="cyan",
-                    )
-                )
-            except UnicodeDecodeError:
-                console.print(
-                    Panel(
-                        f"[Binary content: {result['size_bytes']} bytes]",
-                        title=f"Thread {thread_uuid[:8]}...",
-                        border_style="cyan",
-                    )
-                )
-
-            # Relationships
-            rels = result["relationships"]
-            rel_info = f"Parent: {rels['parent'][:8] + '...' if rels['parent'] else 'None'}\n"
-            rel_info += f"Children: {len(rels['children'])}"
-
-            console.print(Panel(rel_info, title="Relationships", border_style="yellow"))
-
-            # Related threads preview
-            if result.get("related_threads"):
-                tree = Tree(f"Thread Chain ({len(result['related_threads'])} related)")
-
-                for related in result["related_threads"]:
+            table = Table(title=f"Thread {thread_uuid[:8]}... ({result['size_bytes']} bytes)")
+            table.add_column("#", style="dim", width=4)
+            table.add_column("Type", style="cyan", width=8)
+            table.add_column("Data (decoded)", style="white")
+            for i, event in enumerate(events):
+                typ = event.get("type", "?")
+                data = event.get("data", b"")
+                if isinstance(data, bytes):
                     try:
-                        preview = related["content"].decode("utf-8")[:50] + "..."
-                    except UnicodeDecodeError:
-                        preview = f"[Binary: {related['size_bytes']} bytes]"
-
-                    node_text = f"{related['thread_uuid'][:8]}... ({related['relationship']})"
-                    tree.add(f"{node_text}\n[dim]{preview}[/dim]")
-
-                console.print(tree)
+                        data_str = data.decode("utf-8")
+                    except Exception:
+                        data_str = str(data)
+                else:
+                    data_str = str(data)
+                table.add_row(str(i + 1), typ, data_str)
+            console.print(table)
         else:
-            # Plain text display
             print(f"\nThread {thread_uuid[:8]}... ({result['size_bytes']} bytes)")
             print("-" * 60)
+            for i, event in enumerate(events):
+                typ = event.get("type", "?")
+                data = event.get("data", b"")
+                if isinstance(data, bytes):
+                    try:
+                        data_str = data.decode("utf-8")
+                    except Exception:
+                        data_str = str(data)
+                else:
+                    data_str = str(data)
+                print(f"[{i+1:03}] {typ}: {data_str}")
 
-            try:
-                content = result["content"].decode("utf-8")
-                if len(content) > 500:
-                    content = content[:500] + "..."
-                print(content)
-            except UnicodeDecodeError:
-                print(f"[Binary content: {result['size_bytes']} bytes]")
-
-            print(f"\nRelationships:")
-            print(f"  Parent: {result['relationships']['parent'] or 'None'}")
-            print(f"  Children: {len(result['relationships']['children'])}")
+        print(f"\nRelationships:")
+        print(f"  Parent: {result['relationships']['parent'] or 'None'}")
+        print(f"  Children: {len(result['relationships']['children'])}")
 
     def _show_thread_stats(self):
         """Show detailed thread statistics"""
@@ -1151,8 +1131,24 @@ Chat Commands:
 
         filename = f"thread_{thread_uuid[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
 
+        # Ensure content is bytes before writing
+        to_write = content
+        if isinstance(content, list):
+            import json
+
+            to_write = (json.dumps(content, indent=2) + "\n").encode("utf-8")
+        elif not isinstance(content, (bytes, bytearray)):
+            to_write = str(content).encode("utf-8")
+
         with open(filename, "wb") as f:
-            f.write(content)
+            # Guarantee bytes: handle list, str, and fallback
+            if isinstance(to_write, list):
+                import json
+
+                to_write = (json.dumps(to_write, indent=2) + "\n").encode("utf-8")
+            elif not isinstance(to_write, (bytes, bytearray)):
+                to_write = str(to_write).encode("utf-8")
+            f.write(to_write)
 
         if RICH_AVAILABLE and console is not None:
             console.print(f"[green]Thread exported to {filename}[/green]")

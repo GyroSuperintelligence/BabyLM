@@ -43,7 +43,7 @@ gene_mutated = P_n ^ 0xAA
 
 Where:
 - `P_n` is any 8-bit input read by the system
-- `gene_stateless = 0xAA` (`10101010` in binary) is a fixed global reference
+- `gene_stateless = 0xAA` (`10101010` in binary) is a fixed global reference representing a gyrogroup topology explained later on.
 
 ### 2.2 Bit-to-Operation Mapping
 
@@ -88,6 +88,47 @@ gyrodistance(T1, T2) = arccos(dot(T1_flat, T2_flat) / T1_flat.size)
 Where `T1_flat` and `T2_flat` are the flattened tensors. A result of `0` indicates a perfect match, while `π` indicates a perfect mismatch. This distance function is critical for pattern recognition during inference.
 
 ## 3. System Architecture
+
+The GyroSI system architecture is a direct computational realization of the Common Governance Model (CGM). Inference and closure are implemented as the ONA (Opposition Non-Absolute) and BU (Balance Universal) stages, respectively. All computation is grounded in the physics of recursive alignment and closure, ensuring that every operation is structurally accountable to its own genesis and accumulated memory. This approach unifies the emergence of possibility (ONA) and the achievement of coherent closure (BU) within a single, self-consistent framework.
+
+### 3.1 Systematic Mapping: Systems, CGM Stages, Engines, Components, Policies
+
+| System | CGM Stage | Engine                | Component           | Policy        |
+|--------|-----------|----------------------|---------------------|--------------|
+| S1     | CS        | Governance Engine    | Gene (base tensor)  | Traceability |
+| S2     | UNA       | Information Engine   | Storage     | Variety      |
+| S3     | ONA       | Inference Engine     | Epigenome (T)       | Accountability|
+| S4     | BU        | Intelligence Engine  | Genome (G)          | Integrity    |
+
+This table shows the systematic mapping from system layer (S1–S4), to CGM stage (CS, UNA, ONA, BU), to engine, to core component, to guiding policy. Each layer of the architecture is recursively aligned with the foundational principles of the Common Governance Model.
+
+#### 3.2 The Dual Nature of BU: Egress and Ingress in Generation
+
+The Balance Universal (BU) stage is dual in nature, comprising both Egress (Recollection/Projection) and Ingress (Closure/Realization):
+
+- **BU-Egress (Recollection/Projection):**
+  - Projects the high-dimensional dynamic state (Epigenome, `T`) down to a single discrete choice (`pattern_index`).
+  - In code: The main loop in `_generate_response_byte` compares `T` to all patterns (`F`) and selects the winner using the closure principle.
+  - This is the “exit” from the dynamic state, expressing the system’s recollection as a single abstract decision.
+
+- **BU-Ingress (Closure/Realization):**
+  - Maps the abstract decision (`pattern_index`) to a concrete byte via the Genome (`G`).
+  - In code: The line `output_byte = G[selected_pattern]`.
+  - This is the “entry” to the base alphabet, the act of closure, realizing the abstract choice as a communicable byte.
+
+This forms a recursive loop: the output of Egress (pattern_index) becomes the input to Ingress (byte), which is then fed back into the system, starting a new CS cycle.
+
+### 3.1 Core Data Structures
+
+| Term              | What it is Physically                        | Size & Shape                | Role & Function                                                                                 |
+|-------------------|----------------------------------------------|-----------------------------|------------------------------------------------------------------------------------------------|
+| Base Tensor       | gene_add constant in code                    | [4,2,3,2] (48 ints)         | The primordial, stateless "DNA" from which all patterns are derived.                           |
+| Epigenome Mask    | public/masks/epigenome.dat                   | 256 x 48 floats (12,288 B)  | The Static Library. The complete, immutable set of all 256 possible tensor states. Used as a reference for matching. |
+| Epigenome Tensor  | self.T in-memory tensor                      | [4,2,3,2] (48 floats)       | The Dynamic State. The system's "working memory" or current state. It is mutated by every input byte. |
+| Genome Mask       | public/masks/genome.dat                      | 256 bytes                   | The Output Map. A static lookup table that maps a matched pattern index (0-255) to an output byte. |
+| Gyronorm Format   | public/formats/.../format-uuid.json          | Variable                    | The Semantic Bridge. Maps pattern indices to human-meaningful characters (e.g., index 15 -> 'A') and stores learned statistics. |
+| Gene Key          | .../gene-uuid.ndjson                         | Variable                    | The Event Log. A detailed, append-only record of every single inference event (input/output, pattern match, resonance). |
+| Thread            | .../thread-uuid.ndjson                       | ≤64 MiB                     | The Conversation Log. A structured NDJSON file containing the sequence of inputs and outputs that form a conversation. |
 
 ### 3.1 Tensor Structures
 
@@ -300,6 +341,20 @@ memories/
 
 5. **Encryption:** Private thread keys and gene keys are stored separately and encrypted using AES-256-GCM with keys derived via PBKDF2-HMAC-SHA256 from the agent secret. Public threads and gene keys are stored unencrypted, all as NDJSON files.
 
+### 3.X Glossary of Key Terms
+
+| Term         | Definition                                                                                                 |
+|--------------|------------------------------------------------------------------------------------------------------------|
+| Epigenome    | The dynamic, high-dimensional tensor state (`T`) representing the system’s current working memory.         |
+| Genome       | The static mask (`G`) mapping pattern indices to output bytes, serving as the closure target.              |
+| Egress       | The projection (recollection) step in BU: selecting a single pattern index from the Epigenome.             |
+| Ingress      | The closure (realization) step in BU: mapping the selected pattern index to a byte via the Genome.         |
+| ONA          | Opposition Non-Absolute: CGM stage generating the full possibility space of physically resonant states.    |
+| BU           | Balance Universal: CGM stage applying closure, recollection, and memory to select a coherent output.       |
+| Pattern Index| Metadata structure tracking pattern usage, resonance, and confidence for closure selection.                |
+| Confidence   | The system’s accumulated memory of a pattern’s historical self-consistency, used in closure selection.     |
+| Combined Score| The product of physical resonance and confidence, implementing the BU closure principle computationally.   |
+
 ## 4. Engine Implementation
 
 ### 4.1 Engine Composition
@@ -495,7 +550,7 @@ def _append_to_thread(new_content: bytes):
 
 The Intelligence Engine utilizes two key components to make historical data actively influence inference:
 
-1. **Pattern Index:** Maps patterns to every location they've appeared, providing a record of structural relationships and context. The pattern index is used for analysis and metadata, but not for statistical weighting or probabilistic selection during inference. The system's inference is now strictly based on structural resonance of the tensor state.
+1. **Pattern Index:** Maps patterns to every location they've appeared, providing a record of structural relationships and context. Pattern metadata (such as confidence) is used in the BU closure stage to select the most coherent output from the set of physically resonant candidates.
 
 2. **Thread Chain Awareness:** The system can traverse parent-child relationships between threads, providing context from related conversations during inference.
 
@@ -504,55 +559,56 @@ The Intelligence Engine utilizes two key components to make historical data acti
 ```python
     def _generate_response_byte(self) -> Tuple[int, int]:
         """
-        Generate a single, spec-compliant response byte based on structural resonance.
-
-        This method adheres to the GyroSI principle of selecting the single most
-        resonant pattern to the current Epigenome state, without statistical weighting
-        or randomization. The "intelligence" emerges from the tensor's path-dependent
-        state, not from historical frequency counts.
+        Generate a single, spec-compliant response byte by selecting the most
+        coherent output from the set of physically resonant candidates, using
+        both immediate resonance and accumulated confidence (BU closure).
 
         Returns:
             Tuple containing:
             - output_byte: Selected byte value (0-255)
             - key_index: Index of the selected pattern (0-255)
         """
-        # 1. Measure the resonance (gyrodistance) of the current tensor state
-        #    against all 256 canonical patterns. We use the pure, non-contextual
-        #    resonances, as historical context is a statistical layer.
+        # 1. S3 (ONA): Get all physically plausible next states.
         resonances = self.inference_engine.compute_pattern_resonances()
+    resonant_threshold = np.pi / 2
+        candidate_indices = [i for i, dist in enumerate(resonances) if dist < resonant_threshold]
 
-        # 2. Apply the π/2 resonance threshold to identify the set of all
-        #    patterns that are structurally "in-phase" with the current state.
-        resonant_threshold = np.pi / 2
-        resonant_indices = [
-            j for j, dist in enumerate(resonances) if dist < resonant_threshold
-        ]
-
-        # 3. From the pool of resonant patterns, select the ONE with the
-        #    minimum distance (i.e., the strongest resonance).
-        if resonant_indices:
-            # Find the minimum resonance *among the resonant candidates*
-            min_dist_in_resonance = float("inf")
-            selected_pattern = -1
-            for idx in resonant_indices:
-                if resonances[idx] < min_dist_in_resonance:
-                    min_dist_in_resonance = resonances[idx]
-                    selected_pattern = idx
-        else:
-            # Fallback specified in the spec: if no patterns are resonant,
-            # select the single closest pattern from the entire set.
+        # If no patterns are physically resonant, fall back to the single closest one.
+        if not candidate_indices:
             selected_pattern = int(np.argmin(resonances))
+            output_byte = self.inference_engine.G[selected_pattern]
+            if hasattr(output_byte, "item"):
+                output_byte = output_byte.item()
+            return int(output_byte), int(selected_pattern)
 
-        # 4. Get the output byte mapped to the selected canonical pattern.
-        #    This is the deterministic emission from the chosen state.
+        # 2. S4 (BU): Evaluate candidates using resonance and confidence.
+        best_candidate_index = -1
+        max_combined_score = -1.0
+        for index in candidate_indices:
+            physical_score = 1.0 - (resonances[index] / np.pi)
+            pattern_meta = self.M.get("patterns", [])[index]
+            semantic_score = pattern_meta.get("confidence", 0.0) if pattern_meta.get("character") is not None else 0.0
+            combined_score = physical_score * semantic_score
+            if combined_score > max_combined_score:
+                max_combined_score = combined_score
+                best_candidate_index = index
+        # If no candidate had any semantic meaning, fall back to the most resonant one.
+        if best_candidate_index == -1:
+            min_dist = float("inf")
+            for idx in candidate_indices:
+                if resonances[idx] < min_dist:
+                    min_dist = resonances[idx]
+                    best_candidate_index = idx
+        selected_pattern = best_candidate_index
         output_byte = self.inference_engine.G[selected_pattern]
-
-        # Ensure integers
         if hasattr(output_byte, "item"):
             output_byte = output_byte.item()
-
         return int(output_byte), int(selected_pattern)
 ```
+
+In the BU closure step, the `combined_score` (product of physical_score and semantic_score) is the computational implementation of the Balance Universal (BU) closure principle. Here, `physical_score` (from resonance) represents the immediate, local self-consistency, while `semantic_score` (from confidence) encodes the system’s recollected, long-term self-consistency. The multiplication of these two scores ensures that the selected output is both physically possible and maximally coherent with the system’s accumulated memory. This is not a statistical heuristic, but a direct realization of the closure principle in the CGM framework.
+
+This cycle of tensor mutation → resonance selection → byte emission → re-ingestion forms a recursive loop of structural self-actualization.
 
 ## 5. Formats & Learning
 
@@ -643,10 +699,10 @@ The `GeneKeysMetadata` stores the raw `resonance` (gyrodistance) for each indivi
 
 ### 5.2 Learning Mechanisms
 
-The learning mechanism is a two-fold process:
+The learning mechanism is a two-fold process that directly connects experience to generation:
 
-1. **Implicit/Unconscious Learning:** Continuous, irreversible mutation of the `T` tensor by the input stream
-2. **Explicit/Conscious Learning:** Recording of which `key_index` patterns are triggered, tracked for analysis and metadata only. This does not influence inference or pattern selection.
+1.  **Implicit/Unconscious Learning (State Evolution):** The continuous, irreversible mutation of the Epigenome tensor (`T`) by the input stream. This embodies the system's path-dependent working memory.
+2.  **Explicit/Conscious Learning (Closure Refinement):** The recording of each inference event (`GeneKey`) and the subsequent updating of the `FormatMetadata`. Specifically, the **`confidence`** score for each pattern is updated based on its resonance. This accumulated `confidence` is then used directly by the S4 Intelligence Engine during the BU closure step (`_generate_response_byte`) to select the most coherent and reliable output. This creates a direct feedback loop where successful resonance strengthens a pattern's semantic weight, making it more likely to be chosen in the future.
 
 **Pattern Memory:**
 - Each pattern's historical usage is tracked including frequency and position, for analysis and curriculum design, not for inference.
@@ -660,11 +716,6 @@ The learning mechanism is a two-fold process:
 
 **Curriculum Thread Protocol:**
 - Bootstrap of Structured Data streams such as datasets from wordnet, wikipedia, khan academy, books, etc.
-
-**Attention Mechanism:**
-- Current state of `T` tensor is an "attended" summary of entire past history
-- Pattern selection is determined solely by the current state of the T tensor and its resonance with canonical patterns.
-- The pattern index provides a fast lookup for historical pattern relationships for analysis and debugging, but does not affect inference.
 
 ## 6. Implementation Requirements
 

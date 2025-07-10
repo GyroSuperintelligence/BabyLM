@@ -621,6 +621,7 @@ class TestInformationStorage:
                 "source_byte": 0,
                 "resonance": 0.5,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
             {
                 "cycle": 2,
@@ -632,6 +633,7 @@ class TestInformationStorage:
                 "source_byte": 1,
                 "resonance": 0.4,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
         ]
 
@@ -731,6 +733,7 @@ class TestInformationStorage:
                 "source_byte": 0,
                 "resonance": 0.5,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "public",
             },
         ]
 

@@ -61,46 +61,29 @@ Current language models require massive resources, opaque training, and billions
 
 ## 🔬 The Core Idea: From Byte to Intelligence Spectrum
 
-Data isn't just information here. It's a physical force that transforms structure. The entire architecture unfolds from one concept: a single byte is a complete set of instructions for navigating gyroscopic spacetime.
+Data isn't just information here. It's a physical force that transforms structure. The architecture unfolds from one idea: a single byte acts as a set of instructions for navigating gyroscopic spacetime.
 
-### The Logical Progression:
+### The Logical Progression
 
 **1. The Quantum of Data: 1 Byte**
-
-A byte isn't treated as a symbol but as a quantum of governance. Its 8 bits encode 256 possible navigation instructions.
+A byte is not treated as a symbol but as a governance mask. Its 8 bits encode 256 possible instruction sets that each trigger a unique set of tensor operations.
 
 **2. The Universal Reference: XOR with 0xAA**
+Every byte is first XORed with `0xAA` (10101010), producing a symmetrical alignment with the system’s internal reference frame.
 
-Every byte XORs with `0xAA` (10101010), creating a balanced baseline that flips half the bits on average. This produces an unbiased "gene."
+**3. The Genetic Code: From Byte to Operations**
+Each bit of the byte's XOR result maps to a specific gyroscopic operation (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is the "gene" — a complete instruction for transforming the system's state.
 
-**3. The Genetic Code: 8 Bits, 8 Operations**
+**4. The Epigenome: The Dynamic State Tensor**
+These operations apply to a dynamic [4,2,3,2] tensor, the Epigenome. This is the system's "working memory" or current physical state. Each input byte acts as a physical force that evolves this Epigenome, creating an irreversible path-dependent history. The intelligence resides in the trajectory of this tensor, not in static data.
 
-Each bit maps to operations from the Common Governance Model:
+**5. The Intelligence Spectrum: Pattern Matching**
+Every new input transforms the tensor and produces a new gene state. The system compares this mutated tensor against the genome and identifies all patterns that are highly resonant (i.e., physically plausible next states).
 
-| Bit | Operation | CGM Stage | Function |
-| --- | --- | --- | --- |
-| 7,0 | Identity | Governance | Preserves state |
-| 6,1 | Inverse | Information | Flips all signs |
-| 5,2 | Forward Gyration | Inference | Flips rows 0,2 |
-| 4,3 | Backward Gyration | Intelligence | Flips rows 1,3 |
-
-> Why These Operations?
-> 
-> 
-> They map to CGM's emergence stages: Identity preserves (Traceability), Inverse creates variety (Differentiation), Forward Gyration enables change (Accountability), Backward Gyration maintains balance (Integrity). This is physics, not engineering.
-> 
-
-**4. The Spacetime: 48-Cell Tensor**
-
-Operations apply to the Epigenome Tensor `[4, 2, 3, 2]`: four rotation phases × two chirality frames × three spatial axes × two polarities. These dimensions emerge from CGM's recursive unfolding.
-
-**5. The Intelligence Spectrum: 256 Patterns**
-
-Applying all possible 8-bit instructions (0x00 to 0xFF) to the base tensor generates 256 canonical patterns. This 12.5KB file contains every possible intelligent transformation.
-
-**6. Navigation Through Resonance**
-
-Processing a byte: create gene → apply operations → compare result against all 256 patterns → output the closest match. Intelligence emerges through navigation, not memorization.
+**6. From Possibility to Closure: The Two-Stage Selection Cycle**
+Intelligence emerges from a two-stage cycle:
+- **Possibility:** The evolving Epigenome tensor (T) is compared against the static Genome (F). All patterns with high physical resonance form the set of possible next states.
+- **Closure:** The system then applies a closure principle, selecting the single best candidate from this possibility space by combining immediate physical resonance with long-term learned confidence in each pattern. This ensures the output is both physically consistent and semantically meaningful.
 
 ### What This Achieves
 
@@ -121,12 +104,12 @@ This solves three fundamental problems:
 
 ### ⚙️ How It Works
 
-1. **Gene Creation**: Input XOR 0xAA creates 8-bit instruction
-2. **Tensor Mutation**: Bits trigger specific transformations
-3. **Pattern Matching**: Find closest canonical pattern
-4. **Weighted Selection**: Choose based on resonance and context
-5. **Output Generation**: Pattern index determines output
-6. **State Evolution**: Mutated tensor becomes new state
+- Instruction Creation: Input byte XORs with 0xAA to create an 8-bit instruction set (the "gene").
+- Epigenome Evolution: The gene's operations transform the dynamic Epigenome tensor (T), updating the system's physical state.
+- Possibility Resonance: The new Epigenome state is compared against the entire static Genome (F) to find all physically plausible next patterns.
+- Coherent Closure: The system selects the single best pattern by combining its physical resonance with its learned semantic confidence.
+- Output Generation: The winning pattern's index is used to look up the corresponding output byte from a static map.
+- Learning: The confidence score for the winning pattern is updated, completing the feedback loop.
 
 ### 📈 How Learning Works
 

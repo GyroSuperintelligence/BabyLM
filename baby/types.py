@@ -27,7 +27,7 @@ class FormatMetadata(TypedDict, total=False):
 class ThreadMetadata(TypedDict, total=False):
     thread_uuid: str
     thread_name: Optional[str]
-    agent_uuid: Optional[str]
+    agent_uuid: Optional[str]  # Deprecated: use 'privacy' instead
     parent_uuid: Optional[str]
     parent_name: Optional[str]
     child_uuids: List[str]
@@ -38,15 +38,17 @@ class ThreadMetadata(TypedDict, total=False):
     created_at: str
     last_updated: str
     size_bytes: int
+    privacy: str  # 'public' or 'private'
 
 
 class GeneKeysMetadata(TypedDict):
     cycle: int
     pattern_index: int
     thread_uuid: str
-    agent_uuid: Optional[str]
     format_uuid: str
     event_type: str
     source_byte: int
     resonance: float
     created_at: str
+    privacy: str  # 'public' or 'private'
+    agent_uuid: Optional[str]  # Agent association/ownership only; not used for privacy logic

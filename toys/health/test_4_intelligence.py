@@ -294,6 +294,9 @@ class TestIntelligence:
         """Test processing an input stream"""
         engine = initialized_intelligence_engine
         test_input = b"Test input stream"
+        import base64
+
+        expected_event = {"type": "input", "data": base64.b64encode(test_input).decode("utf-8")}
 
         with (
             patch.object(
@@ -301,7 +304,7 @@ class TestIntelligence:
                 "process_stream",
                 return_value=(b"ciphertext", b"keystream"),
             ),
-            patch.object(engine, "_append_to_thread"),
+            patch.object(engine, "_append_to_thread") as mock_append,
         ):
             # Process input stream
             plaintext, ciphertext = engine.process_input_stream(test_input)
@@ -312,7 +315,7 @@ class TestIntelligence:
 
             # Verify method calls
             engine.information_engine.process_stream.assert_called_once()
-            engine._append_to_thread.assert_called_once_with(test_input)
+            mock_append.assert_called_once_with(expected_event)
 
     def test_end_current_thread(self, initialized_intelligence_engine):
         """Test ending a current thread"""
@@ -345,10 +348,11 @@ class TestIntelligence:
     def test_generate_and_save_response(self, initialized_intelligence_engine):
         """Test generating and saving a response"""
         engine = initialized_intelligence_engine
+        import base64
 
         with (
             patch.object(engine, "_generate_response_bytes", return_value=b"Generated response"),
-            patch.object(engine, "_append_to_thread"),
+            patch.object(engine, "_append_to_thread") as mock_append,
         ):
             # Generate response
             response = engine.generate_and_save_response(length=20)
@@ -358,7 +362,8 @@ class TestIntelligence:
 
             # Verify method calls
             engine._generate_response_bytes.assert_called_once_with(20)
-            engine._append_to_thread.assert_called_once_with(b"Generated response")
+            expected_event = {"type": "output", "data": base64.b64encode(b"Generated response").decode("utf-8")}
+            mock_append.assert_called_once_with(expected_event)
 
     def test_generate_response_bytes(self, initialized_intelligence_engine):
         """Test generating response bytes"""
@@ -461,22 +466,30 @@ class TestIntelligence:
         assert engine.decode(99) is None
 
     def test_load_thread_content(self, initialized_intelligence_engine):
-        """Test loading a thread's decrypted content"""
+        """Test loading a thread's decrypted content as NDJSON events"""
         engine = initialized_intelligence_engine
         thread_uuid = "test-thread-uuid"
+        import base64, json
 
+        # Prepare a fake NDJSON thread with two events
+        event1 = {"type": "input", "data": base64.b64encode(b"abc").decode("utf-8")}
+        event2 = {"type": "output", "data": base64.b64encode(b"xyz").decode("utf-8")}
+        ndjson = f"{json.dumps(event1)}\n{json.dumps(event2)}\n".encode("utf-8")
         with (
-            patch("baby.intelligence.load_thread", return_value=b"encrypted_content") as mock_load_thread,
+            patch("baby.intelligence.load_thread", return_value=ndjson) as mock_load_thread,
             patch(
                 "baby.intelligence.load_thread_key", return_value=bytes([i % 256 for i in range(256)])
             ) as mock_load_thread_key,
         ):
             # Load thread content
             content = engine.load_thread_content(thread_uuid)
-
-            # Verify decryption
-            assert content is not None
-
+            # Should return a list of event dicts with decoded data
+            assert isinstance(content, list)
+            assert len(content) == 2
+            assert content[0]["type"] == "input"
+            assert content[0]["data"] == b"abc"
+            assert content[1]["type"] == "output"
+            assert content[1]["data"] == b"xyz"
             # Check that the right functions were called
             mock_load_thread.assert_called_once_with(engine.agent_uuid, thread_uuid)
             mock_load_thread_key.assert_called_once_with(engine.agent_uuid, thread_uuid, engine.agent_secret)
@@ -554,7 +567,13 @@ class TestIntelligence:
             [
                 cast(
                     ThreadMetadata,
-                    {"thread_uuid": None, "parent_uuid": None, "child_uuids": [str(thread_ids[1])], "size_bytes": 1000},
+                    {
+                        "thread_uuid": None,
+                        "parent_uuid": None,
+                        "child_uuids": [str(thread_ids[1])],
+                        "size_bytes": 1000,
+                        "privacy": "public",
+                    },
                 ),
                 cast(
                     ThreadMetadata,
@@ -563,11 +582,18 @@ class TestIntelligence:
                         "parent_uuid": thread_ids[0],
                         "child_uuids": [str(thread_ids[2])],
                         "size_bytes": 2000,
+                        "privacy": "public",
                     },
                 ),
                 cast(
                     ThreadMetadata,
-                    {"thread_uuid": None, "parent_uuid": thread_ids[1], "child_uuids": [], "size_bytes": 3000},
+                    {
+                        "thread_uuid": None,
+                        "parent_uuid": thread_ids[1],
+                        "child_uuids": [],
+                        "size_bytes": 3000,
+                        "privacy": "public",
+                    },
                 ),
             ],
         ):

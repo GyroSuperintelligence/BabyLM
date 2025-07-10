@@ -316,6 +316,7 @@ class TestPatternIndexAndContext:
                 "source_byte": 65,  # 'A'
                 "resonance": 0.1,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
             {
                 "cycle": 2,
@@ -327,6 +328,7 @@ class TestPatternIndexAndContext:
                 "source_byte": 66,  # 'B'
                 "resonance": 0.2,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
             {
                 "cycle": 3,
@@ -338,6 +340,7 @@ class TestPatternIndexAndContext:
                 "source_byte": 65,  # 'A'
                 "resonance": 0.1,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
         ]
 
@@ -409,6 +412,7 @@ class TestPatternIndexAndContext:
                 "source_byte": 1,
                 "resonance": 0.1,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
             {
                 "cycle": 2,
@@ -420,6 +424,7 @@ class TestPatternIndexAndContext:
                 "source_byte": 2,
                 "resonance": 0.1,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
             {
                 "cycle": 3,
@@ -431,6 +436,7 @@ class TestPatternIndexAndContext:
                 "source_byte": 3,
                 "resonance": 0.1,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
             {
                 "cycle": 4,
@@ -442,6 +448,7 @@ class TestPatternIndexAndContext:
                 "source_byte": 1,
                 "resonance": 0.1,
                 "created_at": datetime.now().isoformat(),
+                "privacy": "private",
             },
         ]
 

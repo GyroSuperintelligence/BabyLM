@@ -385,7 +385,7 @@ def _get_thread_path(thread_uuid: str, agent_uuid: Optional[str]) -> Path:
 
 
 def create_thread(
-    agent_uuid: Optional[str],
+    privacy: str,
     parent_uuid: Optional[str],
     format_uuid: str,
     thread_name: Optional[str] = None,
@@ -395,7 +395,7 @@ def create_thread(
     """
     Create a new thread (public or private).
     Args:
-        agent_uuid: Agent UUID (None for public thread)
+        privacy: 'public' or 'private'
         parent_uuid: Optional parent thread UUID
         format_uuid: Format UUID to use for the thread
         thread_name: Optional human-friendly name for the thread
@@ -405,6 +405,7 @@ def create_thread(
         str: New thread UUID
     """
     thread_uuid = str(uuid.uuid4())
+    agent_uuid = None if privacy == "public" else ensure_agent_uuid()
     threads_dir = _get_thread_path(thread_uuid, agent_uuid)
     thread_shard = shard_path(threads_dir, thread_uuid)
     thread_shard.mkdir(parents=True, exist_ok=True)
@@ -420,7 +421,7 @@ def create_thread(
     thread_meta: ThreadMetadata = {
         "thread_uuid": thread_uuid,
         "thread_name": thread_name,
-        "agent_uuid": agent_uuid,
+        "agent_uuid": agent_uuid,  # Deprecated
         "parent_uuid": parent_uuid,
         "parent_name": parent_name,
         "child_uuids": [],
@@ -431,33 +432,18 @@ def create_thread(
         "created_at": now,
         "last_updated": now,
         "size_bytes": 0,
+        "privacy": privacy,
     }
     thread_meta_path = thread_shard / f"thread-{thread_uuid}.json"
     with open(thread_meta_path, "w") as f:
         f.write(json_dumps(thread_meta))
     update_registry(threads_dir, thread_uuid)
     update_registry(thread_shard, thread_uuid)
-    if parent_uuid:
-        parent_shard = shard_path(threads_dir, parent_uuid)
-        parent_meta_path = parent_shard / f"thread-{parent_uuid}.json"
-        if parent_meta_path.exists():
-            with open(parent_meta_path, "r") as f:
-                parent_meta = json_loads(f.read())
-            if "child_uuids" not in parent_meta:
-                parent_meta["child_uuids"] = []
-            if "child_names" not in parent_meta:
-                parent_meta["child_names"] = []
-            if thread_uuid not in parent_meta["child_uuids"]:
-                parent_meta["child_uuids"].append(thread_uuid)
-                parent_meta["child_names"].append(thread_name)
-                parent_meta["last_updated"] = now
-                with open(parent_meta_path, "w") as f:
-                    f.write(json_dumps(parent_meta))
     return thread_uuid
 
 
 def save_thread(
-    agent_uuid: Optional[str],
+    privacy: str,
     thread_uuid: str,
     content: bytes,
     size: int,
@@ -468,7 +454,7 @@ def save_thread(
     """
     Save thread content to disk (public or private).
     Args:
-        agent_uuid: Agent UUID (None for public thread)
+        privacy: 'public' or 'private'
         thread_uuid: Thread UUID
         content: Thread content (encrypted for private, plaintext for public)
         size: Size of the original unencrypted content
@@ -476,10 +462,11 @@ def save_thread(
         curriculum: Optional curriculum label
         tags: Optional list of tags
     """
+    agent_uuid = None if privacy == "public" else ensure_agent_uuid()
     threads_dir = _get_thread_path(thread_uuid, agent_uuid)
     thread_shard = shard_path(threads_dir, thread_uuid)
     thread_shard.mkdir(parents=True, exist_ok=True)
-    ext = ".enc" if agent_uuid else ".dat"
+    ext = ".enc" if privacy == "private" else ".dat"
     thread_path = thread_shard / f"thread-{thread_uuid}{ext}"
     atomic_write(thread_path, content)
     meta_path = thread_shard / f"thread-{thread_uuid}.json"
@@ -491,7 +478,7 @@ def save_thread(
         meta: ThreadMetadata = {
             "thread_uuid": thread_uuid,
             "thread_name": thread_name,
-            "agent_uuid": agent_uuid,
+            "agent_uuid": agent_uuid,  # Deprecated
             "parent_uuid": None,
             "parent_name": None,
             "child_uuids": [],
@@ -502,6 +489,7 @@ def save_thread(
             "created_at": now,
             "last_updated": now,
             "size_bytes": 0,
+            "privacy": privacy,
         }
     meta["last_updated"] = datetime.now().isoformat()
     meta["size_bytes"] = size
@@ -511,6 +499,7 @@ def save_thread(
         meta["curriculum"] = curriculum
     if tags is not None:
         meta["tags"] = tags
+    meta["privacy"] = privacy
     with open(meta_path, "w") as f:
         f.write(json_dumps(meta))
     update_registry(thread_shard, thread_uuid)
@@ -595,14 +584,15 @@ def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes, agent_secret
 def store_gene_keys(
     thread_uuid: str,
     gene_keys: list[GeneKeysMetadata],
-    agent_uuid: Optional[str] = None,
+    privacy: str,
     agent_secret: Optional[str] = None,
 ) -> None:
     """
     Store gene keys (pattern observation logs) in the appropriate location (public or private).
-    If agent_uuid and agent_secret are provided, encrypt and store privately. Otherwise, store unencrypted in public.
+    If privacy is 'private' and agent_secret is provided, encrypt and store privately. Otherwise, store unencrypted in public.
     """
-    if agent_uuid and agent_secret:
+    agent_uuid = None if privacy == "public" else ensure_agent_uuid()
+    if privacy == "private" and agent_secret:
         # PRIVATE (encrypted)
         private_dir = Path("memories/private/agents")
         agent_shard = shard_path(private_dir, agent_uuid)
@@ -611,7 +601,7 @@ def store_gene_keys(
         key_shard = shard_path(keys_dir, thread_uuid)
         key_shard.mkdir(parents=True, exist_ok=True)
         # Serialize as NDJSON (one JSON object per line)
-        ndjson_str = "\n".join(json_dumps(gk) for gk in gene_keys)
+        ndjson_str = "\n".join(json_dumps({**gk, "privacy": privacy, "agent_uuid": agent_uuid}) for gk in gene_keys)
         ndjson_bytes = ndjson_str.encode("utf-8")
         # Encrypt as before
         salt = (agent_uuid + thread_uuid + "gene_keys").encode("utf-8")
@@ -633,7 +623,7 @@ def store_gene_keys(
         gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson"
         with open(gene_keys_path, "w", encoding="utf-8") as f:
             for gk in gene_keys:
-                f.write(json_dumps(gk) + "\n")
+                f.write(json_dumps({**gk, "privacy": privacy, "agent_uuid": None}) + "\n")
         update_registry(key_shard, thread_uuid)
 
 
