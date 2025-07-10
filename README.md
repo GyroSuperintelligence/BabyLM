@@ -148,39 +148,6 @@ Mathematical formalism employs gyrogroup structures (generalizations of rotation
 
 ---
 
-## 🌱 Quick Start
-
-```bash
-# Clone and install
-git clone https://github.com/GyroSuperintelligence/BabyLM.git
-cd BabyLM
-pip install -r requirements.txt
-
-# Start interactive chat
-python3 babylm.py --chat
-
-# Or process text directly
-python3 babylm.py --process "Hello, world!"
-
-# Or generate text
-python3 babylm.py --generate 100
-```
-
-The CLI provides an interactive experience where you can chat with the model, process text, generate responses, and explore the system's capabilities through various commands. Remember: like an actual baby, it starts with no language knowledge and learns through interaction.
-
----
-
-## 🏗️ Architecture
-
-The system consists of four interconnected engines based on CGM principles:
-
-- **S1: Governance** - Defines tensor structures and operations (traceability)
-- **S2: Information** - Manages storage and stream processing (variety)
-- **S3: Inference** - Performs pattern matching and tensor evolution (accountability)
-- **S4: Intelligence** - Orchestrates learning and response generation (integrity)
-
----
-
 ## 🔄 Current Status & Expectations
 
 **This is experimental research**, not a production language model. Current limitations:
@@ -194,6 +161,17 @@ The system consists of four interconnected engines based on CGM principles:
 - Gradual improvement in pattern selection over time
 - Unique approach to text generation and encryption
 - Insights into alternative approaches to machine learning
+
+---
+
+## 🏗️ Architecture
+
+The system consists of four interconnected engines based on CGM principles:
+
+- **S1: Governance** - Defines tensor structures and operations (traceability)
+- **S2: Information** - Manages storage and stream processing (variety)
+- **S3: Inference** - Performs pattern matching and tensor evolution (accountability)
+- **S4: Intelligence** - Orchestrates learning and response generation (integrity)
 
 ---
 
@@ -243,6 +221,29 @@ GyroSI-BabyLM/
 
 The complete intelligence framework lives in just two files: `masks/epigenome.dat` (12,288 bytes) and `masks/genome.dat` (256 bytes).
 
+---
+
+## 🌱 Quick Start
+
+```bash
+# Clone and install
+git clone https://github.com/GyroSuperintelligence/BabyLM.git
+cd BabyLM
+pip install -r requirements.txt
+
+# Start interactive chat
+python3 babylm.py --chat
+
+# Or process text directly
+python3 babylm.py --process "Hello, world!"
+
+# Or generate text
+python3 babylm.py --generate 100
+```
+
+The CLI provides an interactive experience where you can chat with the model, process text, generate responses, and explore the system's capabilities through various commands. Remember: like an actual baby, it starts with no language knowledge and learns through interaction.
+
+---
 ---
 
 ## 📜 License
