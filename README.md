@@ -275,19 +275,12 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 </div>
 
-<div style="border: 1px solid #ccc; padding: 1em; font-size: 0.85em; background-color: #f9f9f9; line-height: 1.4; border-radius: 6px;">
-<pre style="margin: 0; font-family: inherit; white-space: pre-wrap;">
-🤖 AI Disclosure
-All code architecture, documentation, and theoretical models in this project were authored and architected by Basil Korompilias.
-
-Artificial intelligence was employed solely as a technical assistant, limited to code drafting, formatting, verification, and editorial services, always under direct human supervision.
-
-All foundational ideas, design decisions, and conceptual frameworks originate from the Author.
-
-Responsibility for the validity, coherence, and ethical direction of this project remains fully human.
-
-Acknowledgements:
-This project benefited from AI language model services accessed through Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).
-</pre>
+<div style="border: 1px solid #ccc; padding: 1em; font-size: 0.85em; background-color: #f9f9f9; border-radius: 6px; line-height: 1.5;">
+  <p><strong>🤖 AI Disclosure</strong></p>
+  <p>All code architecture, documentation, and theoretical models in this project were authored and architected by Basil Korompilias.</p>
+  <p>Artificial intelligence was employed solely as a technical assistant, limited to code drafting, formatting, verification, and editorial services, always under direct human supervision.</p>
+  <p>All foundational ideas, design decisions, and conceptual frameworks originate from the Author.</p>
+  <p>Responsibility for the validity, coherence, and ethical direction of this project remains fully human.</p>
+  <p><strong>Acknowledgements:</strong><br>
+  This project benefited from AI language model services accessed through Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).</p>
 </div>
-
