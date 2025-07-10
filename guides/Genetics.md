@@ -10,6 +10,8 @@
 | Intelligence   | Epigenome mask                | Read: macro gene (state)      |
 | Intelligence   | Genome mask                   | Write: micro gene (output)    |
 
+*Macro context refers to persistent structural memory (e.g., conversation threads), while micro context refers to fine-grained inference events and local input-output cycles.*
+
 ## 1. Introduction & Foundation
 
 **Gyroscopic Superintelligence (GyroSI)** is an architecture grounded in the **Common Governance Model (CGM)**, a physics-based framework for understanding how intelligence emerges through recursive structural alignment.
@@ -33,7 +35,9 @@ The **Common Governance Model** presents an axiomatic framework for understandin
 
 ## 2. Fundamental Operations
 
-### 2.1 Gene Byte Topology
+### 2.1 Gene and Pattern Fundamentals
+
+In this system, "gene" refers generically to the 8-bit instruction derived from an input byte. "Gene stateless" is the universal reference (0xAA), while "gene mutated" is the active mutation mask used to trigger operations.
 
 The core operational mechanism in GyroSI is the transformation of input bytes into tensor operations through the `gene_mutated` mask:
 
@@ -241,6 +245,8 @@ def classify_pattern_resonance(mask: int) -> str:
 
 **No External Tokenizer Required:** The system operates at the byte level, deriving "tokenization" organically through learning which sequences of byte-transformations correspond to meaningful concepts.
 
+In short: Egress selects a pattern; Ingress renders it. Together they form the closure of an inference cycle.
+
 #### 3.2.2 Power Distribution Architecture
 
 | Component | Location | Size | Purpose | Power |
@@ -351,7 +357,8 @@ memories/
 | Ingress      | The closure (realization) step in BU: mapping the selected pattern index to a byte via the Genome.         |
 | ONA          | Opposition Non-Absolute: CGM stage generating the full possibility space of physically resonant states.    |
 | BU           | Balance Universal: CGM stage applying closure, recollection, and memory to select a coherent output.       |
-| Pattern Index| Metadata structure tracking pattern usage, resonance, and confidence for closure selection.                |
+| Pattern Index| Integer identifier (0–255) corresponding to a canonical tensor pattern.                |
+| Pattern Metadata| Structured data (resonance, confidence, frequency, etc.) associated with each pattern index. |
 | Confidence   | The system’s accumulated memory of a pattern’s historical self-consistency, used in closure selection.     |
 | Combined Score| The product of physical resonance and confidence, implementing the BU closure principle computationally.   |
 
@@ -699,7 +706,7 @@ The `GeneKeysMetadata` stores the raw `resonance` (gyrodistance) for each indivi
 
 ### 5.2 Learning Mechanisms
 
-The learning mechanism is a two-fold process that directly connects experience to generation:
+During inference, the active `format_uuid` is pulled from thread metadata or the system’s preferred default. This enables logging of each inference event under the correct semantic mapping.
 
 1.  **Implicit/Unconscious Learning (State Evolution):** The continuous, irreversible mutation of the Epigenome tensor (`T`) by the input stream. This embodies the system's path-dependent working memory.
 2.  **Explicit/Conscious Learning (Closure Refinement):** The recording of each inference event (`GeneKey`) and the subsequent updating of the `FormatMetadata`. Specifically, the **`confidence`** score for each pattern is updated based on its resonance. This accumulated `confidence` is then used directly by the S4 Intelligence Engine during the BU closure step (`_generate_response_byte`) to select the most coherent and reliable output. This creates a direct feedback loop where successful resonance strengthens a pattern's semantic weight, making it more likely to be chosen in the future.
@@ -745,4 +752,13 @@ The learning mechanism is a two-fold process that directly connects experience t
 
 **Degeneracy:**
 A fundamental property of the system is that multiple different input masks (gene mutations) can produce identical tensor states. This is called degeneracy: a many-to-one mapping from mask to tensor. For example, F[2] and F[100] may be mathematically identical, and the system will always select the lowest index among degenerate patterns. This is a feature, not a flaw, and mirrors the redundancy found in biological genetic codes.
+
+**Degeneracy resolution: always pick the lowest-index match**
+```python
+# Degeneracy resolution: always pick the lowest-index match
+def find_closest_pattern_index(T, F):
+    distances = [gyrodistance(T, f) for f in F]
+    min_distance = min(distances)
+    return distances.index(min_distance)  # Picks first match if degenerate
+```
 
