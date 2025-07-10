@@ -12,7 +12,6 @@ from baby.governance import (
     apply_operation,
     gene_add,
     gene_stateless,
-    gyrodistance,
     derive_canonical_patterns,
     classify_pattern_resonance,
 )
@@ -189,7 +188,15 @@ class InferenceEngine:
         return angular_distances
 
     def tensor_to_output_byte(self) -> int:
-        """Canonical tensor-to-byte conversion using epigenome pattern matching."""
+        """
+        Convert a tensor to a single output byte by thresholding and packing bits.
+
+        Args:
+            tensor (np.ndarray): The input tensor to convert.
+
+        Returns:
+            int: The resulting output byte as an integer.
+        """
         key_index, _ = self.find_closest_pattern_index()
         output_byte = self.G[key_index]
         if hasattr(output_byte, "item"):

@@ -443,7 +443,7 @@ Chat Commands:
                 layout["input"].update(Panel(f"Input: {user_input}", border_style="cyan"))
 
                 # Process with visualization
-                import numpy as np
+                import numpy as np  # noqa: F401
 
                 plaintext, encrypted = self.engine.process_input_stream(input_bytes)
 
@@ -624,7 +624,7 @@ Chat Commands:
         tags = ", ".join(thread_detail.get("tags") or []) if thread_detail and thread_detail.get("tags") else "-"
 
         if RICH_AVAILABLE and console is not None:
-            info = f"""
+            info = """
 [cyan]Thread UUID:[/cyan] {self.engine.thread_uuid}
 [cyan]Name:[/cyan] {name}
 [cyan]Curriculum:[/cyan] {curriculum}
@@ -687,7 +687,7 @@ Chat Commands:
                 stats = self.engine.get_pattern_statistics(pattern_idx)
 
                 if RICH_AVAILABLE and console is not None:
-                    info = f"""
+                    info = """
 [cyan]Index:[/cyan] {stats['pattern_index']}
 [cyan]Semantic:[/cyan] {stats['character'] or 'None'}
 [cyan]Count:[/cyan] {stats['count']}
@@ -1241,7 +1241,7 @@ Chat Commands:
 
         if RICH_AVAILABLE and console is not None:
             # Basic info
-            basic_info = f"""
+            basic_info = """
 [cyan]UUID:[/cyan] {format_data.get('format_uuid', 'Unknown')}
 [cyan]Name:[/cyan] {format_data.get('format_name', 'Unknown')}
 [cyan]Version:[/cyan] {format_data.get('format_version', 'Unknown')}
@@ -1251,8 +1251,8 @@ Chat Commands:
             console.print(Panel(basic_info.strip(), title="Format Information", border_style="cyan"))
 
             # Metadata
-            meta = format_data.get("metadata", {})
-            meta_info = f"""
+            format_data.get("metadata", {})
+            meta_info = """
 [green]Author:[/green] {meta.get('author', 'Unknown')}
 [green]Description:[/green] {meta.get('description', 'None')}
 [green]Created:[/green] {meta.get('created_at', 'Unknown')}
@@ -1263,10 +1263,10 @@ Chat Commands:
 
             # Pattern statistics
             patterns = format_data.get("patterns", [])
-            labeled = sum(1 for p in patterns if p.get("character"))
-            active = sum(1 for p in patterns if p.get("count", 0) > 0)
+            sum(1 for p in patterns if p.get("character"))
+            sum(1 for p in patterns if p.get("count", 0) > 0)
 
-            pattern_info = f"""
+            pattern_info = """
 [magenta]Total Patterns:[/magenta] {len(patterns)}
 [magenta]Labeled:[/magenta] {labeled}
 [magenta]Active:[/magenta] {active}
@@ -1390,8 +1390,8 @@ Chat Commands:
                 if recent_patterns:
                     recent_patterns_str = recent_patterns[-5:]
                 else:
-                    recent_patterns_str = []
-                info = f"""
+                    pass
+                info = """
 [cyan]Input size:[/cyan] {len(data)} bytes
 [cyan]Thread UUID:[/cyan] {self.engine.thread_uuid if self.engine.thread_uuid else '[unknown]'}
 [cyan]Cycles processed:[/cyan] {len(data)}
@@ -1468,7 +1468,7 @@ def main():
     """Main entry point"""
     # Import numpy here to avoid issues if not installed
     try:
-        import numpy as np
+        import numpy as np  # noqa: F401
     except ImportError:
         print("Error: NumPy is required. Install with: pip install numpy")
         sys.exit(1)

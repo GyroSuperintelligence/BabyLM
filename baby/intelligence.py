@@ -38,36 +38,13 @@ from baby.information import (
     shard_path,
     PatternIndex,
     load_thread_key,
-    json_dumps,  # Ensure json_dumps is always imported
-    json_loads,  # Ensure json_loads is always imported
+    json_loads,
+    json_dumps,
 )
 from baby.types import PatternMetadata, FormatMetadata, GeneKeysMetadata
 
 import base64
-
-# pyright: reportMissingModuleSource=false
-try:
-    import orjson as json
-
-    def json_loads(s):
-        if isinstance(s, str):
-            s = s.encode("utf-8")
-        return json.loads(s)
-
-    def json_dumps(obj):
-        return json.dumps(obj).decode("utf-8")
-
-except ImportError:
-    try:
-        import ujson as json
-
-        json_loads = json.loads
-        json_dumps = json.dumps
-    except ImportError:
-        import json
-
-        json_loads = json.loads
-        json_dumps = json.dumps
+import json
 
 __all__ = [
     "IntelligenceEngine",
@@ -364,12 +341,11 @@ class IntelligenceEngine:
             store_thread_key(self.agent_uuid, new_thread_uuid, self.thread_file_key, self.agent_secret)
 
         if privacy == "public":
-            threads_dir = shard_path(Path("memories/public/threads"), str(new_thread_uuid))
-            thread_shard = shard_path(threads_dir, str(new_thread_uuid))
+            threads_root = Path("memories/public/threads")
+            thread_shard = shard_path(threads_root, str(new_thread_uuid))
             thread_path = thread_shard / f"thread-{new_thread_uuid}.ndjson"
-            # Open the file in append mode and store the handle
+            thread_shard.mkdir(parents=True, exist_ok=True)
             self._active_public_thread_handle = open(thread_path, "a", encoding="utf-8")
-            # --- NEW: Create public thread metadata file immediately ---
             meta_path = thread_shard / f"thread-{new_thread_uuid}.json"
             now = datetime.datetime.now().isoformat()
             meta = {
@@ -422,13 +398,17 @@ class IntelligenceEngine:
             self.finalize_and_save_thread(privacy=privacy)  # This will be refactored in a later step
             self.start_new_thread(privacy=privacy)
         # 4. Write or Buffer based on privacy
-        if privacy == "public" and self._active_public_thread_handle:
+        if privacy == "public":
             if self.thread_uuid is None:
-                raise ValueError("thread_uuid must not be None for public thread metadata update")
-            # For public threads, write directly to the file handle
+                raise ValueError("thread_uuid must not be None for public thread operations.")
+            thread_shard = shard_path(Path("memories/public/threads"), self.thread_uuid)
+            thread_path = thread_shard / f"thread-{self.thread_uuid}.ndjson"
+            if self._active_public_thread_handle is None:
+                thread_shard.mkdir(parents=True, exist_ok=True)
+                self._active_public_thread_handle = open(thread_path, "a", encoding="utf-8")
+            print(f"Writing to NDJSON: {thread_path}")
             self._active_public_thread_handle.write(json_line.decode("utf-8"))
             self._active_public_thread_handle.flush()
-            # --- REMOVED: Per-event metadata update for public threads ---
         else:
             # For private threads, continue using the in-memory buffer
             self.active_thread_content.extend(json_line)
@@ -448,46 +428,50 @@ class IntelligenceEngine:
 
         # --- Finalize Public Thread ---
         if privacy == "public":
+            # Always close the file handle if open
             if self._active_public_thread_handle:
                 self._active_public_thread_handle.close()
                 self._active_public_thread_handle = None
-                # --- NEW: Update public thread metadata once at finalization ---
-                from baby.information import shard_path, json_loads, json_dumps
-                from pathlib import Path
-                import os
 
-                threads_dir = shard_path(Path("memories/public/threads"), self.thread_uuid)
-                thread_shard = shard_path(threads_dir, self.thread_uuid)
-                meta_path = thread_shard / f"thread-{self.thread_uuid}.json"
-                now = datetime.datetime.now().isoformat()
-                meta = None
-                if os.path.exists(meta_path):
-                    with open(meta_path, "r") as f:
-                        meta = json_loads(f.read())
-                if not meta:
-                    meta = {
-                        "thread_uuid": self.thread_uuid,
-                        "thread_name": None,
-                        "agent_uuid": None,
-                        "parent_uuid": None,
-                        "parent_name": None,
-                        "children": [],
-                        "format_uuid": self.format_uuid,
-                        "curriculum": None,
-                        "tags": None,
-                        "created_at": now,
-                        "last_updated": now,
-                        "size_bytes": 0,
-                        "privacy": "public",
-                    }
-                meta["last_updated"] = now
-                meta["privacy"] = "public"
-                # Update size_bytes (accurate at finalization)
-                thread_path = thread_shard / f"thread-{self.thread_uuid}.ndjson"
-                if os.path.exists(thread_path):
-                    meta["size_bytes"] = os.path.getsize(thread_path)
-                with open(meta_path, "w") as f:
-                    f.write(json_dumps(meta))
+            # --- FIX: Calculate the shard path correctly (only once) ---
+            from baby.information import shard_path, json_loads, json_dumps
+            from pathlib import Path
+            import os
+
+            threads_root = Path("memories/public/threads")
+            thread_shard = shard_path(threads_root, self.thread_uuid)
+            meta_path = thread_shard / f"thread-{self.thread_uuid}.json"
+            meta_path.parent.mkdir(parents=True, exist_ok=True)
+
+            now = datetime.datetime.now().isoformat()
+            meta = None
+            if os.path.exists(meta_path):
+                with open(meta_path, "r") as f:
+                    meta = json_loads(f.read())
+            if not meta:
+                meta = {
+                    "thread_uuid": self.thread_uuid,
+                    "thread_name": None,
+                    "agent_uuid": None,
+                    "parent_uuid": self.parent_thread_uuid,
+                    "parent_name": None,
+                    "children": [],
+                    "format_uuid": self.format_uuid,
+                    "curriculum": None,
+                    "tags": None,
+                    "created_at": now,
+                    "last_updated": now,
+                    "size_bytes": 0,
+                    "privacy": "public",
+                }
+            meta["last_updated"] = now
+            meta["privacy"] = "public"
+            # Update size_bytes (accurate at finalization)
+            thread_path = thread_shard / f"thread-{self.thread_uuid}.ndjson"
+            if os.path.exists(thread_path):
+                meta["size_bytes"] = os.path.getsize(thread_path)
+            with open(meta_path, "w") as f:
+                f.write(json_dumps(meta))
         # --- Finalize Private Thread ---
         else:  # privacy == "private"
             if not self.active_thread_content:
@@ -498,18 +482,43 @@ class IntelligenceEngine:
             # Use thread_file_key directly as the AES-256-GCM key
             aes_key = self.thread_file_key
             encrypted_blob = self._encrypt_data(final_data_to_save, aes_key)
-            save_thread(privacy, self.thread_uuid, encrypted_blob, len(final_data_to_save))
+            save_thread(self.thread_uuid, encrypted_blob, privacy)
+
+            # Update thread metadata with actual file size
+            from baby.information import shard_path, json_loads, json_dumps
+            from pathlib import Path
+            import os
+
+            private_dir = Path("memories/private/agents")
+            agent_shard = shard_path(private_dir, self.agent_uuid)
+            agent_dir = agent_shard / f"agent-{self.agent_uuid}"
+            threads_dir = agent_dir / "threads"
+            thread_shard = shard_path(threads_dir, self.thread_uuid)
+            meta_path = thread_shard / f"thread-{self.thread_uuid}.json"
+
+            if meta_path.exists():
+                with open(meta_path, "r") as f:
+                    meta = json_loads(f.read())
+                meta["last_updated"] = datetime.datetime.now().isoformat()
+                # Update size_bytes (accurate at finalization)
+                thread_path = thread_shard / f"thread-{self.thread_uuid}.enc"
+                if os.path.exists(thread_path):
+                    meta["size_bytes"] = os.path.getsize(thread_path)
+                with open(meta_path, "w") as f:
+                    f.write(json_dumps(meta))
 
         # --- Common Finalization Logic for BOTH public and private ---
         if self.current_thread_keys:
-            store_gene_keys(self.thread_uuid, self.current_thread_keys, privacy, self.agent_secret)
+            store_gene_keys(self.thread_uuid, self.current_thread_keys, privacy, self.agent_secret, self.agent_uuid)
         self.M.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
         self.M.setdefault("metadata", {})["usage_count"] = self.M.get("metadata", {}).get("usage_count", 0) + 1
         store_format(self.M)
+        # Update pattern index if it exists (conditional)
         if self.pattern_index:
             self.pattern_index.update_from_thread(self.thread_uuid, self.current_thread_keys)
-            self.active_thread_content.clear()
-            self.current_thread_keys.clear()
+        # --- FIX: ALWAYS clear the state buffers after finalizing ---
+        self.active_thread_content.clear()
+        self.current_thread_keys.clear()
 
     def generate_and_save_response(self, length: int = 100, privacy: str = "private") -> bytes:
         """
@@ -711,7 +720,9 @@ class IntelligenceEngine:
         """
         patterns = self.M.get("patterns", [])
         if 0 <= key_index < len(patterns):
-            return patterns[key_index].get("character")
+            char = patterns[key_index].get("character")
+            if isinstance(char, str):
+                return char
         return None
 
     def load_thread_content(self, thread_uuid: str) -> Optional[list]:
@@ -843,8 +854,10 @@ class IntelligenceEngine:
                 if not secondary_data:
                     continue
                 # Merge pattern metadata
-                primary_patterns = composed_format.get("patterns", [])
-                secondary_patterns = secondary_data.get("patterns", [])
+                primary_patterns = composed_format.get("patterns")
+                secondary_patterns = secondary_data.get("patterns")
+                if not isinstance(primary_patterns, list) or not isinstance(secondary_patterns, list):
+                    continue
                 for i in range(256):
                     if i >= len(primary_patterns) or i >= len(secondary_patterns):
                         continue
@@ -852,8 +865,10 @@ class IntelligenceEngine:
                     secondary_pattern = secondary_patterns[i]
 
                     # If primary doesn't have character but secondary does, use secondary's
-                    if primary_pattern.get("character") is None and secondary_pattern.get("character") is not None:
-                        primary_pattern["character"] = secondary_pattern["character"]
+                    primary_char = primary_pattern.get("character")
+                    secondary_char = secondary_pattern.get("character")
+                    if primary_char is None and isinstance(secondary_char, str):
+                        primary_pattern["character"] = secondary_char
 
                     # Merge counts and confidences (weighted average)
                     p_count = primary_pattern.get("count", 0)
@@ -864,7 +879,7 @@ class IntelligenceEngine:
                         # Update confidence with weighted average
                         p_conf = primary_pattern.get("confidence", 0.0)
                         s_conf = secondary_pattern.get("confidence", 0.0)
-                        composed_format["patterns"][i]["confidence"] = (
+                        composed_format.get("patterns", [])[i]["confidence"] = (
                             p_conf * p_count + s_conf * s_count
                         ) / total_count
 
@@ -1053,6 +1068,17 @@ class IntelligenceEngine:
         with open(registry_path, "r") as f:
             registry = json_loads(f.read())
         thread_uuids = registry.get("uuids", [])
+        # Filter out invalid UUIDs to prevent errors
+        valid_thread_uuids = []
+        for uuid_str in thread_uuids:
+            if isinstance(uuid_str, str) and len(uuid_str) == 36 and uuid_str.count("-") == 4:
+                try:
+                    # Validate UUID format
+                    uuid.UUID(uuid_str)
+                    valid_thread_uuids.append(uuid_str)
+                except ValueError:
+                    continue  # Skip invalid UUIDs
+        thread_uuids = valid_thread_uuids
         max_size_bytes = (
             self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
             if self.memory_prefs and "storage_config" in self.memory_prefs
@@ -1178,12 +1204,11 @@ class IntelligenceEngine:
         self.current_thread_size = meta.get("size_bytes", 0)
         self.thread_uuid = thread_uuid
         if privacy == "public":
-            # Close any existing handle first
             if self._active_public_thread_handle:
                 self._active_public_thread_handle.close()
                 self._active_public_thread_handle = None
-            threads_dir = shard_path(Path("memories/public/threads"), thread_uuid)
-            thread_shard = shard_path(threads_dir, thread_uuid)
+            threads_root = Path("memories/public/threads")
+            thread_shard = shard_path(threads_root, thread_uuid)
             thread_path = thread_shard / f"thread-{thread_uuid}.ndjson"
             self._active_public_thread_handle = open(thread_path, "a", encoding="utf-8")
         # For private: buffer is not loaded for appending, as private threads are not typically resumed for append

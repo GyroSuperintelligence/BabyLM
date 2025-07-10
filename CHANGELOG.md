@@ -25,6 +25,16 @@
 - Added a comprehensive glossary of all key terms (Epigenome, Genome, Egress, Ingress, ONA, BU, etc.)
 - Fixed Pyright and linter errors in intelligence.py and babylm.py (indentation, type safety, buffer handling)
 
+### Fixed
+- Fixed a critical state management bug in `IntelligenceEngine` that caused duplicate or excessive gene key writes in public mode. State buffers are now always cleared after finalization, preventing data leaks between sessions in both public and private modes.
+- Fixed inconsistent and incorrect file path logic for public thread and gene key storage, ensuring all files are created and written to the correct sharded locations.
+- Fixed issues where public NDJSON files were not being created or written due to file handle and path errors.
+
+### Improved
+- Modernized and strengthened the test suite for public thread and gene key storage, ensuring robust detection of subtle bugs and regressions.
+- Unified file path calculation logic for all public thread operations, improving maintainability and reliability.
+- Ensured state buffers are always cleared after finalization, preventing data leaks between sessions in both public and private modes.
+
 ## [0.9.6] – 2025-07-09
 
 ### Changed

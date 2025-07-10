@@ -8,7 +8,6 @@ operations and registry management.
 """
 
 import os
-import json
 import uuid
 import numpy as np
 import fcntl
@@ -23,7 +22,6 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 
 from baby.inference import InferenceEngine
-from baby.governance import gyrodistance
 from baby.types import FormatMetadata, ThreadMetadata, GeneKeysMetadata
 
 # pyright: reportMissingModuleSource=false
@@ -46,10 +44,10 @@ except ImportError:
         json_loads = json.loads
         json_dumps = json.dumps
     except ImportError:
-        import json  # noqa: F811
+        import json as std_json
 
-        json_loads = json.loads
-        json_dumps = json.dumps
+        json_loads = std_json.loads
+        json_dumps = std_json.dumps
 
 
 # ====================================================================
@@ -70,7 +68,7 @@ def get_memory_preferences() -> Dict:
     try:
         with open(prefs_path, "r") as f:
             prefs = json_loads(f.read())
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (FileNotFoundError, ValueError):
         # Create default preferences
         prefs = {
             "sharding": {"width": 2, "max_files": 30000, "second_level": True},
@@ -117,11 +115,12 @@ def shard_path(root: Path, uuid_: str, width=2, limit=30_000) -> Path:
                 with open(registry_path, "r+") as f:
                     fcntl.flock(f, fcntl.LOCK_EX)
                     try:
-                    registry = json_loads(f.read())
-                count = registry.get("count", 0)
-            except (json.JSONDecodeError, IOError):
-                pass
-                    fcntl.flock(f, fcntl.LOCK_UN)
+                        registry = json_loads(f.read())
+                        count = registry.get("count", 0)
+                    except (json.JSONDecodeError, IOError):
+                        pass
+                    finally:
+                        fcntl.flock(f, fcntl.LOCK_UN)
             except Exception:
                 pass
         # If registry count is unreliable, count files physically
@@ -427,66 +426,23 @@ def create_thread(
     return thread_uuid
 
 
-def save_thread(
-    privacy: str,
-    thread_uuid: str,
-    content: bytes,
-    size: int,
-    thread_name: Optional[str] = None,
-    curriculum: Optional[str] = None,
-    tags: Optional[list] = None,
-) -> None:
+def save_thread(thread_uuid: str, content: bytes, privacy: str = "private") -> None:
     """
-    Save thread content to disk (public or private).
+    Save thread content to disk, encrypted or plaintext based on privacy.
     Args:
-        privacy: 'public' or 'private'
-        thread_uuid: Thread UUID
-        content: Thread content (encrypted for private, plaintext for public)
-        size: Size of the original unencrypted content
-        thread_name: Optional human-friendly name for the thread
-        curriculum: Optional curriculum label
-        tags: Optional list of tags
+        thread_uuid (str): The thread UUID.
+        content (bytes): The thread content to save.
+        privacy (str): 'private' or 'public'.
     """
+    # Use the same path calculation as load_thread for consistency
     agent_uuid = None if privacy == "public" else ensure_agent_uuid()
     threads_dir = _get_thread_path(thread_uuid, agent_uuid)
     thread_shard = shard_path(threads_dir, thread_uuid)
-    thread_shard.mkdir(parents=True, exist_ok=True)
-    ext = ".enc" if privacy == "private" else ".dat"
+    ext = ".enc" if agent_uuid else ".ndjson"
     thread_path = thread_shard / f"thread-{thread_uuid}{ext}"
-    atomic_write(thread_path, content)
-    meta_path = thread_shard / f"thread-{thread_uuid}.json"
-    if meta_path.exists():
-        with open(meta_path, "r") as f:
-            meta = json_loads(f.read())
-    else:
-        now = datetime.now().isoformat()
-        meta: ThreadMetadata = {
-            "thread_uuid": thread_uuid,
-            "thread_name": thread_name,
-            "agent_uuid": agent_uuid,  # Deprecated
-            "parent_uuid": None,
-            "parent_name": None,
-            "children": [],
-            "format_uuid": "",
-            "curriculum": curriculum,
-            "tags": tags,
-            "created_at": now,
-            "last_updated": now,
-            "size_bytes": 0,
-            "privacy": privacy,
-        }
-    meta["last_updated"] = datetime.now().isoformat()
-    meta["size_bytes"] = size
-    if thread_name is not None:
-        meta["thread_name"] = thread_name
-    if curriculum is not None:
-        meta["curriculum"] = curriculum
-    if tags is not None:
-        meta["tags"] = tags
-    meta["privacy"] = privacy
-    with open(meta_path, "w") as f:
-        f.write(json_dumps(meta))
-    update_registry(thread_shard, thread_uuid)
+    thread_shard.mkdir(parents=True, exist_ok=True)
+    with open(thread_path, "wb") as f:
+        f.write(content)
 
 
 def load_thread(agent_uuid: Optional[str], thread_uuid: str) -> Optional[bytes]:
@@ -500,7 +456,7 @@ def load_thread(agent_uuid: Optional[str], thread_uuid: str) -> Optional[bytes]:
     """
     threads_dir = _get_thread_path(thread_uuid, agent_uuid)
     thread_shard = shard_path(threads_dir, thread_uuid)
-    ext = ".enc" if agent_uuid else ".dat"
+    ext = ".enc" if agent_uuid else ".ndjson"
     thread_path = thread_shard / f"thread-{thread_uuid}{ext}"
     if not thread_path.exists():
         return None
@@ -570,13 +526,15 @@ def store_gene_keys(
     gene_keys: list[GeneKeysMetadata],
     privacy: str,
     agent_secret: Optional[str] = None,
+    agent_uuid: Optional[str] = None,
 ) -> None:
     """
     Store gene keys (pattern observation logs) in the appropriate location (public or private).
-    If privacy is 'private' and agent_secret is provided, encrypt and store privately. Otherwise, store unencrypted in public.
+    If privacy is 'private' and agent_secret is provided, encrypt and store privately. 
+    Otherwise, store unencrypted in public.
     """
     import struct
-    agent_uuid = None if privacy == "public" else ensure_agent_uuid()
+
     if privacy == "private" and agent_secret:
         if agent_uuid is None:
             raise ValueError("agent_uuid must not be None for private gene key storage")
@@ -595,11 +553,11 @@ def store_gene_keys(
             for gk in gene_keys:
                 ndjson_line = json_dumps({**gk, "privacy": privacy, "agent_uuid": agent_uuid})
                 ndjson_bytes = ndjson_line.encode("utf-8")
-        nonce = os.urandom(12)
-        cipher = Cipher(algorithms.AES(encryption_key), modes.GCM(nonce), backend=default_backend())
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(ndjson_bytes) + encryptor.finalize()
-        encrypted_blob = nonce + encryptor.tag + ciphertext
+                nonce = os.urandom(12)
+                cipher = Cipher(algorithms.AES(encryption_key), modes.GCM(nonce), backend=default_backend())
+                encryptor = cipher.encryptor()
+                ciphertext = encryptor.update(ndjson_bytes) + encryptor.finalize()
+                encrypted_blob = nonce + encryptor.tag + ciphertext
                 # Write length prefix (4 bytes, big-endian)
                 f.write(struct.pack(">I", len(encrypted_blob)))
                 f.write(encrypted_blob)
@@ -627,6 +585,7 @@ def load_gene_keys(
     If agent_uuid and agent_secret are provided, decrypt and load privately. Otherwise, load unencrypted from public.
     """
     import struct
+
     if agent_uuid and agent_secret:
         # PRIVATE (encrypted, per-record)
         private_dir = Path("memories/private/agents")
@@ -657,17 +616,17 @@ def load_gene_keys(
                 encrypted_blob = f.read(blob_len)
                 if len(encrypted_blob) != blob_len:
                     break  # Corrupt or truncated file
-        nonce = encrypted_blob[:12]
-        tag = encrypted_blob[12:28]
-        ciphertext = encrypted_blob[28:]
-        cipher = Cipher(algorithms.AES(decryption_key), modes.GCM(nonce, tag), backend=default_backend())
-        decryptor = cipher.decryptor()
-        try:
-            decrypted_data = decryptor.update(ciphertext) + decryptor.finalize()
+                nonce = encrypted_blob[:12]
+                tag = encrypted_blob[12:28]
+                ciphertext = encrypted_blob[28:]
+                cipher = Cipher(algorithms.AES(decryption_key), modes.GCM(nonce, tag), backend=default_backend())
+                decryptor = cipher.decryptor()
+                try:
+                    decrypted_data = decryptor.update(ciphertext) + decryptor.finalize()
                     ndjson_line = decrypted_data.decode("utf-8")
                     gene_keys.append(json_loads(ndjson_line))
-        except Exception:
-                    continue  # Skip corrupt record
+                except Exception:
+                    pass  # Skip corrupt record
         return gene_keys
     else:
         # PUBLIC (unencrypted)
@@ -785,7 +744,7 @@ def children(agent_uuid: str, thread_uuid: str) -> List[str]:
         return []
     with open(meta_path, "r") as f:
         meta = json_loads(f.read())
-    val = [c['uuid'] for c in meta.get('children', [])]
+    val = [c["uuid"] for c in meta.get("children", [])]
     # Always return a flat list of strings (write path enforces this)
     return list(val) if isinstance(val, list) else []
 
@@ -1168,12 +1127,13 @@ class PatternIndex:
         MAX_LOCATIONS = 100
         if len(locations) > MAX_LOCATIONS:
             import random
+
             locations = random.sample(locations, MAX_LOCATIONS)
         results = []
         for thread_uuid, offset, cycle in locations:
-                # Calculate similarity score based on preceding patterns
-                score = self._calculate_context_similarity(thread_uuid, offset, recent_patterns)
-                if score > 0:
+            # Calculate similarity score based on preceding patterns
+            score = self._calculate_context_similarity(thread_uuid, offset, recent_patterns)
+            if score > 0:
                 results.append({"thread_uuid": thread_uuid, "offset": offset, "cycle": cycle, "similarity": score})
 
         # Sort by similarity and return top k
