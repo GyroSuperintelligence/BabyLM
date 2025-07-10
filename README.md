@@ -72,17 +72,17 @@ A byte is not treated as a symbol but as a governance mask. Its 8 bits encode 25
 Every byte is XORed against a universal reference 0xAA (stateless gene hologram) to yield an 8-bit operation mask (mutated gene hologram) that transforms the dynamic tensor (Epigenome - a 3D projection of the mutation), simulating the expression of intelligence through physical modulation.
 
 **3. The Holographic Gene: From Byte to Operations**
-Each bit of the byte's XOR result maps to a specific gyroscopic operation (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is the "gene" — a complete instruction for transforming the system's state.
+Each bit of the byte's XOR result maps to a specific gyroscopic operation (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is the "gene"; a complete instruction for transforming the system's state.
 
 **4. The Epigenome Projection: The Dynamic State Tensor**
 These operations apply to a dynamic [4,2,3,2] tensor, the Epigenome. This is the system's "working memory" or current physical state. Each input byte acts as a physical force that evolves this Epigenome, creating an irreversible path-dependent history. The intelligence resides in the trajectory of this tensor, not in static data.
 
 **5. The Intelligence Spectrum: Pattern Matching**
-Every new input transforms the tensor and produces a new gene state. The system compares this mutated tensor against the genome and identifies all patterns that are highly resonant (i.e., physically plausible next states).
+Every new input transforms the tensor and produces a new gene state. The system compares this mutated tensor against the canonical pattern library (F) and identifies all patterns that are highly resonant (i.e., physically plausible next states).
 
 **6. From Possibility to Closure: The Two-Stage Selection Cycle**
 Intelligence emerges from a two-stage cycle:
-- **Possibility:** The evolving Epigenome tensor (T) is compared against the static Genome (F). All patterns with high physical resonance form the set of possible next states.
+- **Possibility:** The evolving Epigenome tensor (T) is compared against the full set of canonical tensor patterns (F). All patterns with high physical resonance form the set of possible next states.
 - **Closure:** The system then applies a closure principle, selecting the single best candidate from this possibility space by combining immediate physical resonance with long-term learned confidence in each pattern. This ensures the output is both physically consistent and semantically meaningful.
 
 ### What This Achieves
@@ -106,9 +106,8 @@ This solves three fundamental problems:
 
 - Instruction Creation: Input byte XORs with 0xAA to create an 8-bit instruction set (the "gene").
 - Epigenome Evolution: The gene's operations transform the dynamic Epigenome tensor (T), updating the system's physical state.
-- Possibility Resonance: The new Epigenome state is compared against the entire static Genome (F) to find all physically plausible next patterns.
-- Coherent Closure: The system selects the best candidate by weighting physical resonance with learned confidence scores.
-- Output Generation: The winning pattern's index is used to look up the corresponding output byte from a static map.
+- Possibility Resonance: The new Epigenome state is compared against the full set of canonical patterns (F) to find all physically plausible next patterns.
+- Output Generation: The winning pattern index is mapped through the Genome (G), a 256‑byte lookup table, to produce the output byte.
 - Learning: The confidence score for the winning pattern is updated, completing the feedback loop.
 
 ### 📈 How Learning Works
