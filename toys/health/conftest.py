@@ -5,12 +5,10 @@ import json
 import numpy as np
 import pytest
 import shutil
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 from baby.governance import derive_canonical_patterns
-from baby.inference import InferenceEngine
 from baby.information import InformationEngine, assign_agent_uuid, shard_path
 from baby.intelligence import initialize_intelligence_engine
 

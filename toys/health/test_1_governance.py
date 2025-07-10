@@ -1,16 +1,16 @@
 """
 Tests for governance logic, gene operations, and pattern classification in the BabyLM system.
-Includes tests for gene constants, operation application, gyrodistance, canonical pattern derivation, and pattern resonance.
+Includes tests for gene constants, operation application, gyrodistance, canonical pattern 
+derivation, and pattern resonance.
 """
 
-import os
 import uuid
 import json
 import numpy as np
 import pytest
 from pathlib import Path
 from unittest.mock import patch
-from typing import cast, Dict, Any
+from typing import cast
 from datetime import datetime
 import shutil
 
@@ -24,18 +24,10 @@ from baby.governance import (
     derive_canonical_patterns,
     classify_pattern_resonance,
 )
-from baby.inference import InferenceEngine
 from baby.information import (
-    InformationEngine,
     ensure_agent_uuid,
-    ensure_agent_uuid as ensure_agent_uuid_fn,
-    create_thread,
-    load_thread,
-    load_thread_key,
     store_gene_keys,
     load_gene_keys,
-    parent,
-    children,
     list_formats,
     load_format,
     store_format,
@@ -45,8 +37,41 @@ from baby.information import (
     atomic_write,
     PatternIndex,
 )
-from baby.intelligence import initialize_intelligence_engine
 from baby.types import FormatMetadata, GeneKeysMetadata
+
+
+# ------------------------------------------------------------------------------
+# Test Cleanup Fixtures
+# ------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="function", autouse=True)
+def cleanup_test_artifacts():
+    """Clean up test artifacts before and after each test"""
+    # Use isolated test memories directory
+    test_memories_dir = Path("toys/health/memories")
+    
+    # Clean up before test
+    if test_memories_dir.exists():
+        shutil.rmtree(test_memories_dir)
+    
+    # Create fresh test directories
+    test_memories_dir.mkdir(parents=True, exist_ok=True)
+    (test_memories_dir / "private").mkdir(exist_ok=True)
+    (test_memories_dir / "public").mkdir(exist_ok=True)
+    
+    yield
+    
+    # Clean up after test
+    if test_memories_dir.exists():
+        shutil.rmtree(test_memories_dir)
+
+
+def cleanup_test_directories():
+    """Helper function to clean up test directories"""
+    test_memories_dir = Path("toys/health/memories")
+    if test_memories_dir.exists():
+        shutil.rmtree(test_memories_dir)
 
 
 # ------------------------------------------------------------------------------
@@ -207,22 +232,22 @@ class TestInformationStorage:
         assert prefs["sharding"]["max_files"] == 30000
         assert prefs["storage_config"]["max_thread_size_mb"] == 64
 
-    def test_shard_path_first_level(self, mock_env):
+    def test_shard_path_first_level(self):
         # Clean up the agents directory to ensure a clean state
-        agents_dir = Path("memories/private/agents")
+        agents_dir = Path("toys/health/memories/private/agents")
         if agents_dir.exists():
             shutil.rmtree(agents_dir)
         agents_dir.mkdir(parents=True, exist_ok=True)
         """Test calculating first-level shard path"""
         test_uuid = "abcdef12-3456-7890-abcd-ef1234567890"
-        root = Path("memories/private/agents")
+        root = Path("toys/health/memories/private/agents")
         shard = shard_path(root, test_uuid, width=2, limit=30000)
         assert shard == root / "ab"
 
     def test_shard_path_second_level(self):
-        """Test calculating second-level shard path when needed"""
+        """Test calculating second-level shard path"""
         test_uuid = "abcdef12-3456-7890-abcd-ef1234567890"
-        root = Path("memories/private/agents")
+        root = Path("toys/health/memories/private/agents")
         first_level = root / "ab"
         first_level.mkdir(parents=True, exist_ok=True)
 
@@ -240,7 +265,7 @@ class TestInformationStorage:
 
     def test_atomic_write(self):
         """Test atomic file writing"""
-        test_path = Path("memories/test_atomic.dat")
+        test_path = Path("toys/health/memories/test_atomic.dat")
         test_data = b"Test data for atomic write"
 
         # Write data
@@ -254,11 +279,8 @@ class TestInformationStorage:
         # Check that no temporary file remains
         assert not test_path.with_suffix(test_path.suffix + ".tmp").exists()
 
-    def test_update_registry(self, mock_env):
-        # Clean up the test_registry directory to ensure a clean state
-        test_dir = Path("memories/test_registry")
-        if test_dir.exists():
-            shutil.rmtree(test_dir)
+    def test_update_registry(self):
+        test_dir = Path("toys/health/memories/test_registry")
         test_dir.mkdir(parents=True, exist_ok=True)
         """Test updating a registry file"""
         registry_path = test_dir / "registry.json"
@@ -273,7 +295,7 @@ class TestInformationStorage:
 
     def test_rebuild_registry(self):
         """Test rebuilding a registry from directory contents"""
-        test_dir = Path("memories/test_rebuild")
+        test_dir = Path("toys/health/memories/test_rebuild")
         test_dir.mkdir(parents=True, exist_ok=True)
 
         # Create some test files
@@ -315,7 +337,7 @@ class TestInformationStorage:
     def test_ensure_agent_uuid_new(self):
         """Test creating a new agent UUID when none exists"""
         # Ensure no agent exists
-        private_dir = Path("memories/private/agents")
+        private_dir = Path("toys/health/memories/private/agents")
         if private_dir.exists():
             shutil.rmtree(private_dir)
         private_dir.mkdir(parents=True, exist_ok=True)
@@ -342,7 +364,7 @@ class TestInformationStorage:
     def test_ensure_agent_uuid_existing(self):
         """Test finding an existing agent UUID"""
         # Create agent directory
-        private_dir = Path("memories/private/agents")
+        private_dir = Path("toys/health/memories/private/agents")
         agent_uuid = "00000000-0000-0000-0000-000000000000"
         agent_shard = private_dir / "00"
         agent_shard.mkdir(parents=True, exist_ok=True)
@@ -361,19 +383,16 @@ class TestInformationStorage:
         assert found_uuid == agent_uuid
 
     def test_thread_lifecycle(self):
-        """End-to-end test: create agent, thread, save/load encrypted content and key using IntelligenceEngine workflow"""
+        """End-to-end test: create agent, thread, save/load encrypted content and key 
+        using IntelligenceEngine workflow"""
         from baby.intelligence import IntelligenceEngine
         from baby.inference import InferenceEngine
         from baby.information import InformationEngine, store_gene_keys, load_gene_keys
-        import sys
-        import uuid
         from datetime import datetime
-        import numpy as np
-        import os
 
         # os.chdir(tmp_path)  # No longer needed, handled by mock_env
         # sys.path.insert(0, str(tmp_path))  # Not needed for test isolation
-        (Path("memories") / "private" / "agents").mkdir(parents=True, exist_ok=True)
+        (Path("toys/health/memories") / "private" / "agents").mkdir(parents=True, exist_ok=True)
         agent_secret = "test_secret"
         agent_uuid = ensure_agent_uuid()
         inference_engine = InferenceEngine()
@@ -389,7 +408,7 @@ class TestInformationStorage:
         assert thread_uuid is not None, "thread_uuid is None after starting new thread"
         thread_uuid = str(thread_uuid)
         # Clean up any existing gene key file for this thread and agent
-        private_dir = Path("memories/private/agents")
+        private_dir = Path("toys/health/memories/private/agents")
         agent_shard = shard_path(private_dir, agent_uuid)
         agent_dir = agent_shard / f"agent-{agent_uuid}"
         keys_dir = agent_dir / "keys"
@@ -457,7 +476,6 @@ class TestInformationStorage:
         from baby.intelligence import IntelligenceEngine
         from baby.inference import InferenceEngine
         from baby.information import InformationEngine, parent, children
-        import os
 
         agent_secret = "test_secret"
         agent_uuid = ensure_agent_uuid()
@@ -488,7 +506,7 @@ class TestInformationStorage:
     def test_format_management(self):
         """Test format storage and retrieval"""
         # Create format directory
-        formats_dir = Path("memories/public/formats")
+        formats_dir = Path("toys/health/memories/public/formats")
         formats_dir.mkdir(parents=True, exist_ok=True)
 
         # Create test format
@@ -519,12 +537,7 @@ class TestInformationStorage:
         format_list = list_formats()
         assert format_uuid in format_list
 
-    def test_gene_keys_public_storage(self, mock_env):
-        # Clean up the public keys directory to ensure a clean state
-        keys_dir = Path("memories/public/keys")
-        if keys_dir.exists():
-            shutil.rmtree(keys_dir)
-        keys_dir.mkdir(parents=True, exist_ok=True)
+    def test_gene_keys_public_storage(self):
         """Test storing and loading gene keys in public mode"""
         thread_uuid = "test-thread-uuid"
         test_gene_keys: list[GeneKeysMetadata] = [
