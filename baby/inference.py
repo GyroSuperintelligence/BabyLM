@@ -48,13 +48,22 @@ class InferenceEngine:
         # Track recent pattern indices (up to 20)
         self.recent_patterns = deque(maxlen=256)
 
+        # Add distance cache and hit/miss counters
+        self._distance_cache = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
+
     def _load_patterns(self) -> Tuple[np.ndarray, List[str]]:
         """
-        Load canonical patterns from file or generate if not present
+        Load canonical patterns from file or generate if not present.
+
+        For this 48KB file, a direct read with np.fromfile is the most
+        performant and robust method. Memory-mapping would add unnecessary
+        overhead and complexity.
 
         Returns:
             Tuple containing:
-            - patterns: Array of shape [256, 48]
+            - patterns: Array of shape [256, 48] (read-only)
             - gyration_features: List of 256 class labels
         """
         pattern_file = str(Path(self.base_memories_dir) / "public/masks/epigenome.dat")
@@ -63,22 +72,25 @@ class InferenceEngine:
         os.makedirs(os.path.dirname(pattern_file), exist_ok=True)
 
         try:
-            # Try to load patterns from file
+            # Try to load the entire 48KB patterns file directly into memory.
             patterns = np.fromfile(pattern_file, dtype=np.float32)
+            # Explicitly validate the shape to protect against corrupted files.
+            if patterns.size != 256 * 48:
+                raise ValueError("Epigenome file is corrupted or has an incorrect size.")
             patterns = patterns.reshape((256, 48))
-
-            # Regenerate resonance classes (these are deterministic)
+            # Mark the array as read-only to prevent accidental modification.
+            patterns.flags.writeable = False
+            # These are deterministic and cheap to regenerate.
             gyration_features = [classify_pattern_resonance(i) for i in range(256)]
-
             return patterns, gyration_features
-
         except (FileNotFoundError, ValueError, IOError):
-            # Generate patterns if file doesn't exist or is corrupted
+            # This block is for first-time setup or if the file is corrupted.
+            print("Generating canonical patterns... This happens only once.")
             patterns, gyration_features = derive_canonical_patterns()
-
-            # Save patterns to file
+            # Save the newly generated patterns to file.
             patterns.tofile(pattern_file)
-
+            # Mark the new in-memory array as read-only as well.
+            patterns.flags.writeable = False
             return patterns, gyration_features
 
     def _load_genome_mask(self) -> np.ndarray:
@@ -137,6 +149,16 @@ class InferenceEngine:
         Returns:
             Tuple[int, float]: (Index of closest matching pattern (0-255), resonance/gyrodistance)
         """
+        # Create a hash of current tensor state
+        tensor_hash = hash(self.T.tobytes())
+
+        # Check cache first
+        if tensor_hash in self._distance_cache:
+            self._cache_hits += 1
+            return self._distance_cache[tensor_hash]
+
+        self._cache_misses += 1
+
         # Flatten current tensor for comparison
         flat_T = self.T.flatten()
         # Vectorized calculation for all distances
@@ -145,6 +167,13 @@ class InferenceEngine:
         angular_distances = np.arccos(np.clip(normalized_distances, -1.0, 1.0))
         closest_index = int(np.argmin(angular_distances))
         min_distance = float(angular_distances[closest_index])
+
+        # Cache result (limit cache size)
+        if len(self._distance_cache) > 1000:
+            # Remove oldest entries (simple FIFO)
+            self._distance_cache = dict(list(self._distance_cache.items())[-500:])
+
+        self._distance_cache[tensor_hash] = (closest_index, min_distance)
         return closest_index, min_distance
 
     def process_byte(self, P_n: int) -> Tuple[int, float]:

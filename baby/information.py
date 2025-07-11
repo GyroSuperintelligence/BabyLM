@@ -41,9 +41,11 @@ try:
         if isinstance(result, bytes):
             return result.decode("utf-8")
         return result
+
 except ImportError:
     try:
         import ujson as fast_json
+
         json_loads = fast_json.loads
 
         def json_dumps(obj):
@@ -51,8 +53,10 @@ except ImportError:
             if isinstance(result, bytes):
                 return result.decode("utf-8")
             return result
+
     except ImportError:
         import json
+
         json_loads = json.loads
         json_dumps = json.dumps
 
@@ -185,6 +189,7 @@ def atomic_write(path: Path, data: bytes) -> None:
 # This cache will store (data, modification_time) tuples.
 _REGISTRY_CACHE = {}
 _REGISTRY_CACHE_MAX_SIZE = 500  # Prevent unbounded memory growth
+
 
 def _read_registry_cached(registry_path: Path) -> dict:
     """
@@ -371,8 +376,9 @@ def ensure_agent_uuid(base_memories_dir: str = "memories") -> str:
                             return agent_uuid
 
     # No agent found, create a new one
-    return assign_agent_uuid(str(uuid.uuid4()), base_memories_dir=base_memories_dir,
-                             prefs=get_memory_preferences(base_memories_dir))
+    return assign_agent_uuid(
+        str(uuid.uuid4()), base_memories_dir=base_memories_dir, prefs=get_memory_preferences(base_memories_dir)
+    )
 
 
 def assign_agent_uuid(new_uuid: str, base_memories_dir: str, prefs: dict) -> str:
@@ -524,12 +530,8 @@ def load_thread(agent_uuid: Optional[str], thread_uuid: str, prefs: dict, base_m
 
 
 def store_thread_key(
-        agent_uuid: str,
-        thread_uuid: str,
-        key: bytes,
-        agent_secret: str,
-        prefs: dict,
-        base_memories_dir: str) -> None:
+    agent_uuid: str, thread_uuid: str, key: bytes, agent_secret: str, prefs: dict, base_memories_dir: str
+) -> None:
     """
     Store an encryption key for a thread.
 
@@ -1067,11 +1069,8 @@ class ThreadChainCache:
 
             # Load gene keys
             gene_keys = load_gene_keys(
-                thread_uuid,
-                self.prefs,
-                self.agent_uuid,
-                self.agent_secret,
-                base_memories_dir=self.base_memories_dir)
+                thread_uuid, self.prefs, self.agent_uuid, self.agent_secret, base_memories_dir=self.base_memories_dir
+            )
 
             # Add gene keys to metadata (in memory only)
             meta["gene_keys"] = gene_keys
@@ -1153,7 +1152,7 @@ class PatternIndex:
                 prev_pattern = gene_keys[i - 1]["pattern_index"]
                 self.pattern_sequences[(prev_pattern, pattern_idx)] += 1
                 self.pattern_contexts[pattern_idx]["before"][prev_pattern] += 1
-                self.sequence_index[prev_pattern].append((thread_uuid, i-1))
+                self.sequence_index[prev_pattern].append((thread_uuid, i - 1))
 
             if i < len(gene_keys) - 1:
                 next_pattern = gene_keys[i + 1]["pattern_index"]
@@ -1210,11 +1209,8 @@ class PatternIndex:
             gene_keys = self._thread_gene_keys_cache[thread_uuid]
         else:
             gene_keys = load_gene_keys(
-                thread_uuid,
-                self.prefs,
-                self.agent_uuid,
-                self.agent_secret,
-                base_memories_dir=self.base_memories_dir)
+                thread_uuid, self.prefs, self.agent_uuid, self.agent_secret, base_memories_dir=self.base_memories_dir
+            )
             self._thread_gene_keys_cache[thread_uuid] = gene_keys
 
         # Check surrounding patterns
@@ -1257,7 +1253,7 @@ class InformationEngine:
         inference_engine: InferenceEngine,
         update_callback: Callable[[int, int, float, str], None],
         input_stream: bytes,
-        batch_size: int = 0
+        batch_size: int = 0,
     ) -> Tuple[bytes, bytes]:
         """
         Process an entire stream of input bytes using a spec-compliant batching
@@ -1289,8 +1285,7 @@ class InformationEngine:
                 update_callback(P_n, key_index, resonance, "INPUT")
                 keystream_batch[j] = inference_engine.G[key_index]
             cipher_batch = np.bitwise_xor(
-                np.frombuffer(input_batch, dtype=np.uint8),
-                np.frombuffer(keystream_batch, dtype=np.uint8)
+                np.frombuffer(input_batch, dtype=np.uint8), np.frombuffer(keystream_batch, dtype=np.uint8)
             )
             intermediate_ciphertext.extend(cipher_batch)
             dynamic_keystream.extend(keystream_batch)

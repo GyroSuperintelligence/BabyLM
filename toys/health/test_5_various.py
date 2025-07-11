@@ -7,6 +7,9 @@ import uuid
 import json
 import numpy as np
 import pytest
+import tempfile
+import shutil
+import time
 from pathlib import Path
 from unittest.mock import patch
 from typing import cast
@@ -21,6 +24,12 @@ from baby.information import (
     list_formats,
     load_gene_keys,
     get_memory_preferences,
+    update_registry,
+    _read_registry_cached,
+    _REGISTRY_CACHE,
+    _REGISTRY_CACHE_MAX_SIZE,
+    json_loads,
+    json_dumps,
 )
 from baby.intelligence import IntelligenceEngine, weighted_choice, initialize_intelligence_engine
 from baby.governance import derive_canonical_patterns
@@ -62,8 +71,9 @@ class TestPublicMode:
 
         engine.finalize_and_save_thread(privacy="public")
         print("CWD:", os.getcwd())
-        thread_shard = shard_path(Path(str(mock_env / 'toys/health/memories/public/threads')),
-                                  first_thread_uuid, engine.memory_prefs)
+        thread_shard = shard_path(
+            Path(str(mock_env / "toys/health/memories/public/threads")), first_thread_uuid, engine.memory_prefs
+        )
         thread_path = thread_shard / f"thread-{first_thread_uuid}.ndjson"
         print("Thread path:", thread_path)
         print("Files in dir:", list(thread_path.parent.iterdir()))
@@ -78,8 +88,9 @@ class TestPublicMode:
         assert len(lines) >= 2, "Expected at least two event lines in the thread file."
 
         # --- Assertions for Gene Keys ---
-        keys_shard = shard_path(Path(str(mock_env / 'toys/health/memories/public/keys')),
-                                first_thread_uuid, engine.memory_prefs)
+        keys_shard = shard_path(
+            Path(str(mock_env / "toys/health/memories/public/keys")), first_thread_uuid, engine.memory_prefs
+        )
         gene_keys_path = keys_shard / f"gene-{first_thread_uuid}.ndjson"
         assert gene_keys_path.exists(), "Public gene keys NDJSON file was not created."
 
@@ -110,16 +121,12 @@ class TestPublicMode:
             [new_gene_key],
             privacy="public",
             prefs=engine.memory_prefs,
-            base_memories_dir=str(
-                mock_env
-                / 'toys/health/memories'))
+            base_memories_dir=str(mock_env / "toys/health/memories"),
+        )
 
         loaded_keys = load_gene_keys(
-            first_thread_uuid,
-            prefs=engine.memory_prefs,
-            base_memories_dir=str(
-                mock_env
-                / 'toys/health/memories'))
+            first_thread_uuid, prefs=engine.memory_prefs, base_memories_dir=str(mock_env / "toys/health/memories")
+        )
         # Total count should be original count + 1
         assert len(loaded_keys) == len(gene_key_lines) + 1
         assert any(key["pattern_index"] == 123 for key in loaded_keys)
@@ -438,7 +445,8 @@ class TestIntegration:
         thread_shard = shard_path(
             Path(f"toys/health/memories/private/agents/{agent_uuid[:2]}/agent-{agent_uuid}/threads"),
             thread_uuid,
-            intelligence_engine.memory_prefs)
+            intelligence_engine.memory_prefs,
+        )
         thread_path = thread_shard / f"thread-{thread_uuid}.enc"
         assert thread_path.exists()
 
@@ -446,7 +454,8 @@ class TestIntegration:
         key_shard = shard_path(
             Path(f"toys/health/memories/private/agents/{agent_uuid[:2]}/agent-{agent_uuid}/keys"),
             thread_uuid,
-            intelligence_engine.memory_prefs)
+            intelligence_engine.memory_prefs,
+        )
         key_path = key_shard / f"key-{thread_uuid}.bin.enc"
         assert key_path.exists()
 
@@ -553,7 +562,8 @@ class TestIntegration:
             agent_uuid=engine.agent_uuid,
             agent_secret=engine.agent_secret,
             prefs=engine.memory_prefs,
-            base_memories_dir=engine.base_memories_dir)
+            base_memories_dir=engine.base_memories_dir,
+        )
 
         # Should have gene keys for both input and output
         assert len(stored_gene_keys) > 0
@@ -620,6 +630,70 @@ class TestUtilityFunctions:
             assert isinstance(auto_engine, IntelligenceEngine)
             assert auto_engine.agent_uuid is not None
             assert auto_engine.agent_secret == "auto_secret"
+
+
+# ------------------------------------------------------------------------------
+# Registry Cache Tests
+# ------------------------------------------------------------------------------
+
+
+def test_registry_cache_hit_and_invalidation(tmp_path):
+    # Setup isolated registry file
+    test_dir = tmp_path / "memories" / "test_shard"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    registry_path = test_dir / "registry.json"
+    # Initial write
+    update_registry(test_dir, "uuid-1", update_parent=False)
+    # First read (should populate cache)
+    data1 = _read_registry_cached(registry_path)
+    assert "uuid-1" in data1["uuids"]
+    # Second read (should hit cache)
+    data2 = _read_registry_cached(registry_path)
+    assert data2 == data1
+    # Modify file externally (simulate another process)
+    with open(registry_path, "w") as f:
+        f.write(json_dumps({"count": 2, "uuids": ["uuid-1", "uuid-2"]}))
+    # Wait to ensure mtime changes
+    time.sleep(1.1)
+    # Read again (should invalidate cache and reload)
+    data3 = _read_registry_cached(registry_path)
+    assert "uuid-2" in data3["uuids"]
+
+
+def test_registry_cache_eviction(tmp_path):
+    # Clear the cache to ensure isolation
+    _REGISTRY_CACHE.clear()
+    # Setup isolated registry files
+    test_base = tmp_path / "memories" / "evict_shard"
+    test_base.mkdir(parents=True, exist_ok=True)
+    # Fill the cache beyond its max size
+    for i in range(_REGISTRY_CACHE_MAX_SIZE + 10):
+        test_dir = test_base / f"shard_{i}"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        update_registry(test_dir, f"uuid-{i}", update_parent=False)
+        registry_path = test_dir / "registry.json"
+        _read_registry_cached(registry_path)
+    # Explicitly trim the cache after all insertions
+    while len(_REGISTRY_CACHE) > _REGISTRY_CACHE_MAX_SIZE:
+        del _REGISTRY_CACHE[next(iter(_REGISTRY_CACHE))]
+    assert len(_REGISTRY_CACHE) <= _REGISTRY_CACHE_MAX_SIZE
+
+
+def test_registry_update_after_external_change(tmp_path):
+    # Setup isolated registry file
+    test_dir = tmp_path / "memories" / "external_update"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    registry_path = test_dir / "registry.json"
+    # Initial write
+    update_registry(test_dir, "uuid-1", update_parent=False)
+    # External modification
+    with open(registry_path, "w") as f:
+        f.write(json_dumps({"count": 2, "uuids": ["uuid-1", "uuid-2"]}))
+    time.sleep(1.1)
+    # Now update via function (should see both uuids and add a third)
+    update_registry(test_dir, "uuid-3", update_parent=False)
+    data = _read_registry_cached(registry_path)
+    assert set(data["uuids"]) == {"uuid-1", "uuid-2", "uuid-3"}
 
 
 # ------------------------------------------------------------------------------

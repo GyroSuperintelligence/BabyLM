@@ -28,7 +28,7 @@ class TestInference:
             patch.object(InferenceEngine, "_load_genome_mask", return_value=np.arange(256, dtype=np.uint8)),
             patch.object(InferenceEngine, "_initialize_epigenome"),
         ):
-            engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
+            engine = InferenceEngine(base_memories_dir=str(mock_env / "toys/health/memories"))
 
             assert engine.T.shape == (4, 2, 3, 2)
             assert engine.cycle_counter == 0
@@ -121,7 +121,7 @@ class TestInference:
             patch.object(InferenceEngine, "_load_patterns", return_value=(np.zeros((256, 48)), ["test"] * 256)),
             patch.object(InferenceEngine, "_load_genome_mask", return_value=np.arange(256, dtype=np.uint8)),
         ):
-            engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
+            engine = InferenceEngine(base_memories_dir=str(mock_env / "toys/health/memories"))
 
             # Capture initial tensor state after initialization
             initial_T = engine.T.copy()
@@ -138,7 +138,7 @@ class TestInference:
 
     def test_process_byte(self, mock_env):
         """Test processing a byte with explicit mutation logic"""
-        engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
+        engine = InferenceEngine(base_memories_dir=str(mock_env / "toys/health/memories"))
         engine.T = np.arange(4 * 2 * 3 * 2, dtype=np.float32).reshape(4, 2, 3, 2)
         initial_T = engine.T.copy()
         input_byte = 0x55
@@ -166,7 +166,7 @@ class TestInference:
 
     def test_find_closest_pattern_index(self, mock_env):
         """Test finding the closest pattern"""
-        engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
+        engine = InferenceEngine(base_memories_dir=str(mock_env / "toys/health/memories"))
         # Set tensor to all ones
         engine.T.fill(1.0)
         # Set all patterns to zeros except index 42, which matches the tensor
@@ -194,7 +194,7 @@ class TestInference:
 
     def test_compute_pattern_resonances(self, mock_env):
         """Test computing pattern resonances"""
-        engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
+        engine = InferenceEngine(base_memories_dir=str(mock_env / "toys/health/memories"))
         # Create a controlled set of patterns for testing
         engine.F = np.zeros((256, 48))
         engine.F[0] = np.ones(48)  # First pattern has all 1s

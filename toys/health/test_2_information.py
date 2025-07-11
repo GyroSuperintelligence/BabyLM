@@ -23,7 +23,7 @@ class TestInformationProcessing:
 
     def test_information_engine_init(self, mock_env):
         """Test InformationEngine initialization"""
-        engine = InformationEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
+        engine = InformationEngine(base_memories_dir=str(mock_env / "toys/health/memories"))
 
         assert engine.stream_pointer == 0
         assert isinstance(engine.output_buffer, bytearray)
@@ -71,7 +71,7 @@ class TestInformationProcessing:
         """Test canonical tensor-to-byte conversion using pattern matching"""
         from baby.inference import InferenceEngine
 
-        engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
+        engine = InferenceEngine(base_memories_dir=str(mock_env / "toys/health/memories"))
         # Create canonical patterns and genome mask
         patterns = np.zeros((256, 48), dtype=np.float32)
         patterns[42] = np.arange(48, dtype=np.float32)  # Make pattern 42 unique

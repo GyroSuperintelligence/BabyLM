@@ -308,7 +308,8 @@ class TestIntelligence:
             assert content[1]["data"] == b"xyz"
             # Check that the right functions were called
             mock_load_thread.assert_called_once_with(
-                engine.agent_uuid, thread_uuid, engine.memory_prefs, base_memories_dir=engine.base_memories_dir)
+                engine.agent_uuid, thread_uuid, engine.memory_prefs, base_memories_dir=engine.base_memories_dir
+            )
             mock_load_thread_key.assert_not_called()
 
     def test_get_thread_relationships(self, initialized_intelligence_engine):
@@ -331,9 +332,11 @@ class TestIntelligence:
 
             # Check function calls
             mock_parent.assert_called_once_with(
-                engine.agent_uuid, thread_uuid, engine.memory_prefs, engine.base_memories_dir)
+                engine.agent_uuid, thread_uuid, engine.memory_prefs, engine.base_memories_dir
+            )
             mock_children.assert_called_once_with(
-                engine.agent_uuid, thread_uuid, engine.memory_prefs, engine.base_memories_dir)
+                engine.agent_uuid, thread_uuid, engine.memory_prefs, engine.base_memories_dir
+            )
 
     def test_get_thread_chain(self, initialized_intelligence_engine):
         """Test getting a thread chain"""

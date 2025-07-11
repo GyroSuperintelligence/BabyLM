@@ -63,13 +63,42 @@ scripts/migrate_*.py
 .coverage
 
 # Project-specific exclusions
-# BabyLM new structure: ignore all thread and key data, but keep directory structure
-memories/private/*/threads/
-memories/private/*/keys/
-!memories/private/
-!memories/private/*/
-!memories/private/*/threads/
-!memories/private/*/keys/
+# BabyLM: ignore all private agent and thread data
+memories/private/
 
 # Ignore htmlcov coverage output
 htmlcov/
+
+# Python cache and build artifacts (recursive)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Test and coverage artifacts
+.pytest_cache/
+toys/health/htmlcov/
+toys/health/memories/
+
+# BabyLM project-specific cache
+baby/__pycache__/
+toys/__pycache__/
+toys/health/__pycache__/
+toys/learning/formats/__pycache__/
+toys/learning/threads/__pycache__/
+memories/__pycache__/
+
+# Ignore all contents of the formats directory, but keep the folder itself
+memories/public/formats/*
+!memories/public/formats/
+
+# Optionally ignore __init__.py files in public, formats, and masks if not needed
+memories/public/__init__.py
+memories/public/formats/__init__.py
+memories/public/masks/__init__.py
+
+# Ignore VCS, virtualenv, test cache, and IDE settings
+.git/
+.pytest_cache/
+.venv/
+.vscode/

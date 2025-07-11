@@ -82,9 +82,8 @@ def initialized_intelligence_engine(mock_env):
     assign_agent_uuid(agent_uuid, base_memories_dir=base_memories_dir, prefs=prefs)
     # Initialize the engine explicitly for this agent
     engine = initialize_intelligence_engine(
-        agent_uuid=agent_uuid,
-        agent_secret=agent_secret,
-        base_memories_dir=base_memories_dir)
+        agent_uuid=agent_uuid, agent_secret=agent_secret, base_memories_dir=base_memories_dir
+    )
     # Assertions to ensure the fixture is set up correctly
     assert engine.agent_uuid == agent_uuid
     assert engine.agent_secret == agent_secret

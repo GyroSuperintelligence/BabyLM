@@ -78,6 +78,7 @@ format_data = {
 # Store the format using the system's helper
 if __name__ == "__main__":
     from baby.information import get_memory_preferences
+
     base_memories_dir = "memories"
     prefs = get_memory_preferences(base_memories_dir)
     format_uuid = store_format(cast(FormatMetadata, format_data), prefs, base_memories_dir)

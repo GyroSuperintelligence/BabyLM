@@ -160,7 +160,9 @@ class IntelligenceEngine:
 
         format_data["patterns"] = patterns
 
-        return store_format(cast(FormatMetadata, format_data), self.memory_prefs, base_memories_dir=self.base_memories_dir)
+        return store_format(
+            cast(FormatMetadata, format_data), self.memory_prefs, base_memories_dir=self.base_memories_dir
+        )
 
     def _validate_format_compatibility(self) -> None:
         """
@@ -339,7 +341,7 @@ class IntelligenceEngine:
                 key=self.thread_file_key,
                 agent_secret=self.agent_secret,
                 prefs=self.memory_prefs,
-                base_memories_dir=self.base_memories_dir
+                base_memories_dir=self.base_memories_dir,
             )
 
         # --- FIX: Removed redundant block that overwrote public thread metadata ---
@@ -381,11 +383,7 @@ class IntelligenceEngine:
             if self.thread_uuid is None:
                 raise ValueError("thread_uuid must not be None for public thread operations.")
             thread_shard = shard_path(
-                Path(self.base_memories_dir)
-                / "public"
-                / "threads",
-                self.thread_uuid,
-                self.memory_prefs
+                Path(self.base_memories_dir) / "public" / "threads", self.thread_uuid, self.memory_prefs
             )
             thread_path = thread_shard / f"thread-{self.thread_uuid}.ndjson"
             if self._active_public_thread_handle is None:
@@ -467,7 +465,13 @@ class IntelligenceEngine:
             # Use thread_file_key directly as the AES-256-GCM key
             aes_key = self.thread_file_key
             encrypted_blob = self._encrypt_data(final_data_to_save, aes_key)
-            save_thread(self.thread_uuid, encrypted_blob, privacy, prefs=self.memory_prefs, base_memories_dir=self.base_memories_dir)
+            save_thread(
+                self.thread_uuid,
+                encrypted_blob,
+                privacy,
+                prefs=self.memory_prefs,
+                base_memories_dir=self.base_memories_dir,
+            )
 
             # Update thread metadata with actual file size
             from baby.information import shard_path, json_loads, json_dumps
@@ -503,7 +507,7 @@ class IntelligenceEngine:
                 prefs=self.memory_prefs,
                 agent_secret=self.agent_secret,
                 agent_uuid=self.agent_uuid,
-                base_memories_dir=self.base_memories_dir
+                base_memories_dir=self.base_memories_dir,
             )
         self.M.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
         self.M.setdefault("metadata", {})["usage_count"] = self.M.get("metadata", {}).get("usage_count", 0) + 1
@@ -713,11 +717,19 @@ class IntelligenceEngine:
         """
         Load a thread's decrypted content as a list of NDJSON event dicts.
         """
-        thread_content_raw = load_thread(self.agent_uuid, thread_uuid, self.memory_prefs, base_memories_dir=self.base_memories_dir)
+        thread_content_raw = load_thread(
+            self.agent_uuid, thread_uuid, self.memory_prefs, base_memories_dir=self.base_memories_dir
+        )
         if not thread_content_raw:
             return None
         if self.agent_uuid and self.agent_secret:
-            thread_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret, self.memory_prefs, base_memories_dir=self.base_memories_dir)
+            thread_key = load_thread_key(
+                self.agent_uuid,
+                thread_uuid,
+                self.agent_secret,
+                self.memory_prefs,
+                base_memories_dir=self.base_memories_dir,
+            )
             if not thread_key:
                 return None
             # Use thread_key directly as the AES-256-GCM key
@@ -1021,11 +1033,11 @@ class IntelligenceEngine:
                 if related_uuid != thread_uuid:
                     related_content = self.load_thread_content(related_uuid)
                     if related_content:
-                        parent_uuid = parent(
-                            self.agent_uuid,
-                            related_uuid,
-                            self.memory_prefs,
-                            self.base_memories_dir) if self.agent_uuid is not None else None
+                        parent_uuid = (
+                            parent(self.agent_uuid, related_uuid, self.memory_prefs, self.base_memories_dir)
+                            if self.agent_uuid is not None
+                            else None
+                        )
                         relationship = "parent" if related_uuid == parent_uuid else "child"
 
                         related_threads.append(
@@ -1169,8 +1181,9 @@ class IntelligenceEngine:
         Load thread metadata from disk.
         """
         if privacy == "public":
-            threads_dir = shard_path(Path(self.base_memories_dir) / "public"
-                                     / "threads", thread_uuid, self.memory_prefs)
+            threads_dir = shard_path(
+                Path(self.base_memories_dir) / "public" / "threads", thread_uuid, self.memory_prefs
+            )
         else:
             if self.agent_uuid is None:
                 raise ValueError("agent_uuid must not be None for private thread metadata loading")
@@ -1194,9 +1207,9 @@ class IntelligenceEngine:
         self.thread_uuid = thread_uuid
 
         # Get parent/child info for the resumed thread
-        if privacy == 'private' and self.agent_uuid:
+        if privacy == "private" and self.agent_uuid:
             self.parent_thread_uuid = meta.get("parent_uuid")
-            self.child_thread_uuids = [c['uuid'] for c in meta.get("children", [])]
+            self.child_thread_uuids = [c["uuid"] for c in meta.get("children", [])]
 
         if privacy == "public":
             if self._active_public_thread_handle:
@@ -1209,7 +1222,13 @@ class IntelligenceEngine:
         else:  # --- FIX: Implement private thread resume logic ---
             if self.agent_uuid and self.agent_secret:
                 # Load the encryption key for the thread
-                self.thread_file_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret, self.memory_prefs, base_memories_dir=self.base_memories_dir)
+                self.thread_file_key = load_thread_key(
+                    self.agent_uuid,
+                    thread_uuid,
+                    self.agent_secret,
+                    self.memory_prefs,
+                    base_memories_dir=self.base_memories_dir,
+                )
                 if not self.thread_file_key:
                     print(f"Warning: Could not load key for private thread {thread_uuid}. Cannot resume.")
                     self.thread_uuid = None  # Prevent writing to a thread we can't encrypt

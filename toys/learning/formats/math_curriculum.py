@@ -32,6 +32,7 @@ def make_description(pack_num: int, total_packs: int) -> str:
 
 for pack_num in range(num_packs):
     from baby.information import get_memory_preferences
+
     base_memories_dir = "memories"
     prefs = get_memory_preferences(base_memories_dir)
     start = pack_num * pack_size

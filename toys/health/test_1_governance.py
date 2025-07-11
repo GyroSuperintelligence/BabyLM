@@ -207,7 +207,7 @@ class TestInformationStorage:
         assert prefs["storage_config"]["max_thread_size_mb"] == 64
 
     def test_shard_path_first_level(self, mock_env):
-        base_dir = str(mock_env / 'toys/health/memories')
+        base_dir = str(mock_env / "toys/health/memories")
         prefs = get_memory_preferences(base_dir)
         # Clean up the agents directory to ensure a clean state
         agents_dir = Path(base_dir) / "private/agents"
@@ -221,7 +221,7 @@ class TestInformationStorage:
         assert shard == root / "ab"
 
     def test_shard_path_second_level(self, mock_env):
-        base_dir = str(mock_env / 'toys/health/memories')
+        base_dir = str(mock_env / "toys/health/memories")
         prefs = get_memory_preferences(base_dir)
         """Test calculating second-level shard path"""
         test_uuid = "abcdef12-3456-7890-abcd-ef1234567890"
@@ -364,7 +364,7 @@ class TestInformationStorage:
         from datetime import datetime
 
         agent_secret = "test_secret"
-        base_dir = str(mock_env / 'toys/health/memories')
+        base_dir = str(mock_env / "toys/health/memories")
         prefs = get_memory_preferences(base_dir)
         # Only pass prefs to helpers that require it
         agent_uuid = ensure_agent_uuid(base_memories_dir=base_dir)
@@ -398,30 +398,30 @@ class TestInformationStorage:
         assert loaded_content[0]["data"] == test_content
         # Store gene keys with proper structure
         test_gene_keys = [
-                {
-                    "cycle": 1,
-                    "pattern_index": 42,
-                    "thread_uuid": thread_uuid,
-                    "agent_uuid": str(agent_uuid),
+            {
+                "cycle": 1,
+                "pattern_index": 42,
+                "thread_uuid": thread_uuid,
+                "agent_uuid": str(agent_uuid),
                 "format_uuid": "11111111-1111-1111-1111-111111111111",
-                    "event_type": "INPUT",
-                    "source_byte": 0,
-                    "resonance": 0.5,
-                    "created_at": datetime.now().isoformat(),
-                    "privacy": "private",
-                },
-                {
-                    "cycle": 2,
-                    "pattern_index": 84,
-                    "thread_uuid": thread_uuid,
-                    "agent_uuid": str(agent_uuid),
+                "event_type": "INPUT",
+                "source_byte": 0,
+                "resonance": 0.5,
+                "created_at": datetime.now().isoformat(),
+                "privacy": "private",
+            },
+            {
+                "cycle": 2,
+                "pattern_index": 84,
+                "thread_uuid": thread_uuid,
+                "agent_uuid": str(agent_uuid),
                 "format_uuid": "11111111-1111-1111-1111-111111111111",
-                    "event_type": "INPUT",
-                    "source_byte": 1,
-                    "resonance": 0.4,
-                    "created_at": datetime.now().isoformat(),
-                    "privacy": "private",
-                },
+                "event_type": "INPUT",
+                "source_byte": 1,
+                "resonance": 0.4,
+                "created_at": datetime.now().isoformat(),
+                "privacy": "private",
+            },
         ]
         store_gene_keys(
             thread_uuid=thread_uuid,
@@ -438,7 +438,11 @@ class TestInformationStorage:
             with open(gene_keys_path, "rb") as f:
                 print("DEBUG gene_keys_file_bytes:", f.read())
         loaded_gene_keys = load_gene_keys(
-            thread_uuid=thread_uuid, agent_uuid=str(agent_uuid), agent_secret=agent_secret, prefs=prefs, base_memories_dir=base_dir
+            thread_uuid=thread_uuid,
+            agent_uuid=str(agent_uuid),
+            agent_secret=agent_secret,
+            prefs=prefs,
+            base_memories_dir=base_dir,
         )
         print("DEBUG loaded_gene_keys:", loaded_gene_keys)
         assert isinstance(loaded_gene_keys, list)
@@ -454,7 +458,7 @@ class TestInformationStorage:
         from baby.information import InformationEngine, parent, children
 
         agent_secret = "test_secret"
-        base_dir = str(mock_env / 'toys/health/memories')
+        base_dir = str(mock_env / "toys/health/memories")
         prefs = get_memory_preferences(base_dir)
         agent_uuid = ensure_agent_uuid(base_memories_dir=base_dir)
         inference_engine = InferenceEngine(base_memories_dir=base_dir)
@@ -493,7 +497,7 @@ class TestInformationStorage:
             "patterns": [{"index": i, "character": None} for i in range(10)],
         }
 
-        base_dir = str(mock_env / 'toys/health/memories')
+        base_dir = str(mock_env / "toys/health/memories")
         prefs = get_memory_preferences(base_dir)
         # Store format
         stored_uuid = store_format(cast(FormatMetadata, format_data), prefs, base_dir)
@@ -533,14 +537,11 @@ class TestInformationStorage:
             },
         ]
 
-        base_dir = str(mock_env / 'toys/health/memories')
+        base_dir = str(mock_env / "toys/health/memories")
         prefs = get_memory_preferences(base_dir)
         store_gene_keys(
-            thread_uuid=thread_uuid,
-            gene_keys=test_gene_keys,
-            privacy="public",
-            prefs=prefs,
-            base_memories_dir=base_dir)
+            thread_uuid=thread_uuid, gene_keys=test_gene_keys, privacy="public", prefs=prefs, base_memories_dir=base_dir
+        )
         loaded_gene_keys = load_gene_keys(thread_uuid=thread_uuid, prefs=prefs, base_memories_dir=base_dir)
 
         assert len(loaded_gene_keys) == 1
@@ -551,7 +552,7 @@ class TestInformationStorage:
         agent_uuid = "test-agent-uuid"
         agent_secret = "test-secret"
 
-        base_dir = str(mock_env / 'toys/health/memories')
+        base_dir = str(mock_env / "toys/health/memories")
         prefs = get_memory_preferences(base_dir)
         # PatternIndex usage
         pattern_index = PatternIndex(agent_uuid, agent_secret, base_dir, prefs)

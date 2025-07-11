@@ -231,17 +231,17 @@ git clone https://github.com/GyroSuperintelligence/BabyLM.git
 cd BabyLM
 pip install -r requirements.txt
 
-# Start interactive chat
-python3 babylm.py --chat
-
-# Or process text directly
-python3 babylm.py --process "Hello, world!"
-
-# Or generate text
-python3 babylm.py --generate 100
+# Start the new interactive CLI suite (from project root)
+./baby.sh
 ```
 
-The CLI provides an interactive experience where you can chat with the model, process text, generate responses, and explore the system's capabilities through various commands. Remember: like an actual baby, it starts with no language knowledge and learns through interaction.
+The new CLI suite provides an interactive console for BabyLM, including:
+- **Chat**: Conversational interface with BabyLM
+- **Dashboard**: Live monitoring of model internals
+- **Formats**: Explore and inspect format and pattern mappings
+- **Threads**: Manage and browse conversation threads
+
+All tools are accessible from the main menu when you run `./baby.sh`.
 
 ---
 ---

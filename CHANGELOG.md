@@ -14,6 +14,9 @@
   - Refactored PatternIndex to use defaultdict for cleaner and faster indexing.
   - Optimized IntelligenceEngine encode/decode logic with O(1) lookup maps supporting multiple patterns per character.
   - Simplified registry cache eviction logic for clarity and correctness.
+- **Added new CLI suite under `toys/console/`:**
+  - Interactive chat, dashboard, format viewer, and thread manager tools for BabyLM.
+  - All CLI modules are type- and lint-clean, with robust error handling and safe type usage throughout.
 
 ## [0.9.6] – 2025-07-10
 - Refactored private gene key storage to use per-record encryption with length prefix for true append-only performance.
