@@ -230,120 +230,6 @@ class IntelligenceEngine:
             cast(FormatMetadata, format_data), self.memory_prefs, base_memories_dir=self.base_memories_dir
         )
 
-    def _validate_format_compatibility(self, format_metadata: FormatMetadata) -> None:
-        """
-        Validate the loaded format for compatibility with current format version
-
-        Raises:
-            ValueError: If the format is incompatible with the current format version
-        """
-        # Check format exists
-        if not format_metadata:
-            return  # New format will be created
-
-        # Get current format version from preferences (if any)
-        current_format_version = self.memory_prefs["format_config"].get("default_format_version", "1.0.0")
-
-        # Check format compatibility
-        if "compatibility" in format_metadata:
-            min_version = format_metadata["compatibility"].get("min_format_version")
-            max_version = format_metadata["compatibility"].get("max_format_version")
-
-            # Simple version comparison (this could be enhanced with proper semver comparison)
-            if min_version and current_format_version < min_version:
-                raise ValueError(
-                    f"Format requires minimum format version {min_version}, but current is {current_format_version}"
-                )
-
-            if max_version and current_format_version > max_version:
-                raise ValueError(
-                    f"Format requires maximum format version {max_version}, but current is {current_format_version}"
-                )
-
-        # Validate policy mapping
-        if "cgm_policies" in format_metadata:
-            policies = format_metadata["cgm_policies"]
-            required_policies = ["governance", "information", "inference", "intelligence"]
-
-            for policy in required_policies:
-                if policy not in policies:
-                    raise ValueError(f"Required CGM policy '{policy}' missing from format")
-
-    def _load_or_init_formats(self) -> FormatMetadata:
-        """
-        Load format metadata from file or initialize if not present
-
-        Returns:
-            FormatMetadata: Format metadata
-        """
-        if not self.format_uuid:
-            raise ValueError("format_uuid must be set to load or initialize formats.")
-        format_data = load_format(self.format_uuid, base_memories_dir=self.base_memories_dir)
-
-        if not format_data:
-            # Initialize new format metadata
-            format_data = self._initialize_format_metadata()
-            store_format(format_data, self.memory_prefs, base_memories_dir=self.base_memories_dir)
-
-        return format_data
-
-    def _initialize_format_metadata(self) -> FormatMetadata:
-        """
-        Initialize new format metadata
-
-        Returns:
-            FormatMetadata: Initialized format metadata
-        """
-        # Create format metadata structure
-        M: FormatMetadata = {
-            "format_uuid": self.format_uuid or str(uuid.uuid4()),
-            "format_name": "default_format",
-            "format_version": "1.0.0",
-            "stability": "experimental",
-            "compatibility": {
-                "min_format_version": "1.0.0",
-                "max_format_version": "1.0.0",
-                "depends_on": [],
-                "conflicts_with": [],
-            },
-            "metadata": {
-                "author": f"agent_{self.agent_uuid[:8]}" if self.agent_uuid else "public",
-                "description": "Default format initialized automatically",
-                "tags": ["default", "auto_generated"],
-                "created_at": datetime.datetime.now().isoformat(),
-                "last_updated": datetime.datetime.now().isoformat(),
-                "usage_count": 0,
-                "validation_status": "unverified",
-            },
-            "cgm_policies": {
-                "governance": {"operation": "L0", "bits": [0, 7], "policy": "traceability"},
-                "information": {"operation": "LI", "bits": [1, 6], "policy": "variety"},
-                "inference": {"operation": "FG", "bits": [2, 5], "policy": "accountability"},
-                "intelligence": {"operation": "BG", "bits": [3, 4], "policy": "integrity"},
-            },
-            "patterns": [],
-        }
-
-        # Initialize pattern metadata
-        patterns: list[PatternMetadata] = []
-        for i in range(256):
-            pattern: PatternMetadata = {
-                "index": i,
-                "character": None,
-                "description": None,
-                "type": None,
-                "count": 0,
-                "first_cycle": None,
-                "last_cycle": None,
-                "gyration_feature": self.inference_engine.gyration_features[i],
-                "confidence": 0.0,
-            }
-            patterns.append(pattern)
-
-        M["patterns"] = patterns
-
-        return M
-
     def start_new_thread(self, privacy: str = "private") -> str:
         """
         Start a new thread, setting its parent to the current thread if one exists.
@@ -487,10 +373,6 @@ class IntelligenceEngine:
                 self._active_public_thread_handle = None
 
             # --- FIX: Calculate the shard path correctly (only once) ---
-            from baby.information import shard_path, json_loads, json_dumps
-            from pathlib import Path
-            import os
-
             threads_root = Path(self.base_memories_dir) / "public" / "threads"
             thread_shard = shard_path(threads_root, self.thread_uuid, self.memory_prefs)
             meta_path = thread_shard / f"thread-{self.thread_uuid}.json"
@@ -544,10 +426,6 @@ class IntelligenceEngine:
             )
 
             # Update thread metadata with actual file size
-            from baby.information import shard_path, json_loads, json_dumps
-            from pathlib import Path
-            import os
-
             private_dir = Path(self.base_memories_dir) / "private" / "agents"
             if self.agent_uuid is None:
                 raise ValueError("agent_uuid must not be None when finalizing a private thread.")
@@ -1008,14 +886,6 @@ class IntelligenceEngine:
         aes_key = kdf.derive(key_material)
         return aes_key
 
-    def _derive_agent_key(self) -> Optional[bytes]:
-        if self.agent_uuid is None or self.agent_secret is None:
-            return None
-        salt = self.agent_uuid.encode("utf-8")
-        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
-        key = kdf.derive(self.agent_secret.encode("utf-8"))
-        return key
-
     def _encrypt_data(self, data: bytes, key: bytes) -> bytes:
         """
         Encrypt data with AES-GCM
@@ -1088,17 +958,6 @@ class IntelligenceEngine:
             depth += 1
         return chain
 
-    def _add_children_to_chain(self, parent_uuid: str, chain: List[str], max_depth: int) -> None:
-        if self.agent_uuid is None:
-            return
-        if max_depth <= 0:
-            return
-        child_uuids = children(self.agent_uuid, parent_uuid, self.memory_prefs, self.base_memories_dir)
-        for child_uuid in child_uuids:
-            if child_uuid not in chain:
-                chain.append(child_uuid)
-                self._add_children_to_chain(child_uuid, chain, max_depth - 1)
-
     def load_thread_with_context(self, thread_uuid: str, include_related: bool = True) -> Dict:
         """
         Load a thread with its related context from parent and child threads
@@ -1165,18 +1024,7 @@ class IntelligenceEngine:
             return {}
         with open(registry_path, "r") as f:
             registry = json_loads(f.read())
-        thread_uuids = registry.get("uuids", [])
-        # Filter out invalid UUIDs to prevent errors
-        valid_thread_uuids = []
-        for uuid_str in thread_uuids:
-            if isinstance(uuid_str, str) and len(uuid_str) == 36 and uuid_str.count("-") == 4:
-                try:
-                    # Validate UUID format
-                    uuid.UUID(uuid_str)
-                    valid_thread_uuids.append(uuid_str)
-                except ValueError:
-                    continue  # Skip invalid UUIDs
-        thread_uuids = valid_thread_uuids
+        thread_uuids = [uid for uid in registry.get("uuids", []) if isinstance(uid, str) and len(uid) > 4]
         max_size_bytes = (
             self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
             if self.memory_prefs and "storage_config" in self.memory_prefs
@@ -1360,23 +1208,7 @@ def weighted_choice(items: List[Any], weights: List[float]) -> Any:
     Returns:
         Selected item
     """
-    # Convert weights to cumulative distribution
-    cumulative_weights = []
-    total = 0
-    for w in weights:
-        total += w
-        cumulative_weights.append(total)
-
-    # Select a random point
-    r = random.random() * total
-
-    # Find the corresponding item
-    for i, cw in enumerate(cumulative_weights):
-        if r <= cw:
-            return items[i]
-
-    # Fallback (should never happen)
-    return items[-1]
+    return random.choices(items, weights=weights, k=1)[0]
 
 
 def initialize_intelligence_engine(

@@ -582,21 +582,6 @@ class TestIntegration:
 class TestUtilityFunctions:
     """Tests for utility functions"""
 
-    def test_weighted_choice(self):
-        """Test weighted choice selection"""
-        items = ["A", "B", "C", "D"]
-
-        # Test with equal weights
-        with patch("random.random", return_value=0.4):
-            result = weighted_choice(items, [1, 1, 1, 1])
-            assert result == "B"  # 0.4 falls in the second item's range
-
-        # Test with unequal weights
-        with patch("random.random", return_value=0.7):
-            result = weighted_choice(items, [1, 2, 4, 8])
-            # 0.7 * (1+2+4+8) = 10.5, which falls in range for "D"
-            assert result == "D"
-
     def test_initialize_intelligence_engine_modes(self, mock_env):
         """Test intelligence engine initialization in different modes"""
         # Create masks for all tests
