@@ -35,6 +35,81 @@ from baby.intelligence import IntelligenceEngine, weighted_choice, initialize_in
 from baby.governance import derive_canonical_patterns
 from baby.types import GeneKeysMetadata, FormatMetadata
 
+import sys
+import types
+import importlib.util
+
+# --- WordNet Curriculum Format Tests ---
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_wordnet_downloaded():
+    import nltk
+    try:
+        from nltk.corpus import wordnet as wn
+        # Try accessing a synset to check if data is present
+        _ = list(wn.all_synsets())[0]
+    except Exception:
+        nltk.download('wordnet')
+        from nltk.corpus import wordnet as wn
+        _ = list(wn.all_synsets())[0]
+
+
+def test_wordnet_curriculum_formats_generate_files(mock_env, ensure_wordnet_downloaded):
+    """Test that WordNet curriculum format generation creates output files and valid content (only 6 elements checked for semantic correctness)."""
+    import nltk
+    from nltk.corpus import wordnet as wn
+    import json
+    # Import the module dynamically to avoid import errors if nltk/wordnet is missing
+    module_path = Path(__file__).parent.parent / "learning" / "formats" / "wordnet_curriculum_formats.py"
+    spec = importlib.util.spec_from_file_location("wordnet_curriculum_formats", str(module_path))
+    if spec is None:
+        raise ImportError(f"Could not load spec for {module_path}")
+    wordnet_mod = importlib.util.module_from_spec(spec)
+    sys.modules["wordnet_curriculum_formats"] = wordnet_mod
+    if spec.loader is None:
+        raise ImportError(f"No loader for spec {spec}")
+    spec.loader.exec_module(wordnet_mod)
+
+    # Use the test memory preferences
+    prefs = wordnet_mod.get_memory_preferences(str(wordnet_mod.MEMORIES_DIR))
+
+    # Run both format generators
+    wordnet_mod.create_lemma_format(prefs)
+    wordnet_mod.create_synset_format(prefs)
+
+    # Check that the files exist in the expected sharded locations
+    lemma_uuid = wordnet_mod.LEMMA_FORMAT_UUID
+    synset_uuid = wordnet_mod.SYNSET_FORMAT_UUID
+    formats_dir = Path("memories/public/formats")
+    lemma_shard = wordnet_mod.shard_path(formats_dir, lemma_uuid, prefs)
+    synset_shard = wordnet_mod.shard_path(formats_dir, synset_uuid, prefs)
+    lemma_file = lemma_shard / f"format-{lemma_uuid}.json"
+    synset_file = synset_shard / f"format-{synset_uuid}.json"
+    assert lemma_file.exists(), f"Lemma format file not found: {lemma_file}"
+    assert synset_file.exists(), f"Synset format file not found: {synset_file}"
+
+    # --- Validate only 3 lemma and 3 synset entries for semantic correctness ---
+    with open(lemma_file, "r", encoding="utf-8") as f:
+        lemma_data = json.load(f)
+    lemma_patterns = lemma_data.get("patterns", [])
+    wn_lemmas = sorted(list(wn.all_lemma_names()))
+    for i in range(3):
+        entry = lemma_patterns[i]
+        assert entry.get("character") == wn_lemmas[i], f"Lemma character mismatch at {i}"
+        wn_def = wn.synsets(wn_lemmas[i])[0].definition() if wn.synsets(wn_lemmas[i]) else None
+        assert wn_def is None or wn_def in entry.get("description", ""), f"Lemma definition mismatch at {i}"
+
+    with open(synset_file, "r", encoding="utf-8") as f:
+        synset_data = json.load(f)
+    synset_patterns = synset_data.get("patterns", [])
+    wn_synsets = list(wn.all_synsets())
+    for i in range(3):
+        entry = synset_patterns[i]
+        assert entry.get("character") == wn_synsets[i].name(), f"Synset character mismatch at {i}"
+        wn_syn = wn_synsets[i]
+        wn_def = wn_syn.definition() if wn_syn is not None else None
+        assert wn_def is None or wn_def in entry.get("description", ""), f"Synset definition mismatch at {i}"
+
 
 # ------------------------------------------------------------------------------
 # Public Mode Tests

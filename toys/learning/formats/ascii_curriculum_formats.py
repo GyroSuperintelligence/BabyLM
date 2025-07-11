@@ -1,3 +1,4 @@
+
 # toys/learning/formats/ascii_curriculum.py
 # This toy is used to generate the ASCII curriculum format.
 
