@@ -69,18 +69,10 @@ class IntelligenceEngine:
         information_engine: InformationEngine,
         format_uuid: Optional[str] = None,
         formats: Optional[FormatMetadata] = None,
+        base_memories_dir: str = "memories",
     ):
-        """
-        Initialize the Intelligence Engine
-
-        Args:
-            agent_uuid: UUID of the current agent
-            agent_secret: Persistent secret for encryption
-            inference_engine: The InferenceEngine instance
-            information_engine: The InformationEngine instance
-            format_uuid: UUID of the active format
-            formats: Optional format metadata dictionary
-        """
+        self.base_memories_dir = base_memories_dir  # Set this first!
+        self.memory_prefs = get_memory_preferences(base_memories_dir=self.base_memories_dir)
         # Allow None for public mode
         self.inference_engine = inference_engine
         self.information_engine = information_engine
@@ -95,16 +87,15 @@ class IntelligenceEngine:
         self.parent_thread_uuid = None
         self.child_thread_uuids = []
         self.M: FormatMetadata = formats if formats else self._load_or_init_formats()
-        self.memory_prefs = get_memory_preferences()
         self._validate_format_compatibility()
         self.pattern_index = (
-            PatternIndex(self.agent_uuid, self.agent_secret)
+            PatternIndex(self.agent_uuid, self.agent_secret, self.base_memories_dir, self.memory_prefs)
             if (self.agent_uuid is not None and self.agent_secret is not None)
             else None
         )
         self.pattern_distances = None
         if self.M and "pattern_distances" in self.M and "path" in self.M["pattern_distances"]:
-            self.pattern_distances = load_pattern_distances(self.format_uuid)
+            self.pattern_distances = load_pattern_distances(self.format_uuid, base_memories_dir=self.base_memories_dir)
         # File handle for public thread NDJSON streaming
         self._active_public_thread_handle = None
 
@@ -115,7 +106,7 @@ class IntelligenceEngine:
         Returns:
             str: Format UUID
         """
-        formats = list_formats()
+        formats = list_formats(base_memories_dir=self.base_memories_dir)
         if formats:
             return formats[0]
 
@@ -167,7 +158,7 @@ class IntelligenceEngine:
 
         format_data["patterns"] = patterns
 
-        return store_format(cast(FormatMetadata, format_data))
+        return store_format(cast(FormatMetadata, format_data), self.memory_prefs, base_memories_dir=self.base_memories_dir)
 
     def _validate_format_compatibility(self) -> None:
         """
@@ -215,12 +206,12 @@ class IntelligenceEngine:
         Returns:
             Dict: Format metadata
         """
-        format_data = load_format(self.format_uuid)
+        format_data = load_format(self.format_uuid, base_memories_dir=self.base_memories_dir)
 
         if not format_data:
             # Initialize new format metadata
             format_data = self._initialize_format_metadata()
-            store_format(format_data)
+            store_format(format_data, self.memory_prefs, base_memories_dir=self.base_memories_dir)
 
         return format_data
 
@@ -297,15 +288,17 @@ class IntelligenceEngine:
             privacy=privacy,
             parent_uuid=parent_uuid,
             format_uuid=self.format_uuid,
+            prefs=self.memory_prefs,
+            base_memories_dir=self.base_memories_dir,
         )
 
         # --- NEW: Update parent metadata to add child ---
         if parent_uuid is not None and self.agent_uuid is not None:
-            private_dir = Path("memories/private/agents")
-            agent_shard = shard_path(private_dir, self.agent_uuid)
+            private_dir = Path(self.base_memories_dir) / "private" / "agents"
+            agent_shard = shard_path(private_dir, self.agent_uuid, self.memory_prefs)
             agent_dir = agent_shard / f"agent-{self.agent_uuid}"
             threads_dir = agent_dir / "threads"
-            parent_shard = shard_path(threads_dir, parent_uuid)
+            parent_shard = shard_path(threads_dir, parent_uuid, self.memory_prefs)
             parent_meta_path = parent_shard / f"thread-{parent_uuid}.json"
             if parent_meta_path.exists():
                 with open(parent_meta_path, "r") as f:
@@ -338,33 +331,17 @@ class IntelligenceEngine:
             and self.agent_secret is not None
             and self.thread_file_key is not None
         ):
-            store_thread_key(self.agent_uuid, new_thread_uuid, self.thread_file_key, self.agent_secret)
+            store_thread_key(
+                agent_uuid=self.agent_uuid,
+                thread_uuid=new_thread_uuid,
+                key=self.thread_file_key,
+                agent_secret=self.agent_secret,
+                prefs=self.memory_prefs,
+                base_memories_dir=self.base_memories_dir
+            )
 
-        if privacy == "public":
-            threads_root = Path("memories/public/threads")
-            thread_shard = shard_path(threads_root, str(new_thread_uuid))
-            thread_path = thread_shard / f"thread-{new_thread_uuid}.ndjson"
-            thread_shard.mkdir(parents=True, exist_ok=True)
-            self._active_public_thread_handle = open(thread_path, "a", encoding="utf-8")
-            meta_path = thread_shard / f"thread-{new_thread_uuid}.json"
-            now = datetime.datetime.now().isoformat()
-            meta = {
-                "thread_uuid": new_thread_uuid,
-                "thread_name": None,
-                "agent_uuid": None,
-                "parent_uuid": None,
-                "parent_name": None,
-                "children": [],
-                "format_uuid": self.format_uuid,
-                "curriculum": None,
-                "tags": None,
-                "created_at": now,
-                "last_updated": now,
-                "size_bytes": 0,
-                "privacy": "public",
-            }
-            with open(meta_path, "w") as f:
-                f.write(json_dumps(meta))
+        # --- FIX: Removed redundant block that overwrote public thread metadata ---
+        # The NDJSON file handle for public threads is now managed in _append_to_thread.
 
         return new_thread_uuid
 
@@ -401,7 +378,13 @@ class IntelligenceEngine:
         if privacy == "public":
             if self.thread_uuid is None:
                 raise ValueError("thread_uuid must not be None for public thread operations.")
-            thread_shard = shard_path(Path("memories/public/threads"), self.thread_uuid)
+            thread_shard = shard_path(
+                Path(self.base_memories_dir)
+                / "public"
+                / "threads",
+                self.thread_uuid,
+                self.memory_prefs
+            )
             thread_path = thread_shard / f"thread-{self.thread_uuid}.ndjson"
             if self._active_public_thread_handle is None:
                 thread_shard.mkdir(parents=True, exist_ok=True)
@@ -438,8 +421,8 @@ class IntelligenceEngine:
             from pathlib import Path
             import os
 
-            threads_root = Path("memories/public/threads")
-            thread_shard = shard_path(threads_root, self.thread_uuid)
+            threads_root = Path(self.base_memories_dir) / "public" / "threads"
+            thread_shard = shard_path(threads_root, self.thread_uuid, self.memory_prefs)
             meta_path = thread_shard / f"thread-{self.thread_uuid}.json"
             meta_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -482,20 +465,20 @@ class IntelligenceEngine:
             # Use thread_file_key directly as the AES-256-GCM key
             aes_key = self.thread_file_key
             encrypted_blob = self._encrypt_data(final_data_to_save, aes_key)
-            save_thread(self.thread_uuid, encrypted_blob, privacy)
+            save_thread(self.thread_uuid, encrypted_blob, privacy, prefs=self.memory_prefs, base_memories_dir=self.base_memories_dir)
 
             # Update thread metadata with actual file size
             from baby.information import shard_path, json_loads, json_dumps
             from pathlib import Path
             import os
 
-            private_dir = Path("memories/private/agents")
+            private_dir = Path(self.base_memories_dir) / "private" / "agents"
             if self.agent_uuid is None:
                 raise ValueError("agent_uuid must not be None when finalizing a private thread.")
-            agent_shard = shard_path(private_dir, self.agent_uuid)
+            agent_shard = shard_path(private_dir, self.agent_uuid, self.memory_prefs)
             agent_dir = agent_shard / f"agent-{self.agent_uuid}"
             threads_dir = agent_dir / "threads"
-            thread_shard = shard_path(threads_dir, self.thread_uuid)
+            thread_shard = shard_path(threads_dir, self.thread_uuid, self.memory_prefs)
             meta_path = thread_shard / f"thread-{self.thread_uuid}.json"
 
             if meta_path.exists():
@@ -511,10 +494,18 @@ class IntelligenceEngine:
 
         # --- Common Finalization Logic for BOTH public and private ---
         if self.current_thread_keys:
-            store_gene_keys(self.thread_uuid, self.current_thread_keys, privacy, self.agent_secret, self.agent_uuid)
+            store_gene_keys(
+                thread_uuid=self.thread_uuid,
+                gene_keys=self.current_thread_keys,
+                privacy=privacy,
+                prefs=self.memory_prefs,
+                agent_secret=self.agent_secret,
+                agent_uuid=self.agent_uuid,
+                base_memories_dir=self.base_memories_dir
+            )
         self.M.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
         self.M.setdefault("metadata", {})["usage_count"] = self.M.get("metadata", {}).get("usage_count", 0) + 1
-        store_format(self.M)
+        store_format(self.M, self.memory_prefs, base_memories_dir=self.base_memories_dir)
         # Update pattern index if it exists (conditional)
         if self.pattern_index:
             self.pattern_index.update_from_thread(self.thread_uuid, self.current_thread_keys)
@@ -731,11 +722,11 @@ class IntelligenceEngine:
         """
         Load a thread's decrypted content as a list of NDJSON event dicts.
         """
-        thread_content_raw = load_thread(self.agent_uuid, thread_uuid)
+        thread_content_raw = load_thread(self.agent_uuid, thread_uuid, self.memory_prefs, base_memories_dir=self.base_memories_dir)
         if not thread_content_raw:
             return None
         if self.agent_uuid and self.agent_secret:
-            thread_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret)
+            thread_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret, self.memory_prefs, base_memories_dir=self.base_memories_dir)
             if not thread_key:
                 return None
             # Use thread_key directly as the AES-256-GCM key
@@ -774,10 +765,10 @@ class IntelligenceEngine:
         Returns:
             str: UUID of selected format, or None if not found
         """
-        format_uuids = list_formats()
+        format_uuids = list_formats(base_memories_dir=self.base_memories_dir)
         matching_formats = []
         for format_uuid in format_uuids:
-            format_data = load_format(format_uuid)
+            format_data = load_format(format_uuid, base_memories_dir=self.base_memories_dir)
             if not format_data:
                 continue
             if format_data.get("stability") == stability:
@@ -806,10 +797,10 @@ class IntelligenceEngine:
         Returns:
             List[str]: List of discovered format UUIDs
         """
-        format_uuids = list_formats()
+        format_uuids = list_formats(base_memories_dir=self.base_memories_dir)
         discovered_formats = []
         for format_uuid in format_uuids:
-            format_data = load_format(format_uuid)
+            format_data = load_format(format_uuid, base_memories_dir=self.base_memories_dir)
             if not format_data:
                 continue
             author = format_data.get("metadata", {}).get("author", "")
@@ -830,7 +821,7 @@ class IntelligenceEngine:
         """
         try:
             # Load the primary format
-            primary_data = load_format(primary_format)
+            primary_data = load_format(primary_format, base_memories_dir=self.base_memories_dir)
             if not primary_data:
                 return None
 
@@ -852,7 +843,7 @@ class IntelligenceEngine:
 
             # Process each secondary format
             for secondary_uuid in secondary_formats:
-                secondary_data = load_format(secondary_uuid)
+                secondary_data = load_format(secondary_uuid, base_memories_dir=self.base_memories_dir)
                 if not secondary_data:
                     continue
                 # Merge pattern metadata
@@ -895,7 +886,7 @@ class IntelligenceEngine:
                 )
 
             # Save the composed format
-            store_format(composed_format)
+            store_format(composed_format, self.memory_prefs, base_memories_dir=self.base_memories_dir)
 
             return composed_format["format_uuid"]
 
@@ -976,8 +967,8 @@ class IntelligenceEngine:
     def get_thread_relationships(self, thread_uuid: str) -> Dict:
         if self.agent_uuid is None:
             return {"parent": None, "children": []}
-        parent_uuid = parent(self.agent_uuid, thread_uuid)
-        child_uuids = children(self.agent_uuid, thread_uuid)
+        parent_uuid = parent(self.agent_uuid, thread_uuid, self.memory_prefs, self.base_memories_dir)
+        child_uuids = children(self.agent_uuid, thread_uuid, self.memory_prefs, self.base_memories_dir)
         return {"parent": parent_uuid, "children": child_uuids}
 
     def get_thread_chain(self, thread_uuid: str, max_depth: int = 5) -> List[str]:
@@ -988,7 +979,7 @@ class IntelligenceEngine:
         depth = 0
         while current_uuid and depth < max_depth:
             chain.insert(0, current_uuid)
-            parent_uuid = parent(self.agent_uuid, current_uuid)
+            parent_uuid = parent(self.agent_uuid, current_uuid, self.memory_prefs, self.base_memories_dir)
             if parent_uuid:
                 current_uuid = parent_uuid
             else:
@@ -1001,7 +992,7 @@ class IntelligenceEngine:
             return
         if max_depth <= 0:
             return
-        child_uuids = children(self.agent_uuid, parent_uuid)
+        child_uuids = children(self.agent_uuid, parent_uuid, self.memory_prefs, self.base_memories_dir)
         for child_uuid in child_uuids:
             if child_uuid not in chain:
                 chain.append(child_uuid)
@@ -1039,7 +1030,11 @@ class IntelligenceEngine:
                 if related_uuid != thread_uuid:
                     related_content = self.load_thread_content(related_uuid)
                     if related_content:
-                        parent_uuid = parent(self.agent_uuid, related_uuid) if self.agent_uuid is not None else None
+                        parent_uuid = parent(
+                            self.agent_uuid,
+                            related_uuid,
+                            self.memory_prefs,
+                            self.base_memories_dir) if self.agent_uuid is not None else None
                         relationship = "parent" if related_uuid == parent_uuid else "child"
 
                         related_threads.append(
@@ -1058,8 +1053,8 @@ class IntelligenceEngine:
     def get_thread_statistics(self) -> Dict:
         if self.agent_uuid is None:
             return {}
-        private_dir = Path("memories/private/agents")
-        agent_shard = shard_path(private_dir, self.agent_uuid)
+        private_dir = Path(self.base_memories_dir) / "private" / "agents"
+        agent_shard = shard_path(private_dir, self.agent_uuid, self.memory_prefs)
         if agent_shard is None:
             return {}
         agent_dir = agent_shard / f"agent-{self.agent_uuid}"
@@ -1094,7 +1089,7 @@ class IntelligenceEngine:
             "relationship_stats": {"threads_with_parents": 0, "threads_with_children": 0, "isolated_threads": 0},
         }
         for thread_uuid in thread_uuids:
-            thread_shard = shard_path(threads_dir, thread_uuid)
+            thread_shard = shard_path(threads_dir, thread_uuid, self.memory_prefs)
             meta_path = thread_shard / f"thread-{thread_uuid}.json"
             if not meta_path.exists():
                 continue
@@ -1183,15 +1178,16 @@ class IntelligenceEngine:
         Load thread metadata from disk.
         """
         if privacy == "public":
-            threads_dir = shard_path(Path("memories/public/threads"), thread_uuid)
+            threads_dir = shard_path(Path(self.base_memories_dir) / "public"
+                                     / "threads", thread_uuid, self.memory_prefs)
         else:
             if self.agent_uuid is None:
                 raise ValueError("agent_uuid must not be None for private thread metadata loading")
-            private_dir = Path("memories/private/agents")
-            agent_shard = shard_path(private_dir, self.agent_uuid)
+            private_dir = Path(self.base_memories_dir) / "private" / "agents"
+            agent_shard = shard_path(private_dir, self.agent_uuid, self.memory_prefs)
             agent_dir = agent_shard / f"agent-{self.agent_uuid}"
             threads_dir = agent_dir / "threads"
-            threads_dir = shard_path(threads_dir, thread_uuid)
+            threads_dir = shard_path(threads_dir, thread_uuid, self.memory_prefs)
         meta_path = threads_dir / f"thread-{thread_uuid}.json"
         if not meta_path.exists():
             raise FileNotFoundError(f"Thread metadata not found for {thread_uuid}")
@@ -1205,15 +1201,42 @@ class IntelligenceEngine:
         meta = self.load_thread_metadata(thread_uuid, privacy=privacy)
         self.current_thread_size = meta.get("size_bytes", 0)
         self.thread_uuid = thread_uuid
+
+        # Get parent/child info for the resumed thread
+        if privacy == 'private' and self.agent_uuid:
+            self.parent_thread_uuid = meta.get("parent_uuid")
+            self.child_thread_uuids = [c['uuid'] for c in meta.get("children", [])]
+
         if privacy == "public":
             if self._active_public_thread_handle:
                 self._active_public_thread_handle.close()
-                self._active_public_thread_handle = None
-            threads_root = Path("memories/public/threads")
-            thread_shard = shard_path(threads_root, thread_uuid)
+            threads_root = Path(self.base_memories_dir) / "public" / "threads"
+            thread_shard = shard_path(threads_root, thread_uuid, self.memory_prefs)
             thread_path = thread_shard / f"thread-{thread_uuid}.ndjson"
+            thread_shard.mkdir(parents=True, exist_ok=True)
             self._active_public_thread_handle = open(thread_path, "a", encoding="utf-8")
-        # For private: buffer is not loaded for appending, as private threads are not typically resumed for append
+        else:  # --- FIX: Implement private thread resume logic ---
+            if self.agent_uuid and self.agent_secret:
+                # Load the encryption key for the thread
+                self.thread_file_key = load_thread_key(self.agent_uuid, thread_uuid, self.agent_secret, self.memory_prefs, base_memories_dir=self.base_memories_dir)
+                if not self.thread_file_key:
+                    print(f"Warning: Could not load key for private thread {thread_uuid}. Cannot resume.")
+                    self.thread_uuid = None  # Prevent writing to a thread we can't encrypt
+                    return
+
+                # Load and decrypt the existing content into the buffer
+                encrypted_content = load_thread(self.agent_uuid, thread_uuid, self.memory_prefs, self.base_memories_dir)
+                if encrypted_content:
+                    try:
+                        decrypted_content = self._decrypt_data(encrypted_content, self.thread_file_key)
+                        self.active_thread_content = bytearray(decrypted_content)
+                    except Exception as e:
+                        print(f"Warning: Failed to decrypt and resume thread {thread_uuid}. Error: {e}")
+                        self.thread_uuid = None
+                        self.active_thread_content.clear()
+                else:
+                    # Thread exists but has no content yet, which is fine
+                    self.active_thread_content.clear()
 
 
 def weighted_choice(items: List[Any], weights: List[float]) -> Any:
@@ -1251,6 +1274,7 @@ def initialize_intelligence_engine(
     agent_secret: Optional[str] = None,
     format_uuid: Optional[str] = None,
     formats: Optional[FormatMetadata] = None,
+    base_memories_dir: str = "memories",
 ) -> IntelligenceEngine:
     """
     Initialize the complete intelligence engine.
@@ -1271,13 +1295,13 @@ def initialize_intelligence_engine(
                 loaded_secret = baby_prefs.get("agent_secret")
                 if loaded_secret:
                     # Auto-private mode detected
-                    _agent_uuid = ensure_agent_uuid()
+                    _agent_uuid = ensure_agent_uuid(base_memories_dir=base_memories_dir)
                     _agent_secret = loaded_secret
             except (json.JSONDecodeError, IOError):
                 pass  # Failed to read prefs, remain in public mode
     else:
         # Use explicit args for private mode
-        _agent_uuid = agent_uuid or ensure_agent_uuid()
+        _agent_uuid = agent_uuid or ensure_agent_uuid(base_memories_dir=base_memories_dir)
         _agent_secret = agent_secret
         # Optional: attempt to load secret if only UUID was provided
         if _agent_secret is None:
@@ -1293,8 +1317,8 @@ def initialize_intelligence_engine(
                     pass  # Remain with None if cannot load
 
     # Now, initialize the engines with the determined state
-    inference_engine = InferenceEngine()
-    information_engine = InformationEngine()
+    inference_engine = InferenceEngine(base_memories_dir=base_memories_dir)
+    information_engine = InformationEngine(base_memories_dir=base_memories_dir)
     return IntelligenceEngine(
         agent_uuid=_agent_uuid,
         agent_secret=_agent_secret,
@@ -1302,4 +1326,5 @@ def initialize_intelligence_engine(
         information_engine=information_engine,
         format_uuid=format_uuid,
         formats=formats,
+        base_memories_dir=base_memories_dir,
     )

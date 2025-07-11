@@ -39,6 +39,7 @@ except ImportError:
 # Import Baby LM components
 from baby import initialize_intelligence_engine
 from baby.information import assign_agent_uuid, list_formats, load_format
+from baby.information import get_memory_preferences
 
 # Use the fastest available JSON library (orjson > ujson > stdlib json)
 try:
@@ -79,7 +80,7 @@ class ColoredFormatter(logging.Formatter):
     RESET = "\033[0m"
 
     def format(self, record):
-        log_color = self.COLORS.get(record.levelname, self.RESET)
+        self.COLORS.get(record.levelname, self.RESET)
         record.levelname = "{log_color}{record.levelname}{self.RESET}"
         return super().format(record)
 
@@ -141,7 +142,9 @@ class BabyLMCLI:
         try:
             if agent_uuid:
                 # Switch to specific agent
-                assign_agent_uuid(agent_uuid)
+                base_memories_dir = "memories"  # or the appropriate directory
+                prefs = get_memory_preferences(base_memories_dir)
+                assign_agent_uuid(agent_uuid, base_memories_dir=base_memories_dir, prefs=prefs)
 
             if RICH_AVAILABLE and console is not None:
                 with Progress(
@@ -167,7 +170,7 @@ class BabyLMCLI:
                 return True
             return False
 
-        except Exception as e:
+        except Exception:
             logger.error("Failed to initialize engine: {e}")
             if RICH_AVAILABLE and console is not None:
                 console.print("[red]✗ Failed to initialize: {e}[/red]")
@@ -277,7 +280,7 @@ class BabyLMCLI:
                 border_style="green",
             )
 
-            pattern_stats = self._get_pattern_statistics()
+            self._get_pattern_statistics()
             pattern_info = Panel(
                 "[magenta]Total:[/magenta] {pattern_stats['total']}\n"
                 "[magenta]Labeled:[/magenta] {pattern_stats['labeled']}\n"
@@ -299,7 +302,7 @@ class BabyLMCLI:
                 print("Cycles: {self.engine.inference_engine.cycle_counter}")
                 print("Gene Stateless: 0x{gene_stateless:02X}")
 
-                pattern_stats = self._get_pattern_statistics()
+                self._get_pattern_statistics()
                 print("\nPattern Statistics:")
                 print("  Total: {pattern_stats['total']}")
                 print("  Labeled: {pattern_stats['labeled']}")
@@ -362,7 +365,7 @@ class BabyLMCLI:
                 else:
                     if input("Exit chat mode? (y/n): ").lower() == "y":
                         break
-            except Exception as e:
+            except Exception:
                 logger.error("Error in chat: {e}")
                 if RICH_AVAILABLE and console is not None:
                     console.print("[red]Error: {e}[/red]")
@@ -592,13 +595,14 @@ Chat Commands:
 
             # Display conversation
             for msg in self.conversation_history[-5:]:  # Show last 5 messages
-                role = "You" if msg["role"] == "user" else "Baby LM"
                 if RICH_AVAILABLE and console is not None:
-                    console.print("[bold]{role}[/bold]: {msg['content']}")
+                    role_str = "You" if msg["role"] == "user" else "Baby LM"
+                    content_str = msg['content']
+                    console.print(f"[bold]{role_str}[/bold]: {content_str}")
                 else:
-                    print("{role}: {msg['content']}")
+                    print("{0}: {1}".format("You" if msg["role"] == "user" else "Baby LM", msg['content']))
 
-        except Exception as e:
+        except Exception:
             logger.error("Failed to load conversation: {e}")
             if RICH_AVAILABLE and console is not None:
                 console.print("[red]Failed to load conversation: {e}[/red]")
@@ -615,12 +619,12 @@ Chat Commands:
             return
 
         stats = self.engine.get_thread_statistics()
-        relationships = self.engine.get_thread_relationships(self.engine.thread_uuid)
+        self.engine.get_thread_relationships(self.engine.thread_uuid)
         # Find current thread detail
         thread_detail = next((d for d in stats["thread_details"] if d["thread_uuid"] == self.engine.thread_uuid), None)
-        name = thread_detail.get("thread_name") if thread_detail else "-"
-        curriculum = thread_detail.get("curriculum") if thread_detail else "-"
-        tags = ", ".join(thread_detail.get("tags") or []) if thread_detail and thread_detail.get("tags") else "-"
+        thread_detail.get("thread_name") if thread_detail else "-"
+        thread_detail.get("curriculum") if thread_detail else "-"
+        ", ".join(thread_detail.get("tags") or []) if thread_detail and thread_detail.get("tags") else "-"
 
         if RICH_AVAILABLE and console is not None:
             info = """
@@ -724,7 +728,7 @@ Chat Commands:
     def _toggle_developer_mode(self):
         """Toggle developer mode"""
         self.developer_mode = not self.developer_mode
-        mode = "enabled" if self.developer_mode else "disabled"
+        "enabled" if self.developer_mode else "disabled"
 
         if RICH_AVAILABLE and console is not None:
             console.print("[green]Developer mode {mode}[/green]")
@@ -917,7 +921,7 @@ Chat Commands:
                     name,
                     curriculum,
                     tags,
-                    "{size_kb:.1f} KB",
+                    f"{size_kb:.1f} KB",
                     parent,
                     children,
                 )
@@ -933,16 +937,15 @@ Chat Commands:
             print("\nThreads for Agent {self.engine.agent_uuid[:8] if self.engine.agent_uuid else 'None'}...")
             print("-" * 80)
             for i, detail in enumerate(stats["thread_details"], 1):
-                size_kb = detail["size_bytes"] / 1024
                 name = detail.get("thread_name") or "-"
                 curriculum = detail.get("curriculum") or "-"
                 tags = ", ".join(detail.get("tags") or []) if detail.get("tags") else "-"
+                size_kb = detail["size_bytes"] / 1024
                 print(
-                    "{i}. {detail['thread_uuid'][:8]}... | Name: {name} | Curriculum: {curriculum} | Tags: {tags} | "
-                    "Size: {size_kb:.1f} KB"
+                    f"{i}. {detail['thread_uuid'][:8]}... | Name: {name} | Curriculum: {curriculum} | Tags: {tags} | Size: {size_kb:.1f} KB"
                 )
                 if detail["has_parent"] or detail["has_children"]:
-                    print("   Parent: {detail['has_parent']}, Children: {detail['child_count']}")
+                    print(f"   Parent: {detail['has_parent']}, Children: {detail['child_count']}")
 
     def _show_thread(self, thread_uuid: str):
         """Show thread content with context"""
@@ -1109,9 +1112,9 @@ Chat Commands:
             for i, uuid in enumerate(chain):
                 indent = "  " * i
                 if uuid == self.engine.thread_uuid:
-                    print("{indent}→ {uuid[:8]}... (CURRENT)")
+                    print(f"{indent}→ {uuid[:8]}... (CURRENT)")
                 else:
-                    print("{indent}  {uuid[:8]}...")
+                    print(f"{indent}  {uuid[:8]}...")
 
     def _export_thread(self, thread_uuid: str):
         """Export thread content to file"""
@@ -1191,7 +1194,8 @@ Chat Commands:
             table.add_column("Stability", style="yellow")
             table.add_column("Usage", style="blue", justify="right")
             for i, format_uuid in enumerate(format_uuids, 1):
-                format_data = load_format(format_uuid)
+                base_memories_dir = self.engine.base_memories_dir if self.engine else "memories"
+                format_data = load_format(format_uuid, base_memories_dir)
                 if format_data:
                     table.add_row(
                         str(i),
@@ -1204,7 +1208,8 @@ Chat Commands:
         else:
             print("\nAvailable Formats:")
             for i, format_uuid in enumerate(format_uuids, 1):
-                format_data = load_format(format_uuid)
+                base_memories_dir = self.engine.base_memories_dir if self.engine else "memories"
+                format_data = load_format(format_uuid, base_memories_dir)
                 if format_data:
                     print("{i}. {format_uuid[:8]}... - {format_data.get('format_name', 'Unknown')}")
 
@@ -1230,7 +1235,8 @@ Chat Commands:
 
             format_uuid = matches[0]
 
-        format_data = load_format(format_uuid)
+        base_memories_dir = self.engine.base_memories_dir if self.engine else "memories"
+        format_data = load_format(format_uuid, base_memories_dir)
         if not format_data:
             if RICH_AVAILABLE and console is not None:
                 console.print("[red]Format {format_uuid} not found[/red]")
@@ -1290,7 +1296,8 @@ Chat Commands:
                 for stability in ["stable", "beta", "experimental"]:
                     format_uuid = self.engine.select_stable_format(domain, stability)
                     if format_uuid:
-                        format_data = load_format(format_uuid)
+                        base_memories_dir = self.engine.base_memories_dir if self.engine else "memories"
+                        format_data = load_format(format_uuid, base_memories_dir)
                         console.print("[green]Found {stability} format:[/green]")
                         console.print("  UUID: {format_uuid}")
                         if format_data is not None:
@@ -1305,7 +1312,8 @@ Chat Commands:
             for stability in ["stable", "beta", "experimental"]:
                 format_uuid = self.engine.select_stable_format(domain, stability)
                 if format_uuid:
-                    format_data = load_format(format_uuid)
+                    base_memories_dir = self.engine.base_memories_dir if self.engine else "memories"
+                    format_data = load_format(format_uuid, base_memories_dir)
                     print("Found {stability} format:")
                     print("  UUID: {format_uuid}")
                     if format_data is not None:
@@ -1360,12 +1368,10 @@ Chat Commands:
         # Get input
         if text:
             data = text.encode("utf-8")
-            source = "command line"
         elif input_file:
             try:
                 with open(input_file, "rb") as f:
                     data = f.read()
-                source = input_file
             except FileNotFoundError:
                 if RICH_AVAILABLE and console is not None:
                     console.print("[red]Input file not found: {input_file}[/red]")
@@ -1385,17 +1391,12 @@ Chat Commands:
             if self.developer_mode:
                 # Show processing details
 
-                recent_patterns = self.engine.inference_engine.recent_patterns
-                if recent_patterns and isinstance(recent_patterns, list):
-                    recent_patterns_str = recent_patterns[-5:]
-                else:
-                    recent_patterns_str = []
                 info = """
 [cyan]Input size:[/cyan] {len(data)} bytes
 [cyan]Thread UUID:[/cyan] {self.engine.thread_uuid if self.engine.thread_uuid else '[unknown]'}
 [cyan]Cycles processed:[/cyan] {len(data)}
 [cyan]Current cycle:[/cyan] {self.engine.inference_engine.cycle_counter}
-[cyan]Recent patterns:[/cyan] {recent_patterns_str}
+[cyan]Recent patterns:[/cyan] {self.engine.inference_engine.recent_patterns[-5:]}"
                 """
                 console.print(Panel(info.strip(), title="Processing Details", border_style="yellow"))
         else:
@@ -1480,7 +1481,7 @@ def main():
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")
         sys.exit(0)
-    except Exception as e:
+    except Exception:
         logger.error("Unexpected error: {e}", exc_info=True)
         if RICH_AVAILABLE and console is not None:
             console.print("\n[red]Error: {e}[/red]")

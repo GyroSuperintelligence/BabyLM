@@ -31,6 +31,9 @@ def make_description(pack_num: int, total_packs: int) -> str:
 
 
 for pack_num in range(num_packs):
+    from baby.information import get_memory_preferences
+    base_memories_dir = "memories"
+    prefs = get_memory_preferences(base_memories_dir)
     start = pack_num * pack_size
     end = min(start + pack_size, len(all_math_symbols))
     math_slice = all_math_symbols[start:end]
@@ -83,7 +86,7 @@ for pack_num in range(num_packs):
         },
         "patterns": patterns,
     }
-    format_uuid = store_format(cast(FormatMetadata, format_data))
+    format_uuid = store_format(cast(FormatMetadata, format_data), prefs, base_memories_dir)
     print("\n🧮 Math Curriculum Format Learned! 🧮")
     print(f"🆔  UUID: {format_uuid}")
     print("📦  Location: memories/public/formats/")

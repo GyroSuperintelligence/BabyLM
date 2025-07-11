@@ -21,15 +21,14 @@ from baby.governance import derive_canonical_patterns, apply_operation, gene_add
 class TestInference:
     """Tests for the Inference layer (pattern recognition)"""
 
-    def test_inference_engine_init(self):
+    def test_inference_engine_init(self, mock_env):
         """Test InferenceEngine initialization"""
         with (
             patch.object(InferenceEngine, "_load_patterns", return_value=(np.zeros((256, 48)), ["test"] * 256)),
             patch.object(InferenceEngine, "_load_genome_mask", return_value=np.arange(256, dtype=np.uint8)),
             patch.object(InferenceEngine, "_initialize_epigenome"),
         ):
-
-            engine = InferenceEngine()
+            engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
 
             assert engine.T.shape == (4, 2, 3, 2)
             assert engine.cycle_counter == 0
@@ -40,7 +39,7 @@ class TestInference:
     def test_load_patterns_file_exists(self, mock_env):
         """Test loading patterns when file exists"""
         # Create a mock pattern file
-        pattern_file = Path(mock_env) / "memories/public/masks/epigenome.dat"
+        pattern_file = Path(mock_env) / "toys/health/memories/public/masks/epigenome.dat"
         pattern_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create test patterns
@@ -49,7 +48,7 @@ class TestInference:
             test_patterns.tofile(f)
 
         # Test loading
-        engine = InferenceEngine()
+        engine = InferenceEngine(base_memories_dir="toys/health/memories")
 
         # Verify loaded patterns
         assert engine.F.shape == (256, 48)
@@ -61,13 +60,13 @@ class TestInference:
     def test_load_patterns_generate_new(self, mock_env):
         """Test pattern generation when file doesn't exist"""
         # Ensure pattern file doesn't exist
-        pattern_file = Path(mock_env) / "memories/public/masks/epigenome.dat"
+        pattern_file = Path(mock_env) / "toys/health/memories/public/masks/epigenome.dat"
         if pattern_file.exists():
             pattern_file.unlink()
 
         # Use actual implementation to load/generate patterns
         with patch("baby.inference.derive_canonical_patterns", return_value=(np.ones((256, 48)), ["test"] * 256)):
-            engine = InferenceEngine()
+            engine = InferenceEngine(base_memories_dir="toys/health/memories")
 
             # Verify generated patterns
             assert engine.F.shape == (256, 48)
@@ -76,7 +75,7 @@ class TestInference:
     def test_load_genome_mask_file_exists(self, mock_env):
         """Test loading genome mask when file exists"""
         # Create a mock genome file
-        genome_file = Path(mock_env) / "memories/public/masks/genome.dat"
+        genome_file = Path(mock_env) / "toys/health/memories/public/masks/genome.dat"
         genome_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create test genome mask
@@ -89,7 +88,7 @@ class TestInference:
             patch.object(InferenceEngine, "_load_patterns", return_value=(np.zeros((256, 48)), ["test"] * 256)),
             patch.object(InferenceEngine, "_initialize_epigenome"),
         ):
-            engine = InferenceEngine()
+            engine = InferenceEngine(base_memories_dir="toys/health/memories")
 
             # Verify loaded genome mask
             assert engine.G.shape == (256,)
@@ -101,7 +100,7 @@ class TestInference:
     def test_load_genome_mask_generate_new(self, mock_env):
         """Test genome mask generation when file doesn't exist"""
         # Ensure genome file doesn't exist
-        genome_file = Path(mock_env) / "memories/public/masks/genome.dat"
+        genome_file = Path(mock_env) / "toys/health/memories/public/masks/genome.dat"
         if genome_file.exists():
             genome_file.unlink()
 
@@ -110,20 +109,19 @@ class TestInference:
             patch.object(InferenceEngine, "_load_patterns", return_value=(np.zeros((256, 48)), ["test"] * 256)),
             patch.object(InferenceEngine, "_initialize_epigenome"),
         ):
-            engine = InferenceEngine()
+            engine = InferenceEngine(base_memories_dir="toys/health/memories")
 
             # Verify generated genome mask
             assert engine.G.shape == (256,)
             np.testing.assert_array_equal(engine.G, np.arange(256, dtype=np.uint8))
 
-    def test_initialize_epigenome(self):
+    def test_initialize_epigenome(self, mock_env):
         """Test Epigenome initialization"""
         with (
             patch.object(InferenceEngine, "_load_patterns", return_value=(np.zeros((256, 48)), ["test"] * 256)),
             patch.object(InferenceEngine, "_load_genome_mask", return_value=np.arange(256, dtype=np.uint8)),
         ):
-
-            engine = InferenceEngine()
+            engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
 
             # Capture initial tensor state after initialization
             initial_T = engine.T.copy()
@@ -140,8 +138,7 @@ class TestInference:
 
     def test_process_byte(self, mock_env):
         """Test processing a byte with explicit mutation logic"""
-        # Use a real InferenceEngine for this test
-        engine = InferenceEngine()
+        engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
         engine.T = np.arange(4 * 2 * 3 * 2, dtype=np.float32).reshape(4, 2, 3, 2)
         initial_T = engine.T.copy()
         input_byte = 0x55
@@ -169,7 +166,7 @@ class TestInference:
 
     def test_find_closest_pattern_index(self, mock_env):
         """Test finding the closest pattern"""
-        engine = InferenceEngine()
+        engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
         # Set tensor to all ones
         engine.T.fill(1.0)
         # Set all patterns to zeros except index 42, which matches the tensor
@@ -197,7 +194,7 @@ class TestInference:
 
     def test_compute_pattern_resonances(self, mock_env):
         """Test computing pattern resonances"""
-        engine = InferenceEngine()
+        engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
         # Create a controlled set of patterns for testing
         engine.F = np.zeros((256, 48))
         engine.F[0] = np.ones(48)  # First pattern has all 1s

@@ -54,13 +54,13 @@ class TestIntelligence:
         assert hasattr(engine, "pattern_index")
         assert engine.pattern_index is not None  # Should exist in private mode
 
-    def test_load_or_init_formats_existing(self, initialized_intelligence_engine):
+    def test_load_or_init_formats_existing(self, initialized_intelligence_engine, mock_env):
         """Test loading existing format metadata"""
         engine = initialized_intelligence_engine
 
         # Create format directory and file
-        formats_dir = Path("memories/public/formats")
-        format_shard = shard_path(formats_dir, engine.format_uuid)
+        formats_dir = Path("toys/health/memories/public/formats")
+        format_shard = shard_path(formats_dir, engine.format_uuid, engine.memory_prefs)
         format_shard.mkdir(parents=True, exist_ok=True)
 
         format_path = format_shard / f"format-{engine.format_uuid}.json"
@@ -80,13 +80,13 @@ class TestIntelligence:
         assert result.get("format_uuid") == engine.format_uuid
         assert result.get("format_name") == "test_format"
 
-    def test_load_or_init_formats_new(self, initialized_intelligence_engine):
+    def test_load_or_init_formats_new(self, initialized_intelligence_engine, mock_env):
         """Test initializing new format metadata"""
         engine = initialized_intelligence_engine
 
         # Ensure format file doesn't exist
-        formats_dir = Path("memories/public/formats")
-        format_shard = shard_path(formats_dir, engine.format_uuid)
+        formats_dir = Path("toys/health/memories/public/formats")
+        format_shard = shard_path(formats_dir, engine.format_uuid, engine.memory_prefs)
         format_path = format_shard / f"format-{engine.format_uuid}.json"
         if format_path.exists():
             format_path.unlink()
@@ -121,7 +121,7 @@ class TestIntelligence:
         for policy in required_policies:
             assert policy in result.get("cgm_policies")
 
-    def test_start_new_thread(self, initialized_intelligence_engine):
+    def test_start_new_thread(self, initialized_intelligence_engine, mock_env):
         """Test starting a new thread"""
         engine = initialized_intelligence_engine
 
@@ -135,17 +135,17 @@ class TestIntelligence:
             assert engine.current_thread_keys == []
 
             # Check that thread metadata file exists
-            private_dir = Path("memories/private/agents")
-            agent_shard = shard_path(private_dir, engine.agent_uuid)
+            private_dir = Path("toys/health/memories/private/agents")
+            agent_shard = shard_path(private_dir, engine.agent_uuid, engine.memory_prefs)
             agent_dir = agent_shard / f"agent-{engine.agent_uuid}"
             threads_dir = agent_dir / "threads"
-            thread_shard = shard_path(threads_dir, thread_uuid)
+            thread_shard = shard_path(threads_dir, thread_uuid, engine.memory_prefs)
             thread_meta_path = thread_shard / f"thread-{thread_uuid}.json"
             assert thread_meta_path.exists()
 
             # Check that key file exists
             keys_dir = agent_dir / "keys"
-            key_shard = shard_path(keys_dir, thread_uuid)
+            key_shard = shard_path(keys_dir, thread_uuid, engine.memory_prefs)
             key_path = key_shard / f"key-{thread_uuid}.bin.enc"
             assert key_path.exists()
 
@@ -272,7 +272,8 @@ class TestIntelligence:
         """Test loading a thread's decrypted content as NDJSON events"""
         engine = initialized_intelligence_engine
         thread_uuid = "test-thread-uuid"
-        import base64, json
+        import base64
+        import json
 
         # Prepare a fake NDJSON thread with two events
         event1 = {"type": "input", "data": base64.b64encode(b"abc").decode("utf-8")}
@@ -298,7 +299,8 @@ class TestIntelligence:
             assert content[1]["type"] == "output"
             assert content[1]["data"] == b"xyz"
             # Check that the right functions were called
-            mock_load_thread.assert_called_once_with(engine.agent_uuid, thread_uuid)
+            mock_load_thread.assert_called_once_with(
+                engine.agent_uuid, thread_uuid, engine.memory_prefs, base_memories_dir=engine.base_memories_dir)
             mock_load_thread_key.assert_not_called()
 
     def test_get_thread_relationships(self, initialized_intelligence_engine):
@@ -320,8 +322,10 @@ class TestIntelligence:
             assert relationships["children"] == [child_uuid]
 
             # Check function calls
-            mock_parent.assert_called_once_with(engine.agent_uuid, thread_uuid)
-            mock_children.assert_called_once_with(engine.agent_uuid, thread_uuid)
+            mock_parent.assert_called_once_with(
+                engine.agent_uuid, thread_uuid, engine.memory_prefs, engine.base_memories_dir)
+            mock_children.assert_called_once_with(
+                engine.agent_uuid, thread_uuid, engine.memory_prefs, engine.base_memories_dir)
 
     def test_get_thread_chain(self, initialized_intelligence_engine):
         """Test getting a thread chain"""
@@ -333,7 +337,7 @@ class TestIntelligence:
         # Mock parent function
         with patch("baby.intelligence.parent") as mock_parent:
             # Set up mock return values
-            mock_parent.side_effect = lambda a, t: {
+            mock_parent.side_effect = lambda a, t, p, b: {
                 "test-thread-uuid": parent_uuid,
                 "parent-thread-uuid": grandparent_uuid,
                 "grandparent-thread-uuid": None,
@@ -350,14 +354,14 @@ class TestIntelligence:
             # Check parent calls
             assert mock_parent.call_count >= 2
 
-    def test_get_thread_statistics(self, initialized_intelligence_engine):
+    def test_get_thread_statistics(self, initialized_intelligence_engine, mock_env):
         """Test getting thread statistics"""
         engine = initialized_intelligence_engine
 
         # Create test data in the actual directory structure
         agent_uuid = engine.agent_uuid
-        private_dir = Path("memories/private/agents")
-        agent_shard = shard_path(private_dir, agent_uuid)
+        private_dir = Path("toys/health/memories/private/agents")
+        agent_shard = shard_path(private_dir, agent_uuid, engine.memory_prefs)
         agent_dir = agent_shard / f"agent-{agent_uuid}"
         threads_dir = agent_dir / "threads"
         threads_dir.mkdir(parents=True, exist_ok=True)
@@ -406,7 +410,7 @@ class TestIntelligence:
         ):
             meta["thread_uuid"] = thread_id
             # Remove to_flat_str_list; children is a list of ChildRef dicts
-            thread_shard = shard_path(threads_dir, thread_id)
+            thread_shard = shard_path(threads_dir, thread_id, engine.memory_prefs)
             thread_shard.mkdir(parents=True, exist_ok=True)
             with open(thread_shard / f"thread-{thread_id}.json", "w") as f:
                 json.dump(meta, f)

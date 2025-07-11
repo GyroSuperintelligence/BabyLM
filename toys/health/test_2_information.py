@@ -21,9 +21,9 @@ from baby.information import (
 class TestInformationProcessing:
     """Tests for the Information layer (stream processing)"""
 
-    def test_information_engine_init(self):
+    def test_information_engine_init(self, mock_env):
         """Test InformationEngine initialization"""
-        engine = InformationEngine()
+        engine = InformationEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
 
         assert engine.stream_pointer == 0
         assert isinstance(engine.output_buffer, bytearray)
@@ -67,11 +67,11 @@ class TestInformationProcessing:
         # Check stream pointer was advanced
         assert information_engine.stream_pointer == len(test_bytes)
 
-    def test_tensor_to_output_byte(self):
+    def test_tensor_to_output_byte(self, mock_env):
         """Test canonical tensor-to-byte conversion using pattern matching"""
         from baby.inference import InferenceEngine
 
-        engine = InferenceEngine()
+        engine = InferenceEngine(base_memories_dir=str(mock_env / 'toys/health/memories'))
         # Create canonical patterns and genome mask
         patterns = np.zeros((256, 48), dtype=np.float32)
         patterns[42] = np.arange(48, dtype=np.float32)  # Make pattern 42 unique

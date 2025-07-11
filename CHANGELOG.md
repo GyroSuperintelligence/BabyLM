@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.6] – 2025-07-11
+- Enforced strict test isolation: all tests and engine code now use a dedicated test directory (`toys/health/memories/`).
+- Standardized argument propagation: all helpers and engine methods now require and pass `prefs` and `base_memories_dir` as needed.
+- Fixed critical bugs in `IntelligenceEngine` initialization and thread/gene key storage.
+- Updated test mocks and assertions to match real function signatures, eliminating signature mismatch errors.
+- Resolved all linter and static analysis issues; codebase is now clean and warning-free.
+- Investigated and explained origins of stray test output and directory artifacts.
+
 ## [0.9.6] – 2025-07-10
 - Refactored private gene key storage to use per-record encryption with length prefix for true append-only performance.
 - Public thread metadata is now updated only at finalization, not per event, for better performance.

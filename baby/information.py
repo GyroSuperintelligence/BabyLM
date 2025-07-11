@@ -28,19 +28,29 @@ from baby.types import FormatMetadata, ThreadMetadata, GeneKeysMetadata
 # pyright: reportMissingModuleSource=false
 try:
     import orjson as fast_json
+
     def json_loads(s):
         if isinstance(s, str):
             s = s.encode("utf-8")
         return fast_json.loads(s)
+
     def json_dumps(obj):
-        return fast_json.dumps(obj).decode("utf-8")
+        result = fast_json.dumps(obj)
+        if isinstance(result, bytes):
+            return result.decode("utf-8")
+        return result
 except ImportError:
     try:
         import ujson as fast_json
         json_loads = fast_json.loads
-        json_dumps = fast_json.dumps
+
+        def json_dumps(obj):
+            result = fast_json.dumps(obj)
+            if isinstance(result, bytes):
+                return result.decode("utf-8")
+            return result
     except ImportError:
-        fast_json = None
+        import json
         json_loads = json.loads
         json_dumps = json.dumps
 
@@ -50,14 +60,14 @@ except ImportError:
 # ====================================================================
 
 
-def get_memory_preferences() -> Dict:
+def get_memory_preferences(base_memories_dir: str = "memories") -> Dict:
     """
     Load memory preferences from file or create with defaults if not exists.
 
     Returns:
         Dict: Memory preferences including sharding configuration
     """
-    prefs_path = Path("memories/memory_preferences.json")
+    prefs_path = Path(base_memories_dir) / "memory_preferences.json"
     prefs_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -77,7 +87,8 @@ def get_memory_preferences() -> Dict:
     return prefs
 
 
-def shard_path(root: Path, uuid_: str, width=2, limit=30_000) -> Path:
+# --- Refactor shard_path to accept prefs ---
+def shard_path(root: Path, uuid_: str, prefs: Dict, width=2, limit=30_000) -> Path:
     """
     Calculate the appropriate shard path for a UUID.
 
@@ -98,7 +109,7 @@ def shard_path(root: Path, uuid_: str, width=2, limit=30_000) -> Path:
     first_path = root / first_level
 
     # Check if we need second-level sharding
-    prefs = get_memory_preferences()
+    # Use prefs passed in
     second_level_enabled = prefs["sharding"]["second_level"]
 
     if second_level_enabled and first_path.exists():
@@ -279,14 +290,14 @@ def rebuild_registry(dirpath: Path) -> None:
 # ====================================================================
 
 
-def ensure_agent_uuid() -> str:
+def ensure_agent_uuid(base_memories_dir: str = "memories") -> str:
     """
     Get the current agent UUID, or create and register a new one if missing.
 
     Returns:
         str: Agent UUID
     """
-    private_dir = Path("memories/private")
+    private_dir = Path(base_memories_dir) / "private"
     private_dir.mkdir(parents=True, exist_ok=True)
 
     agents_dir = private_dir / "agents"
@@ -313,10 +324,11 @@ def ensure_agent_uuid() -> str:
                             return agent_uuid
 
     # No agent found, create a new one
-    return assign_agent_uuid(str(uuid.uuid4()))
+    return assign_agent_uuid(str(uuid.uuid4()), base_memories_dir=base_memories_dir,
+                             prefs=get_memory_preferences(base_memories_dir))
 
 
-def assign_agent_uuid(new_uuid: str) -> str:
+def assign_agent_uuid(new_uuid: str, base_memories_dir: str, prefs: dict) -> str:
     """
     Assign a new UUID to the agent, creating all necessary directories.
 
@@ -326,11 +338,9 @@ def assign_agent_uuid(new_uuid: str) -> str:
     Returns:
         str: The new agent UUID
     """
-    private_dir = Path("memories/private/agents")
+    private_dir = Path(base_memories_dir) / "private/agents"
     private_dir.mkdir(parents=True, exist_ok=True)
-
-    # Calculate shard path
-    shard = shard_path(private_dir, new_uuid)
+    shard = shard_path(private_dir, new_uuid, prefs)
     shard.mkdir(parents=True, exist_ok=True)
 
     # Create agent directory
@@ -354,23 +364,25 @@ def assign_agent_uuid(new_uuid: str) -> str:
 # ====================================================================
 
 
-def _get_thread_path(thread_uuid: str, agent_uuid: Optional[str]) -> Path:
+def _get_thread_path(thread_uuid: str, agent_uuid: Optional[str], base_memories_dir: str, prefs: dict) -> Path:
     if agent_uuid:
-        root_dir = Path("memories/private/agents")
-        agent_shard = shard_path(root_dir, agent_uuid)
+        root_dir = Path(base_memories_dir) / "private/agents"
+        agent_shard = shard_path(root_dir, agent_uuid, prefs)
         agent_dir = agent_shard / f"agent-{agent_uuid}"
         return agent_dir / "threads"
     else:
-        return Path("memories/public/threads")
+        return Path(base_memories_dir) / "public/threads"
 
 
 def create_thread(
     privacy: str,
     parent_uuid: Optional[str],
     format_uuid: str,
+    prefs: dict,
     thread_name: Optional[str] = None,
     curriculum: Optional[str] = None,
     tags: Optional[list] = None,
+    base_memories_dir: str = "memories",
 ) -> str:
     """
     Create a new thread (public or private).
@@ -385,13 +397,13 @@ def create_thread(
         str: New thread UUID
     """
     thread_uuid = str(uuid.uuid4())
-    agent_uuid = None if privacy == "public" else ensure_agent_uuid()
-    threads_dir = _get_thread_path(thread_uuid, agent_uuid)
-    thread_shard = shard_path(threads_dir, thread_uuid)
+    agent_uuid = None if privacy == "public" else ensure_agent_uuid(base_memories_dir=base_memories_dir)
+    threads_dir = _get_thread_path(thread_uuid, agent_uuid, base_memories_dir, prefs)
+    thread_shard = shard_path(threads_dir, thread_uuid, prefs)
     thread_shard.mkdir(parents=True, exist_ok=True)
     parent_name = None
     if parent_uuid:
-        parent_shard = shard_path(threads_dir, parent_uuid)
+        parent_shard = shard_path(threads_dir, parent_uuid, prefs)
         parent_meta_path = parent_shard / f"thread-{parent_uuid}.json"
         if parent_meta_path.exists():
             with open(parent_meta_path, "r") as f:
@@ -421,7 +433,7 @@ def create_thread(
     return thread_uuid
 
 
-def save_thread(thread_uuid: str, content: bytes, privacy: str = "private") -> None:
+def save_thread(thread_uuid: str, content: bytes, privacy: str, prefs: dict, base_memories_dir: str) -> None:
     """
     Save thread content to disk, encrypted or plaintext based on privacy.
     Args:
@@ -430,9 +442,9 @@ def save_thread(thread_uuid: str, content: bytes, privacy: str = "private") -> N
         privacy (str): 'private' or 'public'.
     """
     # Use the same path calculation as load_thread for consistency
-    agent_uuid = None if privacy == "public" else ensure_agent_uuid()
-    threads_dir = _get_thread_path(thread_uuid, agent_uuid)
-    thread_shard = shard_path(threads_dir, thread_uuid)
+    agent_uuid = None if privacy == "public" else ensure_agent_uuid(base_memories_dir=base_memories_dir)
+    threads_dir = _get_thread_path(thread_uuid, agent_uuid, base_memories_dir, prefs)
+    thread_shard = shard_path(threads_dir, thread_uuid, prefs)
     ext = ".enc" if agent_uuid else ".ndjson"
     thread_path = thread_shard / f"thread-{thread_uuid}{ext}"
     thread_shard.mkdir(parents=True, exist_ok=True)
@@ -440,7 +452,7 @@ def save_thread(thread_uuid: str, content: bytes, privacy: str = "private") -> N
         f.write(content)
 
 
-def load_thread(agent_uuid: Optional[str], thread_uuid: str) -> Optional[bytes]:
+def load_thread(agent_uuid: Optional[str], thread_uuid: str, prefs: dict, base_memories_dir: str) -> Optional[bytes]:
     """
     Load thread content from disk (public or private).
     Args:
@@ -449,8 +461,8 @@ def load_thread(agent_uuid: Optional[str], thread_uuid: str) -> Optional[bytes]:
     Returns:
         bytes: Thread content or None if not found
     """
-    threads_dir = _get_thread_path(thread_uuid, agent_uuid)
-    thread_shard = shard_path(threads_dir, thread_uuid)
+    threads_dir = _get_thread_path(thread_uuid, agent_uuid, base_memories_dir, prefs)
+    thread_shard = shard_path(threads_dir, thread_uuid, prefs)
     ext = ".enc" if agent_uuid else ".ndjson"
     thread_path = thread_shard / f"thread-{thread_uuid}{ext}"
     if not thread_path.exists():
@@ -464,7 +476,13 @@ def load_thread(agent_uuid: Optional[str], thread_uuid: str) -> Optional[bytes]:
 # ====================================================================
 
 
-def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes, agent_secret: str) -> None:
+def store_thread_key(
+        agent_uuid: str,
+        thread_uuid: str,
+        key: bytes,
+        agent_secret: str,
+        prefs: dict,
+        base_memories_dir: str) -> None:
     """
     Store an encryption key for a thread.
 
@@ -478,13 +496,13 @@ def store_thread_key(agent_uuid: str, thread_uuid: str, key: bytes, agent_secret
         raise ValueError(f"Thread key must be exactly 32 bytes for AES-256, got {len(key)}")
 
     # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
+    private_dir = Path(base_memories_dir) / "private/agents"
+    agent_shard = shard_path(private_dir, agent_uuid, prefs)
     agent_dir = agent_shard / f"agent-{agent_uuid}"
 
     # Calculate key shard (using thread UUID)
     keys_dir = agent_dir / "keys"
-    key_shard = shard_path(keys_dir, thread_uuid)
+    key_shard = shard_path(keys_dir, thread_uuid, prefs)
     key_shard.mkdir(parents=True, exist_ok=True)
 
     # Derive encryption key using PBKDF2-HMAC-SHA256
@@ -520,12 +538,14 @@ def store_gene_keys(
     thread_uuid: str,
     gene_keys: list[GeneKeysMetadata],
     privacy: str,
+    prefs: dict,
     agent_secret: Optional[str] = None,
     agent_uuid: Optional[str] = None,
+    base_memories_dir: str = "memories",
 ) -> None:
     """
     Store gene keys (pattern observation logs) in the appropriate location (public or private).
-    If privacy is 'private' and agent_secret is provided, encrypt and store privately. 
+    If privacy is 'private' and agent_secret is provided, encrypt and store privately.
     Otherwise, store unencrypted in public.
     """
     import struct
@@ -534,11 +554,11 @@ def store_gene_keys(
         if agent_uuid is None:
             raise ValueError("agent_uuid must not be None for private gene key storage")
         # PRIVATE (encrypted, append-only per-record)
-        private_dir = Path("memories/private/agents")
-        agent_shard = shard_path(private_dir, agent_uuid)
+        private_dir = Path(base_memories_dir) / "private/agents"
+        agent_shard = shard_path(private_dir, agent_uuid, prefs)
         agent_dir = agent_shard / f"agent-{agent_uuid}"
         keys_dir = agent_dir / "keys"
-        key_shard = shard_path(keys_dir, thread_uuid)
+        key_shard = shard_path(keys_dir, thread_uuid, prefs)
         key_shard.mkdir(parents=True, exist_ok=True)
         gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson.enc"
         salt = (agent_uuid + thread_uuid + "gene_keys").encode("utf-8")
@@ -559,8 +579,8 @@ def store_gene_keys(
         update_registry(key_shard, thread_uuid)
     else:
         # PUBLIC (unencrypted)
-        keys_dir = Path("memories/public/keys")
-        key_shard = shard_path(keys_dir, thread_uuid)
+        keys_dir = Path(base_memories_dir) / "public/keys"
+        key_shard = shard_path(keys_dir, thread_uuid, prefs)
         key_shard.mkdir(parents=True, exist_ok=True)
         gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson"
         # Change mode from "w" to "a" for appending
@@ -572,8 +592,10 @@ def store_gene_keys(
 
 def load_gene_keys(
     thread_uuid: str,
+    prefs: dict,
     agent_uuid: Optional[str] = None,
     agent_secret: Optional[str] = None,
+    base_memories_dir: str = "memories",
 ) -> list[GeneKeysMetadata]:
     """
     Load gene keys from the appropriate location (public or private).
@@ -583,16 +605,16 @@ def load_gene_keys(
 
     if agent_uuid and agent_secret:
         # PRIVATE (encrypted, per-record)
-        private_dir = Path("memories/private/agents")
-        agent_shard = shard_path(private_dir, agent_uuid)
+        private_dir = Path(base_memories_dir) / "private/agents"
+        agent_shard = shard_path(private_dir, agent_uuid, prefs)
         agent_dir = agent_shard / f"agent-{agent_uuid}"
         keys_dir = agent_dir / "keys"
-        key_shard = shard_path(keys_dir, thread_uuid)
+        key_shard = shard_path(keys_dir, thread_uuid, prefs)
         private_path = key_shard / f"gene-{thread_uuid}.ndjson.enc"
         if not private_path.exists():
             # Fallback: Try public path
-            public_dir = Path("memories/public/keys")
-            public_shard = shard_path(public_dir, thread_uuid)
+            public_dir = Path(base_memories_dir) / "public/keys"
+            public_shard = shard_path(public_dir, thread_uuid, prefs)
             public_path = public_shard / f"gene-{thread_uuid}.ndjson"
             if public_path.exists():
                 with open(public_path, "r", encoding="utf-8") as f:
@@ -625,8 +647,8 @@ def load_gene_keys(
         return gene_keys
     else:
         # PUBLIC (unencrypted)
-        keys_dir = Path("memories/public/keys")
-        key_shard = shard_path(keys_dir, thread_uuid)
+        keys_dir = Path(base_memories_dir) / "public/keys"
+        key_shard = shard_path(keys_dir, thread_uuid, prefs)
         gene_keys_path = key_shard / f"gene-{thread_uuid}.ndjson"
         if not gene_keys_path.exists():
             return []
@@ -638,6 +660,8 @@ def load_thread_key(
     agent_uuid: str,
     thread_uuid: str,
     agent_secret: str,
+    prefs: dict,
+    base_memories_dir: str,
 ) -> Optional[bytes]:
     """
     Load and decrypt the thread key for a private thread.
@@ -645,11 +669,11 @@ def load_thread_key(
     """
     # Use top-level imports, remove redundant imports
     # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
+    private_dir = Path(base_memories_dir) / "private/agents"
+    agent_shard = shard_path(private_dir, agent_uuid, prefs)
     agent_dir = agent_shard / f"agent-{agent_uuid}"
     keys_dir = agent_dir / "keys"
-    key_shard = shard_path(keys_dir, thread_uuid)
+    key_shard = shard_path(keys_dir, thread_uuid, prefs)
     key_path = key_shard / f"key-{thread_uuid}.bin.enc"
     if not key_path.exists():
         return None
@@ -685,7 +709,7 @@ def load_thread_key(
 # ====================================================================
 
 
-def parent(agent_uuid: str, thread_uuid: str) -> Optional[str]:
+def parent(agent_uuid: str, thread_uuid: str, prefs: dict, base_memories_dir: str) -> Optional[str]:
     """
     Get the parent thread UUID for a thread.
 
@@ -697,13 +721,13 @@ def parent(agent_uuid: str, thread_uuid: str) -> Optional[str]:
         str: Parent UUID or None if not found
     """
     # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
+    private_dir = Path(base_memories_dir) / "private/agents"
+    agent_shard = shard_path(private_dir, agent_uuid, prefs)
     agent_dir = agent_shard / f"agent-{agent_uuid}"
 
     # Calculate thread shard
     threads_dir = agent_dir / "threads"
-    thread_shard = shard_path(threads_dir, thread_uuid)
+    thread_shard = shard_path(threads_dir, thread_uuid, prefs)
 
     # Check thread metadata
     meta_path = thread_shard / f"thread-{thread_uuid}.json"
@@ -717,7 +741,7 @@ def parent(agent_uuid: str, thread_uuid: str) -> Optional[str]:
     return meta.get("parent_uuid")
 
 
-def children(agent_uuid: str, thread_uuid: str) -> List[str]:
+def children(agent_uuid: str, thread_uuid: str, prefs: dict, base_memories_dir: str) -> List[str]:
     """
     Get the child thread UUIDs for a thread.
     Args:
@@ -727,12 +751,12 @@ def children(agent_uuid: str, thread_uuid: str) -> List[str]:
         list[str]: List of child UUIDs
     """
     # Get agent directory
-    private_dir = Path("memories/private/agents")
-    agent_shard = shard_path(private_dir, agent_uuid)
+    private_dir = Path(base_memories_dir) / "private/agents"
+    agent_shard = shard_path(private_dir, agent_uuid, prefs)
     agent_dir = agent_shard / f"agent-{agent_uuid}"
     # Calculate thread shard
     threads_dir = agent_dir / "threads"
-    thread_shard = shard_path(threads_dir, thread_uuid)
+    thread_shard = shard_path(threads_dir, thread_uuid, prefs)
     # Check thread metadata
     meta_path = thread_shard / f"thread-{thread_uuid}.json"
     if not meta_path.exists():
@@ -749,14 +773,14 @@ def children(agent_uuid: str, thread_uuid: str) -> List[str]:
 # ====================================================================
 
 
-def list_formats() -> List[str]:
+def list_formats(base_memories_dir: str = "memories") -> List[str]:
     """
     List all available format UUIDs.
 
     Returns:
         list[str]: List of format UUIDs
     """
-    formats_dir = Path("memories/public/formats")
+    formats_dir = Path(base_memories_dir) / "public/formats"
     formats_dir.mkdir(parents=True, exist_ok=True)
 
     # Get all format registries
@@ -773,7 +797,7 @@ def list_formats() -> List[str]:
     return format_uuids
 
 
-def load_format(format_uuid: str) -> Optional[FormatMetadata]:
+def load_format(format_uuid: str, base_memories_dir: str) -> Optional[FormatMetadata]:
     """
     Load a format from disk.
     Args:
@@ -781,8 +805,8 @@ def load_format(format_uuid: str) -> Optional[FormatMetadata]:
     Returns:
         FormatMetadata: Format data or None if not found
     """
-    formats_dir = Path("memories/public/formats")
-    format_shard = shard_path(formats_dir, format_uuid)
+    formats_dir = Path(base_memories_dir) / "public/formats"
+    format_shard = shard_path(formats_dir, format_uuid, get_memory_preferences(base_memories_dir))
     format_path = format_shard / f"format-{format_uuid}.json"
     if not format_path.exists():
         return None
@@ -791,7 +815,7 @@ def load_format(format_uuid: str) -> Optional[FormatMetadata]:
     return format_data  # type: ignore
 
 
-def store_format(format_data: FormatMetadata) -> str:
+def store_format(format_data: FormatMetadata, prefs: dict, base_memories_dir: str) -> str:
     """
     Store a format to disk.
     Args:
@@ -803,8 +827,8 @@ def store_format(format_data: FormatMetadata) -> str:
     if not format_uuid:
         format_uuid = str(uuid.uuid4())
         format_data["format_uuid"] = format_uuid
-    formats_dir = Path("memories/public/formats")
-    format_shard = shard_path(formats_dir, format_uuid)
+    formats_dir = Path(base_memories_dir) / "public/formats"
+    format_shard = shard_path(formats_dir, format_uuid, prefs)
     format_shard.mkdir(parents=True, exist_ok=True)
     # Remove any pattern_distances matrix if present (store separately)
     if "pattern_distances" in format_data:
@@ -827,7 +851,7 @@ def store_format(format_data: FormatMetadata) -> str:
     return format_uuid
 
 
-def load_pattern_distances(format_uuid: str) -> Optional[np.ndarray]:
+def load_pattern_distances(format_uuid: str, base_memories_dir: str) -> Optional[np.ndarray]:
     """
     Load pattern distance matrix for a format.
 
@@ -837,8 +861,8 @@ def load_pattern_distances(format_uuid: str) -> Optional[np.ndarray]:
     Returns:
         np.ndarray: Matrix of pattern distances or None if not found
     """
-    formats_dir = Path("memories/public/formats")
-    format_shard = shard_path(formats_dir, format_uuid)
+    formats_dir = Path(base_memories_dir) / "public/formats"
+    format_shard = shard_path(formats_dir, format_uuid, get_memory_preferences(base_memories_dir))
     distances_path = format_shard / f"pattern-distances-{format_uuid}.dat"
 
     if not distances_path.exists():
@@ -857,7 +881,7 @@ def load_pattern_distances(format_uuid: str) -> Optional[np.ndarray]:
 # ====================================================================
 
 
-def store_object(obj_type: str, payload: Union[bytes, Dict], ext: str = "dat") -> str:
+def store_object(obj_type: str, payload: Union[bytes, Dict], prefs: dict, ext: str, base_memories_dir: str) -> str:
     """
     Store a generic object with proper UUID generation and sharding.
 
@@ -878,14 +902,14 @@ def store_object(obj_type: str, payload: Union[bytes, Dict], ext: str = "dat") -
 
     # Determine root directory
     if obj_type == "format":
-        root_dir = Path("memories/public/formats")
+        root_dir = Path(base_memories_dir) / "public/formats"
     elif obj_type == "agent":
-        root_dir = Path("memories/private/agents")
+        root_dir = Path(base_memories_dir) / "private/agents"
     else:
         raise ValueError(f"Direct storage not supported for {obj_type}, use specific helpers")
 
     # Calculate shard
-    shard = shard_path(root_dir, obj_uuid)
+    shard = shard_path(root_dir, obj_uuid, prefs)
     shard.mkdir(parents=True, exist_ok=True)
 
     # Create filename
@@ -917,9 +941,11 @@ class ThreadChainCache:
     This enables the "passive" thread history to actively influence inference.
     """
 
-    def __init__(self, agent_uuid: str, agent_secret: str, cache_size: int = 100):
+    def __init__(self, agent_uuid: str, agent_secret: str, base_memories_dir: str, prefs: dict, cache_size: int = 100):
         self.agent_uuid = agent_uuid
         self.agent_secret = agent_secret
+        self.base_memories_dir = base_memories_dir
+        self.prefs = prefs
         self.cache_size = cache_size
         self._pattern_cache = {}  # pattern_index -> [(thread_uuid, position), ...]
         self._thread_cache = {}  # thread_uuid -> {metadata, patterns, relationships}
@@ -982,18 +1008,23 @@ class ThreadChainCache:
         # Load from disk
         try:
             # Get thread metadata
-            private_dir = Path("memories/private/agents")
-            agent_shard = shard_path(private_dir, self.agent_uuid)
+            private_dir = Path(self.base_memories_dir) / "private/agents"
+            agent_shard = shard_path(private_dir, self.agent_uuid, self.prefs)
             agent_dir = agent_shard / f"agent-{self.agent_uuid}"
             threads_dir = agent_dir / "threads"
-            thread_shard = shard_path(threads_dir, thread_uuid)
+            thread_shard = shard_path(threads_dir, thread_uuid, self.prefs)
             meta_path = thread_shard / f"thread-{thread_uuid}.json"
 
             with open(meta_path, "r") as f:
                 meta = json_loads(f.read())
 
             # Load gene keys
-            gene_keys = load_gene_keys(thread_uuid, self.agent_uuid, self.agent_secret)
+            gene_keys = load_gene_keys(
+                thread_uuid,
+                self.prefs,
+                self.agent_uuid,
+                self.agent_secret,
+                base_memories_dir=self.base_memories_dir)
 
             # Add gene keys to metadata (in memory only)
             meta["gene_keys"] = gene_keys
@@ -1008,7 +1039,6 @@ class ThreadChainCache:
     def _cache_thread(self, thread_uuid: str, metadata: Dict):
         """Add thread to cache with LRU eviction"""
         if len(self._thread_cache) >= self.cache_size:
-            # Evict least recently used
             lru_uuid = self._access_order.pop(0)
             del self._thread_cache[lru_uuid]
 
@@ -1049,9 +1079,11 @@ class PatternIndex:
     Makes the "passive" thread storage "active" by enabling fast pattern retrieval.
     """
 
-    def __init__(self, agent_uuid: str, agent_secret: str):
+    def __init__(self, agent_uuid: str, agent_secret: str, base_memories_dir: str, prefs: dict):
         self.agent_uuid = agent_uuid
         self.agent_secret = agent_secret
+        self.base_memories_dir = base_memories_dir
+        self.prefs = prefs
         self.pattern_locations = {}  # pattern_index -> [(thread_uuid, offset, cycle), ...]
         self.pattern_sequences = {}  # (pattern_a, pattern_b) -> frequency
         self.pattern_contexts = {}  # pattern_index -> {before: Counter, after: Counter}
@@ -1141,7 +1173,12 @@ class PatternIndex:
         if thread_uuid in self._thread_gene_keys_cache:
             gene_keys = self._thread_gene_keys_cache[thread_uuid]
         else:
-            gene_keys = load_gene_keys(thread_uuid, self.agent_uuid, self.agent_secret)
+            gene_keys = load_gene_keys(
+                thread_uuid,
+                self.prefs,
+                self.agent_uuid,
+                self.agent_secret,
+                base_memories_dir=self.base_memories_dir)
             self._thread_gene_keys_cache[thread_uuid] = gene_keys
 
         # Check surrounding patterns
@@ -1168,8 +1205,9 @@ class InformationEngine:
     streams according to instructions from the Intelligence layer.
     """
 
-    def __init__(self):
+    def __init__(self, base_memories_dir: str = "memories"):
         """Initialize the Information Engine"""
+        self.base_memories_dir = base_memories_dir
         # Current position in active thread
         self.stream_pointer = 0
 

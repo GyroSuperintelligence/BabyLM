@@ -16,6 +16,7 @@ from baby.governance import (
     classify_pattern_resonance,
 )
 from collections import deque
+from pathlib import Path
 
 
 class InferenceEngine:
@@ -26,8 +27,9 @@ class InferenceEngine:
     canonical patterns.
     """
 
-    def __init__(self):
+    def __init__(self, base_memories_dir: str = "memories"):
         """Initialize the Inference Engine with zero-state tensor and load patterns"""
+        self.base_memories_dir = base_memories_dir
         # The Epigenome Tensor (dynamic state)
         self.T = np.zeros((4, 2, 3, 2), dtype=np.float32)
 
@@ -55,7 +57,7 @@ class InferenceEngine:
             - patterns: Array of shape [256, 48]
             - gyration_features: List of 256 class labels
         """
-        pattern_file = "memories/public/masks/epigenome.dat"
+        pattern_file = str(Path(self.base_memories_dir) / "public/masks/epigenome.dat")
 
         # Create directories if they don't exist
         os.makedirs(os.path.dirname(pattern_file), exist_ok=True)
@@ -86,7 +88,7 @@ class InferenceEngine:
         Returns:
             Array of 256 bytes mapping pattern indices to output bytes
         """
-        genome_file = "memories/public/masks/genome.dat"
+        genome_file = str(Path(self.base_memories_dir) / "public/masks/genome.dat")
 
         # Create directories if they don't exist
         os.makedirs(os.path.dirname(genome_file), exist_ok=True)

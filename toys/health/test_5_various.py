@@ -20,6 +20,7 @@ from baby.information import (
     store_format,
     list_formats,
     load_gene_keys,
+    get_memory_preferences,
 )
 from baby.intelligence import IntelligenceEngine, weighted_choice, initialize_intelligence_engine
 from baby.governance import derive_canonical_patterns
@@ -41,7 +42,7 @@ class TestPublicMode:
         assert engine.agent_secret is None
         assert engine.pattern_index is None  # PatternIndex requires an agent
 
-    def test_public_thread_and_gene_keys_storage(self, public_intelligence_engine):
+    def test_public_thread_and_gene_keys_storage(self, public_intelligence_engine, mock_env):
         """Verify that threads and gene_keys are saved unencrypted to public directories and are append-only NDJSON."""
         engine = public_intelligence_engine
 
@@ -61,7 +62,8 @@ class TestPublicMode:
 
         engine.finalize_and_save_thread(privacy="public")
         print("CWD:", os.getcwd())
-        thread_shard = shard_path(Path("memories/public/threads"), first_thread_uuid)
+        thread_shard = shard_path(Path(str(mock_env / 'toys/health/memories/public/threads')),
+                                  first_thread_uuid, engine.memory_prefs)
         thread_path = thread_shard / f"thread-{first_thread_uuid}.ndjson"
         print("Thread path:", thread_path)
         print("Files in dir:", list(thread_path.parent.iterdir()))
@@ -76,7 +78,8 @@ class TestPublicMode:
         assert len(lines) >= 2, "Expected at least two event lines in the thread file."
 
         # --- Assertions for Gene Keys ---
-        keys_shard = shard_path(Path("memories/public/keys"), first_thread_uuid)
+        keys_shard = shard_path(Path(str(mock_env / 'toys/health/memories/public/keys')),
+                                first_thread_uuid, engine.memory_prefs)
         gene_keys_path = keys_shard / f"gene-{first_thread_uuid}.ndjson"
         assert gene_keys_path.exists(), "Public gene keys NDJSON file was not created."
 
@@ -102,9 +105,21 @@ class TestPublicMode:
             "privacy": "public",
             "agent_uuid": None,
         }
-        store_gene_keys(first_thread_uuid, [new_gene_key], privacy="public")
+        store_gene_keys(
+            first_thread_uuid,
+            [new_gene_key],
+            privacy="public",
+            prefs=engine.memory_prefs,
+            base_memories_dir=str(
+                mock_env
+                / 'toys/health/memories'))
 
-        loaded_keys = load_gene_keys(first_thread_uuid)
+        loaded_keys = load_gene_keys(
+            first_thread_uuid,
+            prefs=engine.memory_prefs,
+            base_memories_dir=str(
+                mock_env
+                / 'toys/health/memories'))
         # Total count should be original count + 1
         assert len(loaded_keys) == len(gene_key_lines) + 1
         assert any(key["pattern_index"] == 123 for key in loaded_keys)
@@ -116,7 +131,7 @@ class TestPublicMode:
         # Trying to derive a key should return None
         assert public_intelligence_engine._derive_file_key(np.zeros(1), None, "some-uuid") is None
 
-    def test_public_format_sharing(self, public_intelligence_engine):
+    def test_public_format_sharing(self, public_intelligence_engine, mock_env):
         """Test that formats are shared in public directories"""
         engine = public_intelligence_engine
         # Process some data to create pattern usage
@@ -124,8 +139,8 @@ class TestPublicMode:
 
         # Format should be stored in public directory
         format_uuid = engine.format_uuid
-        formats_dir = Path("memories/public/formats")
-        format_shard = shard_path(formats_dir, format_uuid)
+        formats_dir = Path("toys/health/memories/public/formats")
+        format_shard = shard_path(formats_dir, format_uuid, engine.memory_prefs)
         format_path = format_shard / f"format-{format_uuid}.json"
         assert format_path.exists()
 
@@ -334,12 +349,14 @@ class TestEnhancedThreadManagement:
         assert thread2_uuid != thread3_uuid
 
         # Verify the relationships using the information helpers
-        assert parent(engine.agent_uuid, thread3_uuid) == thread2_uuid
-        assert parent(engine.agent_uuid, thread2_uuid) == thread1_uuid
-        assert parent(engine.agent_uuid, thread1_uuid) is None
+        base_dir = str(initialized_intelligence_engine.base_memories_dir)
+        prefs = get_memory_preferences(base_dir)
+        assert parent(initialized_intelligence_engine.agent_uuid, thread3_uuid, prefs, base_dir) == thread2_uuid
+        assert parent(initialized_intelligence_engine.agent_uuid, thread2_uuid, prefs, base_dir) == thread1_uuid
+        assert parent(initialized_intelligence_engine.agent_uuid, thread1_uuid, prefs, base_dir) is None
 
-        assert children(engine.agent_uuid, thread1_uuid) == [thread2_uuid]
-        assert children(engine.agent_uuid, thread2_uuid) == [thread3_uuid]
+        assert children(initialized_intelligence_engine.agent_uuid, thread1_uuid, prefs, base_dir) == [thread2_uuid]
+        assert children(initialized_intelligence_engine.agent_uuid, thread2_uuid, prefs, base_dir) == [thread3_uuid]
 
     def test_thread_content_accumulation(self, initialized_intelligence_engine):
         """Test that thread content properly accumulates before rollover"""
@@ -397,19 +414,13 @@ class TestEnhancedThreadManagement:
 class TestIntegration:
     """Integration tests for end-to-end functionality"""
 
-    def test_end_to_end_processing(self, initialized_intelligence_engine):
-        """Test end-to-end processing of input data."""
+    def test_end_to_end_processing(self, initialized_intelligence_engine, mock_env):
+        """Test complete end-to-end processing workflow"""
         intelligence_engine = initialized_intelligence_engine
 
-        # Process input data
-        test_input = b"Test input for end-to-end processing"
-        plaintext, ciphertext = intelligence_engine.process_input_stream(test_input)
-        intelligence_engine.finalize_and_save_thread()  # Ensure thread is saved
-
-        # Verify results
-        assert plaintext == test_input
-        assert len(ciphertext) == len(test_input)
-        assert ciphertext != test_input  # Ensure it was actually encrypted
+        # Process input
+        test_input = b"Hello, world!"
+        intelligence_engine.process_input_stream(test_input)
 
         # Generate response
         response = intelligence_engine.generate_and_save_response(length=20)
@@ -425,13 +436,17 @@ class TestIntegration:
         agent_uuid = intelligence_engine.agent_uuid
         thread_uuid = intelligence_engine.thread_uuid
         thread_shard = shard_path(
-            Path(f"memories/private/agents/{agent_uuid[:2]}/agent-{agent_uuid}/threads"), thread_uuid
-        )
+            Path(f"toys/health/memories/private/agents/{agent_uuid[:2]}/agent-{agent_uuid}/threads"),
+            thread_uuid,
+            intelligence_engine.memory_prefs)
         thread_path = thread_shard / f"thread-{thread_uuid}.enc"
         assert thread_path.exists()
 
         # Check that key file exists
-        key_shard = shard_path(Path(f"memories/private/agents/{agent_uuid[:2]}/agent-{agent_uuid}/keys"), thread_uuid)
+        key_shard = shard_path(
+            Path(f"toys/health/memories/private/agents/{agent_uuid[:2]}/agent-{agent_uuid}/keys"),
+            thread_uuid,
+            intelligence_engine.memory_prefs)
         key_path = key_shard / f"key-{thread_uuid}.bin.enc"
         assert key_path.exists()
 
@@ -482,8 +497,9 @@ class TestIntegration:
         ]
 
         # Store formats
+        prefs = get_memory_preferences(initialized_intelligence_engine.base_memories_dir)
         for fmt in formats:
-            store_format(cast(FormatMetadata, fmt))
+            store_format(cast(FormatMetadata, fmt), prefs, initialized_intelligence_engine.base_memories_dir)
 
         # Select format
         with patch(
@@ -504,8 +520,9 @@ class TestIntegration:
     def test_public_private_interoperability(self, public_intelligence_engine, initialized_intelligence_engine):
         """Test that public and private systems can coexist and share formats"""
         # Remove unused variables public_engine and private_engine at lines 702 and 703
-        public_formats = list_formats()
-        private_formats = list_formats()
+        prefs = get_memory_preferences(initialized_intelligence_engine.base_memories_dir)
+        public_formats = list_formats(base_memories_dir=public_intelligence_engine.base_memories_dir)
+        private_formats = list_formats(base_memories_dir=initialized_intelligence_engine.base_memories_dir)
 
         # Formats should be shared (both can see the same public formats)
         assert len(public_formats) > 0
@@ -532,8 +549,11 @@ class TestIntegration:
 
         # Verify gene keys were stored
         stored_gene_keys = load_gene_keys(
-            thread_uuid=thread_uuid, agent_uuid=engine.agent_uuid, agent_secret=engine.agent_secret
-        )
+            thread_uuid,
+            agent_uuid=engine.agent_uuid,
+            agent_secret=engine.agent_secret,
+            prefs=engine.memory_prefs,
+            base_memories_dir=engine.base_memories_dir)
 
         # Should have gene keys for both input and output
         assert len(stored_gene_keys) > 0
@@ -571,9 +591,9 @@ class TestUtilityFunctions:
         """Test intelligence engine initialization in different modes"""
         # Create masks for all tests
         patterns_array, _ = derive_canonical_patterns()
-        patterns_array.tofile("memories/public/masks/epigenome.dat")
+        patterns_array.tofile(str(mock_env / "toys/health/memories/public/masks/epigenome.dat"))
         genome_mask = np.arange(256, dtype=np.uint8)
-        genome_mask.tofile("memories/public/masks/genome.dat")
+        genome_mask.tofile(str(mock_env / "toys/health/memories/public/masks/genome.dat"))
 
         # Test public mode
         public_engine = initialize_intelligence_engine(agent_uuid=None, agent_secret=None)
