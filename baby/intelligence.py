@@ -53,6 +53,8 @@ __all__ = [
     "initialize_intelligence_engine",
 ]
 
+FORMAT_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 
 class IntelligenceEngine:
     """
@@ -79,7 +81,8 @@ class IntelligenceEngine:
         self.information_engine = information_engine
         self.agent_uuid = agent_uuid
         self.agent_secret = agent_secret
-        self.format_uuid = format_uuid or self._get_or_create_format_uuid()
+        # This now represents the format of the CURRENTLY ACTIVE THREAD. It can be None initially.
+        self.format_uuid = format_uuid  # Keep this to track the active format
         self.thread_uuid = None
         self.thread_file_key = None
         self.current_thread_keys = []
@@ -87,19 +90,82 @@ class IntelligenceEngine:
         self.active_thread_content = bytearray()
         self.parent_thread_uuid = None
         self.child_thread_uuids = []
-        self.M: FormatMetadata = formats if formats else self._load_or_init_formats()
-        self._validate_format_compatibility()
-        self._build_format_maps()
+        # --- NEW STATE ATTRIBUTES ---
+        # A dictionary to hold all loaded formats, keyed by their UUID
+        self.formats: Dict[str, FormatMetadata] = self._load_all_available_formats()
+        # If format_uuid is not set, pick the first available format
+        if self.format_uuid is None and self.formats:
+            self.format_uuid = next(iter(self.formats.keys()))
+        # A dictionary for the pattern distance caches (the optimization you mentioned)
+        self.pattern_distances: Dict[str, np.ndarray] = self._load_all_pattern_distances()
+        # Dictionaries for the fast lookup maps, one per format
+        self._decode_maps: Dict[str, Dict[int, str]] = {}
+        self._encode_maps: Dict[str, Dict[str, list]] = {}
+        self._build_all_format_maps()
+        # Remove single-format state
+        # self.M: FormatMetadata = formats if formats else self._load_or_init_formats()
+        # self._validate_format_compatibility()
+        # self._build_format_maps()
         self.pattern_index = (
             PatternIndex(self.agent_uuid, self.agent_secret, self.base_memories_dir, self.memory_prefs)
             if (self.agent_uuid is not None and self.agent_secret is not None)
             else None
         )
-        self.pattern_distances = None
-        if self.M and "pattern_distances" in self.M and "path" in self.M["pattern_distances"]:
-            self.pattern_distances = load_pattern_distances(self.format_uuid, base_memories_dir=self.base_memories_dir)
+        # self.pattern_distances = None
+        # if self.M and "pattern_distances" in self.M and "path" in self.M["pattern_distances"]:
+        #     self.pattern_distances = load_pattern_distances(self.format_uuid, base_memories_dir=self.base_memories_dir)
         # File handle for public thread NDJSON streaming
         self._active_public_thread_handle = None
+
+    def _load_all_available_formats(self) -> Dict[str, FormatMetadata]:
+        """Loads all format metadata files from disk."""
+        all_formats = {}
+        format_uuids = list_formats(base_memories_dir=self.base_memories_dir)
+
+        if not format_uuids:
+            # If no formats exist, create and store a default one.
+            print("No formats found. Creating a default format.")
+            default_format_uuid = self._get_or_create_format_uuid()
+            format_data = load_format(default_format_uuid, base_memories_dir=self.base_memories_dir)
+            if format_data:
+                all_formats[default_format_uuid] = format_data
+            return all_formats
+
+        for f_uuid in format_uuids:
+            format_data = load_format(f_uuid, base_memories_dir=self.base_memories_dir)
+            if format_data:
+                all_formats[f_uuid] = format_data
+        print(f"Loaded {len(all_formats)} formats.")
+        return all_formats
+
+    def _load_all_pattern_distances(self) -> Dict[str, np.ndarray]:
+        """Loads all pattern distance matrices for all loaded formats."""
+        all_distances = {}
+        for f_uuid, f_data in self.formats.items():
+            if "pattern_distances" in f_data and "path" in f_data["pattern_distances"]:
+                distances = load_pattern_distances(f_uuid, base_memories_dir=self.base_memories_dir)
+                if distances is not None:
+                    all_distances[f_uuid] = distances
+        return all_distances
+
+    def _build_all_format_maps(self) -> None:
+        """Pre-processes all loaded formats into fast lookup dictionaries."""
+        self._decode_maps.clear()
+        self._encode_maps.clear()
+        for f_uuid, f_data in self.formats.items():
+            decode_map: Dict[int, str] = {}
+            encode_map: Dict[str, list] = defaultdict(list)
+            patterns = f_data.get("patterns", [])
+            for p_meta in patterns:
+                index = p_meta.get("index")
+                char = p_meta.get("character")
+                if index is None or not isinstance(char, str):
+                    continue
+                encode_map[char].append(p_meta)
+                if index not in decode_map:
+                    decode_map[index] = char
+            self._decode_maps[f_uuid] = decode_map
+            self._encode_maps[f_uuid] = encode_map
 
     def _get_or_create_format_uuid(self) -> str:
         """
@@ -114,7 +180,7 @@ class IntelligenceEngine:
 
         # Create a default format
         format_data = {
-            "format_uuid": str(uuid.uuid4()),
+            "format_uuid": str(uuid.uuid5(FORMAT_NAMESPACE, "default_format")),
             "format_name": "default_format",
             "format_version": "1.0.0",
             "stability": "experimental",
@@ -164,7 +230,7 @@ class IntelligenceEngine:
             cast(FormatMetadata, format_data), self.memory_prefs, base_memories_dir=self.base_memories_dir
         )
 
-    def _validate_format_compatibility(self) -> None:
+    def _validate_format_compatibility(self, format_metadata: FormatMetadata) -> None:
         """
         Validate the loaded format for compatibility with current format version
 
@@ -172,16 +238,16 @@ class IntelligenceEngine:
             ValueError: If the format is incompatible with the current format version
         """
         # Check format exists
-        if not self.M:
+        if not format_metadata:
             return  # New format will be created
 
         # Get current format version from preferences (if any)
         current_format_version = self.memory_prefs["format_config"].get("default_format_version", "1.0.0")
 
         # Check format compatibility
-        if "compatibility" in self.M:
-            min_version = self.M["compatibility"].get("min_format_version")
-            max_version = self.M["compatibility"].get("max_format_version")
+        if "compatibility" in format_metadata:
+            min_version = format_metadata["compatibility"].get("min_format_version")
+            max_version = format_metadata["compatibility"].get("max_format_version")
 
             # Simple version comparison (this could be enhanced with proper semver comparison)
             if min_version and current_format_version < min_version:
@@ -195,8 +261,8 @@ class IntelligenceEngine:
                 )
 
         # Validate policy mapping
-        if "cgm_policies" in self.M:
-            policies = self.M["cgm_policies"]
+        if "cgm_policies" in format_metadata:
+            policies = format_metadata["cgm_policies"]
             required_policies = ["governance", "information", "inference", "intelligence"]
 
             for policy in required_policies:
@@ -208,8 +274,10 @@ class IntelligenceEngine:
         Load format metadata from file or initialize if not present
 
         Returns:
-            Dict: Format metadata
+            FormatMetadata: Format metadata
         """
+        if not self.format_uuid:
+            raise ValueError("format_uuid must be set to load or initialize formats.")
         format_data = load_format(self.format_uuid, base_memories_dir=self.base_memories_dir)
 
         if not format_data:
@@ -224,11 +292,11 @@ class IntelligenceEngine:
         Initialize new format metadata
 
         Returns:
-            Dict: Initialized format metadata
+            FormatMetadata: Initialized format metadata
         """
         # Create format metadata structure
         M: FormatMetadata = {
-            "format_uuid": self.format_uuid,
+            "format_uuid": self.format_uuid or str(uuid.uuid4()),
             "format_name": "default_format",
             "format_version": "1.0.0",
             "stability": "experimental",
@@ -288,6 +356,8 @@ class IntelligenceEngine:
 
         # Create a new thread, linking it to the previous one.
         parent_uuid = self.thread_uuid if self.thread_uuid else None
+        if self.format_uuid is None:
+            raise ValueError("Cannot start a new thread: the engine's active format_uuid is not set.")
         new_thread_uuid = create_thread(
             privacy=privacy,
             parent_uuid=parent_uuid,
@@ -509,9 +579,17 @@ class IntelligenceEngine:
                 agent_uuid=self.agent_uuid,
                 base_memories_dir=self.base_memories_dir,
             )
-        self.M.setdefault("metadata", {})["last_updated"] = datetime.datetime.now().isoformat()
-        self.M.setdefault("metadata", {})["usage_count"] = self.M.get("metadata", {}).get("usage_count", 0) + 1
-        store_format(self.M, self.memory_prefs, base_memories_dir=self.base_memories_dir)
+
+        # --- FIX: Update and save the format metadata for the finalized thread ---
+        if self.format_uuid and self.format_uuid in self.formats:
+            active_format = self.formats[self.format_uuid]
+            if "metadata" not in active_format:
+                active_format["metadata"] = {}
+            active_format["metadata"]["last_updated"] = datetime.datetime.now().isoformat()
+            usage_count = active_format["metadata"].get("usage_count", 0)
+            active_format["metadata"]["usage_count"] = usage_count + 1
+            store_format(active_format, self.memory_prefs, base_memories_dir=self.base_memories_dir)
+
         # Update pattern index if it exists (conditional)
         if self.pattern_index:
             self.pattern_index.update_from_thread(self.thread_uuid, self.current_thread_keys)
@@ -577,6 +655,21 @@ class IntelligenceEngine:
             return int(output_byte), int(selected_pattern)
 
         # 2. S4 Linguistics: Evaluate the candidates based on learned meaning.
+        if not self.format_uuid:
+            # No active format, fall back to physical resonance
+            selected_pattern = candidate_indices[0]
+            output_byte = self.inference_engine.G[selected_pattern]
+            if hasattr(output_byte, "item"):
+                output_byte = output_byte.item()
+            return int(output_byte), int(selected_pattern)
+        active_format = self.formats.get(self.format_uuid)
+        if not active_format:
+            selected_pattern = candidate_indices[0]
+            output_byte = self.inference_engine.G[selected_pattern]
+            if hasattr(output_byte, "item"):
+                output_byte = output_byte.item()
+            return int(output_byte), int(selected_pattern)
+
         best_candidate_index = -1
         max_combined_score = -1.0
 
@@ -586,7 +679,7 @@ class IntelligenceEngine:
 
             # Semantic Score: How meaningful is this pattern, based on long-term learning?
             # We use the pattern's learned confidence from the format metadata.
-            pattern_meta = self.M.get("patterns", [])[index]
+            pattern_meta = active_format.get("patterns", [])[index]
             # A pattern is only meaningful if it has an assigned character and some confidence.
             if pattern_meta.get("character") is not None:
                 semantic_score = pattern_meta.get("confidence", 0.0)
@@ -626,8 +719,13 @@ class IntelligenceEngine:
         Update learning state based on processed byte, including pattern
         statistics and confidence.
         """
+        if not self.format_uuid:
+            return  # Cannot learn without an active format
+        active_format = self.formats.get(self.format_uuid)
+        if not active_format:
+            return  # Cannot learn without a valid format
         # 1. Update pattern metadata
-        pattern = self.M.get("patterns", [])[key_index]
+        pattern = active_format.get("patterns", [])[key_index]
 
         # Increment count
         current_count = pattern.get("count", 0)
@@ -659,36 +757,32 @@ class IntelligenceEngine:
         }
         self.current_thread_keys.append(gene_key_event)
 
-    def _build_format_maps(self) -> None:
-        """
-        Pre-processes the format's pattern list into fast O(1) lookup dictionaries.
-        """
-        self._decode_map: Dict[int, str] = {}
-        self._encode_map: Dict[str, list] = defaultdict(list)
-        patterns = self.M.get("patterns", [])
-        for p_meta in patterns:
-            index = p_meta.get("index")
-            char = p_meta.get("character")
-            if index is None or not isinstance(char, str):
-                continue
-            self._encode_map[char].append(p_meta)
-            if index not in self._decode_map:
-                self._decode_map[index] = char
-
-    def encode(self, character_label: str) -> Optional[int]:
+    def encode(self, character_label: str, format_uuid: Optional[str] = None) -> Optional[int]:
         """
         Finds the first pattern index for a character label using the O(1) map.
         """
-        candidates = self._encode_map.get(character_label)
+        active_format_uuid = format_uuid or self.format_uuid
+        if not active_format_uuid:
+            return None
+        encode_map = self._encode_maps.get(active_format_uuid)
+        if not encode_map:
+            return None
+        candidates = encode_map.get(character_label)
         if candidates:
             return candidates[0].get("index")
         return None
 
-    def intelligent_encode(self, character_label: str) -> Optional[int]:
+    def intelligent_encode(self, character_label: str, format_uuid: Optional[str] = None) -> Optional[int]:
         """
         Intelligently finds the best pattern for a character using the O(1) map.
         """
-        candidate_patterns = self._encode_map.get(character_label)
+        active_format_uuid = format_uuid or self.format_uuid
+        if not active_format_uuid:
+            return None
+        encode_map = self._encode_maps.get(active_format_uuid)
+        if not encode_map:
+            return None
+        candidate_patterns = encode_map.get(character_label)
         if not candidate_patterns:
             return None
         if len(candidate_patterns) == 1:
@@ -707,11 +801,15 @@ class IntelligenceEngine:
             return best_candidate.get("index")
         return None
 
-    def decode(self, key_index: int) -> Optional[str]:
+    def decode(self, key_index: int, format_uuid: Optional[str] = None) -> Optional[str]:
         """
         Decode a pattern index to its character label using O(1) lookup
         """
-        return self._decode_map.get(key_index)
+        active_format_uuid = format_uuid or self.format_uuid
+        if not active_format_uuid:
+            return None
+        active_decode_map = self._decode_maps.get(active_format_uuid)
+        return active_decode_map.get(key_index) if active_decode_map else None
 
     def load_thread_content(self, thread_uuid: str) -> Optional[list]:
         """
@@ -830,7 +928,7 @@ class IntelligenceEngine:
 
             # Create a new composed format
             composed_format = primary_data.copy()
-            composed_format["format_uuid"] = str(uuid.uuid4())
+            composed_format["format_uuid"] = str(uuid.uuid5(FORMAT_NAMESPACE, composed_format.get("format_name", "unnamed_format")))
             composed_format["format_name"] = f"composed_{primary_data.get('format_name', '')}"
             composed_format["stability"] = "experimental"
             composed_format.setdefault("metadata", {})["created_at"] = datetime.datetime.now().isoformat()
@@ -1140,9 +1238,10 @@ class IntelligenceEngine:
             Dict: Pattern statistics including usage, relationships, and contexts
         """
         # Get pattern metadata from format
-        pattern_meta = (
-            self.M.get("patterns", [])[pattern_index] if pattern_index < len(self.M.get("patterns", [])) else {}
-        )
+        if self.format_uuid is None:
+            raise ValueError("format_uuid must be set to get pattern statistics.")
+        patterns = self.formats[self.format_uuid].get("patterns", [])
+        pattern_meta = patterns[pattern_index] if pattern_index < len(patterns) else {}
 
         # Get historical contexts from pattern index
         contexts = {}
@@ -1203,8 +1302,9 @@ class IntelligenceEngine:
         Resume appending to an existing thread. Sets current_thread_size and opens file handle if public.
         """
         meta = self.load_thread_metadata(thread_uuid, privacy=privacy)
-        self.current_thread_size = meta.get("size_bytes", 0)
         self.thread_uuid = thread_uuid
+        self.format_uuid = meta.get("format_uuid")  # Set the active format!
+        self.current_thread_size = meta.get("size_bytes", 0)
 
         # Get parent/child info for the resumed thread
         if privacy == "private" and self.agent_uuid:

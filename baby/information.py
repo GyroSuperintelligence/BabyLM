@@ -874,7 +874,8 @@ def store_format(format_data: FormatMetadata, prefs: dict, base_memories_dir: st
     """
     format_uuid = format_data.get("format_uuid")
     if not format_uuid:
-        format_uuid = str(uuid.uuid4())
+        format_name = format_data.get("format_name", "unnamed_format")
+        format_uuid = str(uuid.uuid5(FORMAT_NAMESPACE, format_name))
         format_data["format_uuid"] = format_uuid
     formats_dir = Path(base_memories_dir) / "public/formats"
     format_shard = shard_path(formats_dir, format_uuid, prefs)

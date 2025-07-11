@@ -671,6 +671,9 @@ The Gyronorm Formats structure serves as the **character bridge** connecting the
 }
 ```
 
+**Pattern Index Cycling:**  
+Each format’s `"patterns"` array always contains exactly 256 entries, indexed from 0 to 255. If you need to process more than 256 items, simply continue iterating from 0 again within the same array and file. The format file never changes size, and all pattern operations (learning, encoding, generation) always use this fixed array, cycling through indices as needed.
+
 **Note:** For formats that include a pre-computed pattern distance matrix (256x256), the large binary data is stored in a separate file (`pattern-distances-<uuid>.dat`) in the same shard, with the main JSON file containing only a reference.
 
 **Format Stability Levels:**

@@ -9,6 +9,8 @@ from baby.types import FormatMetadata
 from baby.information import store_format
 from baby.governance import classify_pattern_resonance
 
+FORMAT_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 # Generate ASCII 256 characters with special handling for control chars
 ascii_chars = []
 for i in range(256):
@@ -47,7 +49,7 @@ patterns = [
 # Build the format metadata
 timestamp = datetime.datetime.now().isoformat()
 format_data = {
-    "format_uuid": str(uuid.uuid4()),
+    "format_uuid": str(uuid.uuid5(FORMAT_NAMESPACE, "ascii_curriculum")),
     "format_name": "ascii_256",
     "format_version": "1.0.0",
     "stability": "stable",

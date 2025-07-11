@@ -6,6 +6,8 @@ from baby.types import FormatMetadata
 from baby.information import store_format
 from baby.governance import classify_pattern_resonance
 
+FORMAT_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 # Exclude ASCII codepoints
 ascii_codepoints = set(range(256))
 
@@ -60,7 +62,7 @@ for pack_num in range(num_packs):
         )
     timestamp = datetime.datetime.now().isoformat()
     format_data = {
-        "format_uuid": str(uuid.uuid4()),
+        "format_uuid": str(uuid.uuid5(FORMAT_NAMESPACE, "math_curriculum")),
         "format_name": make_format_name(pack_num),
         "format_version": "1.0.0",
         "stability": "stable",

@@ -18,6 +18,13 @@
   - Interactive chat, dashboard, format viewer, and thread manager tools for BabyLM.
   - All CLI modules are type- and lint-clean, with robust error handling and safe type usage throughout.
 
+- Refactored IntelligenceEngine to support multiple formats simultaneously, keyed by format_uuid.
+- Updated all code and tests to use per-format access (self.formats[self.format_uuid]) instead of self.M.
+- Fixed all test failures and ensured robust multi-format operation.
+- Updated Genetics.md to clarify format access, pattern index cycling, and pattern distance matrix storage.
+- Implemented stable UUIDs for public formats using uuid.uuid5 and a fixed namespace, enabling reproducible curriculum and format references.
+- Fixed TypedDict access warnings for optional keys.
+
 ## [0.9.6] – 2025-07-10
 - Refactored private gene key storage to use per-record encryption with length prefix for true append-only performance.
 - Public thread metadata is now updated only at finalization, not per event, for better performance.

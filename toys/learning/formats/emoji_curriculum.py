@@ -11,6 +11,8 @@ try:
 except ImportError:
     raise ImportError("Please install the 'emoji' package: pip install emoji")
 
+FORMAT_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 # Get the full list of emoji characters
 all_emoji = list(emoji.EMOJI_DATA.keys())
 pack_size = 256
@@ -63,7 +65,7 @@ for pack_num in range(num_packs):
         )
     timestamp = datetime.datetime.now().isoformat()
     format_data = {
-        "format_uuid": str(uuid.uuid4()),
+        "format_uuid": str(uuid.uuid5(FORMAT_NAMESPACE, "emoji_curriculum")),
         "format_name": make_format_name(pack_num),
         "format_version": "1.0.0",
         "stability": "stable",
