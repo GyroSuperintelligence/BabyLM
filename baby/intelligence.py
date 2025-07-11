@@ -45,6 +45,7 @@ from baby.types import PatternMetadata, FormatMetadata, GeneKeysMetadata
 
 import base64
 import json
+from collections import defaultdict
 
 __all__ = [
     "IntelligenceEngine",
@@ -88,6 +89,7 @@ class IntelligenceEngine:
         self.child_thread_uuids = []
         self.M: FormatMetadata = formats if formats else self._load_or_init_formats()
         self._validate_format_compatibility()
+        self._build_format_maps()
         self.pattern_index = (
             PatternIndex(self.agent_uuid, self.agent_secret, self.base_memories_dir, self.memory_prefs)
             if (self.agent_uuid is not None and self.agent_secret is not None)
@@ -653,42 +655,40 @@ class IntelligenceEngine:
         }
         self.current_thread_keys.append(gene_key_event)
 
+    def _build_format_maps(self) -> None:
+        """
+        Pre-processes the format's pattern list into fast O(1) lookup dictionaries.
+        """
+        self._decode_map: Dict[int, str] = {}
+        self._encode_map: Dict[str, list] = defaultdict(list)
+        patterns = self.M.get("patterns", [])
+        for p_meta in patterns:
+            index = p_meta.get("index")
+            char = p_meta.get("character")
+            if index is None or not isinstance(char, str):
+                continue
+            self._encode_map[char].append(p_meta)
+            if index not in self._decode_map:
+                self._decode_map[index] = char
+
     def encode(self, character_label: str) -> Optional[int]:
         """
-        Find pattern index for character label
-        Args:
-            character_label: Character label to search for
-        Returns:
-            int: Pattern index or None if not found
+        Finds the first pattern index for a character label using the O(1) map.
         """
-        for index, pattern in enumerate(self.M.get("patterns", [])):
-            character = pattern.get("character")
-            if isinstance(character, str) and character == character_label:
-                return index
+        candidates = self._encode_map.get(character_label)
+        if candidates:
+            return candidates[0].get("index")
         return None
 
     def intelligent_encode(self, character_label: str) -> Optional[int]:
         """
-        Intelligently finds the best pattern index for a character label
-        by leveraging learned statistics (count and confidence).
-
-        Args:
-            character_label: The character to encode (e.g., "A").
-
-        Returns:
-            The pattern index that is the most reliable representation, or None.
+        Intelligently finds the best pattern for a character using the O(1) map.
         """
-        candidate_patterns = []
-        for index, p_meta in enumerate(self.M.get("patterns", [])):
-            if p_meta.get("character") == character_label:
-                candidate_patterns.append(p_meta)
-
+        candidate_patterns = self._encode_map.get(character_label)
         if not candidate_patterns:
-            return None  # No pattern maps to this character
-
+            return None
         if len(candidate_patterns) == 1:
-            return candidate_patterns[0].get("index")  # Only one choice
-
+            return candidate_patterns[0].get("index")
         # Disambiguate using count and confidence
         best_candidate = None
         max_score = -1.0
@@ -705,18 +705,9 @@ class IntelligenceEngine:
 
     def decode(self, key_index: int) -> Optional[str]:
         """
-        Decode a pattern index to its character label
-        Args:
-            key_index: Pattern index to decode
-        Returns:
-            str: Character label or None if not found
+        Decode a pattern index to its character label using O(1) lookup
         """
-        patterns = self.M.get("patterns", [])
-        if 0 <= key_index < len(patterns):
-            char = patterns[key_index].get("character")
-            if isinstance(char, str):
-                return char
-        return None
+        return self._decode_map.get(key_index)
 
     def load_thread_content(self, thread_uuid: str) -> Optional[list]:
         """

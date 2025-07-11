@@ -12,10 +12,12 @@ import json  # Always import standard json for type safety
 import uuid
 import numpy as np
 import fcntl
+import time
 from pathlib import Path
 from typing import Tuple, Callable, List, Dict, Optional, Union
 from datetime import datetime
 import re
+from collections import defaultdict
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes
@@ -79,10 +81,17 @@ def get_memory_preferences(base_memories_dir: str = "memories") -> Dict:
             "sharding": {"width": 2, "max_files": 30000, "second_level": True},
             "storage_config": {"max_thread_size_mb": 64, "encryption_algorithm": "AES-256-GCM"},
             "format_config": {"default_cgm_version": "1.0.0", "max_character_label_length": 128},
+            "stream_config": {"batch_size": 1024},
         }
 
         with open(prefs_path, "w") as f:
             f.write(json_dumps(prefs))
+
+    # Ensure stream_config and batch_size are present (for upgrades)
+    if "stream_config" not in prefs:
+        prefs["stream_config"] = {"batch_size": 1024}
+    elif "batch_size" not in prefs["stream_config"]:
+        prefs["stream_config"]["batch_size"] = 1024
 
     return prefs
 
@@ -173,51 +182,89 @@ def atomic_write(path: Path, data: bytes) -> None:
         os.close(dir_fd)
 
 
+# This cache will store (data, modification_time) tuples.
+_REGISTRY_CACHE = {}
+_REGISTRY_CACHE_MAX_SIZE = 500  # Prevent unbounded memory growth
+
+def _read_registry_cached(registry_path: Path) -> dict:
+    """
+    Reads a registry file using a multi-process-safe cache.
+    The cache is considered valid only if the file's modification time matches.
+    This function uses a SHARED lock for reading to allow concurrent reads.
+    """
+    cache_key = str(registry_path)
+    # 1. Check if file exists. If not, return an empty registry.
+    if not registry_path.exists():
+        return {"count": 0, "uuids": []}
+    # 2. Check the cache first.
+    current_mtime = os.path.getmtime(registry_path)
+    if cache_key in _REGISTRY_CACHE:
+        cached_data, cached_mtime = _REGISTRY_CACHE[cache_key]
+        if current_mtime == cached_mtime:
+            # Cache is fresh. Return immediately, avoiding disk I/O.
+            return cached_data
+    # 3. Cache is stale or missing. Read from disk with a SHARED lock.
+    with open(registry_path, "r") as f:
+        fcntl.flock(f, fcntl.LOCK_SH)  # Lock for safe reading
+        try:
+            registry_data = json_loads(f.read())
+            if not isinstance(registry_data, dict):
+                registry_data = {"count": 0, "uuids": []}
+        except (json.JSONDecodeError, ValueError):
+            registry_data = {"count": 0, "uuids": []}
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+    # 4. Update the cache with the fresh data and its modification time.
+    if len(_REGISTRY_CACHE) >= _REGISTRY_CACHE_MAX_SIZE:
+        del _REGISTRY_CACHE[next(iter(_REGISTRY_CACHE))]
+    _REGISTRY_CACHE[cache_key] = (registry_data, current_mtime)
+    return registry_data
+
+
 def update_registry(dirpath: Path, uuid_: str, update_parent: bool = True) -> None:
     """
-    Update a registry file with a new UUID, optionally updating parent registry.
-
-    Args:
-        dirpath: Directory containing the registry
-        uuid_: UUID to add to registry
-        update_parent: Whether to update parent registry if this is a second-level shard
+    Atomically updates a registry file, ensuring safety for multi-process access.
+    It uses an EXCLUSIVE lock for the entire read-modify-write cycle.
+    After writing, it updates the in-memory cache for its own process.
     """
     registry_path = dirpath / "registry.json"
-
-    # Use file locking instead of sentinel file
+    cache_key = str(registry_path)
+    # The 'a+' mode creates the file if it doesn't exist.
     with open(registry_path, "a+") as f:
-        # Lock the file for exclusive access
+        # 1. ACQUIRE EXCLUSIVE LOCK. No other process can read or write now.
         fcntl.flock(f, fcntl.LOCK_EX)
-
-        # Seek to beginning to read contents
-        f.seek(0)
-
-        # Read existing registry or create new one
         try:
-            registry = json_loads(f.read())
-        except (json.JSONDecodeError, ValueError):
-            registry = {"count": 0, "uuids": []}
-
-        # Add UUID if not already present and not empty
-        if uuid_ and uuid_ not in registry["uuids"]:
-            registry["uuids"].append(uuid_)
-            registry["count"] = len(registry["uuids"])
-
-            # Truncate file and write updated registry
+            # 2. CRITICAL STEP: Always re-read the file from disk after acquiring the lock.
             f.seek(0)
-            f.truncate()
-            f.write(json_dumps(registry))
-            f.flush()
-            os.fsync(f.fileno())
-
-    # Update parent registry if requested and this is a second-level shard
-    if update_parent and len(dirpath.parts) >= 2:
+            try:
+                registry = json_loads(f.read())
+                if not isinstance(registry, dict):
+                    registry = {"count": 0, "uuids": []}
+            except (json.JSONDecodeError, ValueError):
+                registry = {"count": 0, "uuids": []}
+            # 3. MODIFY the data in memory.
+            if uuid_ and uuid_ not in registry.get("uuids", []):
+                if "uuids" not in registry or not isinstance(registry["uuids"], list):
+                    registry["uuids"] = []
+                registry["uuids"].append(uuid_)
+                registry["count"] = len(registry["uuids"])
+                # 4. WRITE the updated data back to the file.
+                f.seek(0)
+                f.truncate()
+                f.write(json_dumps(registry))
+                f.flush()
+                os.fsync(f.fileno())
+            # 5. UPDATE CACHE for our own process after the operation is complete.
+            mtime = os.path.getmtime(registry_path)
+            _REGISTRY_CACHE[cache_key] = (registry, mtime)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+    # Update parent registry if requested. This is a recursive call.
+    if update_parent and dirpath.parent != dirpath:
         parent_dir = dirpath.parent
-        parent_uuid = dirpath.name  # The second-level shard name
-
-        # If parent exists and this is a second-level shard
-        if parent_dir.exists() and len(parent_uuid) == 2:  # 2-char hex is first-level shard
-            update_registry(parent_dir, parent_uuid, False)  # Don't recurse again
+        shard_name = dirpath.name
+        if parent_dir.exists() and len(shard_name) in [2, 4]:
+            update_registry(parent_dir, shard_name, False)
 
 
 def rebuild_registry(dirpath: Path) -> None:
@@ -1084,14 +1131,14 @@ class PatternIndex:
         self.agent_secret = agent_secret
         self.base_memories_dir = base_memories_dir
         self.prefs = prefs
-        self.pattern_locations = {}  # pattern_index -> [(thread_uuid, offset, cycle), ...]
-        self.pattern_sequences = {}  # (pattern_a, pattern_b) -> frequency
-        self.pattern_contexts = {}  # pattern_index -> {before: Counter, after: Counter}
+        self.pattern_locations = defaultdict(list)  # pattern_index -> [(thread_uuid, offset, cycle), ...]
+        self.pattern_sequences = defaultdict(int)  # (pattern_a, pattern_b) -> frequency
+        self.pattern_contexts = defaultdict(lambda: {"before": defaultdict(int), "after": defaultdict(int)})
+        self.sequence_index = defaultdict(list)  # pattern -> list of (thread_uuid, offset)
         self._thread_gene_keys_cache = {}  # thread_uuid -> gene_keys
 
     def update_from_thread(self, thread_uuid: str, gene_keys: List[Dict]):
-        """Update index when a thread is saved"""
-        # Cache gene keys to avoid repeated loading
+        """Optimized version with better indexing"""
         self._thread_gene_keys_cache[thread_uuid] = gene_keys
 
         for i, gene_key in enumerate(gene_keys):
@@ -1099,29 +1146,18 @@ class PatternIndex:
             cycle = gene_key["cycle"]
 
             # Record location
-            if pattern_idx not in self.pattern_locations:
-                self.pattern_locations[pattern_idx] = []
             self.pattern_locations[pattern_idx].append((thread_uuid, i, cycle))
 
-            # Record sequences
+            # Record sequences more efficiently
             if i > 0:
                 prev_pattern = gene_keys[i - 1]["pattern_index"]
-                seq_key = (prev_pattern, pattern_idx)
-                self.pattern_sequences[seq_key] = self.pattern_sequences.get(seq_key, 0) + 1
-
-                # Update contexts
-                if pattern_idx not in self.pattern_contexts:
-                    self.pattern_contexts[pattern_idx] = {"before": {}, "after": {}}
-
-                before_count = self.pattern_contexts[pattern_idx]["before"]
-                before_count[prev_pattern] = before_count.get(prev_pattern, 0) + 1
+                self.pattern_sequences[(prev_pattern, pattern_idx)] += 1
+                self.pattern_contexts[pattern_idx]["before"][prev_pattern] += 1
+                self.sequence_index[prev_pattern].append((thread_uuid, i-1))
 
             if i < len(gene_keys) - 1:
                 next_pattern = gene_keys[i + 1]["pattern_index"]
-                if pattern_idx not in self.pattern_contexts:
-                    self.pattern_contexts[pattern_idx] = {"before": {}, "after": {}}
-                after_count = self.pattern_contexts[pattern_idx]["after"]
-                after_count[next_pattern] = after_count.get(next_pattern, 0) + 1
+                self.pattern_contexts[pattern_idx]["after"][next_pattern] += 1
 
     def get_likely_next_patterns(self, current_pattern: int, top_k: int = 5) -> List[Tuple[int, float]]:
         """Get the most likely next patterns based on historical sequences"""
@@ -1210,40 +1246,55 @@ class InformationEngine:
         self.base_memories_dir = base_memories_dir
         # Current position in active thread
         self.stream_pointer = 0
-
         # Accumulator for generated bytes
         self.output_buffer = bytearray()
+        # Load preferences for batch_size
+        self.memory_prefs = get_memory_preferences(base_memories_dir=self.base_memories_dir)
+        self.default_batch_size = self.memory_prefs.get("stream_config", {}).get("batch_size", 1024)
 
     def process_stream(
         self,
         inference_engine: InferenceEngine,
         update_callback: Callable[[int, int, float, str], None],
         input_stream: bytes,
+        batch_size: int = 0
     ) -> Tuple[bytes, bytes]:
         """
-        Process an entire stream of input bytes
+        Process an entire stream of input bytes using a spec-compliant batching
+        strategy that separates sequential inference from vectorized output generation.
 
         Args:
-            inference_engine: The InferenceEngine to use for processing
-            update_callback: Function to call for each processed byte (from IntelligenceEngine)
-            input_stream: Bytes to process
+            inference_engine: The InferenceEngine to use for processing.
+            update_callback: Function to call for each processed byte.
+            input_stream: Bytes to process.
+            batch_size: The number of bytes to process before vectorizing the output.
 
         Returns:
-            Tuple containing:
-            - intermediate_ciphertext: Encrypted form of input
-            - dynamic_keystream: Generated keystream
+            A tuple containing:
+            - intermediate_ciphertext: The encrypted form of the input stream.
+            - dynamic_keystream: The generated keystream.
         """
+        if not batch_size:
+            batch_size = self.default_batch_size
         intermediate_ciphertext = bytearray()
         dynamic_keystream = bytearray()
         self.stream_pointer = 0
-        for P_n in input_stream:
-            key_index, resonance = inference_engine.process_byte(P_n)
-            update_callback(P_n, key_index, resonance, "INPUT")
-            keystream_byte = inference_engine.G[key_index]
-            C_n = P_n ^ keystream_byte
-            intermediate_ciphertext.append(C_n)
-            dynamic_keystream.append(keystream_byte)
-            self.stream_pointer += 1
+
+        # Process the input stream in manageable chunks (batches)
+        for i in range(0, len(input_stream), batch_size):
+            input_batch = input_stream[i : i + batch_size]
+            keystream_batch = bytearray(len(input_batch))
+            for j, P_n in enumerate(input_batch):
+                key_index, resonance = inference_engine.process_byte(P_n)
+                update_callback(P_n, key_index, resonance, "INPUT")
+                keystream_batch[j] = inference_engine.G[key_index]
+            cipher_batch = np.bitwise_xor(
+                np.frombuffer(input_batch, dtype=np.uint8),
+                np.frombuffer(keystream_batch, dtype=np.uint8)
+            )
+            intermediate_ciphertext.extend(cipher_batch)
+            dynamic_keystream.extend(keystream_batch)
+            self.stream_pointer += len(input_batch)
         return bytes(intermediate_ciphertext), bytes(dynamic_keystream)
 
     def process_generated_bytes(

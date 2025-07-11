@@ -7,6 +7,13 @@
 - Updated test mocks and assertions to match real function signatures, eliminating signature mismatch errors.
 - Resolved all linter and static analysis issues; codebase is now clean and warning-free.
 - Investigated and explained origins of stray test output and directory artifacts.
+- Major performance and robustness improvements:
+  - Added pattern matching cache to InferenceEngine for fast repeated lookups.
+  - Implemented batch stream processing in InformationEngine with configurable batch size for efficient I/O.
+  - Introduced robust, multi-process-safe registry caching with mtime-based invalidation.
+  - Refactored PatternIndex to use defaultdict for cleaner and faster indexing.
+  - Optimized IntelligenceEngine encode/decode logic with O(1) lookup maps supporting multiple patterns per character.
+  - Simplified registry cache eviction logic for clarity and correctness.
 
 ## [0.9.6] – 2025-07-10
 - Refactored private gene key storage to use per-record encryption with length prefix for true append-only performance.

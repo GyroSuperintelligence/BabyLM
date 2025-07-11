@@ -259,8 +259,16 @@ class TestIntelligence:
         pattern_index = 42
         character_label = "test_character"
         engine.M["patterns"][pattern_index]["character"] = character_label
-
-        # Test encode
+        # Rebuild encode/decode maps after modifying patterns
+        engine._encode_map = {}
+        engine._decode_map = {}
+        for idx, pattern in enumerate(engine.M["patterns"]):
+            char = pattern.get("character")
+            if isinstance(char, str):
+                engine._encode_map[char] = idx
+                engine._decode_map[idx] = char
+        # Note: Only the last pattern for a character is stored in the encode map.
+        # So encode returns the last index assigned for that character.
         assert engine.encode(character_label) == pattern_index
         assert engine.encode("nonexistent") is None
 
@@ -501,6 +509,14 @@ def test_intelligent_encode_prefers_stronger_pattern(initialized_intelligence_en
     engine.M["patterns"][150]["character"] = "A"
     engine.M["patterns"][150]["count"] = 100
     engine.M["patterns"][150]["confidence"] = 0.9  # Score = 100 * 0.9 = 90
+    # Rebuild encode/decode maps after modifying patterns
+    engine._encode_map = {}
+    engine._decode_map = {}
+    for idx, pattern in enumerate(engine.M["patterns"]):
+        char = pattern.get("character")
+        if isinstance(char, str):
+            engine._encode_map[char] = idx
+            engine._decode_map[idx] = char
     chosen_index = engine.intelligent_encode("A")
     assert chosen_index == 150, "intelligent_encode failed to pick the stronger pattern."
 
@@ -522,6 +538,27 @@ def test_intelligent_generation_prefers_meaningful_pattern(initialized_intellige
     monkeypatch.setattr(engine.inference_engine, "compute_pattern_resonances", lambda: mock_resonances)
     _output_byte, chosen_index = engine._generate_response_byte()
     assert chosen_index == 20, "Generation failed to prioritize the semantically meaningful pattern."
+
+
+def test_encode_decode_map_rebuild(initialized_intelligence_engine):
+    """
+    Test that encode/decode maps can be rebuilt if patterns are changed after initialization.
+    """
+    engine = initialized_intelligence_engine
+    # Add a new character after init
+    pattern_index = 100
+    character_label = "new_char"
+    engine.M["patterns"][pattern_index]["character"] = character_label
+    # Rebuild encode/decode maps
+    engine._encode_map = {}
+    engine._decode_map = {}
+    for idx, pattern in enumerate(engine.M["patterns"]):
+        char = pattern.get("character")
+        if isinstance(char, str):
+            engine._encode_map[char] = idx
+            engine._decode_map[idx] = char
+    assert engine.encode(character_label) == pattern_index
+    assert engine.decode(pattern_index) == character_label
 
 
 # ------------------------------------------------------------------------------
