@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.7] – 2024-07-12
+- Refactored InferenceEngine and InformationEngine to support efficient batch processing with a new process_batch() method and updated process_stream() for fast-path batching.
+- Created a high-performance bulk trainer script (toys/learning/trainer.py) for large curriculum files, supporting batch updates, periodic checkpointing, and multi-format learning.
+- Added preference flags for batch size and optional Numba JIT compilation for further speedup.
+- Established a clean, two-step curriculum workflow:
+  1. Curriculum Serialization: Script (toys/learning/threads/wordnet_curriculum_threads.py) serializes the entire WordNet database into a flat text file for training. Output now goes to toys/learning/threads/corpus/wordnet_corpus.txt.
+  2. Model Training: The trainer script consumes the generated corpus file for fast, scalable learning.
+- Restored and updated all curriculum format and thread generator scripts in toys/learning/formats/ and toys/learning/threads/ to use correct namespace UUIDs and implement pattern index cycling (degeneracy).
+- Ensured all scripts are runnable with PYTHONPATH=. for proper import resolution.
+- Rewrote learning update logic so all loaded formats are updated for each winning pattern index, enabling true multi-format associative learning and correct handling of degeneracy.
+- Fixed all pyright type errors related to string/bytes handling and added targeted type ignore comments where necessary.
+- Moved all generated and output files to appropriate subdirectories to avoid clutter and maintain a clean project structure.
+
 ## [0.9.6] – 2025-07-11
 - Enforced strict test isolation: all tests and engine code now use a dedicated test directory (`toys/health/memories/`).
 - Standardized argument propagation: all helpers and engine methods now require and pass `prefs` and `base_memories_dir` as needed.
