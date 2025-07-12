@@ -10,44 +10,31 @@ import numpy as np
 from typing import List, Tuple
 
 # 3.1.1 Governance Identity (Gene Com)
-gene_com = np.array([[-1, 1], [-1, 1], [-1, 1]], dtype=np.int8)  # Shape: [3, 2]
+_base = np.array([-1, 1], dtype=np.int8)
+gene_com = np.tile(_base, (3, 1))  # Shape: [3, 2]
 
 # 3.1.2 Information Structure (Gene Nest)
-gene_nest = np.array(
-    [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]], dtype=np.int8  # Frame 1  # Frame 2
-)  # Shape: [2, 3, 2]
+gene_nest = np.stack((gene_com, -gene_com))  # Shape: [2, 3, 2]
 
 # 3.1.3 Intelligence Projection (Gene Add)
-gene_add = np.array(
-    [
-        [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]],
-        [[[1, -1], [1, -1], [1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
-        [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]],
-        [[[1, -1], [1, -1], [1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
-    ],
-    dtype=np.int8,
-)  # Shape: [4, 2, 3, 2]
+gene_add = np.concatenate(([gene_nest, -gene_nest] * 2)).astype(np.int8).reshape(4, 2, 3, 2)  # Shape: [4, 2, 3, 2]
 
 # Global invariant for inference
 gene_stateless = 0xAA  # 10101010 in binary
 
-_L0 = [0, 7]  # Identity
-_LI = [1, 6]  # Inverse
-_FG = [2, 5]  # Forward Gyration
-_BG = [3, 4]  # Backward Gyration
+ops = np.array([[0,7],[1,6],[2,5],[3,4]], np.int8)
+_L0, _LI, _FG, _BG = ops
 
 
 def apply_operation(T: np.ndarray, bit_index: int) -> np.ndarray:
-    """Apply a discrete operation to the tensor T based on the bit index."""
-    T_new = T.copy()
-    if bit_index in _LI:
-        T_new *= -1
-    elif bit_index in _FG:
-        T_new[[0, 2]] *= -1
-    elif bit_index in _BG:
-        T_new[[1, 3]] *= -1
-    # No action needed for _L0 (identity)
-    return T_new
+    """In-place mutation – returns the same object for chaining."""
+    if bit_index in _LI:          # global inverse
+        T *= -1
+    elif bit_index in _FG:        # forward rows
+        T[[0, 2]] *= -1
+    elif bit_index in _BG:        # backward rows
+        T[[1, 3]] *= -1
+    return T                      # no copy, same API
 
 
 def gyrodistance(T1: np.ndarray, T2: np.ndarray) -> float:

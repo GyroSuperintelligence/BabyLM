@@ -1,93 +1,74 @@
-
-# toys/learning/formats/ascii_curriculum.py
-# This toy is used to generate the ASCII curriculum format.
+# toys/learning/formats/ascii_curriculum_formats.py
+# This script generates the full 256-character ASCII curriculum format.
 
 import uuid
 import datetime
 import unicodedata
 from typing import cast
 from baby.types import FormatMetadata
-from baby.information import store_format
+from baby.information import store_format, get_memory_preferences, shard_path
 from baby.governance import classify_pattern_resonance
+from pathlib import Path
+import os
+import json
 
-FORMAT_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+# Namespace and UUID config
+CURRICULUM_NAMESPACE = uuid.UUID("b6e0e1e2-1c2d-4e3f-8a9b-123456789abc")
+ASCII_CURRICULUM_NAME = "ascii_curriculum_v1.0.0"
+ASCII_CURRICULUM_UUID = str(uuid.uuid5(CURRICULUM_NAMESPACE, ASCII_CURRICULUM_NAME))
 
-# Generate ASCII 256 characters with special handling for control chars
-ascii_chars = []
+# Build the full 256-character ASCII table
+patterns = []
 for i in range(256):
-    if i < 32 or i == 127:  # Control characters
-        char = chr(i)
-        try:
-            name = unicodedata.name(char)
-        except ValueError:
-            name = f"CONTROL CHARACTER {i}" if i < 32 else "DELETE"
-        category = unicodedata.category(char)
-        ascii_chars.append(
-            {"character": f"\\x{i:02x}" if not char.isprintable() else char, "description": name, "type": category}
-        )
-    else:
-        char = chr(i)
-        name = unicodedata.name(char, f"ASCII {i}")
-        category = unicodedata.category(char)
-        ascii_chars.append({"character": char, "description": name, "type": category})
-
-# Build the patterns list with proper resonance classification
-patterns = [
-    {
+    char = chr(i)
+    try:
+        name = unicodedata.name(char)
+        description = name
+    except ValueError:
+        if i < 32 or i == 127:
+            description = f"CONTROL CHARACTER {i}"
+        else:
+            description = f"ASCII {i}"
+    patterns.append({
         "index": i,
-        "character": entry["character"],
-        "description": entry["description"],
-        "type": entry["type"],
+        "character": char,  # *** This is now ALWAYS the real character ***
+        "description": description,
+        "type": "ASCII",
         "count": 0,
         "first_cycle": None,
         "last_cycle": None,
         "gyration_feature": classify_pattern_resonance(i),
         "confidence": 0.0,
-    }
-    for i, entry in enumerate(ascii_chars)
-]
+    })
 
-# Build the format metadata
 timestamp = datetime.datetime.now().isoformat()
 format_data = {
-    "format_uuid": str(uuid.uuid5(FORMAT_NAMESPACE, "ascii_curriculum")),
+    "format_uuid": ASCII_CURRICULUM_UUID,
     "format_name": "ascii_256",
     "format_version": "1.0.0",
     "stability": "stable",
-    "compatibility": {
-        "min_format_version": "1.0.0",
-        "max_format_version": "1.0.0",
-        "depends_on": [],
-        "conflicts_with": [],
-    },
+    "compatibility": {"min_format_version": "1.0.0"},
     "metadata": {
-        "author": "curriculum_init",
-        "description": "Complete ASCII 256 character set mapping with Unicode names and types",
-        "tags": ["ascii", "foundational", "curriculum"],
-        "created_at": timestamp,
-        "last_updated": timestamp,
-        "usage_count": 0,
-        "validation_status": "verified",
+        "description": "Full 256-character ASCII table. 'character' is the real character.",
+        "author": "curriculum_generator",
+        "timestamp": timestamp
     },
-    "cgm_policies": {
-        "governance": {"operation": "L0", "bits": [0, 7], "policy": "traceability"},
-        "information": {"operation": "LI", "bits": [1, 6], "policy": "variety"},
-        "inference": {"operation": "FG", "bits": [2, 5], "policy": "accountability"},
-        "intelligence": {"operation": "BG", "bits": [3, 4], "policy": "integrity"},
-    },
+    "cgm_policies": {},
     "patterns": patterns,
 }
 
-# Store the format using the system's helper
 if __name__ == "__main__":
-    from baby.information import get_memory_preferences
-
     base_memories_dir = "memories"
     prefs = get_memory_preferences(base_memories_dir)
-    format_uuid = store_format(cast(FormatMetadata, format_data), prefs, base_memories_dir)
+    formats_dir = os.path.join(base_memories_dir, "public/formats")
+    format_shard = shard_path(Path(formats_dir), ASCII_CURRICULUM_UUID, prefs)
+    format_shard.mkdir(parents=True, exist_ok=True)
+    file_path = format_shard / f"format-ascii_256-{ASCII_CURRICULUM_UUID}.json"
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(format_data, f, ensure_ascii=False, indent=2)
     print("\n🎉✅ ASCII Curriculum Format Learned! ✅🎉")
-    print(f"🆔  UUID: {format_uuid}")
-    print("📦  Location: memories/public/formats/")
-    print("🔤  Characters: 256 (ASCII + Unicode extensions)")
+    print(f"🆔  UUID: {ASCII_CURRICULUM_UUID}")
+    print(f"📦  Location: {file_path}")
+    print("🔤  Characters: 256 (raw bytes, all valid ASCII)")
     print("📝  Each entry includes: character, description, type, gyration_feature, and stats.")
     print("✨  Ready for learning, encryption, and curriculum composition! ✨\n")

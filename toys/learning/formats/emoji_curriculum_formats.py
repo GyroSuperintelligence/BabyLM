@@ -1,9 +1,8 @@
 import uuid
 import datetime
 import unicodedata
-from typing import cast
 from baby.types import FormatMetadata
-from baby.information import store_format
+from baby.information import store_format, get_memory_preferences, shard_path
 from baby.governance import classify_pattern_resonance
 
 try:
@@ -11,92 +10,58 @@ try:
 except ImportError:
     raise ImportError("Please install the 'emoji' package: pip install emoji")
 
-FORMAT_NAMESPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+CURRICULUM_NAMESPACE = uuid.UUID("b6e0e1e2-1c2d-4e3f-8a9b-123456789abc")
+EMOJI_CURRICULUM_NAME = "emoji_curriculum_v1.0.0"
+EMOJI_CURRICULUM_UUID = str(uuid.uuid5(CURRICULUM_NAMESPACE, EMOJI_CURRICULUM_NAME))
 
-# Get the full list of emoji characters
+# Gather all emoji characters
 all_emoji = list(emoji.EMOJI_DATA.keys())
-pack_size = 256
-num_packs = (len(all_emoji) + pack_size - 1) // pack_size
+patterns = []
+for i, char in enumerate(all_emoji):
+    name = emoji.EMOJI_DATA[char].get('en', char)
+    patterns.append({
+        "index": i % 256,  # cycles every 256
+        "character": char,  # actual emoji character
+        "description": name,
+        "type": "EMOJI",
+        "count": 0,
+        "first_cycle": None,
+        "last_cycle": None,
+        "gyration_feature": classify_pattern_resonance(i),
+        "confidence": 0.0,
+    })
 
+timestamp = datetime.datetime.now().isoformat()
+format_data = {
+    "format_uuid": EMOJI_CURRICULUM_UUID,
+    "format_name": "emoji_all",
+    "format_version": "1.0.0",
+    "stability": "stable",
+    "compatibility": {"min_format_version": "1.0.0"},
+    "metadata": {
+        "description": "All emoji characters.",
+        "author": "curriculum_generator",
+        "timestamp": timestamp
+    },
+    "cgm_policies": {},
+    "patterns": patterns,
+}
 
-def make_format_name(pack_num: int) -> str:
-    return f"emoji_pack_{pack_num+1}"
-
-
-def make_description(pack_num: int, total_packs: int) -> str:
-    return f"Emoji curriculum pack {pack_num+1} of {total_packs} (Unicode emoji set)"
-
-
-for pack_num in range(num_packs):
-    from baby.information import get_memory_preferences
-
+if __name__ == "__main__":
+    import os
     base_memories_dir = "memories"
     prefs = get_memory_preferences(base_memories_dir)
-    start = pack_num * pack_size
-    end = min(start + pack_size, len(all_emoji))
-    emoji_slice = all_emoji[start:end]
-    patterns = []
-    for i, char in enumerate(emoji_slice):
-        # Handle single and multi-codepoint emoji for name
-        if len(char) == 1:
-            try:
-                name = unicodedata.name(char)
-            except ValueError:
-                name = emoji.EMOJI_DATA[char].get("en", "EMOJI") if "en" in emoji.EMOJI_DATA[char] else "EMOJI"
-        else:
-            try:
-                name = " + ".join(unicodedata.name(c) for c in char)
-            except ValueError:
-                name = emoji.EMOJI_DATA[char].get("en", "EMOJI") if "en" in emoji.EMOJI_DATA[char] else "EMOJI"
-        # Use the category of the first codepoint as type
-        category = unicodedata.category(char[0]) if char else "So"
-        patterns.append(
-            {
-                "index": i,
-                "character": char,
-                "description": name,
-                "type": category,
-                "count": 0,
-                "first_cycle": None,
-                "last_cycle": None,
-                "gyration_feature": classify_pattern_resonance(i),
-                "confidence": 0.0,
-            }
-        )
-    timestamp = datetime.datetime.now().isoformat()
-    format_data = {
-        "format_uuid": str(uuid.uuid5(FORMAT_NAMESPACE, "emoji_curriculum")),
-        "format_name": make_format_name(pack_num),
-        "format_version": "1.0.0",
-        "stability": "stable",
-        "compatibility": {
-            "min_format_version": "1.0.0",
-            "max_format_version": "1.0.0",
-            "depends_on": [],
-            "conflicts_with": [],
-        },
-        "metadata": {
-            "author": "curriculum_init",
-            "description": make_description(pack_num, num_packs),
-            "tags": ["emoji", "foundational", "curriculum", f"pack_{pack_num+1}"],
-            "created_at": timestamp,
-            "last_updated": timestamp,
-            "usage_count": 0,
-            "validation_status": "verified",
-        },
-        "cgm_policies": {
-            "governance": {"operation": "L0", "bits": [0, 7], "policy": "traceability"},
-            "information": {"operation": "LI", "bits": [1, 6], "policy": "variety"},
-            "inference": {"operation": "FG", "bits": [2, 5], "policy": "accountability"},
-            "intelligence": {"operation": "BG", "bits": [3, 4], "policy": "integrity"},
-        },
-        "patterns": patterns,
-    }
-    format_uuid = store_format(cast(FormatMetadata, format_data), prefs, base_memories_dir)
-    print("\n��😃 Emoji Curriculum Format Learned! 😃🎉")
-    print(f"🆔  UUID: {format_uuid}")
-    print("📦  Location: memories/public/formats/")
-    print(f"😀  Pack: {pack_num+1} of {num_packs} | Emojis: {len(patterns)}")
-    print(f"🏷️  Format Name: {make_format_name(pack_num)}")
+    formats_dir = os.path.join(base_memories_dir, "public/formats")
+    from pathlib import Path
+    format_shard = shard_path(Path(formats_dir), EMOJI_CURRICULUM_UUID, prefs)
+    format_shard.mkdir(parents=True, exist_ok=True)
+    file_path = format_shard / f"format-emoji_all-{EMOJI_CURRICULUM_UUID}.json"
+    with open(file_path, "w") as f:
+        import json
+        f.write(json.dumps(format_data))
+    print("\n🎉✅ Emoji Curriculum Format Learned! ✅🎉")
+    print(f"🆔  UUID: {EMOJI_CURRICULUM_UUID}")
+    print(f"📦  Location: {file_path}")
+    print(f"😀  Emojis: {len(patterns)} (Unicode emoji set)")
     print("📝  Each entry includes: character, description, type, gyration_feature, and stats.")
     print("✨  Ready for learning, encryption, and curriculum composition! ✨\n")

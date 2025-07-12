@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.9.7] – 2024-07-12
+## [0.9.7] – 2025-07-12
 - Refactored InferenceEngine and InformationEngine to support efficient batch processing with a new process_batch() method and updated process_stream() for fast-path batching.
 - Created a high-performance bulk trainer script (toys/learning/trainer.py) for large curriculum files, supporting batch updates, periodic checkpointing, and multi-format learning.
 - Added preference flags for batch size and optional Numba JIT compilation for further speedup.

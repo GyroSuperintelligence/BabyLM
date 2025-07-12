@@ -40,6 +40,8 @@ from baby.information import (
     load_thread_key,
     json_loads,
     json_dumps,
+    _aes_encrypt,
+    _aes_decrypt,
 )
 from baby.types import PatternMetadata, FormatMetadata, GeneKeysMetadata
 
@@ -268,7 +270,7 @@ class IntelligenceEngine:
                 if new_thread_uuid not in [c["uuid"] for c in parent_meta["children"]]:
                     parent_meta["children"].append({"uuid": new_thread_uuid, "name": None})
                 with open(parent_meta_path, "w") as f:
-                    f.write(json_dumps(parent_meta))
+                    f.write(str(json_dumps(parent_meta)))
 
         # Reset the engine's state for the new thread.
         self.thread_uuid = new_thread_uuid
@@ -328,7 +330,7 @@ class IntelligenceEngine:
         if not self.thread_uuid:
             self.start_new_thread(privacy=privacy)
         # 2. Serialize event
-        json_line = json_dumps(event).encode("utf-8") + b"\n"
+        json_line = str(json_dumps(event)).encode("utf-8") + b"\n"
         # 3. Check for thread rotation BEFORE writing
         max_size_bytes = self.memory_prefs["storage_config"]["max_thread_size_mb"] * 1024 * 1024
         if self.current_thread_size > 0 and (self.current_thread_size + len(json_line) > max_size_bytes):
@@ -346,7 +348,7 @@ class IntelligenceEngine:
                 thread_shard.mkdir(parents=True, exist_ok=True)
                 self._active_public_thread_handle = open(thread_path, "a", encoding="utf-8")
             print(f"Writing to NDJSON: {thread_path}")
-            self._active_public_thread_handle.write(json_line.decode("utf-8"))
+            self._active_public_thread_handle.write(str(json_line.decode("utf-8")))
             self._active_public_thread_handle.flush()
         else:
             # For private threads, continue using the in-memory buffer
@@ -406,7 +408,7 @@ class IntelligenceEngine:
             if os.path.exists(thread_path):
                 meta["size_bytes"] = os.path.getsize(thread_path)
             with open(meta_path, "w") as f:
-                f.write(json_dumps(meta))
+                f.write(str(json_dumps(meta)))
         # --- Finalize Private Thread ---
         else:  # privacy == "private"
             if not self.active_thread_content:
@@ -416,7 +418,7 @@ class IntelligenceEngine:
                 raise RuntimeError("Thread file key is not set for a private thread.")
             # Use thread_file_key directly as the AES-256-GCM key
             aes_key = self.thread_file_key
-            encrypted_blob = self._encrypt_data(final_data_to_save, aes_key)
+            encrypted_blob = _aes_encrypt(aes_key, final_data_to_save)
             save_thread(
                 self.thread_uuid,
                 encrypted_blob,
@@ -444,7 +446,7 @@ class IntelligenceEngine:
                 if os.path.exists(thread_path):
                     meta["size_bytes"] = os.path.getsize(thread_path)
                 with open(meta_path, "w") as f:
-                    f.write(json_dumps(meta))
+                    f.write(str(json_dumps(meta)))
 
         # --- Common Finalization Logic for BOTH public and private ---
         if self.current_thread_keys:
@@ -594,39 +596,43 @@ class IntelligenceEngine:
         self, source_byte: int, key_index: int, resonance: float, event_type: str, privacy: str = "private"
     ) -> None:
         """
-        Update learning state based on processed byte, including pattern
-        statistics and confidence.
+        Update learning state based on a processed byte.
+        This method now iterates through ALL loaded formats and updates the
+        statistics for any format that has a character assigned to the
+        winning pattern index. This enables multi-format associative learning.
         """
-        if not self.format_uuid:
-            return  # Cannot learn without an active format
-        active_format = self.formats.get(self.format_uuid)
-        if not active_format:
-            return  # Cannot learn without a valid format
-        # 1. Update pattern metadata
-        pattern = active_format.get("patterns", [])[key_index]
+        # --- THIS IS THE CRUCIAL MULTI-FORMAT LEARNING LOGIC ---
+        for fmt_data in self.formats.values():
+            # Find all entries in this format that map to the winning key_index
+            matching_patterns = [p for p in fmt_data.get("patterns", []) if p.get("index") == key_index]
 
-        # Increment count
-        current_count = pattern.get("count", 0)
-        pattern["count"] = current_count + 1
+            for pattern_meta in matching_patterns:
+                # Now, update the stats for each matching character/lemma/synset
+                current_count = pattern_meta.get("count", 0)
+                pattern_meta["count"] = current_count + 1
 
-        # Update cycle info
-        pattern["last_cycle"] = self.inference_engine.cycle_counter
-        if pattern.get("first_cycle") is None:
-            pattern["first_cycle"] = self.inference_engine.cycle_counter
+                # Update cycle info
+                pattern_meta["last_cycle"] = self.inference_engine.cycle_counter
+                if pattern_meta.get("first_cycle") is None:
+                    pattern_meta["first_cycle"] = self.inference_engine.cycle_counter
 
-        # --- Update confidence as a moving average of resonance ---
-        current_confidence = pattern.get("confidence", 0.0)
-        new_event_confidence = 1.0 - (resonance / np.pi)
-        alpha = 0.01
-        pattern["confidence"] = (1 - alpha) * current_confidence + alpha * new_event_confidence
+                # Update confidence as a moving average of resonance
+                current_confidence = pattern_meta.get("confidence", 0.0)
+                new_event_confidence = 1.0 - (resonance / np.pi)
+                alpha = 0.01
+                pattern_meta["confidence"] = (1 - alpha) * current_confidence + alpha * new_event_confidence
 
-        # 2. Record the FULL Gene Key
+        # The GeneKey is a universal record of the physical event.
+        # It is logged once, with the context of the active thread's primary format.
+        if not self.thread_uuid: 
+            return
+
         gene_key_event: GeneKeysMetadata = {
             "cycle": self.inference_engine.cycle_counter,
             "pattern_index": int(key_index),
             "thread_uuid": self.thread_uuid or "",
             "agent_uuid": self.agent_uuid,  # Deprecated
-            "format_uuid": self.format_uuid,
+            "format_uuid": self.format_uuid or "", # Log with the active format's context
             "event_type": event_type,
             "source_byte": int(source_byte),
             "resonance": float(resonance),
@@ -711,7 +717,7 @@ class IntelligenceEngine:
             # Use thread_key directly as the AES-256-GCM key
             aes_key = thread_key
             try:
-                thread_content_raw = self._decrypt_data(thread_content_raw, aes_key)
+                thread_content_raw = _aes_decrypt(aes_key, thread_content_raw)
             except Exception:
                 return None
         # At this point, thread_content_raw is NDJSON (utf-8 bytes)
@@ -875,65 +881,25 @@ class IntelligenceEngine:
     def _derive_file_key(
         self, epigenome_snapshot: np.ndarray, agent_uuid: Optional[str], thread_uuid: str
     ) -> Optional[bytes]:
-        if agent_uuid is None:
-            return None
+        """
+        Derive a file encryption key from the epigenome snapshot.
+
+        Args:
+            epigenome_snapshot: Current epigenome state
+            agent_uuid: Agent UUID
+            thread_uuid: Thread UUID
+
+        Returns:
+            bytes: 32-byte AES key or None if derivation fails
+        """
         tensor_bytes = epigenome_snapshot.tobytes()
-        salt = (agent_uuid + thread_uuid).encode("utf-8")
+        salt = ((agent_uuid or "") + (thread_uuid or "")).encode("utf-8")
         # Derive a 32-byte AES key directly
         kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
         stateless_bytes = bytes([gene_stateless])
         key_material = tensor_bytes + stateless_bytes
         aes_key = kdf.derive(key_material)
         return aes_key
-
-    def _encrypt_data(self, data: bytes, key: bytes) -> bytes:
-        """
-        Encrypt data with AES-GCM
-
-        Args:
-            data: Data to encrypt
-            key: Encryption key
-
-        Returns:
-            bytes: Encrypted data with nonce and tag
-        """
-        # Generate random nonce
-        nonce = os.urandom(12)
-
-        # Create cipher
-        cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
-        encryptor = cipher.encryptor()
-
-        # Encrypt data
-        ciphertext = encryptor.update(data) + encryptor.finalize()
-
-        # Return nonce + tag + ciphertext
-        return nonce + encryptor.tag + ciphertext
-
-    def _decrypt_data(self, encrypted_data: bytes, key: bytes) -> bytes:
-        """
-        Decrypt data with AES-GCM
-
-        Args:
-            encrypted_data: Encrypted data with nonce and tag
-            key: Decryption key
-
-        Returns:
-            bytes: Decrypted data
-        """
-        # Extract nonce, tag, and ciphertext
-        nonce = encrypted_data[:12]
-        tag = encrypted_data[12:28]
-        ciphertext = encrypted_data[28:]
-
-        # Create cipher
-        cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())
-        decryptor = cipher.decryptor()
-
-        # Decrypt data
-        plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-
-        return plaintext
 
     def get_thread_relationships(self, thread_uuid: str) -> Dict:
         if self.agent_uuid is None:
@@ -1186,7 +1152,7 @@ class IntelligenceEngine:
                 encrypted_content = load_thread(self.agent_uuid, thread_uuid, self.memory_prefs, self.base_memories_dir)
                 if encrypted_content:
                     try:
-                        decrypted_content = self._decrypt_data(encrypted_content, self.thread_file_key)
+                        decrypted_content = _aes_decrypt(self.thread_file_key, encrypted_content)
                         self.active_thread_content = bytearray(decrypted_content)
                     except Exception as e:
                         print(f"Warning: Failed to decrypt and resume thread {thread_uuid}. Error: {e}")

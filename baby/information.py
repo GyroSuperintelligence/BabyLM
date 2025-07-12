@@ -28,37 +28,24 @@ from baby.inference import InferenceEngine
 from baby.types import FormatMetadata, ThreadMetadata, GeneKeysMetadata
 
 # pyright: reportMissingModuleSource=false
+# Unified fast JSON fallback: orjson → ujson → json
 try:
-    import orjson as fast_json
-
-    def json_loads(s):
-        if isinstance(s, str):
-            s = s.encode("utf-8")
-        return fast_json.loads(s)
-
-    def json_dumps(obj):
-        result = fast_json.dumps(obj)
-        if isinstance(result, bytes):
-            return result.decode("utf-8")
-        return result
-
+    import orjson as _fjson
 except ImportError:
     try:
-        import ujson as fast_json
-
-        json_loads = fast_json.loads
-
-        def json_dumps(obj):
-            result = fast_json.dumps(obj)
-            if isinstance(result, bytes):
-                return result.decode("utf-8")
-            return result
-
+        import ujson as _fjson    # type: ignore
     except ImportError:
-        import json
+        import json as _fjson     # type: ignore
 
-        json_loads = json.loads
-        json_dumps = json.dumps
+json_loads  = lambda b: _fjson.loads(b if isinstance(b, (bytes, bytearray)) else str(b).encode())
+
+def json_dumps(o):
+    result = _fjson.dumps(o)
+    if isinstance(result, (bytes, bytearray)):
+        return result.decode('utf-8')
+    return result
+
+FORMAT_NAMESPACE = uuid.UUID('00000000-0000-0000-0000-000000000000')
 
 
 # ====================================================================
@@ -89,7 +76,7 @@ def get_memory_preferences(base_memories_dir: str = "memories") -> Dict:
         }
 
         with open(prefs_path, "w") as f:
-            f.write(json_dumps(prefs))
+            f.write(str(json_dumps(prefs)))
 
     # Ensure stream_config and batch_size are present (for upgrades)
     if "stream_config" not in prefs:
@@ -186,6 +173,21 @@ def atomic_write(path: Path, data: bytes) -> None:
         os.close(dir_fd)
 
 
+# Re-usable, private helpers – still in this file, no new modules
+def _aes_encrypt(key: bytes, data: bytes) -> bytes:
+    nonce = os.urandom(12)
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
+    enc = cipher.encryptor()
+    return nonce + enc.tag + (enc.update(data) + enc.finalize())
+
+
+def _aes_decrypt(key: bytes, blob: bytes) -> bytes:
+    nonce, tag, ct = blob[:12], blob[12:28], blob[28:]
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())
+    dec = cipher.decryptor()
+    return dec.update(ct) + dec.finalize()
+
+
 # This cache will store (data, modification_time) tuples.
 _REGISTRY_CACHE = {}
 _REGISTRY_CACHE_MAX_SIZE = 500  # Prevent unbounded memory growth
@@ -256,7 +258,7 @@ def update_registry(dirpath: Path, uuid_: str, update_parent: bool = True) -> No
                 # 4. WRITE the updated data back to the file.
                 f.seek(0)
                 f.truncate()
-                f.write(json_dumps(registry))
+                f.write(str(json_dumps(registry)))
                 f.flush()
                 os.fsync(f.fileno())
             # 5. UPDATE CACHE for our own process after the operation is complete.
@@ -334,7 +336,7 @@ def rebuild_registry(dirpath: Path) -> None:
     # Write registry
     registry_path = dirpath / "registry.json"
     with open(registry_path, "w") as f:
-        f.write(json_dumps(registry))
+        f.write(str(json_dumps(registry)))
 
 
 # ====================================================================
@@ -480,7 +482,7 @@ def create_thread(
     }
     thread_meta_path = thread_shard / f"thread-{thread_uuid}.json"
     with open(thread_meta_path, "w") as f:
-        f.write(json_dumps(thread_meta))
+        f.write(str(json_dumps(thread_meta)))
     update_registry(threads_dir, thread_uuid)
     update_registry(thread_shard, thread_uuid)
     return thread_uuid
@@ -565,14 +567,8 @@ def store_thread_key(
     )
     agent_key = kdf.derive(agent_secret.encode("utf-8"))
 
-    # Encrypt with AES-256-GCM
-    nonce = os.urandom(12)
-    cipher = Cipher(algorithms.AES(agent_key), modes.GCM(nonce), backend=default_backend())
-    encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(key) + encryptor.finalize()
-
-    # Store as: nonce (12) + tag (16) + ciphertext
-    encrypted_blob = nonce + encryptor.tag + ciphertext
+    # Encrypt with AES-256-GCM using shared helper
+    encrypted_blob = _aes_encrypt(agent_key, key)
 
     # Write key file
     key_path = key_shard / f"key-{thread_uuid}.bin.enc"
@@ -616,12 +612,8 @@ def store_gene_keys(
         with open(gene_keys_path, "ab") as f:
             for gk in gene_keys:
                 ndjson_line = json_dumps({**gk, "privacy": privacy, "agent_uuid": agent_uuid})
-                ndjson_bytes = ndjson_line.encode("utf-8")
-                nonce = os.urandom(12)
-                cipher = Cipher(algorithms.AES(encryption_key), modes.GCM(nonce), backend=default_backend())
-                encryptor = cipher.encryptor()
-                ciphertext = encryptor.update(ndjson_bytes) + encryptor.finalize()
-                encrypted_blob = nonce + encryptor.tag + ciphertext
+                ndjson_bytes = ndjson_line.encode("utf-8") if isinstance(ndjson_line, str) else ndjson_line
+                encrypted_blob = _aes_encrypt(encryption_key, ndjson_bytes)
                 # Write length prefix (4 bytes, big-endian)
                 f.write(struct.pack(">I", len(encrypted_blob)))
                 f.write(encrypted_blob)
@@ -635,7 +627,7 @@ def store_gene_keys(
         # Change mode from "w" to "a" for appending
         with open(gene_keys_path, "a", encoding="utf-8") as f:
             for gk in gene_keys:
-                f.write(json_dumps({**gk, "privacy": privacy, "agent_uuid": None}) + "\n")
+                f.write(str(json_dumps({**gk, "privacy": privacy, "agent_uuid": None})) + "\n")
         update_registry(key_shard, thread_uuid)
 
 
@@ -682,13 +674,8 @@ def load_gene_keys(
                 encrypted_blob = f.read(blob_len)
                 if len(encrypted_blob) != blob_len:
                     break  # Corrupt or truncated file
-                nonce = encrypted_blob[:12]
-                tag = encrypted_blob[12:28]
-                ciphertext = encrypted_blob[28:]
-                cipher = Cipher(algorithms.AES(decryption_key), modes.GCM(nonce, tag), backend=default_backend())
-                decryptor = cipher.decryptor()
                 try:
-                    decrypted_data = decryptor.update(ciphertext) + decryptor.finalize()
+                    decrypted_data = _aes_decrypt(decryption_key, encrypted_blob)
                     ndjson_line = decrypted_data.decode("utf-8")
                     gene_keys.append(json_loads(ndjson_line))
                 except Exception:
@@ -738,14 +725,9 @@ def load_thread_key(
         backend=default_backend(),
     )
     agent_key = kdf.derive(agent_secret.encode("utf-8"))
-    # Decrypt with AES-256-GCM
-    nonce = encrypted_blob[:12]
-    tag = encrypted_blob[12:28]
-    ciphertext = encrypted_blob[28:]
-    cipher = Cipher(algorithms.AES(agent_key), modes.GCM(nonce, tag), backend=default_backend())
-    decryptor = cipher.decryptor()
+    # Decrypt with AES-256-GCM using shared helper
     try:
-        key = decryptor.update(ciphertext) + decryptor.finalize()
+        key = _aes_decrypt(agent_key, encrypted_blob)
         if len(key) != 32:
             return None
         return key
@@ -831,18 +813,12 @@ def list_formats(base_memories_dir: str = "memories") -> List[str]:
     """
     formats_dir = Path(base_memories_dir) / "public/formats"
     formats_dir.mkdir(parents=True, exist_ok=True)
-
-    # Get all format registries
     format_uuids = []
-
-    # Use recursive glob to find all format files at any level
+    uuid_pattern = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
     for format_file in formats_dir.rglob("format-*.json"):
-        # Extract the full UUID from the filename
-        name = format_file.name
-        if name.startswith("format-") and name.endswith(".json"):
-            uuid_ = name[len("format-") : -len(".json")]
-            format_uuids.append(uuid_)
-
+        m = uuid_pattern.search(format_file.name)
+        if m:
+            format_uuids.append(m.group(1))
     return format_uuids
 
 
@@ -856,12 +832,12 @@ def load_format(format_uuid: str, base_memories_dir: str) -> Optional[FormatMeta
     """
     formats_dir = Path(base_memories_dir) / "public/formats"
     format_shard = shard_path(formats_dir, format_uuid, get_memory_preferences(base_memories_dir))
-    format_path = format_shard / f"format-{format_uuid}.json"
-    if not format_path.exists():
-        return None
-    with open(format_path, "r") as f:
-        format_data = json_loads(f.read())
-    return format_data  # type: ignore
+    # Look for any file ending with -<uuid>.json
+    for file in format_shard.glob(f"*-{format_uuid}.json"):
+        if file.is_file():
+            with open(file, "r") as f:
+                return json_loads(f.read())
+    return None
 
 
 def store_format(format_data: FormatMetadata, prefs: dict, base_memories_dir: str) -> str:
@@ -895,7 +871,7 @@ def store_format(format_data: FormatMetadata, prefs: dict, base_memories_dir: st
             }
     format_path = format_shard / f"format-{format_uuid}.json"
     with open(format_path, "w") as f:
-        f.write(json_dumps(format_data))
+        f.write(str(json_dumps(format_data)))
     update_registry(formats_dir, format_uuid)
     update_registry(format_shard, format_uuid)
     return format_uuid
@@ -969,7 +945,7 @@ def store_object(obj_type: str, payload: Union[bytes, Dict], prefs: dict, ext: s
     # Write data
     if isinstance(payload, dict):
         with open(file_path, "w") as f:
-            f.write(json_dumps(payload))
+            f.write(str(json_dumps(payload)))
     else:
         atomic_write(file_path, payload)
 
@@ -1224,7 +1200,10 @@ class PatternIndex:
         historical_patterns = [gene_keys[i]["pattern_index"] for i in range(offset - context_length, offset)]
 
         # Count matching patterns
-        matches = sum(1 for i in range(context_length) if historical_patterns[i] == recent_patterns[i])
+        if len(recent_patterns) < len(historical_patterns):
+            matches = 0
+        else:
+            matches = sum(h==r for h,r in zip(historical_patterns, recent_patterns[-len(historical_patterns):]))
 
         return matches / context_length
 
@@ -1271,8 +1250,12 @@ class InformationEngine:
             - intermediate_ciphertext: The encrypted form of the input stream.
             - dynamic_keystream: The generated keystream.
         """
-        if not batch_size:
+        # Micro-guard: explicit batch_size=1 overrides any default preferences
+        if batch_size == 0:
             batch_size = self.default_batch_size
+        elif batch_size == 1:
+            # Force per-byte processing for live chat, regardless of preferences
+            pass  # batch_size remains 1
         intermediate_ciphertext = bytearray()
         dynamic_keystream = bytearray()
         self.stream_pointer = 0
@@ -1280,13 +1263,34 @@ class InformationEngine:
         # Process the input stream in manageable chunks (batches)
         for i in range(0, len(input_stream), batch_size):
             input_batch = input_stream[i : i + batch_size]
+
+            # ------------------- NEW: decide fast vs slow -------------------
+            if batch_size > 1 and len(input_batch) > 1:
+                p_arr = np.frombuffer(input_batch, dtype=np.uint8)
+                key_batch, res_batch = inference_engine.process_batch(p_arr)
+                keystream_batch = inference_engine.G[key_batch]
+                # same XOR step but fully vectorised
+                cipher_batch = np.bitwise_xor(p_arr, keystream_batch)
+                # store & callback in one go
+                for j in range(len(p_arr)):
+                    update_callback(int(p_arr[j]), int(key_batch[j]), float(res_batch[j]), "INPUT")
+                intermediate_ciphertext.extend(cipher_batch)
+                dynamic_keystream.extend(keystream_batch)
+                self.stream_pointer += len(p_arr)
+                continue  # done with this batch – go to next loop
+            # ---------------------------------------------------------------
+
+            # Fall back to original per-byte processing for small batches
             keystream_batch = bytearray(len(input_batch))
             for j, P_n in enumerate(input_batch):
                 key_index, resonance = inference_engine.process_byte(P_n)
                 update_callback(P_n, key_index, resonance, "INPUT")
                 keystream_batch[j] = inference_engine.G[key_index]
+            
+            # Vectorized XOR operation for ciphertext generation
             cipher_batch = np.bitwise_xor(
-                np.frombuffer(input_batch, dtype=np.uint8), np.frombuffer(keystream_batch, dtype=np.uint8)
+                np.frombuffer(input_batch, dtype=np.uint8), 
+                np.frombuffer(keystream_batch, dtype=np.uint8)
             )
             intermediate_ciphertext.extend(cipher_batch)
             dynamic_keystream.extend(keystream_batch)

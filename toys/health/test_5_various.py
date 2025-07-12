@@ -96,7 +96,7 @@ def test_wordnet_curriculum_formats_generate_files(mock_env, ensure_wordnet_down
     for i in range(3):
         entry = lemma_patterns[i]
         assert entry.get("character") == wn_lemmas[i], f"Lemma character mismatch at {i}"
-        wn_def = wn.synsets(wn_lemmas[i])[0].definition() if wn.synsets(wn_lemmas[i]) else None
+        wn_def = wn.synsets(wn_lemmas[i])[0].definition() if wn.synsets(wn_lemmas[i]) else None # type: ignore[attr-defined]
         assert wn_def is None or wn_def in entry.get("description", ""), f"Lemma definition mismatch at {i}"
 
     with open(synset_file, "r", encoding="utf-8") as f:
@@ -107,8 +107,8 @@ def test_wordnet_curriculum_formats_generate_files(mock_env, ensure_wordnet_down
         entry = synset_patterns[i]
         assert entry.get("character") == wn_synsets[i].name(), f"Synset character mismatch at {i}"
         wn_syn = wn_synsets[i]
-        wn_def = wn_syn.definition() if wn_syn is not None else None
-        assert wn_def is None or wn_def in entry.get("description", ""), f"Synset definition mismatch at {i}"
+        wn_def = wn_syn.definition()  # type: ignore[attr-defined]
+        assert wn_def in entry.get("description", ""), f"Synset definition mismatch at {i}"
 
 
 # ------------------------------------------------------------------------------
