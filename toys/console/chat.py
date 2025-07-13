@@ -109,15 +109,38 @@ class ChatInterface:
             handle_error(console, "Failed to process message", e)
             return None
 
+    def _load_history_from_thread(self, thread_uuid: str):
+        """Loads and parses thread content into the conversation history."""
+        self.conversation_history.clear()
+        content = self.engine.load_thread_content(thread_uuid)
+        if not content:
+            return
+        for event in content:
+            event_type = event.get("type", "unknown")
+            data = event.get("data", b"")
+            if isinstance(data, bytes):
+                message = data.decode('utf-8', errors='replace')
+            else:
+                message = str(data)
+            if event_type == "input":
+                self.conversation_history.append({"sender": "user", "message": message})
+            elif event_type == "output":
+                self.conversation_history.append({"sender": "ai", "message": message})
+
     def run(self) -> None:
         """Run the interactive chat session."""
         console.clear()
         console.print(create_header("💬 Chat Session"))
-
-        # Initialize thread if needed
-        if not self.engine.thread_uuid:
-            privacy = "private" if self.engine.agent_uuid else "public"
+        privacy = "private" if self.engine.agent_uuid else "public"
+        # If a thread is already active from the thread manager, load it.
+        if self.engine.thread_uuid:
+            self._load_history_from_thread(self.engine.thread_uuid)
+            self.conversation_history.append(
+                {"sender": "system", "message": f"Resumed thread: {safe_format_uuid(self.engine.thread_uuid)}"}
+            )
+        else:
             self.engine.start_new_thread(privacy=privacy)
+            self.conversation_history.clear()
             self.conversation_history.append(
                 {"sender": "system", "message": f"Started new thread: {safe_format_uuid(self.engine.thread_uuid)}"}
             )
@@ -158,11 +181,18 @@ class ChatInterface:
                 # Handle commands
                 if message.startswith("/"):
                     if message == "/back":
+                        # Finalize and save the work done in this thread.
+                        privacy = "private" if self.engine.agent_uuid else "public"
+                        self.engine.finalize_and_save_thread(privacy=privacy)
+                        console.print("[green]✅ Thread finalized and saved.[/]")
+                        # Reset the engine's active thread so a new one starts next time.
+                        self.engine.thread_uuid = None
                         break
                     elif message == "/new":
                         privacy = "private" if self.engine.agent_uuid else "public"
                         self.engine.finalize_and_save_thread(privacy=privacy)
                         self.engine.start_new_thread(privacy=privacy)
+                        self.conversation_history.clear()  # <--- ADD THIS LINE
                         self.conversation_history.append(
                             {"sender": "system", "message": f"Started new thread: {safe_format_uuid(self.engine.thread_uuid)}"}
                         )

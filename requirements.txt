@@ -2,6 +2,7 @@
 
 # Core dependencies
 numpy>=1.24.0,<2.0.0
+scipy>=1.10.0  # Required for Numba linear algebra operations
 cryptography>=41.0.0,<42.0.0
 rich
 emoji>=2.0.0

@@ -178,7 +178,8 @@ def _aes_encrypt(key: bytes, data: bytes) -> bytes:
     nonce = os.urandom(12)
     cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
     enc = cipher.encryptor()
-    return nonce + enc.tag + (enc.update(data) + enc.finalize())
+    ciphertext = enc.update(data) + enc.finalize()
+    return nonce + enc.tag + ciphertext
 
 
 def _aes_decrypt(key: bytes, blob: bytes) -> bytes:

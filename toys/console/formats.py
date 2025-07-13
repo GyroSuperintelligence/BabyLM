@@ -232,17 +232,14 @@ class FormatViewer:
     def activate_format(self, format_uuid: str) -> None:
         """Set a format as the active format."""
         try:
-            # This would require modifying the engine to change formats
-            # For now, just show a message
+            self.engine.format_uuid = format_uuid
             console.print(Panel(
-                f"[yellow]Format activation not implemented yet.\n"
-                f"Current active format: {self.engine.format_uuid[:8]}...\n"
-                f"Requested format: {format_uuid[:8]}...[/yellow]",
-                title="⚠️ Not Implemented",
-                border_style="yellow"
+                f"[green]✅ Activated format: {format_uuid[:8]}...[/green]\n"
+                f"New chat sessions will now use this format.",
+                title="✅ Success",
+                border_style="green"
             ))
             questionary.press_any_key_to_continue().ask()
-            
         except Exception as e:
             handle_error(console, "Failed to activate format", e)
     

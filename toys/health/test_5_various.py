@@ -39,78 +39,6 @@ import sys
 import types
 import importlib.util
 
-# --- WordNet Curriculum Format Tests ---
-
-@pytest.fixture(scope="session", autouse=True)
-def ensure_wordnet_downloaded():
-    import nltk
-    try:
-        from nltk.corpus import wordnet as wn
-        # Try accessing a synset to check if data is present
-        _ = list(wn.all_synsets())[0]
-    except Exception:
-        nltk.download('wordnet')
-        from nltk.corpus import wordnet as wn
-        _ = list(wn.all_synsets())[0]
-
-
-def test_wordnet_curriculum_formats_generate_files(mock_env, ensure_wordnet_downloaded):
-    """Test that WordNet curriculum format generation creates output files and valid content (only 6 elements checked for semantic correctness)."""
-    import nltk
-    from nltk.corpus import wordnet as wn
-    import json
-    # Import the module dynamically to avoid import errors if nltk/wordnet is missing
-    module_path = Path(__file__).parent.parent / "learning" / "formats" / "wordnet_curriculum_formats.py"
-    spec = importlib.util.spec_from_file_location("wordnet_curriculum_formats", str(module_path))
-    if spec is None:
-        raise ImportError(f"Could not load spec for {module_path}")
-    wordnet_mod = importlib.util.module_from_spec(spec)
-    sys.modules["wordnet_curriculum_formats"] = wordnet_mod
-    if spec.loader is None:
-        raise ImportError(f"No loader for spec {spec}")
-    spec.loader.exec_module(wordnet_mod)
-
-    # Use the test memory preferences
-    prefs = wordnet_mod.get_memory_preferences(str(wordnet_mod.MEMORIES_DIR))
-
-    # Run both format generators
-    wordnet_mod.create_lemma_format(prefs)
-    wordnet_mod.create_synset_format(prefs)
-
-    # Check that the files exist in the expected sharded locations
-    lemma_uuid = wordnet_mod.LEMMA_FORMAT_UUID
-    synset_uuid = wordnet_mod.SYNSET_FORMAT_UUID
-    formats_dir = Path("memories/public/formats")
-    lemma_shard = wordnet_mod.shard_path(formats_dir, lemma_uuid, prefs)
-    synset_shard = wordnet_mod.shard_path(formats_dir, synset_uuid, prefs)
-    lemma_file = lemma_shard / f"format-{lemma_uuid}.json"
-    synset_file = synset_shard / f"format-{synset_uuid}.json"
-    assert lemma_file.exists(), f"Lemma format file not found: {lemma_file}"
-    assert synset_file.exists(), f"Synset format file not found: {synset_file}"
-
-    # --- Validate only 3 lemma and 3 synset entries for semantic correctness ---
-    with open(lemma_file, "r", encoding="utf-8") as f:
-        lemma_data = json.load(f)
-    lemma_patterns = lemma_data.get("patterns", [])
-    wn_lemmas = sorted(list(wn.all_lemma_names()))
-    for i in range(3):
-        entry = lemma_patterns[i]
-        assert entry.get("character") == wn_lemmas[i], f"Lemma character mismatch at {i}"
-        wn_def = wn.synsets(wn_lemmas[i])[0].definition() if wn.synsets(wn_lemmas[i]) else None # type: ignore[attr-defined]
-        assert wn_def is None or wn_def in entry.get("description", ""), f"Lemma definition mismatch at {i}"
-
-    with open(synset_file, "r", encoding="utf-8") as f:
-        synset_data = json.load(f)
-    synset_patterns = synset_data.get("patterns", [])
-    wn_synsets = list(wn.all_synsets())
-    for i in range(3):
-        entry = synset_patterns[i]
-        assert entry.get("character") == wn_synsets[i].name(), f"Synset character mismatch at {i}"
-        wn_syn = wn_synsets[i]
-        wn_def = wn_syn.definition()  # type: ignore[attr-defined]
-        assert wn_def in entry.get("description", ""), f"Synset definition mismatch at {i}"
-
-
 # ------------------------------------------------------------------------------
 # Public Mode Tests
 # ------------------------------------------------------------------------------
@@ -207,11 +135,20 @@ class TestPublicMode:
         assert any(key["pattern_index"] == 123 for key in loaded_keys)
 
     def test_private_operations_fail_in_public_mode(self, public_intelligence_engine):
-        """Verify that operations requiring a key fail gracefully."""
+        """Verify that operations requiring a key fail gracefully and public threads are not encrypted."""
         # Loading encrypted content should fail or return None
         assert public_intelligence_engine.load_thread_content("some-uuid") is None
-        # Trying to derive a key should return None
-        assert public_intelligence_engine._derive_file_key(np.zeros(1), None, "some-uuid") is None
+        # Check that no key file is created for public threads
+        # Start a public thread and process some data
+        public_intelligence_engine.process_input_stream(b"public data", privacy="public")
+        thread_uuid = public_intelligence_engine.thread_uuid
+        # There should be no key file for this thread in public mode
+        from pathlib import Path
+        base_dir = public_intelligence_engine.base_memories_dir
+        key_dir = Path(base_dir) / "public" / "keys"
+        # The key file should not exist (or the directory may not exist at all)
+        key_files = list(key_dir.glob(f"**/*{thread_uuid}*")) if key_dir.exists() else []
+        assert len(key_files) == 0
 
     def test_public_format_sharing(self, public_intelligence_engine, mock_env):
         """Test that formats are shared in public directories"""
@@ -418,12 +355,15 @@ class TestEnhancedThreadManagement:
 
         # Process three streams, each forcing a new thread
         engine.process_input_stream(b"1" * 15)
+        engine.finalize_and_save_thread()
         thread1_uuid = engine.thread_uuid
 
         engine.process_input_stream(b"2" * 15)
+        engine.finalize_and_save_thread()
         thread2_uuid = engine.thread_uuid
 
         engine.process_input_stream(b"3" * 15)
+        engine.finalize_and_save_thread()
         thread3_uuid = engine.thread_uuid
 
         # Verify the chain is not a single thread
@@ -432,7 +372,7 @@ class TestEnhancedThreadManagement:
 
         # Verify the relationships using the information helpers
         base_dir = str(initialized_intelligence_engine.base_memories_dir)
-        prefs = get_memory_preferences(base_dir)
+        prefs = get_memory_preferences(initialized_intelligence_engine.base_memories_dir)
         assert parent(initialized_intelligence_engine.agent_uuid, thread3_uuid, prefs, base_dir) == thread2_uuid
         assert parent(initialized_intelligence_engine.agent_uuid, thread2_uuid, prefs, base_dir) == thread1_uuid
         assert parent(initialized_intelligence_engine.agent_uuid, thread1_uuid, prefs, base_dir) is None

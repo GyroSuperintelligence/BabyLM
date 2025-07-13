@@ -152,6 +152,7 @@ class TestIntelligence:
         patterns[pattern_index]["last_cycle"] = 5
 
         # Update learning state with the new signature
+        engine.thread_uuid = "test-thread-uuid"  # Ensure thread_uuid is set
         engine.update_learning_state(source_byte=100, key_index=pattern_index, resonance=0.5, event_type="INPUT")
 
         # Verify pattern updates

@@ -222,7 +222,7 @@ class IntelligenceEngine:
                 "first_cycle": None,
                 "last_cycle": None,
                 "gyration_feature": self.inference_engine.gyration_features[i],
-                "confidence": 0.0,
+                "confidence": 0.001,  # Bootstrap confidence for all patterns
             }
             patterns.append(pattern)
 
@@ -542,13 +542,20 @@ class IntelligenceEngine:
             if hasattr(output_byte, "item"):
                 output_byte = output_byte.item()
             return int(output_byte), int(selected_pattern)
+
         active_format = self.formats.get(self.format_uuid)
         if not active_format:
+            # No active format, fall back to physical resonance
             selected_pattern = candidate_indices[0]
             output_byte = self.inference_engine.G[selected_pattern]
             if hasattr(output_byte, "item"):
                 output_byte = output_byte.item()
             return int(output_byte), int(selected_pattern)
+
+        # Define weights for how much to care about physics vs. semantics
+        # Let's start by valuing them equally.
+        PHYSICS_WEIGHT = 0.5
+        SEMANTICS_WEIGHT = 0.5
 
         best_candidate_index = -1
         max_combined_score = -1.0
@@ -557,18 +564,16 @@ class IntelligenceEngine:
             # Physical Score: How good is the physical match? (0 to 1)
             physical_score = 1.0 - (resonances[index] / np.pi)
 
-            # Semantic Score: How meaningful is this pattern, based on long-term learning?
-            # We use the pattern's learned confidence from the format metadata.
+            # Semantic Score: How meaningful is this pattern?
+            semantic_score = 0.0  # Default to 0
             pattern_meta = active_format.get("patterns", [])[index]
-            # A pattern is only meaningful if it has an assigned character and some confidence.
             if pattern_meta.get("character") is not None:
+                # Confidence is the learned semantic value
                 semantic_score = pattern_meta.get("confidence", 0.0)
-            else:
-                semantic_score = 0.0  # No character mapping means no semantic value.
 
-            # Combined Score: A pattern is a great choice if it is both
-            # physically resonant AND semantically meaningful.
-            combined_score = physical_score * semantic_score
+            # A pattern is a great choice if it is EITHER physically resonant OR semantically meaningful.
+            # Use a weighted sum instead of a product.
+            combined_score = (PHYSICS_WEIGHT * physical_score) + (SEMANTICS_WEIGHT * semantic_score)
 
             if combined_score > max_combined_score:
                 max_combined_score = combined_score
@@ -585,7 +590,7 @@ class IntelligenceEngine:
 
         selected_pattern = best_candidate_index
 
-        # 3. Get the final output byte for the winning pattern.
+        # Generate the output byte from the selected pattern
         output_byte = self.inference_engine.G[selected_pattern]
         if hasattr(output_byte, "item"):
             output_byte = output_byte.item()
@@ -619,7 +624,7 @@ class IntelligenceEngine:
                 # Update confidence as a moving average of resonance
                 current_confidence = pattern_meta.get("confidence", 0.0)
                 new_event_confidence = 1.0 - (resonance / np.pi)
-                alpha = 0.01
+                alpha = 0.2  # Increased from 0.01 to 0.2 for faster learning
                 pattern_meta["confidence"] = (1 - alpha) * current_confidence + alpha * new_event_confidence
 
         # The GeneKey is a universal record of the physical event.
@@ -1024,6 +1029,7 @@ class IntelligenceEngine:
                 thread_detail = {
                     "thread_uuid": thread_uuid,
                     "thread_name": meta.get("thread_name"),
+                    "created_at": meta.get("created_at", ""),
                     "curriculum": meta.get("curriculum"),
                     "tags": meta.get("tags"),
                     "size_bytes": size,

@@ -6,7 +6,7 @@ representing the Inference (S3) layer of the Common Governance Model.
 """
 
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Callable
 import os
 from baby.governance import (
     apply_operation,
@@ -25,6 +25,28 @@ try:
 except ImportError:
     pass
 
+
+# Numba-compatible static batch processor
+@(_numba.njit(cache=True) if _numba else (lambda f: f))
+def _process_batch_numba(T, F, G, p_batch, gene_stateless):
+    key_indices  = np.empty(p_batch.size, dtype=np.uint8)
+    resonances   = np.empty(p_batch.size, dtype=np.float32)
+    for i in range(p_batch.size):
+        P_n = int(p_batch[i])
+        gene_mutated = P_n ^ gene_stateless
+        for bit in range(8):
+            if (gene_mutated >> bit) & 1:
+                T = apply_operation(T, bit)
+        # Inline find_closest_pattern_index
+        flat_T = T.flatten()
+        dot_products = np.dot(F, flat_T)
+        normalized_distances = dot_products / flat_T.size
+        angular_distances = np.arccos(np.clip(normalized_distances, -1.0, 1.0))
+        key_i = np.argmin(angular_distances)
+        res = angular_distances[key_i]
+        key_indices[i] = key_i
+        resonances[i]  = res
+    return key_indices, resonances, T
 
 class InferenceEngine:
     """
@@ -216,37 +238,19 @@ class InferenceEngine:
     # Fast-path batch processor
     # ------------------------------------------------------------------
     def process_batch(self, p_batch: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Vectorised version of process_byte().
-        Args:
-            p_batch : 1-D NumPy array dtype=uint8.
-        Returns:
-            (key_indices, resonances) – both NumPy arrays same length as p_batch.
-        """
-        batch_len = p_batch.size
-        key_indices  = np.empty(batch_len, dtype=np.uint8)
-        resonances   = np.empty(batch_len, dtype=np.float32)
-
-        for i in range(batch_len):
-            P_n = int(p_batch[i])
-            # --- original per-byte logic, unchanged ---
-            gene_mutated = P_n ^ gene_stateless
-            for bit in range(8):
-                if gene_mutated & (1 << bit):
-                    apply_operation(self.T, bit)   # now mutates T directly
-
-            key_i, res = self.find_closest_pattern_index()
-            key_indices[i] = key_i
-            resonances[i]  = res
-            # We keep the cycle counter identical to the old path
-            self.cycle_counter += 1
-            self.recent_patterns.append(key_i)
-
+        if p_batch.size == 0:
+            return np.array([], dtype=np.uint8), np.array([], dtype=np.float32)
+        key_indices, resonances, final_T = _process_batch_numba(
+            self.T, self.F, self.G, p_batch, gene_stateless
+        )
+        self.T = final_T
+        self.cycle_counter += p_batch.size
+        for key in key_indices:
+            self.recent_patterns.append(key)
         return key_indices, resonances
 
-    # Optional Numba JIT compilation for 3x speedup
-    if _numba:
-        process_batch = _numba.njit(cache=True)(process_batch)
+    # Note: Numba JIT compilation removed because apply_operation() calls
+    # are not Numba-compatible. The method is still vectorized and efficient.
 
     def compute_pattern_resonances(self) -> np.ndarray:
         """

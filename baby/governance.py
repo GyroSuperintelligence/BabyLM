@@ -9,6 +9,12 @@ It contains immutable constants and pure functions with no state.
 import numpy as np
 from typing import List, Tuple
 
+_numba = None
+try:
+    import numba as _numba
+except ImportError:
+    pass
+
 # 3.1.1 Governance Identity (Gene Com)
 _base = np.array([-1, 1], dtype=np.int8)
 gene_com = np.tile(_base, (3, 1))  # Shape: [3, 2]
@@ -26,15 +32,22 @@ ops = np.array([[0,7],[1,6],[2,5],[3,4]], np.int8)
 _L0, _LI, _FG, _BG = ops
 
 
+@(_numba.njit(cache=True) if _numba else (lambda f: f))
 def apply_operation(T: np.ndarray, bit_index: int) -> np.ndarray:
-    """In-place mutation – returns the same object for chaining."""
-    if bit_index in _LI:          # global inverse
-        T *= -1
-    elif bit_index in _FG:        # forward rows
-        T[[0, 2]] *= -1
-    elif bit_index in _BG:        # backward rows
-        T[[1, 3]] *= -1
-    return T                      # no copy, same API
+    """Apply a discrete operation to the tensor T based on the bit index. Returns a new tensor."""
+    T_new = T.copy()
+    if bit_index == 1 or bit_index == 6:  # LI
+        T_new *= -1
+    elif bit_index == 2 or bit_index == 5:  # FG
+        # Explicitly negate rows 0 and 2 for Forward Gyration (Numba-friendly)
+        T_new[0] *= -1
+        T_new[2] *= -1
+    elif bit_index == 3 or bit_index == 4:  # BG
+        # Explicitly negate rows 1 and 3 for Backward Gyration (Numba-friendly)
+        T_new[1] *= -1
+        T_new[3] *= -1
+    # No action needed for _L0 (identity)
+    return T_new
 
 
 def gyrodistance(T1: np.ndarray, T2: np.ndarray) -> float:

@@ -12,6 +12,10 @@ from rich.table import Table
 from rich.text import Text
 from rich.json import JSON
 
+import os
+import json
+from pathlib import Path
+
 from baby.intelligence import IntelligenceEngine
 from baby.information import load_gene_keys
 from toys.console.utils import create_header, handle_error, format_bytes
@@ -26,31 +30,14 @@ class ThreadManager:
         self.engine = engine
     
     def list_threads(self) -> List[Dict[str, Any]]:
-        """Get list of available threads."""
+        """Get list of available threads from the engine and sort them."""
         try:
             if not self.engine.agent_uuid:
                 return []
-            
             stats = self.engine.get_thread_statistics()
             thread_details = stats.get("thread_details", [])
-            
-            # Sort by creation date (most recent first)
-            for thread in thread_details:
-                try:
-                    metadata = self.engine.load_thread_metadata(thread["thread_uuid"])
-                    thread["created_at"] = metadata.get("created_at", "")
-                    thread["thread_name"] = metadata.get("thread_name")
-                    thread["curriculum"] = metadata.get("curriculum")
-                    thread["tags"] = metadata.get("tags", [])
-                except Exception:
-                    thread["created_at"] = ""
-                    thread["thread_name"] = None
-                    thread["curriculum"] = None
-                    thread["tags"] = []
-            
             thread_details.sort(key=lambda x: x.get("created_at", ""), reverse=True)
             return thread_details
-            
         except Exception as e:
             handle_error(console, "Failed to list threads", e)
             return []
@@ -80,62 +67,69 @@ class ThreadManager:
             
             size = format_bytes(thread["size_bytes"])
             children = str(thread["child_count"])
-            tags = ", ".join(thread.get("tags", [])[:2])  # Show first 2 tags
-            if len(thread.get("tags", [])) > 2:
+            tags_list = thread.get("tags") or []
+            tags = ", ".join(tags_list[:2])
+            if len(tags_list) > 2:
                 tags += "..."
             
             table.add_row(thread_id, thread_name, created_at, size, children, tags)
         
         return table
     
-    def view_thread_details(self, thread_uuid: str) -> None:
-        """Display detailed information about a thread."""
-        try:
-            console.clear()
-            console.print(create_header(f"🧵 Thread Details: {thread_uuid[:8]}..."))
-            
-            # Load metadata
-            metadata = self.engine.load_thread_metadata(thread_uuid)
-            
-            # Display metadata
-            metadata_text = f"""🆔 Thread UUID: {thread_uuid}
-📝 Name: {metadata.get('thread_name') or 'Unnamed'}
-👤 Agent UUID: {metadata.get('agent_uuid') or 'N/A'}
-👨‍👩‍👧‍👦 Parent UUID: {metadata.get('parent_uuid') or 'None'}
-🌳 Children: {len(metadata.get('children', []))}
-🎨 Format UUID: {metadata.get('format_uuid', 'N/A')}
-📚 Curriculum: {metadata.get('curriculum') or 'None'}
-🏷️  Tags: {', '.join(metadata.get('tags', []) or ['None'])}
-📅 Created: {metadata.get('created_at', 'Unknown')}
-🕒 Updated: {metadata.get('last_updated', 'Unknown')}
-📊 Size: {format_bytes(metadata.get('size_bytes', 0))}
-🔒 Privacy: {metadata.get('privacy', 'Unknown')}"""
-            
-            console.print(Panel(metadata_text, title="📋 Metadata", border_style="blue"))
-            
-            # Menu for detailed views
-            choice = questionary.select(
+    def display_thread_details(self, thread: dict) -> bool:
+        """Display thread details and offer actions. Returns True if user wants to resume chat."""
+        console.clear()
+        console.print(create_header(f"🧵 Thread Details: {thread['thread_uuid'][:8]}..."))
+        # Load metadata
+        metadata = self.engine.load_thread_metadata(thread["thread_uuid"])
+        # Display metadata
+        metadata_text = f"""🆔 Thread UUID: {thread['thread_uuid']}
+  📝 Name: {metadata.get('thread_name') or 'Unnamed'}
+  👤 Agent UUID: {metadata.get('agent_uuid') or 'N/A'}
+  👨‍👩‍👧‍👦 Parent UUID: {metadata.get('parent_uuid') or 'None'}
+  🌳 Children: {len(metadata.get('children', []))}
+  🎨 Format UUID: {metadata.get('format_uuid') or 'N/A'}
+  📚 Curriculum: {metadata.get('curriculum') or 'None'}
+  🏷️  Tags: {metadata.get('tags') or 'None'}
+  📅 Created: {metadata.get('created_at') or 'N/A'}
+  🕒 Updated: {metadata.get('last_updated') or 'N/A'}
+  📊 Size: {format_bytes(metadata.get('size_bytes', 0))}
+  🔒 Privacy: {metadata.get('privacy') or 'private'}
+"""
+        console.print(Panel(metadata_text, title="📋 Metadata", border_style="cyan"))
+        actions = [
+            "💬 View Thread Content",
+            "🧬 Gene Keys",
+            "🔄 Resume Chat in this Thread",
+            "🔙 Back to Thread List"
+        ]
+        while True:
+            action = questionary.select(
                 "What would you like to view?",
-                choices=[
-                    questionary.Choice("💬 Thread Content", "content"),
-                    questionary.Choice("🧬 Gene Keys", "genes"),
-                    questionary.Choice("📊 Statistics", "stats"),
-                    questionary.Choice("↩️ Resume Thread", "resume"),
-                    questionary.Choice("🔙 Back to List", "back"),
-                ]
+                choices=actions,
+                style=questionary.Style([
+                    ('question', 'fg:#ff0066 bold'),
+                    ('pointer', 'fg:#ff0066 bold'),
+                    ('choice', 'fg:#884444'),
+                    ('selected', 'fg:#cc5454 bold'),
+                ])
             ).ask()
-            
-            if choice == "content":
-                self.view_thread_content(thread_uuid)
-            elif choice == "genes":
-                self.view_gene_keys(thread_uuid)
-            elif choice == "stats":
-                self.view_thread_stats(thread_uuid)
-            elif choice == "resume":
-                self.resume_thread(thread_uuid)
-            
-        except Exception as e:
-            handle_error(console, "Failed to view thread details", e)
+            if action == "💬 View Thread Content":
+                console.clear()
+                self.view_thread_content(thread["thread_uuid"])
+                questionary.press_any_key_to_continue().ask()
+                console.clear()
+            elif action == "🧬 Gene Keys":
+                console.clear()
+                self.view_gene_keys(thread["thread_uuid"])
+                questionary.press_any_key_to_continue().ask()
+                console.clear()
+            elif action == "🔄 Resume Chat in this Thread":
+                privacy = "private" if self.engine.agent_uuid else "public"
+                self.engine.resume_thread(thread["thread_uuid"], privacy=privacy)
+                return True
+            elif action == "🔙 Back to Thread List":
+                return False
     
     def view_thread_content(self, thread_uuid: str) -> None:
         """Display thread conversation content."""
@@ -254,19 +248,36 @@ Chain Length: {len(thread_chain)}
         except Exception as e:
             handle_error(console, "Failed to view thread stats", e)
     
-    def resume_thread(self, thread_uuid: str) -> None:
-        """Resume an existing thread."""
+    def resume_thread(self, thread_uuid: str) -> bool:
+        """Resume an existing thread. Returns True if user wants to chat."""
         try:
+            # Load agent secret from preferences
+            baby_prefs_path = Path("baby/baby_preferences.json")
+            agent_secret = None
+            if baby_prefs_path.exists():
+                with open(baby_prefs_path, "r") as f:
+                    prefs = json.load(f)
+                agent_secret = prefs.get("agent_secret")
+            if not agent_secret:
+                console.print("[bold red]Error: Agent secret missing. Cannot resume thread.[/]")
+                return False
             privacy = "private" if self.engine.agent_uuid else "public"
             self.engine.resume_thread(thread_uuid, privacy=privacy)
+            # Defensive check: did resume succeed?
+            if self.engine.thread_uuid != thread_uuid:
+                console.print(f"[bold red]Failed to resume thread {thread_uuid[:8]}... It may be corrupted or the secret is incorrect.[/]")
+                return False
             console.print(f"[green]✅ Resumed thread {thread_uuid[:8]}...[/green]")
-            questionary.press_any_key_to_continue().ask()
-            
+            # Ask user to jump to chat
+            if questionary.confirm("Start chatting in this thread now?").ask():
+                return True
+            return False
         except Exception as e:
             handle_error(console, "Failed to resume thread", e)
+            return False
     
-    def run(self) -> None:
-        """Run the thread management interface."""
+    def run(self) -> bool:
+        """Main thread manager loop. Returns True if user wants to resume chat."""
         while True:
             console.clear()
             console.print(create_header("🧵 Thread Management"))
@@ -277,7 +288,7 @@ Chain Length: {len(thread_chain)}
                     border_style="yellow"
                 ))
                 questionary.press_any_key_to_continue().ask()
-                return
+                return False
             
             threads = self.list_threads()
             
@@ -287,31 +298,34 @@ Chain Length: {len(thread_chain)}
                     border_style="yellow"
                 ))
                 questionary.press_any_key_to_continue().ask()
-                return
+                return False
             
             # Display threads table
             table = self.display_threads_table(threads)
             console.print(Panel(table, title=f"📚 Available Threads ({len(threads)})", border_style="blue"))
             
             # Create choices for thread selection
-            choices = []
-            for thread in threads[:10]:  # Show max 10 in menu
-                thread_id = thread["thread_uuid"][:8]
-                thread_name = thread.get("thread_name") or "Unnamed"
-                size = format_bytes(thread["size_bytes"])
-                choices.append(questionary.Choice(
-                    f"{thread_id}... - {thread_name} ({size})",
-                    thread["thread_uuid"]
-                ))
-            
-            choices.append(questionary.Choice("🔙 Back to Main Menu", "back"))
-            
-            choice = questionary.select(
+            selected = questionary.select(
                 "Select a thread to view details:",
-                choices=choices
+                choices=[
+                    *[f"{t['thread_uuid'][:8]}... - {t.get('thread_name', 'Unnamed')} ({format_bytes(t['size_bytes'])})" for t in threads],
+                    "🔙 Back to Main Menu"
+                ],
+                style=questionary.Style([
+                    ('question', 'fg:#ff0066 bold'),
+                    ('pointer', 'fg:#ff0066 bold'),
+                    ('choice', 'fg:#884444'),
+                    ('selected', 'fg:#cc5454 bold'),
+                ])
             ).ask()
             
-            if choice is None or choice == "back":
-                break
+            if selected == "🔙 Back to Main Menu":
+                return False
             
-            self.view_thread_details(choice)
+            # Find the selected thread
+            idx = [f"{t['thread_uuid'][:8]}... - {t.get('thread_name', 'Unnamed')} ({format_bytes(t['size_bytes'])})" for t in threads].index(selected)
+            thread = threads[idx]
+            
+            # Show details and check if user wants to resume chat
+            if self.display_thread_details(thread):
+                return True

@@ -1,6 +1,1 @@
-{
-  "agent_secret": "4291da2f-87df-48f8-910f-6d94ba3255eb",
-  "log_level": "info",
-  "response_length": 100,
-  "learning_rate": 1.0
-}
+{"agent_secret": "64a1ecf92e04533eca4fb26982aa3618e5b93492fd823a1c9663122dcadf3753", "agent_name": "Basil"}

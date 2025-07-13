@@ -101,10 +101,16 @@ def initialized_intelligence_engine(mock_env):
 @pytest.fixture
 def inference_engine():
     """Mocks an InferenceEngine to isolate its behavior for S2/S4 tests."""
-    # This is useful when you want to test InformationEngine without running real tensor math
     with patch("baby.inference.InferenceEngine") as MockInferenceEngine:
         mock_engine = MockInferenceEngine.return_value
         mock_engine.process_byte.return_value = (42, 0.1)  # Default mock return
+        # Add a mock for process_batch that returns arrays of the correct shape
+        def mock_process_batch(p_batch):
+            n = len(p_batch)
+            return (np.full(n, 42, dtype=np.uint8), np.full(n, 0.1, dtype=np.float32))
+        mock_engine.process_batch.side_effect = mock_process_batch
+        # Set G to a uint8 array for keystream lookup
+        mock_engine.G = np.arange(256, dtype=np.uint8)
         yield mock_engine
 
 
