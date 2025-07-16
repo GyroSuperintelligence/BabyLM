@@ -74,6 +74,8 @@ coverage.xml
 *.cover
 .hypothesis/
 
+_baby_095_backup/
+
 toys/health/memories/
 toys/health/htmlcov/
 

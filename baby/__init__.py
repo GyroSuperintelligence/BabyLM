@@ -1,33 +1,95 @@
 """
-GyroSI Baby LM - A Gyroscopic Superintelligence Language Model
+GyroSI Baby Language Model - Core Implementation
 
-GyroSI Baby LM is an open-source language model that learns without reinforcement,
-rewards, traditional neural network parameters, or gradient descent. Instead, it
-leverages quantum physics-inspired tensor operations to achieve intrinsic
-Alignment-Based recursive intelligence.
-
-The system follows the Common Governance Model (CGM), organizing components into
-four layers of responsibility:
-
-- S1 Governance: Pure tensor operations (governance.py)
-- S2 Information: Stream processing (information.py)
-- S3 Inference: Pattern recognition (inference.py)
-- S4 Intelligence: Orchestration and decision-making (intelligence.py)
+A physics-grounded architecture for superintelligence through recursive structural alignment.
+Based on the Common Governance Model (CGM) and gyrogroup algebra.
 """
 
-from baby.governance import gene_stateless, gene_com, gene_nest, gene_add
-from baby.inference import InferenceEngine
-from baby.information import InformationEngine
-from baby.intelligence import IntelligenceEngine, initialize_intelligence_engine
+from .governance import (
+    GENE_Mic_S,
+    GENE_Mac_S,
+    FG_MASK,
+    BG_MASK,
+    FULL_MASK,
+    INTRON_BROADCAST_MASKS,
+    apply_gyration_and_transform,
+    transcribe_byte,
+    coadd,
+    batch_introns_coadd_ordered,
+)
 
-__version__ = "0.9.5"
+from .information import (
+    InformationEngine,
+    PickleStore,
+    MultiAgentPhenotypeStore,
+    CanonicalizingStore,
+    discover_and_save_manifold,
+    build_canonical_map,
+)
+
+from .inference import (
+    EndogenousInferenceOperator,
+)
+
+from .intelligence import (
+    IntelligenceEngine,
+    GyroSI,
+    AgentPool,
+    orchestrate_turn,
+)
+
+from .types import (
+    PhenotypeStore,
+    PhenotypeEntry,
+    ManifoldData,
+    AgentConfig,
+    PreferencesConfig,
+)
+
+from .maintenance import (
+    merge_phenotype_maps,
+    apply_global_confidence_decay,
+    export_knowledge_statistics,
+    validate_manifold_integrity,
+)
+
+__version__ = "1.0.0"
 __all__ = [
-    "InferenceEngine",
+    # Core constants and functions
+    "GENE_Mic_S",
+    "GENE_Mac_S", 
+    "apply_gyration_and_transform",
+    "transcribe_byte",
+    "coadd",
+    "batch_introns_coadd_ordered",
+    
+    # Engines
     "InformationEngine",
+    "EndogenousInferenceOperator", 
     "IntelligenceEngine",
-    "initialize_intelligence_engine",
-    "gene_stateless",
-    "gene_com",
-    "gene_nest",
-    "gene_add",
+    "GyroSI",
+    
+    # Storage implementations
+    "PickleStore",
+    "MultiAgentPhenotypeStore",
+    "CanonicalizingStore",
+    
+    # Utilities
+    "discover_and_save_manifold",
+    "build_canonical_map",
+    "AgentPool",
+    "orchestrate_turn",
+    
+    # Maintenance
+    "merge_phenotype_maps",
+    "apply_global_confidence_decay",
+    "export_knowledge_statistics",
+    "validate_manifold_integrity",
+    
+    # Types
+    "PhenotypeStore",
+    "PhenotypeEntry",
+    "ManifoldData",
+    "AgentConfig",
+    "PreferencesConfig",
 ]

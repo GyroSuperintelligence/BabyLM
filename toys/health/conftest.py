@@ -1,121 +1,276 @@
-# toys/health/conftest.py
+"""
+Shared pytest fixtures and configuration for GyroSI test suite.
+"""
 
 import os
+import shutil
 import json
-import numpy as np
+import tempfile
 import pytest
 from pathlib import Path
-from unittest.mock import patch
+from typing import Dict, Any
 
-from baby.governance import derive_canonical_patterns
-from baby.information import InformationEngine, assign_agent_uuid, shard_path, get_memory_preferences
-from baby.intelligence import initialize_intelligence_engine
+# Add the baby module to the Python path
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+from baby import (
+    discover_and_save_manifold,
+    build_canonical_map,
+    PickleStore,
+    MultiAgentPhenotypeStore,
+    GyroSI,
+    AgentPool,
+)
+from baby.types import ManifoldData, AgentConfig, PreferencesConfig
 
 
-# --- Golden Environment Fixture ---
+# Base temp directory for all tests
+BASE_TEMP_DIR = Path(__file__).parent / "memories"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_environment():
+    """Setup and teardown test environment."""
+    # Create base temp directory
+    BASE_TEMP_DIR.mkdir(exist_ok=True)
+    
+    yield
+    
+    # Cleanup after all tests (optional - can be disabled for debugging)
+    # shutil.rmtree(BASE_TEMP_DIR, ignore_errors=True)
+
+
 @pytest.fixture
-def mock_env(tmp_path):
-    """
-    Creates a temporary, self-contained 'toys/health/memories' and 'baby' environment,
-    changes the current working directory into it, and cleans up afterward.
-    This is the foundational fixture for all tests needing file I/O.
-    """
-    # Create the base directories
-    test_memories_dir = tmp_path / "toys/health/memories"
-    baby_dir = tmp_path / "baby"
-    (test_memories_dir / "public" / "masks").mkdir(parents=True, exist_ok=True)
-    (test_memories_dir / "public" / "formats").mkdir(parents=True, exist_ok=True)
-    (test_memories_dir / "public" / "threads").mkdir(parents=True, exist_ok=True)
-    (test_memories_dir / "public" / "keys").mkdir(parents=True, exist_ok=True)
-    (test_memories_dir / "private" / "agents").mkdir(parents=True, exist_ok=True)
-    baby_dir.mkdir(exist_ok=True)
+def temp_dir():
+    """Create a unique temporary directory for each test."""
+    test_dir = BASE_TEMP_DIR / f"test_{os.getpid()}_{id(object())}"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    
+    yield str(test_dir)
+    
+    # Cleanup
+    shutil.rmtree(test_dir, ignore_errors=True)
 
-    # Create default memory_preferences.json
-    mem_prefs = {
-        "sharding": {"width": 2, "max_files": 30000, "second_level": True},
-        "storage_config": {"max_thread_size_mb": 64, "encryption_algorithm": "AES-256-GCM"},
-        "format_config": {"default_cgm_version": "1.0.0", "max_character_label_length": 128},
+
+@pytest.fixture
+def manifold_data(temp_dir):
+    """Create and return test manifold data."""
+    manifold_path = os.path.join(temp_dir, "manifold", "genotype_map.json")
+    os.makedirs(os.path.dirname(manifold_path), exist_ok=True)
+    
+    # For testing, create a smaller mock manifold
+    # In real tests, you'd use discover_and_save_manifold
+    mock_manifold: ManifoldData = {
+        "schema_version": "1.0.0",
+        "genotype_map": {str(i): i for i in range(1000)},  # Mock 1000 states
+        "endogenous_modulus": 788_986,  # Keep the real constant
+        "manifold_diameter": 6,
+        "total_states": 788_986,
+        "build_timestamp": 1234567890.0
     }
-    with open(test_memories_dir / "memory_preferences.json", "w") as f:
-        json.dump(mem_prefs, f, indent=2)
-
-    # Create default mask files needed by InferenceEngine
-    patterns_array, _ = derive_canonical_patterns()
-    patterns_array.tofile(test_memories_dir / "public" / "masks" / "epigenome.dat")
-    genome_mask = np.arange(256, dtype=np.uint8)
-    genome_mask.tofile(test_memories_dir / "public" / "masks" / "genome.dat")
-
-    # Change the CWD to the temp path so 'toys/health/memories/...' paths work
-    original_cwd = Path.cwd()
-    os.chdir(tmp_path)
-
-    yield tmp_path  # The test runs here
-
-    # Teardown: Change back to the original directory
-    os.chdir(original_cwd)
-
-
-# --- Engine Fixtures (built on top of mock_env) ---
+    
+    with open(manifold_path, 'w') as f:
+        json.dump(mock_manifold, f)
+    
+    return manifold_path, mock_manifold
 
 
 @pytest.fixture
-def public_intelligence_engine(mock_env):
-    """Initializes an IntelligenceEngine in public/curation mode."""
-    base_memories_dir = str(mock_env / "toys/health/memories")
-    engine = initialize_intelligence_engine(agent_uuid=None, agent_secret=None, base_memories_dir=base_memories_dir)
-    assert engine.agent_uuid is None
-    assert engine.agent_secret is None
-    return engine
+def real_manifold(temp_dir):
+    """Create the real manifold (expensive - use sparingly)."""
+    manifold_path = os.path.join(temp_dir, "manifold", "genotype_map.json")
+    os.makedirs(os.path.dirname(manifold_path), exist_ok=True)
+    
+    # This is expensive but necessary for integration tests
+    discover_and_save_manifold(manifold_path)
+    
+    # Also build canonical map
+    canonical_path = os.path.join(temp_dir, "manifold", "canonical_map.json")
+    build_canonical_map(manifold_path, canonical_path)
+    
+    with open(manifold_path, 'r') as f:
+        manifold_data = json.load(f)
+    
+    return manifold_path, canonical_path, manifold_data
 
 
 @pytest.fixture
-def initialized_intelligence_engine(mock_env):
-    """Initializes an IntelligenceEngine in a predictable private-agent mode."""
-    agent_uuid = "11111111-1111-1111-1111-111111111111"
-    agent_secret = "test-secret-for-fixture"
-    base_memories_dir = str(mock_env / "toys/health/memories")
-    # Create baby_preferences.json with the secret to simulate a user's setup
-    with open("baby/baby_preferences.json", "w") as f:
-        json.dump({"agent_secret": agent_secret}, f)
-    # Ensure the agent's directory structure exists *before* initializing the engine
-    prefs = get_memory_preferences(base_memories_dir)
-    assign_agent_uuid(agent_uuid, base_memories_dir=base_memories_dir, prefs=prefs)
-    # Initialize the engine explicitly for this agent
-    engine = initialize_intelligence_engine(
-        agent_uuid=agent_uuid, agent_secret=agent_secret, base_memories_dir=base_memories_dir
-    )
-    # Assertions to ensure the fixture is set up correctly
-    assert engine.agent_uuid == agent_uuid
-    assert engine.agent_secret == agent_secret
-    private_dir = Path(base_memories_dir) / "private/agents"
-    prefs = get_memory_preferences(base_memories_dir)
-    agent_shard = shard_path(private_dir, engine.agent_uuid, prefs)
-    agent_dir = agent_shard / f"agent-{engine.agent_uuid}"
-    assert agent_dir.exists()
-    return engine
-
-
-# --- Simple Mocking Fixtures ---
+def pickle_store(temp_dir):
+    """Create a PickleStore instance."""
+    store_path = os.path.join(temp_dir, "knowledge.pkl.gz")
+    store = PickleStore(store_path)
+    yield store
+    store.close()
 
 
 @pytest.fixture
-def inference_engine():
-    """Mocks an InferenceEngine to isolate its behavior for S2/S4 tests."""
-    with patch("baby.inference.InferenceEngine") as MockInferenceEngine:
-        mock_engine = MockInferenceEngine.return_value
-        mock_engine.process_byte.return_value = (42, 0.1)  # Default mock return
-        # Add a mock for process_batch that returns arrays of the correct shape
-        def mock_process_batch(p_batch):
-            n = len(p_batch)
-            return (np.full(n, 42, dtype=np.uint8), np.full(n, 0.1, dtype=np.float32))
-        mock_engine.process_batch.side_effect = mock_process_batch
-        # Set G to a uint8 array for keystream lookup
-        mock_engine.G = np.arange(256, dtype=np.uint8)
-        yield mock_engine
+def multi_agent_store(temp_dir):
+    """Create a MultiAgentPhenotypeStore instance."""
+    public_path = os.path.join(temp_dir, "public", "knowledge.pkl.gz")
+    private_path = os.path.join(temp_dir, "private", "agent1", "knowledge.pkl.gz")
+    
+    # Create public knowledge
+    os.makedirs(os.path.dirname(public_path), exist_ok=True)
+    public_store = PickleStore(public_path)
+    public_store.put((0, 0), {"phenotype": "public", "confidence": 0.9})
+    public_store.close()
+    
+    store = MultiAgentPhenotypeStore(public_path, private_path)
+    yield store
+    store.close()
 
 
 @pytest.fixture
-def information_engine(mock_env):
-    """Provides a standard InformationEngine instance."""
-    base_memories_dir = str(mock_env / "toys/health/memories")
-    return InformationEngine(base_memories_dir=base_memories_dir)
+def agent_config(manifold_data, temp_dir) -> AgentConfig:
+    """Create a test agent configuration."""
+    manifold_path, _ = manifold_data
+    return {
+        "manifold_path": manifold_path,
+        "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
+        "enable_canonical_storage": False
+    }
+
+
+@pytest.fixture
+def gyrosi_agent(agent_config):
+    """Create a GyroSI agent instance."""
+    agent = GyroSI(agent_config)
+    yield agent
+    agent.close()
+
+
+@pytest.fixture
+def agent_pool(manifold_data, temp_dir):
+    """Create an agent pool."""
+    manifold_path, _ = manifold_data
+    public_knowledge = os.path.join(temp_dir, "public_knowledge.pkl.gz")
+    
+    # Create empty public knowledge
+    os.makedirs(os.path.dirname(public_knowledge), exist_ok=True)
+    store = PickleStore(public_knowledge)
+    store.close()
+    
+    pool = AgentPool(manifold_path, public_knowledge)
+    yield pool
+    pool.close_all()
+
+
+@pytest.fixture
+def preferences_config() -> PreferencesConfig:
+    """Create test preferences configuration."""
+    return {
+        "storage_backend": "pickle",
+        "compression_level": 6,
+        "max_file_size_mb": 100,
+        "enable_auto_decay": False,
+        "decay_interval_hours": 24,
+        "decay_factor": 0.999,
+        "confidence_threshold": 0.05,
+        "max_agents_in_memory": 10,
+        "agent_eviction_policy": "lru",
+        "agent_ttl_minutes": 60,
+        "encryption_enabled": False,
+        "enable_profiling": False,
+        "batch_size": 100,
+        "cache_size_mb": 10
+    }
+
+
+@pytest.fixture
+def sample_phenotype_entry():
+    """Create a sample phenotype entry for testing."""
+    return {
+        "phenotype": "A",
+        "memory_mask": 0b10101010,
+        "confidence": 0.75,
+        "context_signature": (100, 42),
+        "semantic_address": 12345,
+        "usage_count": 10,
+        "age_counter": 5,
+        "created_at": 1234567890.0,
+        "last_updated": 1234567890.0
+    }
+
+
+@pytest.fixture
+def mock_time(monkeypatch):
+    """Mock time.time() for deterministic tests."""
+    current_time = [1234567890.0]
+    
+    def mock_time_func():
+        return current_time[0]
+    
+    def advance_time(seconds):
+        current_time[0] += seconds
+    
+    monkeypatch.setattr("time.time", mock_time_func)
+    
+    # Return controller
+    class TimeController:
+        def advance(self, seconds):
+            advance_time(seconds)
+        
+        @property
+        def current(self):
+            return current_time[0]
+    
+    return TimeController()
+
+
+# Test data generators
+
+def generate_test_introns(count: int, seed: int = 42) -> list:
+    """Generate deterministic test introns."""
+    import random
+    random.seed(seed)
+    return [random.randint(0, 255) for _ in range(count)]
+
+
+def generate_test_bytes(text: str) -> bytes:
+    """Convert text to bytes with padding if needed."""
+    return text.encode('utf-8')
+
+
+# Assertion helpers
+
+def assert_phenotype_entry_valid(entry: Dict[str, Any]):
+    """Assert that a phenotype entry has all required fields."""
+    required_fields = [
+        "phenotype", "memory_mask", "confidence", 
+        "context_signature", "usage_count"
+    ]
+    for field in required_fields:
+        assert field in entry, f"Missing required field: {field}"
+    
+    assert isinstance(entry["phenotype"], str)
+    assert isinstance(entry["memory_mask"], int)
+    assert 0 <= entry["memory_mask"] <= 255
+    assert 0 <= entry["confidence"] <= 1.0
+    assert isinstance(entry["context_signature"], tuple)
+    assert len(entry["context_signature"]) == 2
+
+
+def assert_manifold_valid(manifold_data: Dict[str, Any]):
+    """Assert that manifold data is valid."""
+    assert manifold_data["endogenous_modulus"] == 788_986
+    assert manifold_data["manifold_diameter"] == 6
+    assert "genotype_map" in manifold_data
+    assert "schema_version" in manifold_data
+
+
+# Performance measurement helpers
+
+class Timer:
+    """Simple timer context manager for performance tests."""
+    def __init__(self):
+        self.elapsed = 0
+        
+    def __enter__(self):
+        import time
+        self.start = time.perf_counter()
+        return self
+        
+    def __exit__(self, *args):
+        import time
+        self.elapsed = time.perf_counter() - self.start

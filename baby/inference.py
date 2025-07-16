@@ -1,282 +1,310 @@
 """
-inference.py - S3 Pattern recognition for GyroSI Baby LM
+S3: Inference - Interpretation & Meaning Management
 
-This module implements the Inference Engine for pattern recognition and learning,
-representing the Inference (S3) layer of the Common Governance Model.
+This module provides the EndogenousInferenceOperator class responsible for
+converting physical state indices into semantic meanings and managing
+the learning process through gyrogroup coaddition.
 """
 
-import numpy as np
-from typing import List, Tuple, Callable
-import os
-from baby.governance import (
-    apply_operation,
-    gene_add,
-    gene_stateless,
-    derive_canonical_patterns,
-    classify_pattern_resonance,
-)
-from collections import deque
-from pathlib import Path
+import time
+import hashlib
+from typing import Dict, Any, Tuple
 
-# Optional numba import for JIT compilation (adds 2-3x speedup)
-_numba = None  # type: ignore
-try:
-    import numba as _numba  # type: ignore
-except ImportError:
-    pass
+from . import governance
+from .information import InformationEngine
+from .types import PhenotypeStore, PhenotypeEntry, ValidationReport
 
 
-# Numba-compatible static batch processor
-@(_numba.njit(cache=True) if _numba else (lambda f: f))
-def _process_batch_numba(T, F, G, p_batch, gene_stateless):
-    key_indices  = np.empty(p_batch.size, dtype=np.uint8)
-    resonances   = np.empty(p_batch.size, dtype=np.float32)
-    for i in range(p_batch.size):
-        P_n = int(p_batch[i])
-        gene_mutated = P_n ^ gene_stateless
-        for bit in range(8):
-            if (gene_mutated >> bit) & 1:
-                T = apply_operation(T, bit)
-        # Inline find_closest_pattern_index
-        flat_T = T.flatten()
-        dot_products = np.dot(F, flat_T)
-        normalized_distances = dot_products / flat_T.size
-        angular_distances = np.arccos(np.clip(normalized_distances, -1.0, 1.0))
-        key_i = np.argmin(angular_distances)
-        res = angular_distances[key_i]
-        key_indices[i] = key_i
-        resonances[i]  = res
-    return key_indices, resonances, T
-
-class InferenceEngine:
+class EndogenousInferenceOperator:
     """
-    Inference Engine for pattern recognition and learning
-
-    Manages the Epigenome tensor and performs pattern matching against
-    canonical patterns.
+    S3: Interpretation & Meaning Management.
+    
+    The regulatory center that converts physical states into semantic meanings.
+    Contains the endogenous inference operator that bridges physical and semantic worlds.
     """
-
-    def __init__(self, base_memories_dir: str = "memories"):
-        """Initialize the Inference Engine with zero-state tensor and load patterns"""
-        self.base_memories_dir = base_memories_dir
-        # The Epigenome Tensor (dynamic state)
-        self.T = np.zeros((4, 2, 3, 2), dtype=np.float32)
-
-        # Initialize cycle counter
-        self.cycle_counter = 0
-
-        # The Epigenome Mask (canonical patterns)
-        self.F, self.gyration_features = self._load_patterns()
-
-        # Load genome mask (output byte mappings)
-        self.G = self._load_genome_mask()
-
-        # Perform initial stateless mutation
-        self._initialize_epigenome()
-
-        # Track recent pattern indices (up to 20)
-        self.recent_patterns = deque(maxlen=20)
-
-        # Add distance cache and hit/miss counters
-        self._distance_cache = {}
-        self._cache_hits = 0
-        self._cache_misses = 0
-
-    def _load_patterns(self) -> Tuple[np.ndarray, List[str]]:
+    
+    def __init__(self, s2_engine: InformationEngine, phenotype_store: PhenotypeStore):
         """
-        Load canonical patterns from file or generate if not present.
-
-        For this 48KB file, a direct read with np.fromfile is the most
-        performant and robust method. Memory-mapping would add unnecessary
-        overhead and complexity.
-
-        Returns:
-            Tuple containing:
-            - patterns: Array of shape [256, 48] (read-only)
-            - gyration_features: List of 256 class labels
-        """
-        pattern_file = str(Path(self.base_memories_dir) / "public/masks/epigenome.dat")
-
-        # Create directories if they don't exist
-        os.makedirs(os.path.dirname(pattern_file), exist_ok=True)
-
-        try:
-            # Try to load the entire 48KB patterns file directly into memory.
-            patterns = np.fromfile(pattern_file, dtype=np.float32)
-            # Explicitly validate the shape to protect against corrupted files.
-            if patterns.size != 256 * 48:
-                raise ValueError("Epigenome file is corrupted or has an incorrect size.")
-            patterns = patterns.reshape((256, 48))
-            # Mark the array as read-only to prevent accidental modification.
-            patterns.flags.writeable = False
-            # These are deterministic and cheap to regenerate.
-            gyration_features = [classify_pattern_resonance(i) for i in range(256)]
-            return patterns, gyration_features
-        except (FileNotFoundError, ValueError, IOError):
-            # This block is for first-time setup or if the file is corrupted.
-            print("Generating canonical patterns... This happens only once.")
-            patterns, gyration_features = derive_canonical_patterns()
-            # Save the newly generated patterns to file.
-            patterns.tofile(pattern_file)
-            # Mark the new in-memory array as read-only as well.
-            patterns.flags.writeable = False
-            return patterns, gyration_features
-
-    def _load_genome_mask(self) -> np.ndarray:
-        """
-        Load genome mask from file or generate if not present
-
-        Returns:
-            Array of 256 bytes mapping pattern indices to output bytes
-        """
-        genome_file = str(Path(self.base_memories_dir) / "public/masks/genome.dat")
-
-        # Create directories if they don't exist
-        os.makedirs(os.path.dirname(genome_file), exist_ok=True)
-
-        try:
-            # Try to load genome mask from file
-            genome_mask = np.fromfile(genome_file, dtype=np.uint8, count=256)
-
-            # Validate size
-            if genome_mask.size != 256:
-                raise ValueError("Invalid genome mask size")
-
-            return genome_mask
-
-        except (FileNotFoundError, ValueError, IOError):
-            # Generate identity mapping if file doesn't exist
-            genome_mask = np.arange(256, dtype=np.uint8)
-
-            # Save genome mask to file
-            genome_mask.tofile(genome_file)
-
-            return genome_mask
-
-    def _initialize_epigenome(self) -> None:
-        """
-        Initialize Epigenome tensor with one cycle of the stateless gene
-
-        This simulates one full inference cycle without user input,
-        establishing the initial state.
-        """
-        # Start with gene_add instead of zeros
-        self.T = gene_add.copy().astype(np.float32)
-
-        # Use the imported gene_stateless constant
-        gene_mutated = gene_stateless
-        for i in range(8):
-            if gene_mutated & (1 << i):
-                apply_operation(self.T, i)   # now mutates T directly
-        # Reset cycle counter after initialization
-        self.cycle_counter = 0
-
-    def find_closest_pattern_index(self) -> Tuple[int, float]:
-        """
-        Find index of canonical pattern closest to current tensor state
-
-        Returns:
-            Tuple[int, float]: (Index of closest matching pattern (0-255), resonance/gyrodistance)
-        """
-        # Create a hash of current tensor state
-        tensor_hash = hash(self.T.tobytes())
-
-        # Check cache first
-        if tensor_hash in self._distance_cache:
-            self._cache_hits += 1
-            return self._distance_cache[tensor_hash]
-
-        self._cache_misses += 1
-
-        # Flatten current tensor for comparison
-        flat_T = self.T.flatten()
-        # Vectorized calculation for all distances
-        dot_products = np.dot(self.F, flat_T)
-        normalized_distances = dot_products / flat_T.size
-        angular_distances = np.arccos(np.clip(normalized_distances, -1.0, 1.0))
-        closest_index = int(np.argmin(angular_distances))
-        min_distance = float(angular_distances[closest_index])
-
-        # Cache result (limit cache size)
-        if len(self._distance_cache) > 1000:
-            # Remove oldest entries (simple FIFO)
-            self._distance_cache = dict(list(self._distance_cache.items())[-500:])
-
-        self._distance_cache[tensor_hash] = (closest_index, min_distance)
-        return closest_index, min_distance
-
-    def process_byte(self, P_n: int) -> Tuple[int, float]:
-        """
-        Process a single input byte
-
+        Initialize inference operator with measurement engine and storage.
+        
         Args:
-            P_n: Input byte (0-255)
-
-        Returns:
-            Tuple[int, float]: (Index of the closest matching pattern (0-255), resonance/gyrodistance)
+            s2_engine: Information engine for state measurement
+            phenotype_store: Storage interface for phenotype data
         """
-        # 1. Compute gene_mutated = P_n ^ gene_stateless
-        gene_mutated = P_n ^ gene_stateless
+        self.s2 = s2_engine
+        self.store = phenotype_store
+        self.endogenous_modulus = self.s2.endogenous_modulus
 
-        # 2. Apply gyroscopic operations to tensor T
-        for i in range(8):
-            if gene_mutated & (1 << i):
-                apply_operation(self.T, i)   # now mutates T directly
+    def get_phenotype(self, state_int: int, intron: int) -> PhenotypeEntry:
+        """
+        Convert physical state identity to semantic meaning.
+        
+        Creates or retrieves the phenotype entry that represents the semantic
+        meaning of a specific physical state in a specific context.
+        
+        Args:
+            state_int: 48-bit integer representing physical state
+            intron: 8-bit context instruction
+            
+        Returns:
+            Phenotype entry with semantic information
+        """
+        # Get canonical index from S2 measurement engine
+        tensor_index = self.s2.get_index_from_state(state_int)
+        context_key = (tensor_index, intron)
+        
+        # Try to retrieve existing phenotype
+        phenotype_entry = self.store.get(context_key)
+        
+        if not phenotype_entry:
+            # Create new phenotype entry for unknown context
+            semantic_address = self._compute_semantic_address(context_key)
+            phenotype_entry = self._create_default_phenotype(context_key, semantic_address)
+            self.store.put(context_key, phenotype_entry)
+        
+        return phenotype_entry
 
-        # 3. Find matching canonical pattern and resonance
-        key_index, resonance = self.find_closest_pattern_index()
+    def learn(self, phenotype_entry: PhenotypeEntry, intron: int) -> None:
+        """
+        Update memory via true gyrogroup coaddition.
+        
+        This is where all learning occurs in the GyroSI system. Uses the
+        path-dependent coaddition operation to accumulate experience.
+        
+        Args:
+            phenotype_entry: Entry to update with new experience
+            intron: Learning signal to integrate
+        """
+        old_mask = phenotype_entry['memory_mask']
+        
+        # Use S1's true gyrogroup coaddition
+        new_mask = governance.coadd(old_mask, intron)
+        
+        # Only update if learning actually occurred
+        if new_mask != old_mask:
+            phenotype_entry['memory_mask'] = new_mask
+            phenotype_entry['usage_count'] += 1
+            phenotype_entry['last_updated'] = time.time()
+            
+            # Periodic confidence boost for frequently used entries
+            if phenotype_entry['usage_count'] % 1000 == 0:
+                phenotype_entry['age_counter'] = min(255, phenotype_entry['age_counter'] + 1)
+                phenotype_entry['confidence'] = min(1.0, phenotype_entry['confidence'] * 1.1)
+            
+            # Persist the updated entry
+            self.store.put(phenotype_entry['context_signature'], phenotype_entry)
 
-        # Track recent patterns
-        self.recent_patterns.append(key_index)
-
-        # 4. Increment cycle counter
-        self.cycle_counter += 1
-
-        return key_index, resonance
-
-    # ------------------------------------------------------------------
-    # Fast-path batch processor
-    # ------------------------------------------------------------------
-    def process_batch(self, p_batch: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        if p_batch.size == 0:
-            return np.array([], dtype=np.uint8), np.array([], dtype=np.float32)
-        key_indices, resonances, final_T = _process_batch_numba(
-            self.T, self.F, self.G, p_batch, gene_stateless
+    def validate_knowledge_integrity(self) -> ValidationReport:
+        """
+        Validates the integrity of the knowledge base.
+        
+        Returns:
+            Report with integrity statistics
+        """
+        total_entries = 0
+        confidence_sum = 0.0
+        
+        # Direct access for stores that support it
+        if hasattr(self.store, 'data'):
+            for entry in self.store.data.values():
+                total_entries += 1
+                confidence_sum += entry.get('confidence', 0.0)
+        
+        return ValidationReport(
+            total_entries=total_entries,
+            average_confidence=confidence_sum / total_entries if total_entries > 0 else 0,
+            store_type=type(self.store).__name__
         )
-        self.T = final_T
-        self.cycle_counter += p_batch.size
-        for key in key_indices:
-            self.recent_patterns.append(key)
-        return key_indices, resonances
 
-    # Note: Numba JIT compilation removed because apply_operation() calls
-    # are not Numba-compatible. The method is still vectorized and efficient.
-
-    def compute_pattern_resonances(self) -> np.ndarray:
+    def apply_confidence_decay(
+        self, 
+        decay_factor: float = 0.999, 
+        age_threshold: int = 100,
+        time_threshold_days: float = 30.0
+    ) -> ValidationReport:
         """
-        Compute resonance values between current tensor and all patterns
-
-        Returns:
-            np.ndarray: Array of 256 resonance values (distances) between current tensor and each canonical pattern
-        """
-        flat_T = self.T.flatten()
-        dot_products = np.dot(self.F, flat_T)
-        normalized_distances = dot_products / flat_T.size
-        angular_distances = np.arccos(np.clip(normalized_distances, -1.0, 1.0))
-        return angular_distances
-
-    def tensor_to_output_byte(self) -> int:
-        """
-        Convert a tensor to a single output byte by thresholding and packing bits.
-
+        Applies temporal decay to aging knowledge entries.
+        
+        Fixed: Now uses more reasonable decay logic based on maximum of
+        age counter and time-based aging, not their sum.
+        
         Args:
-            tensor (np.ndarray): The input tensor to convert.
-
+            decay_factor: Multiplicative decay (0.999 = 0.1% decay per unit)
+            age_threshold: Minimum age counter to trigger decay
+            time_threshold_days: Days without update to trigger decay
+            
         Returns:
-            int: The resulting output byte as an integer.
+            Report with number of modified entries
         """
-        key_index, _ = self.find_closest_pattern_index()
-        output_byte = self.G[key_index]
-        if hasattr(output_byte, "item"):
-            return int(output_byte.item())
-        return int(output_byte)
+        if not hasattr(self.store, 'data'):
+            raise NotImplementedError(
+                "Decay only supported for stores with direct data access"
+            )
+        
+        modified_count = 0
+        current_time = time.time()
+        
+        for entry in self.store.data.values():
+            age_counter = entry.get('age_counter', 0)
+            last_updated = entry.get('last_updated', current_time)
+            
+            # Calculate time-based aging
+            time_since_update = current_time - last_updated
+            days_since_update = time_since_update / (24 * 3600)
+            
+            # Use maximum of the two aging factors, not sum
+            age_factor = max(
+                age_counter - age_threshold if age_counter > age_threshold else 0,
+                days_since_update - time_threshold_days if days_since_update > time_threshold_days else 0
+            )
+            
+            if age_factor > 0:
+                # Apply decay to memory mask (probabilistically clear bits)
+                old_mask = entry['memory_mask']
+                # Smooth decay based on age factor
+                decay_strength = decay_factor ** age_factor
+                decay_mask = int(255 * decay_strength)
+                entry['memory_mask'] = old_mask & decay_mask
+                
+                # Apply confidence decay
+                entry['confidence'] *= decay_strength
+                
+                # Prevent complete confidence loss
+                entry['confidence'] = max(0.01, entry['confidence'])
+                
+                modified_count += 1
+        
+        # Persist changes if store supports it
+        if modified_count > 0 and hasattr(self.store, '_save'):
+            self.store._save()
+        
+        return ValidationReport(
+            total_entries=len(self.store.data) if hasattr(self.store, 'data') else 0,
+            average_confidence=0.0,  # Would need full recalculation
+            store_type=type(self.store).__name__,
+            modified_entries=modified_count
+        )
+
+    def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
+        """
+        Remove entries below confidence threshold.
+        
+        Args:
+            confidence_threshold: Minimum confidence to retain
+            
+        Returns:
+            Number of entries removed
+        """
+        if not hasattr(self.store, 'data'):
+            raise NotImplementedError(
+                "Pruning only supported for stores with direct data access"
+            )
+        
+        keys_to_remove = []
+        
+        for key, entry in self.store.data.items():
+            if entry.get('confidence', 1.0) < confidence_threshold:
+                keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            del self.store.data[key]
+        
+        if keys_to_remove and hasattr(self.store, '_save'):
+            self.store._save()
+        
+        return len(keys_to_remove)
+
+    def _compute_semantic_address(self, context_key: Tuple[int, int]) -> int:
+        """
+        Compute deterministic semantic address for context.
+        
+        Uses hash-based mapping to endogenous modulus for consistent
+        address assignment across restarts.
+        
+        Args:
+            context_key: (tensor_index, intron) tuple
+            
+        Returns:
+            Semantic address within endogenous modulus
+        """
+        # Create deterministic hash of context
+        context_bytes = f"{context_key[0]}:{context_key[1]}".encode('utf-8')
+        hash_digest = hashlib.sha256(context_bytes).digest()
+        
+        # Map to endogenous modulus
+        hash_int = int.from_bytes(hash_digest[:8], 'big')
+        return hash_int % self.endogenous_modulus
+
+    def _create_default_phenotype(
+        self, 
+        context_key: Tuple[int, int], 
+        semantic_address: int
+    ) -> PhenotypeEntry:
+        """
+        Create default phenotype entry for unknown context.
+        
+        Args:
+            context_key: (tensor_index, intron) tuple
+            semantic_address: Computed semantic address
+            
+        Returns:
+            Initialized phenotype entry
+        """
+        current_time = time.time()
+        
+        return PhenotypeEntry(
+            phenotype="?",  # Unknown meaning initially
+            memory_mask=0,  # No learned associations yet
+            confidence=0.1,  # Low initial confidence
+            context_signature=context_key,
+            semantic_address=semantic_address,
+            usage_count=0,
+            age_counter=0,
+            created_at=current_time,
+            last_updated=current_time
+        )
+
+    def get_knowledge_statistics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive knowledge base statistics.
+        
+        Returns:
+            Dictionary with various statistics
+        """
+        if not hasattr(self.store, 'data'):
+            return {"error": "Statistics not available for this store type"}
+        
+        entries = list(self.store.data.values())
+        
+        if not entries:
+            return {
+                "total_entries": 0,
+                "average_confidence": 0.0,
+                "memory_utilization": 0.0,
+                "age_distribution": {}
+            }
+        
+        confidences = [e.get('confidence', 0.0) for e in entries]
+        memory_masks = [e.get('memory_mask', 0) for e in entries]
+        age_counters = [e.get('age_counter', 0) for e in entries]
+        
+        # Calculate memory utilization (average bits set in masks)
+        total_bits = sum(bin(mask).count('1') for mask in memory_masks)
+        max_possible_bits = len(memory_masks) * 8  # 8 bits per mask
+        memory_utilization = total_bits / max_possible_bits if max_possible_bits > 0 else 0
+        
+        # Age distribution
+        age_distribution = {}
+        for age in age_counters:
+            age_bucket = (age // 10) * 10  # Group by decades
+            age_distribution[age_bucket] = age_distribution.get(age_bucket, 0) + 1
+        
+        return {
+            "total_entries": len(entries),
+            "average_confidence": sum(confidences) / len(confidences),
+            "median_confidence": sorted(confidences)[len(confidences) // 2],
+            "memory_utilization": memory_utilization,
+            "age_distribution": age_distribution,
+            "high_confidence_entries": sum(1 for c in confidences if c > 0.8),
+            "low_confidence_entries": sum(1 for c in confidences if c < 0.2)
+        }

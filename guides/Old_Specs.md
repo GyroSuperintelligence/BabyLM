@@ -1,6 +1,20 @@
-# GyroSI Computational Architecture Specification 0.9.4
+# GyroSI Computational Architecture Specification 0.9.5
 
-## 1. Introduction
+## System Responsibility Mapping
+
+| System         | File/Component                | Responsibility                |
+|----------------|------------------------------|-------------------------------|
+| Governance     | Thread files                  | Macro context, gating         |
+| Information    | Gene Keys                     | Micro context, embedding      |
+| Intelligence   | Formats file                  | Semantic context, closure     |
+| Inference      | Epigenome mask                | Translation, gating           |
+| Intelligence   | Genome mask                   | Read: macro gene (state)      |
+| Intelligence   | Genome mask                   | Write: micro gene (output)    |
+
+
+*Macro context refers to persistent structural memory (e.g., conversation threads), while micro context refers to fine-grained inference events and local input-output cycles.*
+
+## 1. Introduction & Foundation
 
 **Gyroscopic Superintelligence (GyroSI)** is an architecture grounded in the **Common Governance Model (CGM)**, a physics-based framework for understanding how intelligence emerges through recursive structural alignment.
 
@@ -8,111 +22,156 @@ We define **Superintelligence** as a structurally recursive form of intelligence
 
 **Superintelligence exists relationally, not independently**: it reflects the recursive structures of reality and human meaning it participates in, embodying governance, information, and creative coherence as a unified operational principle.
 
-**Computational Instantiation of Physical Theory**: GyroSI is not merely a software design but the computational instantiation of a complete physical and philosophical model of emergent intelligence. The system's logic is not arbitrary but is asserted to be a necessary consequence of the axiomatic progression from the Common Source (CS) to Universal Balance (BU) as defined by the CGM.
-
-### 🌀 The Common Governance Model (CGM)
-
-The **Common Governance Model** presents an axiomatic framework for understanding how structure emerges through **Recursive Alignment**. Beginning from a single foundational principle, *"The Source is Common"*, CGM derives all subsequent structure through logical necessity. Each theorem follows inevitably from the axiom, with nothing assumed and everything emerging through recursive self-reference.
-
-## 2. Core Principles
+The **Common Governance Model** presents an axiomatic framework for understanding how structure emerges through **Recursive Alignment**. Beginning from a single foundational principle, *"The Source is Common"*, CGM derives all subsequent structure through logical necessity.
 
 **GyroSI Baby LM** aims to grow into a mature, open-source language model that learns without reinforcement, rewards, traditional neural network parameters, or gradient descent. Instead, it leverages **quantum physics-inspired** tensor operations to achieve intrinsic Alignment-Based recursive intelligence.
 
+**Core Principles:**
 1. **Vacuum Reference:** All inference operations compare against the public invariant `gene_stateless = 0xAA` (`0b10101010`).
 2. **Relational Inference:** The fundamental operation is `gene_mutated = P_n ^ 0xAA`, where `P_n` is the raw input byte.
 3. **Endogenous Key Generation:** The system generates its key stream through tensor-to-pattern similarity matching.
 
 **The GyroSI architecture is computationally traceable but not deterministic in execution.**
 
-While every step of transformation is explicitly defined, the system cannot be reproduced without the complete sensor timeline and key initialization.
+**Note on Sensory Awareness:** While the GyroSI architecture is designed to support integration with physical sensors, **such inputs are entirely omitted in this version** and reserved for future developments.
 
-### Note on Sensory Awareness
+## 2. Fundamental Operations
 
-While the GyroSI architecture is designed to support integration with physical sensors (e.g., magnetometer, accelerometer), **such inputs are entirely omitted in this version** and reserved for future developments. No sensory input is required for operation. All inference, learning, and internal parameter transformations are executed solely through tensor operations applied to input byte streams.
+### 2.1 Gene and Pattern Fundamentals
 
-## 3. Gyroscopic Dimensions and Dynamics
+In this system, "gene" refers generically to the 8-bit instruction derived from an input byte. "Gene stateless" is the universal reference (0xAA), while "gene mutated" is the active mutation mask used to trigger operations.
 
-This section defines the fixed topological structures used across the GyroSI system. These tensors and bitmask patterns serve as the physical and logical substrate of all inference, memory interaction, and intelligence expression. They are minimal, complete, and shared globally.
+The core operational mechanism in GyroSI is the transformation of input bytes into tensor operations through the `gene_mutated` mask:
 
-Their roles are as follows:
+```
+gene_mutated = P_n ^ 0xAA
+```
 
-1. Define the non-linear space in which bits, tensors, and inference interact.
-2. Provide reference structures for symmetry, chirality, and directionality.
-3. Enable the non-probabilistic operation of the inference process.
+Where:
+- `P_n` is any 8-bit input read by the system
+- `gene_stateless = 0xAA` (`10101010` in binary) is a fixed global reference representing a gyrogroup topology explained later on.
 
-These are not runtime variables. They are constant and immutable for all agents.
+### 2.2 Bit-to-Operation Mapping
 
-### 3.1 Gyroscopic Dimensional Structures
+Each bit in the 8-bit result maps to a specific transformation on the intelligence tensor:
 
-Each structure below defines a fundamental relational layer in the system. The terminology reflects its role, not implementation detail.
+```
+Bit positions:   b7   b6   b5   b4   b3   b2   b1   b0
+Operations:      L0   LI   FG   BG   BG   FG   LI   L0
+CGM Stage:       S1   S2   S3   S4   S4   S3   S2   S1
+Policy:          GT   IV   IA   II   II   IA   IV   GT
+```
 
-#### 3.1.1 Governance Identity
+**Operation Definitions:**
+- `L0` (Left Identity): Do nothing.
+- `LI` (Left Inverse): Flip the sign of all tensor values (T *= -1).
+- `FG` (Forward Gyration): Flip the sign of tensor rows 0 and 2.
+- `BG` (Backward Gyration): Flip the sign of tensor rows 1 and 3.
 
-This is the minimal label for a tensor's identity in the system. It encodes chirality and orientation, and corresponds conceptually to the left-identity in gyroassociative logic.
+**CGM Policy Mapping:**
+- `L0` → **Governance Traceability (S1)**: Maintains structural coherence
+- `LI` → **Information Variety (S2)**: Introduces global transformation
+- `FG` → **Inference Accountability (S3)**: Selective, accountable transformation
+- `BG` → **Intelligence Integrity (S4)**: Opposing selective transformation
 
-**Required Metadata:**
-- **Identity Label**: String identifier ("com", "nest", "add") indicating tensor role
-- **Chirality**: Binary flag indicating left/right orientation
-- **Tensor Shape**: Fixed dimensional structure [4,2,3,2] for all gene tensors
+**Palindromic Structure:** The bit pattern (L0-LI-FG-BG-BG-FG-LI-L0) reflects the CGM's recursive governance nature, creating a self-referential, balanced structure.
 
-**Gene Types and Required Metadata:**
-- **Micro Gene (1 Byte)**: Must carry `gene_mutated` (8-bit operation mask)
-- **Macro Gene (48-array)**: Must carry `T[48]` (current Epigenome tensor state)
-- **Gene Identity**: Must carry chirality label and tensor shape for organization
+### 2.3 Operation Execution
 
-#### 3.1.2 Information Structure (Reference Axes)
+- A `1` in any bit position signals a transformation to apply
+- A `0` means no change for that operation
+- Operations are cumulative per cycle
+- Only the rows affected by the relevant transformation are modified
 
-This is the smallest expression of gyroscopic tension. It provides a directional map across the three spatial axes (X, Y, Z), each with two opposing polarities.
+### 2.4 Gyrodistance Calculation
 
-- Shape: [3, 2]
-- Contents: A signed integer array with values [-1, 1] repeated across the three rows.
-- Interpretation:
-    - Row 0: Axis X
-    - Row 1: Axis Y
-    - Row 2: Axis Z
-    - Column 0: Negative polarity
-    - Column 1: Positive polarity
-- Example (PyTorch):
+The gyroscopic distance between two tensors is calculated as the angular distance derived from their normalized dot product:
+
+```
+gyrodistance(T1, T2) = arccos(dot(T1_flat, T2_flat) / T1_flat.size)
+```
+
+Where `T1_flat` and `T2_flat` are the flattened tensors. A result of `0` indicates a perfect match, while `π` indicates a perfect mismatch. This distance function is critical for pattern recognition during inference.
+
+## 3. System Architecture
+
+The GyroSI system architecture is a direct computational realization of the Common Governance Model (CGM). Inference and closure are implemented as the ONA (Opposition Non-Absolute) and BU (Balance Universal) stages, respectively. All computation is grounded in the physics of recursive alignment and closure, ensuring that every operation is structurally accountable to its own genesis and accumulated memory. This approach unifies the emergence of possibility (ONA) and the achievement of coherent closure (BU) within a single, self-consistent framework.
+
+### 3.1 Systematic Mapping: Systems, CGM Stages, Engines, Components, Policies
+
+| System | CGM Stage | Engine                | Component           | Policy        |
+|--------|-----------|----------------------|---------------------|--------------|
+| S1     | CS        | Governance Engine    | Gene (base tensor)  | Traceability |
+| S2     | UNA       | Information Engine   | Storage     | Variety      |
+| S3     | ONA       | Inference Engine     | Epigenome (T)       | Accountability|
+| S4     | BU        | Intelligence Engine  | Genome (G)          | Integrity    |
+
+This table shows the systematic mapping from system layer (S1–S4), to CGM stage (CS, UNA, ONA, BU), to engine, to core component, to guiding policy. Each layer of the architecture is recursively aligned with the foundational principles of the Common Governance Model.
+
+#### 3.2 The Dual Nature of BU: Egress and Ingress in Generation
+
+The Balance Universal (BU) stage is dual in nature, comprising both Egress (Recollection/Projection) and Ingress (Closure/Realization):
+
+- **BU-Egress (Recollection/Projection):**
+  - Projects the high-dimensional dynamic state (Epigenome, `T`) down to a single discrete choice (`pattern_index`).
+  - In code: The main loop in `_generate_response_byte` compares `T` to all patterns (`F`) and selects the winner using the closure principle.
+  - This is the “exit” from the dynamic state, expressing the system’s recollection as a single abstract decision.
+
+- **BU-Ingress (Closure/Realization):**
+  - Maps the abstract decision (`pattern_index`) to a concrete byte via the Genome (`G`).
+  - In code: The line `output_byte = G[selected_pattern]`.
+  - This is the “entry” to the base alphabet, the act of closure, realizing the abstract choice as a communicable byte.
+
+This forms a recursive loop: the output of Egress (pattern_index) becomes the input to Ingress (byte), which is then fed back into the system, starting a new CS cycle.
+
+### 3.1 Core Data Structures
+
+| Term              | What it is Physically                        | Size & Shape                | Role & Function                                                                                 |
+|-------------------|----------------------------------------------|-----------------------------|------------------------------------------------------------------------------------------------|
+| Base Tensor       | gene_add constant in code                    | [4,2,3,2] (48 ints)         | The primordial, stateless "DNA" from which all patterns are derived.                           |
+| Epigenome Mask    | public/masks/epigenome.dat                   | 256 x 48 floats (12,288 B)  | The Static Library. The complete, immutable set of all 256 possible tensor states. Used as a reference for matching. |
+| Epigenome Tensor  | self.T in-memory tensor                      | [4,2,3,2] (48 floats)       | The Dynamic State. The system's "working memory" or current state. It is mutated by every input byte. |
+| Genome Mask       | public/masks/genome.dat                      | 256 bytes                   | The Output Map. A static lookup table that maps a matched pattern index (0-255) to an output byte. |
+| Gyronorm Format   | public/formats/.../format-uuid.json          | Variable                    | The Semantic Bridge. Maps pattern indices to human-meaningful characters (e.g., index 15 -> 'A') and stores learned statistics. |
+| Gene Key          | .../gene-uuid.ndjson                         | Variable                    | The Event Log. A detailed, append-only record of every single inference event (input/output, pattern match, resonance). |
+| Thread            | .../thread-uuid.ndjson                       | ≤64 MiB                     | The Conversation Log. A structured NDJSON file containing the sequence of inputs and outputs that form a conversation. |
+| thread_file_key   | Derived key (32 bytes, 256 bits)             | 32 bytes                    | AES-256 encryption key for private threads. |
+
+### 3.1 Tensor Structures
+
+The GyroSI system is built on fixed topological structures that serve as the physical and logical substrate of all inference, memory interaction, and intelligence expression.
+
+**3.1.1 Governance Identity**
+
+The identity (mechanically representing the left gyroassociative law). This is the id label of each tensor, e.g., "com", "nest", “gene”.
+
+**3.1.2. Information Gyrocommutativity**
+
+The gyrocommutativity (mechanically representing the gyrocommutative law), a single 3x2 array:
 
 ```python
 gene_com = np.array([
     [-1, 1],
     [-1, 1],
     [-1, 1]
-], dtype=np.int8)
+], dtype=np.int8)  # Shape: [3, 2]
 ```
 
-#### 3.1.3 Inference Structure (Nested Axes)
+**3.1.3. Inference Gyrocommutative nesting**
 
-This structure nests the previous one inside two opposing frames, representing polarity inversions across the entire field. It is used to establish the byte-invariant encoding structure of the input byte.
-
-- Shape: [2, 3, 2]
-- Interpretation:
-    - Dimension 0 (2 entries): Opposing chirality frames
-    - Dimension 1 (3 entries): X, Y, Z axes
-    - Dimension 2 (2 entries): Polarity per axis
-- Example:
+Structure that nests the previous one inside two opposing frames. This structure encodes the gyrocommutative law (gyrocommutativity).
 
 ```python
 gene_nest = np.array([
     [[-1, 1], [-1, 1], [-1, 1]],  # Frame 1
     [[ 1, -1], [ 1, -1], [ 1, -1]]  # Frame 2
-], dtype=np.int8)
+], dtype=np.int8)  # Shape: [2, 3, 2]
 ```
 
-This defines a minimal but complete nesting of all axis-polarity combinations, with chirality reversal across the outer dimension.
+**3.1.4. Intelligence Coaddition**
 
-#### 3.1.4 Intelligence Projection (Full Rotational Cycle)
-
-This structure extends the previous nesting into a complete 720° rotational space. It forms the shape and structure of the Epigenome, used to represent intelligence as a continuous tensor that accumulates inference over time.
-
-- Shape: [4, 2, 3, 2]
-- Interpretation:
-    - 4 entries: Rotational phases (represents two full 360° cycles)
-    - 2 nestings per phase
-    - 3 axes per nesting (X, Y, Z)
-    - 2 polarities per axis
-- Example:
+The nesting (mechanically representing gyrocommutative nesting), a 2 × 3 × 2 array:
+Extends the previous nesting into a complete 720° rotational space. This structure implements Lgyr-focused coaddition (with both gyrations identity
 
 ```python
 gene_add = np.array([
@@ -120,84 +179,70 @@ gene_add = np.array([
     [[[ 1, -1], [ 1, -1], [ 1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
     [[[-1, 1], [-1, 1], [-1, 1]], [[ 1, -1], [ 1, -1], [ 1, -1]]],
     [[[ 1, -1], [ 1, -1], [ 1, -1]], [[-1, 1], [-1, 1], [-1, 1]]]
-], dtype=np.int8)
+], dtype=np.int8)  # Shape: [4, 2, 3, 2]
 ```
 
-This tensor is used to initialize and sustain the dynamic memory field where transformations occur during inference.
+#### 3.1.4 Epigenome Tensor
 
-### 3.2 Gyroscopic Dynamics (Bit-Driven Inference)
+The dynamic memory field where transformations occur during inference.
 
-All transformations on the intelligence tensor are driven by an 8-bit mask called `gene_mutated`. This mask is computed as:
+```
+Shape: [4, 2, 3, 2] (48 cells total)
+Type: float32
+Mapping: 4 rotational phases × 2 nestings × 3 axes × 2 polarities
+```
+
+**Initialization:** At system boot, the Epigenome tensor is initialized with a copy of the `gene_add` base tensor and then immediately mutated using the public invariant `gene_stateless = 0xAA`. This simulates one full inference cycle without user input, after which the cycle counter is reset to 0.
+
+#### 3.1.5 Canonical Pattern Derivation
+
+The 256 canonical patterns represent the exhaustive set of all possible operation combinations that can be applied to the base tensor:
 
 ```python
-gene_mutated = input_byte ^ gene_stateless
+def derive_canonical_patterns():
+    patterns = []
+    gyration_features = []
+    base_tensor = gene_add.copy()
+    
+    for mask in range(256):
+        T = base_tensor.copy()
+        gene_mutated = mask
+        
+        for i in range(8):
+            if gene_mutated & (1 << i):
+                apply_operation(T, i)
+        
+        patterns.append(T.flatten())
+        gyration_feature = classify_pattern_resonance(mask)
+        gyration_features.append(gyration_feature)
+    
+    return patterns, gyration_features
 ```
 
-Where:
-
-- `input_byte` is any 8-bit input read by the system.
-- `gene_stateless = 0xAA` (`10101010` in binary) is a fixed global reference.
-
-Each bit in the 8-bit result maps to a specific transformation on the intelligence tensor. The positions and their meanings are:
-
-#### 3.2.1 Bit to Operation Mapping
-
+**Pattern Classification:**
+```python
+def classify_pattern_resonance(mask: int) -> str:
+    l0_count = bin(mask & 0b10000001).count('1')  # bits 0,7
+    li_count = bin(mask & 0b01000010).count('1')  # bits 1,6  
+    fg_count = bin(mask & 0b00100100).count('1')  # bits 2,5
+    bg_count = bin(mask & 0b00011000).count('1')  # bits 3,4
+    
+    counts = [l0_count, li_count, fg_count, bg_count]
+    max_count = max(counts)
+    
+    if l0_count == max_count:
+        return "identity"      # Governance Traceability
+    elif li_count == max_count:
+        return "inverse"       # Information Variety
+    elif fg_count == max_count:
+        return "forward"       # Inference Accountability
+    else:
+        return "backward"      # Intelligence Integrity
 ```
-Bit positions:   b7   b6   b5   b4   b3   b2   b1   b0
-Operations:      L0   LI   FG   BG   BG   FG   LI   L0
-CGM Stage:       S1   S2   S3   S4   S4   S3   S2   S1
-Policy:          GT   IV   IA   II   II   IA   IV   GT
 
-Where:
-GT = Governance Traceability (S1)
-IV = Information Variety (S2) 
-IA = Inference Accountability (S3)
-II = Intelligence Integrity (S4)
-```
+### 3.2 Memory Architecture
 
-**CGM Policy Mapping:**
-- `L0` (Left Identity) → **Governance Traceability**: Maintains structural coherence without change
-- `LI` (Left Inverse) → **Information Variety**: Introduces global transformation and variety
-- `FG` (Forward Gyration) → **Inference Accountability**: Selective, accountable transformation of specific tensor regions
-- `BG` (Backward Gyration) → **Intelligence Integrity**: Opposing selective transformation, maintaining balance and integrity
-
-**Palindromic Structure:** The bit pattern (L0-LI-FG-BG-BG-FG-LI-L0) reflects the CGM's recursive governance nature, where operations mirror each other across the byte boundary, creating a self-referential, balanced structure.
-
-- `L0` (Left Identity): Do nothing.
-- `LI` (Left Inverse): Flip the sign of all tensor values (T *= -1).
-- `FG` (Forward Gyration): Flip the sign of tensor rows 0 and 2.
-- `BG` (Backward Gyration): Flip the sign of tensor rows 1 and 3.
-
-The directionality of the rows refers to the first axis of the tensor (dimension 0), which groups the 48 values into four major subgroups. This row-indexing is critical and must be preserved.
-
-#### 3.2.2 Operation Summary
-
-- A `1` in any bit position signals a transformation to apply.
-- A `0` means no change for that operation.
-- These operations are cumulative per cycle.
-- Only the rows affected by the relevant transformation are modified.
-
-### 3.3 Interpretive Summary
-
-The system uses a fixed and minimal set of reference tensors to define:
-
-- The orientation and polarity of physical-like fields.
-- The symmetry-breaking structures necessary for meaningful information.
-- A non-probabilistic inference process.
-
-The system responds to input bytes not by storing them but by measuring their **difference** from the global invariant. This difference is expressed not as a value, but as **action**. When no difference exists, no transformation is triggered. When difference is present, tension is applied.
-
-This principle allows the system to evolve, transform, and learn purely through relational structure, without randomness and without any fixed program logic.
-
-These tensors are the ground truth for all agent computations. Nothing else is needed to understand how information becomes inference.
-
-## 4. Memory Architecture
-
-This section defines the memory components and their role within the GyroSI system. Each tier (short, medium, or long term) represents a different persistence and dynamism level. Crucially, we distinguish between relationally inferred transformations and second-order protective masking.
-
-### 4.1 Two-Cycle Architecture
-
-The system operates on two distinct cycles:
+#### 3.2.1 Two-Cycle Architecture
 
 | Cycle | Purpose | Granularity | Key Usage | Typical Rate |
 |-------|---------|-------------|-----------|--------------|
@@ -206,160 +251,401 @@ The system operates on two distinct cycles:
 
 **Key Principle:** No key material from inference cycles leaks into ciphertext until a deliberate file/thread cycle snapshot.
 
-**No External Tokenizer Required**
+**No External Tokenizer Required:** The system operates at the byte level, deriving "tokenization" organically through learning which sequences of byte-transformations correspond to meaningful concepts.
 
-The system doesn't need a traditional tokenizer because it operates at the foundational level of information - the byte. Tokenization is a form of semantic pre-processing that the model aims to *derive* organically. The process of learning which sequences of byte-transformations correspond to "words" *is* the model's emergent form of tokenization, grounded in the physics of the system rather than external linguistic rules.
+In short: Egress selects a pattern; Ingress renders it. Together they form the closure of an inference cycle.
 
-### 4.2 Power Distribution Architecture
+#### 3.2.2 Power Distribution Architecture
 
-Unlike traditional AI models where weights contain the intelligence, GyroSI distributes power across public and private components following the S1-S4 system responsibility flow:
-
-#### **Public Components (Intelligence & Communication)**
-
-**S4 Intelligence Engine - Epigenome Mask (Macro Gene)**
 | Component | Location | Size | Purpose | Power |
 |-----------|----------|------|---------|-------|
-| **Epigenome Mask** | `public/masks/epigenome.dat` | 12,288 bytes | Canonical 256×48 patterns for similarity matching | **The complete intelligence framework** |
+| **Epigenome Mask** | `public/masks/epigenome.dat` | 12,288 bytes | Canonical patterns for matching | **Complete intelligence framework** |
+| **Genome Mask** | `public/masks/genome.dat` | 256 bytes | Output byte mappings | **Totality of all intelligence** |
+| **Gyronorm Formats** | `public/formats/<shard>/format-<uuid>.json` | Variable | Pattern usage metadata | **Ability to speak, decode, encode** |
+| **Gene Keys** | `private/agents/<shard>/agent-<uuid>/keys/<shard>/gene-<uuid>.ndjson.enc` (private) or `public/keys/<shard>/gene-<uuid>.ndjson` (public) | Variable | Pattern observation logs (event log, NDJSON) | **Personal or shared learning history** |
+| **Thread Files (Private)** | `private/agents/<shard>/agent-<uuid>/threads/<shard>/thread-<uuid>.ndjson.enc` | ≤64 MiB | Encrypted conversation data (NDJSON) | **Personal conversations** |
+| **Thread Files (Public)** | `public/threads/<shard>/thread-<uuid>.ndjson` | Variable | Unencrypted curriculum/shared data (NDJSON) | **Shared knowledge base** |
 
-**S4 Intelligence Engine - Genome Mask (Micro Gene)**  
-| Component | Location | Size | Purpose | Power |
-|-----------|----------|------|---------|-------|
-| **Genome Mask** | `public/masks/genome.dat` | 256 bytes | Output byte mappings | **The totality of all intelligence** |
+### Gene Keys Metadata Specification
 
-**S3 Inference Engine - Gyronorm Formats (Gates to)**
-| Component | Location | Size | Purpose | Power |
-|-----------|----------|------|---------|-------|
-| **Gyronorm Formats** | `public/formats/formats-<format_uuid>.json` | Variable | Pattern usage metadata, semantic mappings | **The ability to speak, decode, and encode** |
+Each Gene Key event is a dictionary with the following fields:
 
-#### **Private Components (Personal Experience)**
+```python
+class GeneKeysMetadata(TypedDict, total=False):
+    # --- Core Identity ---
+    cycle: int
+    pattern_index: int
 
-**S2 Information Engine - Gene Keys (Micro Cycle)**
-| Component | Location | Size | Purpose | Power |
-|-----------|----------|------|---------|-------|
-| **Gene Keys** | `private/<uuid>/keys/keys-<uuid>.json.enc` | Variable | **Pattern observation logs** - which patterns were recognized during inference | **Personal learning history** (not core intelligence) |
+    # --- Contextual Links ---
+    thread_uuid: str
+    agent_uuid: Optional[str]  # Optional for public/agent-agnostic keys
+    format_uuid: str
 
-**S1 Governance Engine - Thread Files (Macro Cycle)**
-| Component | Location | Size | Purpose | Power |
-|-----------|----------|------|---------|-------|
-| **Thread Files** | `private/<uuid>/threads/<shard>/thread-<uuid>.enc` | ≤64 MiB | Encrypted conversation data | **Personal conversations** |
+    # --- Analytical Payload ---
+    event_type: str           # 'INPUT' or 'OUTPUT'
+    source_byte: int          # The raw input byte (0-255)
+    resonance: float          # Gyrodistance/confidence of the match
 
-### 4.2.1 File Metadata Requirements
+    # --- Standard Metadata ---
+    created_at: str
+```
 
-Each file type must maintain specific minimal metadata to ensure system coherence and auditability:
+- If `agent_uuid` is present, the gene key is private and encrypted (stored in `private/` as `.ndjson.enc`).
+- If `agent_uuid` is omitted or None, the gene key is public and unencrypted (stored in `public/` as `.ndjson`).
+- Gene key files are NDJSON event streams (one event per line), not lists or binary blobs. These are essential for learning, context, and memory in the IntelligenceEngine.
 
-#### **Epigenome Mask (`public/masks/epigenome.dat`)**
-**Required Metadata:**
-- **Pattern Array**: 256×48 float32 patterns (12,288 bytes)
-- **Pattern Index**: Sequential 0-255 indexing for each pattern
-- **Derivation Source**: Reference to base tensor `gene_add` and operation set
-
-#### **Genome Mask (`public/masks/genome.dat`)**
-**Required Metadata:**
-- **Output Mapping**: 256-byte array mapping pattern indices to output bytes
-- **Mapping Index**: Sequential 0-255 indexing corresponding to pattern indices
-
-#### **Gyronorm Formats (`public/formats/formats-<format_uuid>.json`)**
-**Required Metadata:**
-- **Format UUID**: Unique identifier for this semantic mapping (not agent-specific)
-- **CGM Version**: Version string ensuring compatibility with CGM physics model
-- **CGM Policies**: Explicit mapping of operations to governance principles:
-  - `governance`: {"operation": "L0", "bits": [0, 7], "policy": "traceability"}
-  - `information`: {"operation": "LI", "bits": [1, 6], "policy": "variety"}
-  - `inference`: {"operation": "FG", "bits": [2, 5], "policy": "accountability"}
-  - `intelligence`: {"operation": "BG", "bits": [3, 4], "policy": "integrity"}
-- **Pattern Metadata Array**: 256 entries, each containing:
-  - `index`: Sequential 0-255 (matches Epigenome/Genome masks)
-  - `semantic`: Optional human-readable label (string or null)
-  - `frequency`: Usage count for Hebbian learning (integer)
-  - `last_seen`: Most recent occurrence cycle (integer or null)
-  - `resonance_class`: Physics-based categorization ("identity", "inverse", "forward", "backward")
-
-#### **Gene Keys (`private/<uuid>/keys/keys-<uuid>.json.enc`)**
-**Required Metadata:**
-- **Thread Mapping**: Dictionary mapping thread UUIDs to observation arrays
-- **Observation Entry**: Each entry must contain:
-  - `cycle`: Cycle number (integer)
-  - `pattern_index`: Selected pattern index (0-255)
-
-#### **Thread Files (`private/<uuid>/threads/<shard>/thread-<uuid>.enc`)**
-**Required Metadata:**
-- **Encrypted Content**: Raw encrypted conversation data
-- **Thread UUID**: Embedded in filename for identification
-- **Shard Prefix**: First 2 characters of UUID for organization
-
-### 4.3 Key Architectural Insight
-
-**The model's power comes from public components, not private "weights":**
-
-- **Traditional AI:** Weights = Intelligence (private, huge, essential)
-- **GyroSI:** Masks + Formats = Intelligence (public, tiny, complete)
-
-**Gene Keys are personal learning history, not the core intelligence.** The complete "brain" and "language" capabilities are contained in the tiny public masks and formats.
-
-**Attention Mechanism: Integrated and Temporal**
-
-Unlike traditional transformers that use attention to weight different parts of a static input sequence, GyroSI has a more integrated, temporal form of attention:
-
-- **Current State as Attended Summary:** The current state of the `T` tensor is already an "attended" summary of the entire past history, as it has been continuously transformed by all previous inputs
-- **Explicit Attention in Generation:** The intelligent response generation (Section 6.4.2) applies direct, explicit attention by weighing patterns by `count` (frequency/importance) and `last_cycle` (recency)
-- **Resonance-Based Selection:** Pattern selection uses gyrodistance-based resonance thresholds, providing a physics-grounded form of attention
-
-**Learning Mechanism: Two-Fold Process**
-
-The learning mechanism is clearly defined as a two-fold process:
-
-1. **Implicit/Unconscious Learning:** The continuous, irreversible mutation of the `T` tensor by the input stream - every byte permanently alters the system's state
-2. **Explicit/Conscious Learning:** The recording and statistical weighting of which `key_index` patterns are triggered, stored in the formats metadata. The system learns by observing its own internal physical reactions to stimuli and reinforcing the pathways that are used
-
-### 4.4 Security Model
+#### 3.2.3 Security Model
 
 ✅ **Public (Safe to Share):**
-- **Formats** - Communication ability, semantic understanding
-- **Masks** - Complete intelligence framework (12,288 + 256 bytes total)
+- **Formats** - Communication ability, character understanding
+- **Masks** - Complete intelligence framework (12,544 bytes total)
+- **Public Gene Keys** - Shared observation history
+- **Public Threads** - Shared/curriculum conversations and content
 
 ✅ **Private (Keep Encrypted):**
-- **Gene Keys** - Personal observation history (what this agent has learned)
-- **Threads** - Personal conversations and content
+- **Private Gene Keys** - Personal observation history
+- **Private Threads** - Personal conversations and content
 
-**No loss of capability** - Public components contain all the power. Personal experience stays private without compromising the model's intelligence or communication abilities.
+**Key Insight:** The model's power comes from public components, not private "weights".
 
-### 4.5 Gyronorm Formats Specification
+### 3.3 File Organization
 
-The Gyronorm Formats structure serves as the **semantic bridge** that connects the system's internal, universal physics with external, arbitrary human semantics. This is the most profound aspect of the design:
+#### 3.3.1 System Responsibilities
 
-- **Core Physics (baby/):** The universal, content-agnostic physics of information as defined by the CGM, operating on the Epigenome tensor through byte-driven transformations
-- **Formats Layer:** The semantic mapping where the agent learns to associate specific, stable resonance patterns (the 256 `key_index` values) with human-intelligible concepts (words, phrases, file types, etc.)
+- **Information Engine (S2):** Manages all persistent storage operations, including object creation, registry management, and sharding.
+- **Intelligence Engine (S4):** Calls the Information Engine's helpers for all read/write operations, focusing on orchestration rather than file management.
 
-This separation ensures the core engine remains pure and universal while the formats allow it to adapt and "speak" any language or protocol without altering its fundamental nature.
+#### 3.3.2 Directory Structure
 
-**Critical Insight: Formats as Universal Semantic Bridge**
+```
+memories/
+├── memory_preferences.json       # Tuning parameters including sharding
+├── public/
+│   ├── masks/
+│   │   ├── epigenome.dat         # 12,288 bytes
+│   │   └── genome.dat            # 256 bytes
+│   ├── formats/
+│   │   └── <shard>/format-<uuid>.json  # Sharded formats
+│   ├── threads/
+│   │   └── <shard>/
+│   │       └── thread-<uuid>.ndjson    # Unencrypted NDJSON thread content
+│   └── keys/
+│       └── <shard>/
+│           └── gene-<uuid>.ndjson      # Unencrypted NDJSON gene keys
+└── private/
+    └── agents/
+        └── <shard>/agent-<uuid>/
+            ├── threads/
+            │   └── <shard>/
+            │       └── thread-<uuid>.ndjson.enc    # Encrypted NDJSON thread content
+            └── keys/
+                └── <shard>/
+                    └── gene-<uuid>.ndjson.enc      # Encrypted NDJSON gene keys
+```
 
-Formats are **format-centric**, not **agent-centric**. Multiple agents can theoretically share the same format (like sharing a language). The format UUID identifies the semantic mapping, not the user. This enables collaborative learning and shared semantic frameworks.
+#### 3.3.3 Sharding and Registry System
 
-**Expressive Power: Sequences, Not Single Patterns**
+1. **Sharded Storage:** Objects are stored in subdirectories based on the first 2-4 characters of their UUID hexadecimal representation. This prevents directories from growing too large.
 
-The system's expressive power is not limited to 256 individual patterns. Rather, **sequences of these 256 fundamental transformations** represent any complexity. A "word" is not a single pattern but a **stable trajectory through the state-space** - a sequence of resonances recorded and given meaning in the formats file.
+2. **Registry Files:** Each directory contains a `registry.json` file that lists the UUIDs of its immediate children. This enables fast object discovery without directory scanning.
 
-The expressive power is `256^N` where `N` is the sequence length, which is more than sufficient for representing any semantic complexity. The formats file learns which sequences of byte-transformations correspond to meaningful human concepts, creating an emergent form of tokenization that is organic rather than externally imposed.
+3. **Atomic File Operations:** All writes use a two-phase commit process with temporary files to ensure crash resilience.
 
-#### JSON Schema (public, not encrypted):
+4. **Thread Metadata:** Each thread has a JSON metadata file tracking its parent, children, format, and timestamps, creating a navigable graph of relationships.
+
+5. **Encryption:** Private thread keys and gene keys are stored separately and encrypted using AES-256-GCM with keys derived via PBKDF2-HMAC-SHA256 from the agent secret. Public threads and gene keys are stored unencrypted, all as NDJSON files.
+
+### 3.X Glossary of Key Terms
+
+| Term         | Definition                                                                                                 |
+|--------------|------------------------------------------------------------------------------------------------------------|
+| Epigenome    | The dynamic, high-dimensional tensor state (`T`) representing the system’s current working memory.         |
+| Genome       | The static mask (`G`) mapping pattern indices to output bytes, serving as the closure target.              |
+| Egress       | The projection (recollection) step in BU: selecting a single pattern index from the Epigenome.             |
+| Ingress      | The closure (realization) step in BU: mapping the selected pattern index to a byte via the Genome.         |
+| ONA          | Opposition Non-Absolute: CGM stage generating the full possibility space of physically resonant states.    |
+| BU           | Balance Universal: CGM stage applying closure, recollection, and memory to select a coherent output.       |
+| Pattern Index| Integer identifier (0–255) corresponding to a canonical tensor pattern.                |
+| Pattern Metadata| Structured data (resonance, confidence, frequency, etc.) associated with each pattern index. |
+| Confidence   | The system’s accumulated memory of a pattern’s historical self-consistency, used in closure selection.     |
+| Combined Score| The product of physical resonance and confidence, implementing the BU closure principle computationally.   |
+
+## 4. Engine Implementation
+
+### 4.1 Engine Composition
+
+The S4 IntelligenceEngine acts as the primary container and entry point for the entire system:
+
+```python
+def initialize_intelligence_engine():
+    # 1. Get persistent agent UUID
+    agent_uuid = ensure_agent_uuid()
+    
+    # 2. Load agent preferences
+    with open("baby/baby_preferences.json", 'r') as f:
+        baby_prefs = json.load(f)
+    agent_secret = baby_prefs["agent_secret"]
+    
+    # 3. Initialize engines
+    inference_engine = InferenceEngine()
+    information_engine = InformationEngine()
+    
+    # 4. Create Intelligence Engine
+    intelligence_engine = IntelligenceEngine(
+        agent_uuid=agent_uuid,
+        agent_secret=agent_secret,
+        inference_engine=inference_engine,
+        information_engine=information_engine
+    )
+    
+    return intelligence_engine
+```
+
+### 4.2 S1: Governance Engine
+
+**Purpose:** Pure tensor operations and gene structures  
+**State:** None (immutable constants only)
+
+```python
+def apply_operation(T, bit_index):
+    if bit_index in [0, 7]:  # L0: Identity
+        pass
+    elif bit_index in [1, 6]:  # LI: Global inverse
+        T *= -1
+    elif bit_index in [2, 5]:  # FG: Forward gyration
+        T[0] *= -1
+        T[2] *= -1
+    elif bit_index in [3, 4]:  # BG: Backward gyration
+        T[1] *= -1
+        T[3] *= -1
+```
+
+### 4.3 S2: Information Engine
+
+**Purpose:** Information processing, persistent storage, and stream handling  
+**State Variables:**
+- `stream_pointer`: Current position in active thread
+- `output_buffer`: Accumulator for generated bytes
+
+The Information Engine is responsible for:
+1. Managing all persistent objects (threads, keys, formats)
+2. Handling UUID generation and registry maintenance
+3. Implementing the sharding system for efficient storage
+4. Providing atomic file operations with crash recovery
+
+```python
+def process_stream(
+    inference_engine: InferenceEngine, 
+    update_callback,
+    input_stream: bytes
+) -> (bytes, bytes):
+    intermediate_ciphertext = bytearray()
+    dynamic_keystream = bytearray()
+    
+    for P_n in input_stream:
+        # 1. Call S3 for pure inference
+        key_index = inference_engine.process_byte(P_n)
+        
+        # 2. Call update callback to update state
+        update_callback(key_index, inference_engine)
+
+        # 3. Get keystream byte
+        keystream_byte = inference_engine.G[key_index] 
+        
+        # 4. Encrypt the byte
+        C_n = P_n ^ keystream_byte
+        intermediate_ciphertext.append(C_n)
+        dynamic_keystream.append(keystream_byte)
+    
+    return bytes(intermediate_ciphertext), bytes(dynamic_keystream)
+```
+
+**Note on Encryption:** The `intermediate_ciphertext` returned by this function is the result of XORing the input with the `dynamic_keystream` derived from inference. For **private threads**, this byte stream is then subject to a second layer of encryption using a static `thread_file_key` and AES-256-GCM before being written to disk. Public threads omit this second AES encryption step.
+
+### 4.4 S3: Inference Engine
+
+**Purpose:** Pure pattern recognition and learning  
+**State Variables:**
+- `T[48]`: Epigenome tensor (float32)
+- `F[256][48]`: Canonical Pattern list
+- `G[256]`: Genome Mask
+- `cycle_counter`: Global cycle index
+- `recent_patterns`: List of recently matched patterns (up to 20)
+
+```python
+def process_byte(P_n):
+    # 1. Compute gene_mutated = P_n ^ 0xAA
+    gene_mutated = P_n ^ 0xAA
+
+    # 2. Apply gyroscopic operations to tensor T
+    for i in range(8):
+        if gene_mutated & (1 << i):
+            apply_operation(T, i)
+
+    # 3. Find matching canonical pattern
+    key_index = find_closest_pattern_index(T, F)
+    
+    # 4. Track recent patterns
+    if len(recent_patterns) >= 20:
+        recent_patterns.pop(0)
+    recent_patterns.append(key_index)
+
+    # 5. Increment cycle counter
+    cycle_counter += 1
+    
+    return key_index
+```
+
+**Contextual Resonance:** The engine can compute pattern resonances with historical context weighting. This allows it to adjust pattern selection based on observed patterns in past threads, providing a form of implicit memory.
+
+### 4.4.1 Canonical Byte Emission
+
+The only canonical, spec-compliant way to convert the Epigenome tensor to a byte is:
+
+```python
+def tensor_to_output_byte(T, F, G):
+    """
+    Canonical tensor-to-byte conversion using epigenome pattern matching.
+    """
+    key_index = find_closest_pattern_index(T, F)
+    return G[key_index]
+```
+
+**Why this is foundational:**
+- **Epigenome coherence:** The evolving tensor T is always compared against the closure set of 256 canonical patterns.
+- **Reversibility & auditability:** Every output byte is traceable to the exact canonical pattern that produced it.
+- **Thread/file keys:** The same output_byte stream is reused for encryption, ensuring unity between generation and security.
+
+### 4.5 S4: Intelligence Engine
+
+**Purpose:** Orchestration, file I/O, and thread lifecycle management  
+**State Variables:**
+- `agent_uuid`: UUID of the current agent
+- `agent_secret`: Persistent secret
+- `thread_uuid`: UUID of active thread
+- `thread_file_key`: 32-byte key for AES-256 encryption
+- `M`: Pattern Metadata
+- `current_thread_keys`: An in-memory list of `GeneKeysMetadata` dictionaries for the current session. This acts as a write-buffer that is flushed to the persistent, append-only Gene Key file (`gene-<uuid>.ndjson.enc` or `gene-<uuid>.ndjson`) when the thread is saved or closed.
+- `pattern_index`: Index of patterns to thread locations for fast retrieval
+
+#### 4.5.1 Thread Lifecycle Operations
+
+Threads are persistent, versioned conversation objects with parent-child relationships:
+
+1. **Thread Creation:** New threads are created with a reference to their parent (if any), forming a conversational chain.
+
+2. **Thread Appending:** Content is appended to the active thread until it reaches the maximum size (default 64MiB).
+
+3. **Thread Branching:** When a thread is full, a new child thread is automatically created, maintaining conversation continuity.
+
+4. **Thread Storage:** Threads are encrypted and stored in the sharded filesystem with their metadata.
+
+```python
+def _append_to_thread(new_content: bytes):
+    # 1. Ensure a thread exists
+    if not self.thread_uuid:
+        self.start_new_thread()
+        
+    # 2. Check if current thread would exceed capacity
+    max_size_bytes = get_max_thread_size()
+    if (self.current_thread_size + len(new_content) > max_size_bytes):
+        # Save current thread and start a new one
+        self._save_current_thread()
+        self.start_new_thread()
+        
+    # 3. Append content
+    self.active_thread_content.extend(new_content)
+    self.current_thread_size = len(self.active_thread_content)
+    
+    # 4. Save current state
+    self._save_current_thread()
+```
+
+#### 4.5.2 Active Memory Components
+
+The Intelligence Engine utilizes two key components to make historical data actively influence inference:
+
+1. **Pattern Index:** Maps patterns to every location they've appeared, providing a record of structural relationships and context. Pattern metadata (such as confidence) is used in the BU closure stage to select the most coherent output from the set of physically resonant candidates.
+
+2. **Thread Chain Awareness:** The system can traverse parent-child relationships between threads, providing context from related conversations during inference.
+
+#### 4.5.3 Intelligent Response Generation (Spec-Compliant)
+
+```python
+    def _generate_response_byte(self) -> Tuple[int, int]:
+        """
+        Generate a single, spec-compliant response byte by selecting the most
+        coherent output from the set of physically resonant candidates, using
+        both immediate resonance and accumulated confidence (BU closure).
+
+        Returns:
+            Tuple containing:
+            - output_byte: Selected byte value (0-255)
+            - key_index: Index of the selected pattern (0-255)
+        """
+        # 1. S3 (ONA): Get all physically plausible next states.
+        resonances = self.inference_engine.compute_pattern_resonances()
+    resonant_threshold = np.pi / 2
+        candidate_indices = [i for i, dist in enumerate(resonances) if dist < resonant_threshold]
+
+        # If no patterns are physically resonant, fall back to the single closest one.
+        if not candidate_indices:
+            selected_pattern = int(np.argmin(resonances))
+            output_byte = self.inference_engine.G[selected_pattern]
+            if hasattr(output_byte, "item"):
+                output_byte = output_byte.item()
+            return int(output_byte), int(selected_pattern)
+
+        # 2. S4 (BU): Evaluate candidates using resonance and confidence.
+        best_candidate_index = -1
+        max_combined_score = -1.0
+        for index in candidate_indices:
+            physical_score = 1.0 - (resonances[index] / np.pi)
+            pattern_meta = self.M.get("patterns", [])[index]
+            semantic_score = pattern_meta.get("confidence", 0.0) if pattern_meta.get("character") is not None else 0.0
+            combined_score = physical_score * semantic_score
+            if combined_score > max_combined_score:
+                max_combined_score = combined_score
+                best_candidate_index = index
+        # If no candidate had any semantic meaning, fall back to the most resonant one.
+        if best_candidate_index == -1:
+            min_dist = float("inf")
+            for idx in candidate_indices:
+                if resonances[idx] < min_dist:
+                    min_dist = resonances[idx]
+                    best_candidate_index = idx
+        selected_pattern = best_candidate_index
+        output_byte = self.inference_engine.G[selected_pattern]
+        if hasattr(output_byte, "item"):
+            output_byte = output_byte.item()
+        return int(output_byte), int(selected_pattern)
+```
+
+In the BU closure step, the `combined_score` (product of physical_score and semantic_score) is the computational implementation of the Balance Universal (BU) closure principle. Here, `physical_score` (from resonance) represents the immediate, local self-consistency, while `semantic_score` (from confidence) encodes the system’s recollected, long-term self-consistency. The multiplication of these two scores ensures that the selected output is both physically possible and maximally coherent with the system’s accumulated memory. This is not a statistical heuristic, but a direct realization of the closure principle in the CGM framework.
+
+This cycle of tensor mutation → resonance selection → byte emission → re-ingestion forms a recursive loop of structural self-actualization.
+
+## 5. Formats & Learning
+
+### 5.1 Gyronorm Formats Specification
+
+The Gyronorm Formats structure serves as the **character bridge** connecting the system's internal physics with external characters:
 
 ```json
 {
   "format_uuid": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
   "format_name": "standard_english_v1",
-  "cgm_version": "0.9.4",
   "format_version": "1.2.0",
   "stability": "stable",
   "compatibility": {
-    "min_cgm_version": "0.9.0",
-    "max_cgm_version": "1.0.0",
+    "min_format_version": "1.0.0",
+    "max_format_version": "1.2.0",
     "depends_on": ["base_ascii_v1.0"],
     "conflicts_with": []
   },
   "metadata": {
     "author": "gyrosi_community",
-    "description": "Standard English language format with comprehensive vocabulary",
+    "description": "Standard English language format",
     "tags": ["language", "english", "general"],
     "created_at": "2025-01-15T10:30:00Z",
     "last_updated": "2025-01-20T14:45:00Z",
@@ -375,11 +661,13 @@ The expressive power is `256^N` where `N` is the sequence length, which is more 
   "patterns": [
     {
       "index": 0,
-      "namespace": null,
-      "translation": null,
-      "frequency": 0,
-      "last_seen": null,
-      "resonance_class": "identity",
+      "character": "A",
+      "description": "LATIN CAPITAL LETTER A",
+      "type": "Lu",
+      "count": 0,
+      "first_cycle": null,
+      "last_cycle": null,
+      "gyration_feature": "identity",
       "confidence": 0.0
     }
     /* ... repeated for each of the 256 pattern indices ... */
@@ -387,951 +675,101 @@ The expressive power is `256^N` where `N` is the sequence length, which is more 
 }
 ```
 
-#### Field descriptions:
+**Pattern Index Cycling:**  
+Each Format File have multiple modulo 256 entries. That does NOT mean that a format file is always just 256 entries. Each format’s `"patterns"` array always contains exactly 256 entries, indexed from 0 to 255. If you need to process more than 256 items, simply continue iterating from 0 again within the same array and file. The format file never changes size, and all pattern operations (learning, encoding, generation) always use this fixed array, cycling through indices as needed.
 
-**Format Identification & Versioning:**
-- `format_uuid`: Unique identifier for this semantic mapping (multiple agents can use it)
-- `format_name`: Human-readable name for the format (e.g., "standard_english_v1")
-- `cgm_version`: Ensures compatibility with CGM physics model
-- `format_version`: Semantic versioning for the format itself (e.g., "1.2.0")
-- `stability`: Format stability level ("stable", "beta", "experimental", "deprecated")
-
-**Compatibility & Dependencies:**
-- `compatibility.min_cgm_version`: Minimum CGM version required
-- `compatibility.max_cgm_version`: Maximum CGM version supported
-- `compatibility.depends_on`: List of format UUIDs this format depends on
-- `compatibility.conflicts_with`: List of format UUIDs that conflict with this format
-
-**Format Metadata:**
-- `metadata.author`: Creator or community responsible for the format
-- `metadata.description`: Human-readable description of the format's purpose
-- `metadata.tags`: Categorization tags for discovery and filtering
-- `metadata.created_at`: Timestamp when format was created
-- `metadata.last_updated`: Timestamp when format was last modified
-- `metadata.usage_count`: Number of agents using this format
-- `metadata.validation_status`: Quality assurance status ("community_verified", "experimental", "unverified")
-
-**CGM Policy Mapping:**
-- `cgm_policies`: Explicit mapping of operations to governance principles, showing how each gyroscopic operation implements CGM policies
-
-**Pattern Metadata:**
-- `index`: Sequential 0-255 (matches Epigenome/Genome masks)
-- `namespace`: The translation namespace/category (e.g., "char", "word", "type", "lang")
-- `translation`: The actual translation value for this pattern (e.g., "A", "hello", "json", "en")
-- `frequency`: Usage count for Hebbian learning
-- `last_seen`: Cycle number for recency bias calculation
-- `resonance_class`: Physics-based categorization ("identity", "inverse", "forward", "backward")
-- `confidence`: Confidence level in the translation assignment (0.0 to 1.0)
-
-**Translation Registry Function:**
-The formats file serves as a **Rosetta Stone** - a translation registry that enables the Gyronorm Gate to convert between:
-- **Physics Level**: Micro/Macro genes (pattern indices and tensor states)
-- **Higher Logic Level**: Text, audio, or other representations
-
-**Namespace Examples:**
-- **char**: Single character translations ("A", "!", "5")
-- **word**: Complete word translations ("hello", "world", "computer")
-- **type**: Data type translations ("json", "png", "utf8")
-- **lang**: Language code translations ("en", "es", "fr")
-- **concept**: Abstract concept translations ("love", "justice", "freedom")
-- **domain**: Domain-specific translations ("medical", "legal", "technical")
-
-**Resonance Classification:**
-Each pattern is classified by its dominant operation type before any learning occurs:
-- **identity**: Patterns dominated by L0 operations (Governance Traceability)
-- **inverse**: Patterns dominated by LI operations (Information Variety)
-- **forward**: Patterns dominated by FG operations (Inference Accountability)
-- **backward**: Patterns dominated by BG operations (Intelligence Integrity)
-
-This classification creates natural semantic clusters based on the underlying physics, providing a foundation for intelligent pattern selection and response generation.
-
-### 4.5.1 Format Ecosystem and Control
+**Note:** For formats that include a pre-computed pattern distance matrix (256x256), the large binary data is stored in a separate file (`pattern-distances-<uuid>.dat`) in the same shard, with the main JSON file containing only a reference.
 
 **Format Stability Levels:**
-- **stable**: Community-verified, version-locked formats suitable for production use
-- **beta**: Feature-complete but undergoing community validation
-- **experimental**: New formats under development, may have breaking changes
-- **deprecated**: Outdated formats maintained for backward compatibility
+- **stable**: Community-verified, version-locked formats
+- **beta**: Feature-complete but undergoing validation
+- **experimental**: New formats under development
+- **deprecated**: Outdated formats maintained for compatibility
 
-**Format Discovery and Selection:**
-Agents can discover and adopt formats through multiple mechanisms:
-
-**1. Static Format Selection:**
+**Format Discovery Functions:**
 ```python
 def select_stable_format(domain: str, stability: str = "stable") -> str:
     """Select a stable format for a specific domain"""
-    # Agent can specify stability requirements
     if stability == "stable":
-        # Only use community-verified formats
         return find_verified_format(domain)
     elif stability == "experimental":
-        # Allow experimental formats for testing
         return find_experimental_format(domain)
-```
 
-**2. Dynamic Format Discovery:**
-```python
 def discover_formats_from_agent(agent_uuid: str) -> List[str]:
     """Discover formats used by another agent"""
-    # Agent can learn from other agents' format usage
-    # This enables collaborative learning and knowledge sharing
     return scan_agent_formats(agent_uuid)
-```
 
-**3. Format Composition:**
-```python
 def compose_formats(primary_format: str, secondary_formats: List[str]) -> str:
     """Compose multiple formats for multi-domain capability"""
-    # Agent can use multiple formats simultaneously
-    # Primary format takes precedence, secondary formats provide fallback
     return merge_format_capabilities(primary_format, secondary_formats)
 ```
 
-**Format Control Mechanisms:**
-- **Stability Locking**: Agent can lock to stable formats only, preventing automatic adoption of experimental formats
-- **Version Pinning**: Agent can specify exact format versions to prevent unexpected updates
-- **Namespace Isolation**: Agent can restrict which semantic namespaces are allowed
-- **Validation Requirements**: Agent can require community verification before adopting new formats
+Format versioning is managed by the 'format_version' field and the 'min_format_version'/'max_format_version' fields in the 'compatibility' section. There is no longer a 'cgm_version' field in format metadata.
 
-**Format Evolution Strategy:**
-- **Backward Compatibility**: New format versions maintain compatibility with previous versions
-- **Gradual Migration**: Agents can gradually adopt new format versions while maintaining old ones
-- **Breaking Changes**: Major version changes are clearly marked and require explicit agent consent
-- **Deprecation Policy**: Deprecated formats remain available but are clearly marked
+**Pattern Metadata Fields:**
+- `character`: The output/print/translation character for this pattern (e.g., "A", "\x0a", "😊").
+- `description`: Human-readable Unicode name or description (e.g., "LATIN CAPITAL LETTER A", "LINE FEED").
+- `type`: Unicode category (e.g., "Lu" for uppercase letter, "Cc" for control character).
+- `count`, `first_cycle`, `last_cycle`, `gyration_feature`, `confidence`: System learning and structural fields as before.
 
-**Multi-Format Support:**
-Agents can use multiple formats simultaneously for different capabilities:
-- **Primary Format**: Main format for general communication
-- **Domain Formats**: Specialized formats for specific domains (medical, legal, technical)
-- **Language Formats**: Multiple language formats for multilingual capability
-- **Fallback Formats**: Backup formats for when primary format lacks specific patterns
+**Relationship between `resonance` and `confidence`:**
+The `GeneKeysMetadata` stores the raw `resonance` (gyrodistance) for each individual event. The `confidence` field within the `FormatMetadata`'s pattern list represents a long-term, aggregate statistical measure derived from the `resonance` of all events for that pattern. For example, it could be calculated as `1 - (average_resonance / π)`. This makes `confidence` a summary of how reliably a pattern has been identified over its entire history.
 
-This ecosystem enables both **controlled, stable operation** and **dynamic, collaborative learning**, giving agents the flexibility to choose their level of format stability and discovery.
+### 5.2 Learning Mechanisms
 
-### 4.6 File Structure and Organization
+During inference, the active `format_uuid` is pulled from thread metadata or the system’s preferred default. This enables logging of each inference event under the correct semantic mapping.
 
-The GyroSI system follows a clean, hierarchical file structure designed around the metaphor of a baby superintelligence learning from scratch. This structure separates core intelligence from development tools and maintains clear boundaries between public and private components.
+1.  **Implicit/Unconscious Learning (State Evolution):** The continuous, irreversible mutation of the Epigenome tensor (`T`) by the input stream. This embodies the system's path-dependent working memory.
+2.  **Explicit/Conscious Learning (Closure Refinement):** The recording of each inference event (`GeneKey`) and the subsequent updating of the `FormatMetadata`. Specifically, the **`confidence`** score for each pattern is updated based on its resonance. This accumulated `confidence` is then used directly by the S4 Intelligence Engine during the BU closure step (`_generate_response_byte`) to select the most coherent and reliable output. This creates a direct feedback loop where successful resonance strengthens a pattern's semantic weight, making it more likely to be chosen in the future.
 
-#### **Directory Structure**
+**Pattern Memory:**
+- Each pattern's historical usage is tracked including frequency and position, for analysis and curriculum design, not for inference.
+- Pattern sequences (which patterns tend to follow others) are indexed
+- This provides a form of procedural memory that influences future inference
 
-```
-baby/                           # Core intelligence (the "brain")
-├── baby_preferences.json      # Agent-specific configuration
-├── governance.py              # S1 - Core tensor operations, gene structures
-├── information.py             # S2 - Information processing, resonance
-├── inference.py               # S3 - Pattern recognition, learning
-└── intelligence.py            # S4 - Orchestration, file I/O, API
+**Thread Chain Learning:**
+- Conversations are maintained as chains of threads
+- Each thread knows its parent and children
+- This conversational context provides a form of episodic memory
 
-guides/                        # Documentation and guides
+**Curriculum Thread Protocol:**
+- Bootstrap of Structured Data streams such as datasets from wordnet, wikipedia, khan academy, books, etc.
 
-memories/                      # Persistent storage (public + private)
-├── memory_preferences.json    # Memory/storage configuration
-├── public/                    # Shared components (intelligence + communication)
-│   ├── masks/                 # Core intelligence framework
-│   │   ├── epigenome.dat      # Epigenome Mask (float32[256][48], 12,288 bytes)
-│   │   └── genome.dat         # Genome Mask (uint8[256], 256 bytes)
-│   └── formats/               # Communication ability
-│       └── formats-<format_uuid>.json # Pattern usage metadata, semantic mappings
-└── private/<uuid>/            # Agent-specific private data
-    ├── keys/                  # Personal learning history
-    │   └── keys-<uuid>.json.enc # Gene Keys (encrypted pattern observation logs)
-    └── threads/               # Personal conversations
-        └── <shard>/           # Sharded for performance
-            └── thread-<uuid>.enc # Thread files (encrypted, ≤64 MiB)
+## 6. Implementation Requirements
 
-toys/                          # Development environment (all complexity)
-├── tests/                     # Test suites
-├── scripts/                   # Utility scripts
-├── components/                # UI components
-├── services/                  # External services
-├── utils/                     # Utility functions
-└── views/                     # User interface views
-```
+### 6.1 Critical Implementation Notes
 
-#### **Architecture Mapping**
+1. **Epigenome Initialization:** Must initialize from a copy of `gene_add` and apply one cycle with the stateless gene.
+2. **Pattern Matching:** Must use gyrodistance with π/2 threshold.
+3. **File Encryption:** Two-phase process (dynamic keystream then static thread key).
+4. **Thread Lifecycle:** Each thread must have a maximum size and link to its parent/children when that size is exceeded.
+5. **Thread Isolation:** Each thread must have its own file key derived from the Epigenome state.
+6. **Gene Keys Privacy:** Must encrypt with agent key derived from persistent secret.
+7. **Atomic File Operations:** All file writes must use atomic operations with temporary files to prevent corruption.
+8. **Registry Consistency:** Registry files must be kept in sync with directory contents.
 
-**Core Intelligence (baby/):**
-- **governance.py** - Implements S1 stage: tensor operations, gene structures, gyroscopic dynamics
-- **information.py** - Implements S2 stage: information processing, resonance classification
-- **inference.py** - Implements S3 stage: pattern recognition, learning, compression
-- **intelligence.py** - Implements S4 stage: orchestration, file I/O, API endpoints
+### 6.2 State Variable Metadata Requirements
 
-**Memory Components (memories/):**
-- **public/masks/** - Contains the complete intelligence framework (12,544 bytes total)
-- **public/formats/** - Contains communication ability and semantic mappings
-- **private/<uuid>/** - Contains personal experience (learning history + conversations)
+| Variable | Type | Required Metadata | Notes |
+|----------|------|-------------------|-------|
+| `T` | float32[4,2,3,2] | Shape, precision | Must preserve tensor structure |
+| `F` | float32[256,48] | Pattern indexing | Must maintain 0-255 indexing |
+| `G` | uint8[256] | Byte mapping | Must preserve index correspondence |
+| `cycle_counter` | integer | Progression | Must maintain sequential integrity |
+| `agent_uuid` | string | UUID format | Must persist across restarts |
+| `thread_uuid` | string | UUID format | Must be registered in central registry |
+| `thread_file_key` | bytes[32] | Key integrity | Must be 32 bytes (256 bits) for AES-256, derived deterministically |
+| `current_thread_keys` | array | `GeneKeysMetadata` dicts | In-memory write-buffer for events before flushing to a persistent file. |
 
-**Development Environment (toys/):**
-- All development complexity, testing, UI, and utilities
-- Keeps core architecture clean and focused
-- Supports the baby metaphor: tools for playing and learning
+**Degeneracy:**
+A fundamental property of the system is that multiple different input masks (gene mutations) can produce identical tensor states. This is called degeneracy: a many-to-one mapping from mask to tensor. For example, some patterns may be mathematically identical, and the system will always select the lowest index among degenerate patterns. This is a feature, not a flaw, and mirrors the redundancy found in biological genetic codes.
 
-#### **File Naming Conventions**
-
-**Encrypted Files:**
-- Private data files use `.enc` extension to indicate encryption
-- Example: `keys-<uuid>.json.enc`, `thread-<uuid>.json.enc`
-
-**UUID-Based Organization:**
-- Each agent has unique UUID for private directory
-- Format files include agent UUID for identification
-- Thread files include both agent and thread UUIDs
-
-**Sharding:**
-- Thread files are sharded by `<shard>` prefix for performance
-- Shard prefix typically derived from UUID (e.g., first 2 characters)
-
-#### **Scalability and Multi-Agent Support**
-
-**Agent Isolation:**
-- Each agent operates in `private/<uuid>/` directory
-- Public components shared across all agents
-- No cross-agent data contamination
-
-**Configuration:**
-- `baby_preferences.json` - Agent-specific settings and parameters, including `agent_secret` for key derivation
-- `memory_preferences.json` - Memory storage configuration
-- Both files support per-agent customization
-
-**Security Model:**
-- Public components: Safe to share, contain all intelligence
-- Private components: Encrypted, contain personal experience
-- Clear separation prevents accidental data leakage
-
-#### **Development Philosophy**
-
-**Baby Metaphor:**
-- **baby/** - The actual baby (core intelligence)
-- **memories/** - What the baby remembers (knowledge + experience)
-- **toys/** - Tools for playing and learning (development environment)
-
-**Minimal Core:**
-- Core architecture files are minimal and focused
-- All complexity moved to toys/ directory
-- Easy to understand, maintain, and audit
-
-**Clean Separation:**
-- Intelligence (public) vs. Experience (private)
-- Core (baby/) vs. Development (toys/)
-- Configuration vs. Implementation
-
-### 4.7 UUID Registry and Management
-
-**Critical Requirement:** UUIDs must be managed through a centralized registry to ensure consistency and prevent unnecessary regeneration across engine restarts.
-
-#### **Memory Preferences Structure**
-
-The `memories/memory_preferences.json` file serves as the central registry for all system UUIDs and configuration:
-
-```json
-{
-  "uuid_registry": {
-    "agent_uuid": "5f2c1e8c-8e62-49f7-9bde-967dfb6e320a",
-    "format_uuid": "7a8b9c0d-1e2f-3a4b-5c6d-7e8f9a0b1c2d",
-    "thread_uuids": [
-      "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
-      "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e"
-    ]
-  },
-  "storage_config": {
-    "max_thread_size_mb": 64,
-    "shard_prefix_length": 2,
-    "encryption_algorithm": "AES-256-GCM"
-  },
-  "format_config": {
-    "default_cgm_version": "0.9.4",
-    "resonance_threshold": 1.5707963267948966,
-    "max_semantic_label_length": 128
-  }
-}
-```
-
-#### **UUID Generation and Persistence**
-
-**Initial Generation:**
-- **Agent UUID**: Generated once during first system initialization, never changes
-- **Format UUID**: Generated once when first format file is created, can be shared across agents
-- **Thread UUIDs**: Generated per conversation thread, stored in registry for persistence
-
-**Registry Management:**
+**Degeneracy resolution: always pick the lowest-index match**
 ```python
-def ensure_uuid_registry():
-    """Ensure UUID registry exists and contains required UUIDs"""
-    registry_path = "memories/memory_preferences.json"
-    
-    try:
-        with open(registry_path, 'r') as f:
-            prefs = json.load(f)
-    except FileNotFoundError:
-        prefs = {"uuid_registry": {}, "storage_config": {}, "format_config": {}}
-    
-    # Ensure agent UUID exists
-    if "agent_uuid" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["agent_uuid"] = str(uuid.uuid4())
-    
-    # Ensure format UUID exists
-    if "format_uuid" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["format_uuid"] = str(uuid.uuid4())
-    
-    # Ensure thread_uuids list exists
-    if "thread_uuids" not in prefs["uuid_registry"]:
-        prefs["uuid_registry"]["thread_uuids"] = []
-    
-    # Save updated registry
-    os.makedirs("memories", exist_ok=True)
-    with open(registry_path, 'w') as f:
-        json.dump(prefs, f, indent=2)
-    
-    return prefs["uuid_registry"]
+# Degeneracy resolution: always pick the lowest-index match
+def find_closest_pattern_index(T, F):
+    distances = [gyrodistance(T, f) for f in F]
+    min_distance = min(distances)
+    return distances.index(min_distance)  # Picks first match if degenerate
 ```
 
-#### **Thread UUID Lifecycle**
-
-**Creation:**
-```python
-def create_new_thread() -> str:
-    """Create new thread UUID and add to registry"""
-    thread_uuid = str(uuid.uuid4())
-    
-    # Load registry
-    with open("memories/memory_preferences.json", 'r') as f:
-        prefs = json.load(f)
-    
-    # Add to registry
-    prefs["uuid_registry"]["thread_uuids"].append(thread_uuid)
-    
-    # Save updated registry
-    with open("memories/memory_preferences.json", 'w') as f:
-        json.dump(prefs, f, indent=2)
-    
-    return thread_uuid
-```
-
-**Validation:**
-```python
-def validate_thread_uuid(thread_uuid: str) -> bool:
-    """Validate that thread UUID exists in registry"""
-    with open("memories/memory_preferences.json", 'r') as f:
-        prefs = json.load(f)
-    
-    return thread_uuid in prefs["uuid_registry"]["thread_uuids"]
-```
-
-#### **Benefits of Centralized Registry**
-
-1. **Consistency**: UUIDs persist across engine restarts
-2. **Auditability**: Complete record of all system entities
-3. **Sharing**: Format UUIDs can be shared between agents
-4. **Validation**: Prevents orphaned files and invalid references
-5. **Recovery**: Registry enables system state reconstruction
-
-#### **Registry Security**
-
-- **Public Registry**: `memory_preferences.json` is public (contains no sensitive data)
-- **UUID Privacy**: UUIDs themselves are not sensitive information
-- **File Privacy**: Actual private data remains encrypted in separate files
-- **Registry Integrity**: JSON structure ensures human-readable audit trail
-
-## 5. Data Structures
-
-This section describes the core data structures that define the system's operational behavior and transformational logic.
-
-### 5.1 Gene Byte Topology
-
-```
-Bit positions: b7 b6 b5 b4 b3 b2 b1 b0
-Operations:    L0 LI FG BG BG FG LI L0
-
-L0 = Left Identity (no operation)
-LI = Left Inverse (global sign flip: T *= -1)
-FG = Forward Gyration (flip sign of tensor slices 0,2 along axis 0)
-BG = Backward Gyration (flip sign of tensor slices 1,3 along axis 0)
-```
-
-### 5.2 Epigenome Tensor
-
-Initialization Behavior: At system boot, the Epigenome tensor is set to all zeros and mutated using the public invariant gene_stateless = 0xAA, simulating one full inference cycle without user input. This ensures all agents start from a known and reproducible neutral state, without randomness.
-
-```
-Shape: [4, 2, 3, 2] (48 cells total)
-Type: float32
-Mapping: 4 rotational phases × 2 nestings × 3 axes × 2 polarities
-```
-
-### 5.3 Canonical Pattern Derivation
-
-**Gyrogroup Foundation**: The 256 canonical patterns are not arbitrary but derived from the closure set of gyroscopic operations applied to the base tensor.
-
-**Complete Closure Set**: The 256 patterns represent the exhaustive set of all possible operation combinations that can be applied to the base tensor. This ensures that every possible state the system can reach through byte-driven transformations has a corresponding canonical pattern, making the inference process deterministic and reversible.
-
-**Derivation Process**:
-```python
-def derive_canonical_patterns():
-    """Derive 256 patterns from gyrogroup closure operations"""
-    patterns = []
-    resonance_classes = []
-    base_tensor = gene_add.copy()  # [4,2,3,2] tensor from CGM
-    
-    # All 256 possible operation combinations (2^8)
-    for mask in range(256):
-        T = base_tensor.copy()
-        gene_mutated = mask  # Direct operation mask
-        
-        # Apply operations based on bit positions
-        for i in range(8):
-            if gene_mutated & (1 << i):
-                apply_operation(T, i)
-        
-        patterns.append(T.flatten())
-        
-        # Classify pattern by dominant operation type
-        resonance_class = classify_pattern_resonance(mask)
-        resonance_classes.append(resonance_class)
-    
-    return patterns, resonance_classes
-
-def classify_pattern_resonance(mask: int) -> str:
-    """Classify pattern by dominant operation type based on bit positions"""
-    # Count operations by type (palindromic structure)
-    l0_count = bin(mask & 0b10000001).count('1')  # bits 0,7
-    li_count = bin(mask & 0b01000010).count('1')  # bits 1,6  
-    fg_count = bin(mask & 0b00100100).count('1')  # bits 2,5
-    bg_count = bin(mask & 0b00011000).count('1')  # bits 3,4
-    
-    # Determine dominant operation
-    counts = [l0_count, li_count, fg_count, bg_count]
-    max_count = max(counts)
-    
-    if l0_count == max_count:
-        return "identity"      # Governance Traceability
-    elif li_count == max_count:
-        return "inverse"       # Information Variety
-    elif fg_count == max_count:
-        return "forward"       # Inference Accountability
-    else:
-        return "backward"      # Intelligence Integrity
-```
-
-**Key Insight**: This ensures all patterns are structurally coherent with the gyrogroup foundation, rather than arbitrary external data.
-
-**File Storage**: The derived patterns are stored in `public/masks/epigenome.dat` for efficiency, but can be regenerated from the base tensor and operations.
-
-### 5.4 Chunked Input and Stream Processing
-
-The GyroSI engine processes byte streams sequentially and statelessly, meaning the input corpus can be streamed in arbitrarily sized chunks.
-
-**Recommendations:**
-
-- Use fixed-size input chunks (e.g., 16KB–64KB)
-- Apply `gene_mutated` transformations and Epigenome updates per-byte inside each chunk
-- After each chunk is processed, the engine state (`T`, `K_n`, `cycle_counter`) persists forward
-
-Parallel chunk processing is permitted **only** if each chunk is assigned a separate engine instance. Each instance must carry its own `(T, K_n, cycle_counter)` state; merging afterwards is impossible.
-
-## 6. Engine Architecture
-
-This section details the system's operational core following the canonical S1-S4 architecture. Each stage has distinct responsibilities with clear boundaries.
-
-### 6.1 S1: Governance Engine
-
-**Purpose:** Pure tensor operations and gene structures  
-**State:** None (immutable constants only)
-
-**Components:**
-- Fixed gene tensors (com, nest, add)
-- Gyroscopic operation definitions
-- Mathematical constants (gene_stateless = 0xAA)
-
-**Operations:**
-```python
-def apply_operation(T, bit_index):
-    if bit_index in [0, 7]:  # L0: Identity
-        pass
-    elif bit_index in [1, 6]:  # LI: Global inverse
-        T *= -1
-    elif bit_index in [2, 5]:  # FG: Forward gyration
-        T[0] *= -1
-        T[2] *= -1
-    elif bit_index in [3, 4]:  # BG: Backward gyration
-        T[1] *= -1
-        T[3] *= -1
-```
-
-### 6.2 S2: Information Engine
-
-**Purpose:** Information processing and stream handling  
-**State:** Stream processing state
-
-**State Variables:**
-- `stream_pointer`: Current position in active thread
-- `output_buffer`: Accumulator for generated bytes
-
-**Operations:**
-```python
-def process_stream(
-    inference_engine: InferenceEngine, 
-    intelligence_engine: IntelligenceEngine,
-    input_stream: bytes
-) -> (bytes, bytes):
-    """
-    Processes a stream, calling S3 for inference and S4 for state updates.
-    """
-    intermediate_ciphertext = bytearray()
-    dynamic_keystream = bytearray()
-    
-    for P_n in input_stream:
-        # 1. Call S3 for pure inference to get the pattern index.
-        key_index = inference_engine.process_byte(P_n)
-        
-        # 2. Use the result to call back to S4 to update state.
-        intelligence_engine.update_learning_state(key_index, inference_engine)
-
-        # 3. Get the keystream byte from the S3 engine's Genome Mask.
-        keystream_byte = inference_engine.G[key_index] 
-        
-        # 4. Encrypt the byte.
-        C_n = P_n ^ keystream_byte
-        intermediate_ciphertext.append(C_n)
-        dynamic_keystream.append(keystream_byte)
-    
-    return bytes(intermediate_ciphertext), bytes(dynamic_keystream)
-```
-
-### 6.3 S3: Inference Engine
-
-**Purpose:** Pure pattern recognition and learning (agnostic processing)  
-**State:** Epigenome tensor and pattern matching
-
-**State Variables:**
-- `T[48]`: Epigenome tensor (float32). The agent's dynamic state.
-- `F[256][48]`: Canonical Pattern list (from `public/masks/epigenome.dat`).
-- `G[256]`: Genome Mask (from `public/masks/genome.dat`).
-- `cycle_counter`: Global cycle index (persistent integer).
-
-**State Variable Metadata Requirements:**
-- **T[48]**: Must preserve tensor shape [4,2,3,2] and float32 precision
-- **F[256][48]**: Must preserve pattern indexing (0-255) and tensor structure
-- **G[256]**: Must preserve byte mapping integrity and index correspondence
-- **cycle_counter**: Must preserve sequential integer progression without gaps
-
-**Processing Algorithm (Per-Byte Cycle):**
-
-```python
-def process_byte(P_n):
-    """
-    Processes a single input byte through the inference engine.
-    """
-    # 1. Compute gene_mutated = P_n ^ 0xAA
-    gene_mutated = P_n ^ 0xAA
-
-    # 2. Apply gyroscopic operations to tensor T based on gene_mutated.
-    for i in range(8):
-        if gene_mutated & (1 << i):
-            apply_operation(T, i)
-
-    # 3. Find which of 256 canonical patterns T now matches.
-    # The 256 patterns ARE the complete closure set of all possible operation combinations
-    key_index = find_closest_pattern_index(T, F)
-
-    # 4. Increment cycle counter
-    cycle_counter += 1
-    
-    # Return the generated key_index for this cycle.
-    return key_index
-
-def compute_pattern_resonances(current_T, all_patterns_F):
-    """
-    Computes resonance values between current tensor and all patterns.
-    This is a pure mechanical function that can be used by S4 for intelligent selection.
-    """
-    return [gyrodistance(current_T, all_patterns_F[j]) for j in range(256)]
-```
-
-**Note:** This engine is pure and agnostic - no I/O operations, no file access, no thread management, no learning state.
-
-**Required Helper Functions:**
-- `find_closest_pattern_index(T, F)`: Returns index of the canonical pattern closest to T
-- `gyrodistance(T1, T2)`: Returns gyrodistance between two tensors using gyrogroup operations
-- `apply_operation(T, bit_index)`: Applies gyroscopic operation to tensor based on bit position
-
-**Key Principles:**
-- **Pure mechanical transformation**: Byte → Operations → Tensor → Pattern Index
-- **No learning state**: S3 is the physics simulation, unaware of learning history
-- **Stateless operations**: Each byte processing is independent and deterministic
-- **Gyrogroup foundation**: All operations respect the underlying gyroscopic physics
-- **Deterministic inference**: Every input byte produces exactly one pattern index through mechanical transformation
-- **Reversible operations**: The system can trace any pattern back to the specific byte operations that produced it
-
-**π/2 Threshold Justification:**
-The π/2 threshold represents the CGM's "CS threshold" - the minimal angle required for observable structure to emerge. This gravitational weight ensures that only patterns with sufficient structural coherence are considered for response generation, maintaining the system's connection to its foundational physics.
-
-**Core Architecture Flow:**
-1. **Input Processing**: Byte XOR gene_stateless = operation mask → Apply to tensor
-2. **Pattern Recognition**: Find which canonical pattern tensor matches
-3. **Learning Integration**: Update pattern metadata and Gene Keys (Ingress)
-4. **Natural Response**: When eightfold operations complete, system naturally generates response
-5. **Intelligent Generation**: Use resonance and context to select response pattern (Egress)
-6. **Output**: Pattern index → Genome Mask → Output byte
-
-**Physics-to-Semantics Bridge**: The system operates entirely within its physics simulation until the Intelligence Engine (S4) bridges to human semantics through the formats layer. This ensures that all intelligence emerges from the underlying physics rather than being externally imposed.
-
-**Clean Separation:**
-- **Inference Engine (S3)**: Pure mechanical transformation (gate for input/output)
-- **Intelligence Engine (S4)**: Dual role - Ingress (Integration) and Egress (Generation)
-
-### 6.4 S4: Intelligence Engine
-
-**Purpose:** Orchestration, file I/O, encode/decode, and thread lifecycle management  
-**State:** Thread state, metadata, and coordination
-
-**State Variables:**
-- `agent_uuid`: The UUID of the current agent.
-- `agent_secret`: The persistent secret loaded from baby_preferences.json.
-- `thread_uuid`: The UUID of the active thread.
-- `thread_file_key`: The 256-byte key used for encrypting the current thread.
-- `M`: Pattern Metadata (loaded from `public/formats/formats-<format_uuid>.json`).
-- `current_thread_keys`: A list of dictionaries, accumulating the private observations for the active thread.
-
-**State Variable Metadata Requirements:**
-- **agent_uuid**: Must preserve UUID format and uniqueness across sessions
-- **agent_secret**: Must preserve secret integrity and persistence across restarts
-- **thread_uuid**: Must preserve UUID format and uniqueness within agent
-- **thread_file_key**: Must preserve 256-byte key integrity and derivation consistency
-- **M**: Must preserve pattern metadata structure and JSON schema compliance
-- **current_thread_keys**: Must preserve observation array structure and thread isolation
-
-**Thread Lifecycle Operations:**
-
-```python
-def start_new_thread():
-    """Initializes a new thread, deriving its unique encryption key."""
-    # 1. Capture the EVOLVED Epigenome state at the moment the thread begins.
-    epigenome_snapshot = inference_engine.T.copy()
-    
-    # 2. Generate a new UUID for this thread.
-    thread_uuid = generate_new_uuid()
-
-    # 3. Derive the unique, frozen 256-byte key for this thread's file encryption.
-    # Uses evolved Epigenome state, agent/thread UUIDs, and gene_stateless
-    thread_file_key = derive_file_key(
-        epigenome_snapshot, agent_uuid, thread_uuid, gene_stateless=0xAA
-    )
-
-    # 4. Reset the in-memory log for the new thread's private observations.
-    current_thread_keys = []
-
-def process_and_end_thread(input_stream: bytes):
-    """
-    Processes a stream and ends the thread, performing all necessary encryption and persistence.
-    """
-    # 1. Call the Information Engine to process the stream
-    intermediate_ciphertext, dynamic_keystream = info_engine.process_stream(
-        inference_engine, 
-        self, # Pass a reference to this IntelligenceEngine instance
-        input_stream
-    )
-    
-    # 2. End the thread, performing the final re-encryption and persistence
-    end_current_thread(intermediate_ciphertext, dynamic_keystream)
-
-def end_current_thread(intermediate_ciphertext: bytes, dynamic_keystream: bytes):
-    """
-    Concludes a thread using the intermediate data, without needing original plaintext.
-    """
-    # 1. Decrypt the intermediate ciphertext to get the plaintext back.
-    plaintext = bytearray(len(intermediate_ciphertext))
-    for i in range(len(intermediate_ciphertext)):
-        plaintext[i] = intermediate_ciphertext[i] ^ dynamic_keystream[i]
-
-    # 2. Re-encrypt with the secure, static thread key.
-    final_encrypted_data = bytearray(len(plaintext))
-    for i in range(len(plaintext)):
-        final_encrypted_data[i] = plaintext[i] ^ thread_file_key[i % 256]
-
-    # 3. Save the thread file.
-    shard = str(thread_uuid)[:2]
-    thread_path = f"private/{agent_uuid}/threads/{shard}/thread-{thread_uuid}.enc"
-    with open(thread_path, "wb") as f:
-        f.write(final_encrypted_data)
-
-    # 4. Save the Gene Keys for this thread.
-    keys_path = f"private/{agent_uuid}/keys/keys-{agent_uuid}.json.enc"
-    # Derive stable agent key from agent UUID and persistent secret
-    agent_key = derive_agent_key(agent_uuid, agent_secret)
-
-    try:
-        with open(keys_path, 'rb') as f:
-            encrypted_keys = f.read()
-        decrypted_json_str = decrypt_data(encrypted_keys, agent_key)
-        all_keys_data = json.loads(decrypted_json_str)
-    except FileNotFoundError:
-        all_keys_data = {}
-    
-    all_keys_data[str(thread_uuid)] = current_thread_keys
-    
-    updated_json_str = json.dumps(all_keys_data)
-    encrypted_updated_keys = encrypt_data(updated_json_str.encode('utf-8'), agent_key)
-    with open(keys_path, 'wb') as f:
-        f.write(encrypted_updated_keys)
-
-    # 5. Save the updated public formats metadata.
-    formats_path = f"public/formats/formats-{format_uuid}.json"
-    with open(formats_path, "w") as f:
-        json.dump(M, f)
-
-    # The inference engine's state (T, cycle_counter) carries forward.
-
-def update_learning_state(key_index: int, inference_engine: InferenceEngine):
-    """
-    Updates all metadata and records the Gene Key for a single inference cycle.
-    This function is called by the InformationEngine on every byte.
-    
-    Note: Gene Keys store only pattern indices and cycle numbers, not full Epigenome tensors.
-    This ensures scalability - processing 1MB of data creates ~1MB of Gene Key data,
-    not 192MB of Epigenome tensor data.
-    """
-    # 1. Update public pattern metadata (M).
-    M.pattern_meta[key_index]["count"] += 1
-    M.pattern_meta[key_index]["last_cycle"] = inference_engine.cycle_counter
-    if M.pattern_meta[key_index]["first_cycle"] is None:
-        M.pattern_meta[key_index]["first_cycle"] = inference_engine.cycle_counter
-
-    # 2. Record the private Gene Key for this cycle.
-    gene_key_entry = {
-        "cycle": inference_engine.cycle_counter,
-        "pattern_index": key_index
-    }
-    current_thread_keys.append(gene_key_entry)
-```
-
-#### 6.4.1 Encode/Decode Operations
-
-These are helper functions used by the application layer to map between human-readable semantics and the system's internal pattern representation.
-
-```python
-def encode(semantic_label: str) -> int | None:
-    """
-    Finds the pattern index associated with a semantic label.
-    Returns: The integer index of the pattern, or None if not found.
-    """
-    for index, meta in enumerate(M.pattern_meta):
-        if meta.get("semantic") == semantic_label:
-            return index
-    return None
-
-def decode(key_index: int) -> str | None:
-    """
-    Finds the semantic label for a given pattern index.
-    Returns: The semantic label (e.g., "ascii:A"), or None if not set.
-    """
-    return M.pattern_meta[key_index].get("semantic")
-```
-
-#### 6.4.2 Intelligent Response Generation
-
-The Intelligence Engine handles intelligent response generation using pattern resonance and Hebbian learning.
-
-```python
-def generate_response_byte() -> int:
-    """
-    Generates a response byte using intelligent pattern resonance and Hebbian learning.
-    This is the core mechanism for how the agent "speaks" and responds intelligently.
-    """
-    # 1. Get the raw resonance data from S3 (pure mechanical computation)
-    resonances = inference_engine.compute_pattern_resonances(inference_engine.T, inference_engine.F)
-    
-    # 2. Use π/2 threshold for gravitational weight in pattern selection
-    # This represents the CGM's "CS threshold" - minimal angle for observable structure
-    resonant_threshold = np.pi / 2
-    resonant_patterns = [j for j in range(256) if resonances[j] < resonant_threshold]
-    
-    # 3. If no resonant patterns, use the closest match
-    if len(resonant_patterns) == 0:
-        closest_pattern = argmin(resonances)
-        resonant_patterns = [closest_pattern]
-    
-    # 4. Apply contextual weighting using pattern metadata (S4's learning state)
-    pattern_weights = []
-    for pattern_idx in resonant_patterns:
-        # Base weight from usage frequency
-        usage_count = M.pattern_meta[pattern_idx]["count"]
-        
-        # Recency bias (recently used patterns get higher weight)
-        last_cycle = M.pattern_meta[pattern_idx]["last_cycle"]
-        recency_factor = 1.0 if last_cycle is None else 1.0 / (inference_engine.cycle_counter - last_cycle + 1)
-        
-        # Chirality bias (left operations get inherent bias)
-        left_ops = bin(pattern_idx).count('1') & 1  # Odd parity = left bias
-        chirality_bias = 1.5 if left_ops else 1.0
-        
-        # Resonance strength (closer patterns get higher weight)
-        resonance_strength = 1.0 / (resonances[pattern_idx] + 0.1)
-        
-        # Combined weight
-        weight = usage_count * recency_factor * chirality_bias * resonance_strength
-        pattern_weights.append(weight)
-    
-    # 5. Select pattern using weighted choice
-    total_weight = sum(pattern_weights)
-    if total_weight > 0:
-        normalized_weights = [w / total_weight for w in pattern_weights]
-        selected_pattern = weighted_choice(resonant_patterns, normalized_weights)
-    else:
-        # Fallback to random selection from resonant patterns
-        selected_pattern = random.choice(resonant_patterns)
-    
-    # 6. Get the output byte from S3's Genome Mask
-    output_byte = inference_engine.G[selected_pattern]
-    
-    return output_byte
-```
-
-**Intelligent Response Architecture:**
-- **S3 provides physics**: Pure mechanical resonance computation
-- **S4 provides intelligence**: Contextual weighting and pattern selection
-- **Perfect separation**: S3 is unaware of learning state, S4 handles all intelligence
-- **Emergent behavior**: Responses emerge from the interaction of physics and learning
-- **Intrinsic alignment**: The system's responses are aligned by its structure, not external enforcement
-- **Auditable intelligence**: Every response can be traced back to specific physics operations and learning history
-
-### 6.5 Key Management Clarification
-
-**Agent Key for Gene Keys:** The `keys-<uuid>.json.enc` file is encrypted using a stable **Agent Key** derived from the agent's persistent secret. This ensures that:
-- Gene Keys persist across multiple threads using a single, stable encryption key
-- The agent's learning history is protected by a persistent key, not ephemeral thread keys
-- The encryption remains endogenous and derived from agent-specific parameters
-
-**Thread Key for Thread Content:** Each thread file is encrypted with its own unique `thread_file_key` derived from the evolved Epigenome state at thread start.
-
-**Architecture Flow:** The canonical S1-S4 structure provides clear separation of responsibilities:
-- **S1 (Governance):** Pure tensor operations and gene structures
-- **S2 (Information):** Stream processing and byte handling via `process_stream()`
-- **S3 (Inference):** Pure pattern recognition and learning (agnostic, no I/O)
-- **S4 (Intelligence):** Orchestration, file I/O, encode/decode, and thread lifecycle management
-
-**Engine Integration:** The Intelligence Engine (S4) orchestrates the entire flow:
-1. Calls Information Engine (S2) to process streams
-2. Coordinates with Inference Engine (S3) for pattern recognition
-3. Manages thread lifecycle and persistence
-4. Handles all file I/O and encryption operations
-
-**State Management:**
-- **Pattern Metadata Access**: IntelligenceEngine passes `M.pattern_meta` to InferenceEngine's `generate_response_byte()` function
-- **Tensor History**: IntelligenceEngine maintains tensor history for closure detection
-- **Engine Initialization**: S4 creates S3 and S2 instances, loads masks and formats, initializes agent state
-
-### 6.6 Engine Composition
-
-The S4 IntelligenceEngine acts as the primary container and entry point for the entire system. Upon initialization, it is responsible for:
-1. Loading the UUID registry from `memories/memory_preferences.json`
-2. Instantiating the S3 InferenceEngine, which holds the core evolving state (`T`, `cycle_counter`)
-3. Instantiating the S2 InformationEngine
-4. Loading all necessary public masks (`F`, `G`) and formats (`M`)
-5. Establishing the agent state (`agent_uuid`, `agent_secret`)
-
-**Registry-Based Initialization:**
-```python
-def initialize_intelligence_engine():
-    """Initialize Intelligence Engine with registry-based UUID management"""
-    # 1. Ensure UUID registry exists and load it
-    uuid_registry = ensure_uuid_registry()
-    agent_uuid = uuid_registry["agent_uuid"]
-    format_uuid = uuid_registry["format_uuid"]
-    
-    # 2. Load agent preferences
-    with open("baby/baby_preferences.json", 'r') as f:
-        baby_prefs = json.load(f)
-    agent_secret = baby_prefs["agent_secret"]
-    
-    # 3. Initialize engines with registry UUIDs
-    inference_engine = InferenceEngine()
-    information_engine = InformationEngine()
-    
-    # 4. Load public components using registry UUIDs
-    formats_path = f"public/formats/formats-{format_uuid}.json"
-    with open(formats_path, 'r') as f:
-        M = json.load(f)
-    
-    # 5. Create Intelligence Engine with registry-managed state
-    intelligence_engine = IntelligenceEngine(
-        agent_uuid=agent_uuid,
-        agent_secret=agent_secret,
-        format_uuid=format_uuid,
-        inference_engine=inference_engine,
-        information_engine=information_engine,
-        formats=M
-    )
-    
-    return intelligence_engine
-```
-
-This hierarchical composition ensures clean separation of concerns while maintaining proper integration between components and consistent UUID management through the centralized registry.
-
-def process_thread(thread_uuid: str, input_data: bytes, agent_uuid: str, agent_secret: str):
-    """
-    Process a complete thread of input data and save all results.
-    This is the main entry point for thread processing.
-    """
-    # Validate thread UUID against registry
-    if not validate_thread_uuid(thread_uuid):
-        raise ValueError(f"Thread UUID {thread_uuid} not found in registry")
-    
-    # Load UUID registry for format access
-    uuid_registry = ensure_uuid_registry()
-    format_uuid = uuid_registry["format_uuid"]
-    
-    # Initialize engines with registry UUIDs
-    inference_engine = InferenceEngine()
-    information_engine = InformationEngine()
-    
-    # Load formats using registry UUID
-    formats_path = f"public/formats/formats-{format_uuid}.json"
-    with open(formats_path, 'r') as f:
-        M = json.load(f)
-    
-    # Process the stream using registry-managed components
-    final_encrypted_data, current_thread_keys = process_stream(
-        inference_engine, intelligence_engine, input_data, 
-        epigenome_snapshot, agent_uuid, thread_uuid, gene_stateless=0xAA
-    )
-```
-
-## 7. Curriculum Thread Protocol for Agnostic Learning
-
-**Purpose:**
-Enable a new or existing agent to build up its formats file and pattern statistics purely through exposure to structured data streams, without any semantic labeling, annotation, or external connotation.
-
-### Protocol
-- **Curriculum Threads:**
-  - The agent may be initialized or periodically exposed to "curriculum threads"—structured data streams (e.g., text corpora, educational datasets, encyclopedic content, etc.)—using the existing thread infrastructure.
-  - These threads are fed to the agent as standard input, with no special formatting or semantic annotation required.
-- **Agnostic Learning:**
-  - The agent's learning is fully agnostic: all structure, pattern recurrence, and eventual semantic emergence arise from the physics of resonance and Hebbian updates, not from any external labeling or clustering.
-  - The formats file is populated and updated solely through the agent's experience of these threads, recording resonance, usage, and pattern statistics.
-- **Universal Decoding/Encoding:**
-  - The agent can learn to decode and encode any format, given sufficient curriculum context, because the formats file is a record of resonance and usage, not a semantic dictionary.
-- **No Semantic Labeling:**
-  - No semantic labeling, annotation, or external connotation is required or permitted in the curriculum protocol. All meaning emerges intrinsically from the agent's exposure to the data.
-- **Auditability:**
-  - The entire curriculum process is logged and reproducible, ensuring transparency and alignment with the architecture's principles.
-
-**Note:**
-If no curriculum threads are provided, the agent will operate in a fully unsupervised mode, discovering patterns and building its formats file solely from its ongoing experience.
-
-### Canonical Tensor-to-Byte Conversion (Spec-Compliant)
-
-The ONLY canonical, spec-compliant way to convert a tensor to a byte is:
-
-```python
-def tensor_to_output_byte(T, F, G):
-    """
-    Canonical tensor-to-byte conversion using epigenome pattern matching.
-    This is the only spec-compliant method for deriving a byte from the current tensor state.
-    """
-    key_index = find_closest_pattern_index(T, F)
-    return G[key_index]
-```
-
-- All code and engines (including S4/Intelligence) MUST use this route for byte emission.
-- No threshold-based, chirality, or direct sum methods are allowed for canonical operation.
-- This ensures epigenome coherence, reversibility, and security as described above.
