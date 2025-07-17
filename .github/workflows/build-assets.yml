@@ -23,22 +23,22 @@ jobs:
 
       - name: Build ontology_map.json
         run: |
-          python -m baby.information ontology --output memories/public/ontology/ontology_map.json
+          python -m baby.information ontology --output memories/public/meta/ontology_map.json
 
       - name: Build phenomenology_map.json
         run: |
-          python -m baby.information phenomenology --ontology_map memories/public/ontology/ontology_map.json --output memories/public/ontology/phenomenology_map.json
+          python -m baby.information phenomenology --ontology_map memories/public/meta/ontology_map.json --output memories/public/meta/phenomenology_map.json
 
       - name: Build epistemology.npy
         run: |
-          python -m baby.information epistemology --ontology memories/public/ontology/ontology_map.json --output memories/public/ontology/epistemology.npy
+          python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
 
       - name: Add and commit LFS files
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git lfs track "*.npy" "*.json"
-          git add memories/public/ontology/ontology_map.json memories/public/ontology/phenomenology_map.json memories/public/ontology/epistemology.npy
+          git add memories/public/meta/ontology_map.json memories/public/meta/phenomenology_map.json memories/public/meta/epistemology.npy
           git commit -m "Add prebuilt ontology assets [skip ci]" || echo "No changes to commit"
           git push
         env:
