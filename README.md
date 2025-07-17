@@ -306,7 +306,7 @@ MIT License - see [LICENSE](LICENSE) for details.
   <p>All foundational ideas, design decisions, and conceptual frameworks originate from the Author.</p>
   <p>Responsibility for the validity, coherence, and ethical direction of this project remains fully human.</p>
   <p><strong>Acknowledgements:</strong><br>
-  This project benefited from AI language model services accessed through Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).</p>
+  This project benefited from AI language model services accessed through LMArena, Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).</p>
 </div>
 
 
