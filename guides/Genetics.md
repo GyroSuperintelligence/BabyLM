@@ -453,79 +453,7 @@ def batch_introns_coadd_ordered(introns: List[int]) -> int:
 
 **Responsibility**: Defines the fundamental constants and physics operations as pure functions and constants. There is no engine class for S1; all operations are provided as stateless functions in `governance.py`.
 
-```python
-# baby/governance.py
-import numpy as np
-import json
-import time
 
-# Core genetic constants - see Section 4.1 for tensor definitions
-GENE_Mic_S = 0xAA  # 10101010 binary, stateless constant
-GENE_Mac_S = # Implementation as defined in Section 4.1.4
-
-def build_masks_and_constants() -> tuple[int, int, int, list[int]]:
-    """Pre-computes masks based on the Layer-based physics."""
-    FG, BG = 0, 0
-    # Tensor is flattened in C-order (row-major), so we can iterate and set bits
-    for layer in range(4):
-        # A layer has 2 frames * 3 rows * 2 cols = 12 elements
-        for frame in range(2):
-            for row in range(3):
-                for col in range(2):
-                    bit_index = (((layer * 2 + frame) * 3 + row) * 2 + col)
-                    # FG flips all 12 bits in layers 0 & 2
-                    if layer in (0, 2):
-                        FG |= 1 << bit_index
-                    # BG flips all 12 bits in layers 1 & 3
-                    if layer in (1, 3):
-                        BG |= 1 << bit_index
-    FULL_MASK = (1 << 48) - 1
-    # Corrected: A 48-bit integer is 6 bytes.
-    INTRON_BROADCAST_MASKS = [
-        int.from_bytes(i.to_bytes(1, 'little') * 6, 'little') 
-        for i in range(256)
-    ]
-    return FG, BG, FULL_MASK, INTRON_BROADCAST_MASKS
-
-FG_MASK, BG_MASK, FULL_MASK, INTRON_BROADCAST_MASKS = build_masks_and_constants()
-
-def apply_gyration_and_transform(state_int: int, intron: int) -> int:
-    """
-    Applies the full gyroscopic physics. This is a direct implementation of
-    a gyro-addition (a set of XOR flips) followed by a Thomas gyration.
-    """
-    # 1. Gyro-addition (applying the transformational forces)
-    temp_state = state_int
-    if intron & 0b01000010: temp_state ^= FULL_MASK
-    if intron & 0b00100100: temp_state ^= FG_MASK
-    if intron & 0b00011000: temp_state ^= BG_MASK
-
-    # 2. Thomas Gyration (applying the path-dependent memory/carry term)
-    intron_pattern = INTRON_BROADCAST_MASKS[intron]
-    gyration = temp_state & intron_pattern
-    final_state = temp_state ^ gyration
-    return final_state
-
-def transcribe_byte(byte: int) -> int:
-    """Returns byte ⊕ GENE_Mic_S"""
-    return byte ^ GENE_Mic_S
-
-def coadd(a: int, b: int) -> int:
-    """Performs true gyrogroup coaddition. See Section 5.3 for details."""
-    not_b = b ^ 0xFF
-    gyration_of_b = b ^ (a & not_b)
-    return a ^ gyration_of_b
-
-def batch_introns_coadd_ordered(introns: list[int]) -> int:
-    """
-    Reduces a list of introns into a single representative intron using
-    gyrogroup coaddition.
-    """
-    from functools import reduce
-    if not introns:
-        return 0
-    return reduce(coadd, introns)
-```
 
 ### **6.2 S2: `information.py` - Measurement & Storage**
 
