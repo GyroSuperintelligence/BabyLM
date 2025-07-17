@@ -4,6 +4,7 @@ Tests for S2: Information - Measurement & Storage
 
 import pytest
 import numpy as np
+
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
     import ujson as json  # type: ignore[import]
@@ -85,7 +86,7 @@ class TestInformationEngine:
                 "ontology_map": {},
                 "endogenous_modulus": 788_986,
                 "ontology_diameter": 6,
-                "schema_version": "1.0.0",
+                "schema_version": "0.9.6",
                 "total_states": 0,
                 "build_timestamp": 0.0,
             }

@@ -62,8 +62,6 @@ class PreferencesConfig(TypedDict, total=False):
     agent_ttl_minutes: int
 
     # Security preferences
-    encryption_enabled: bool
-    encryption_key: Optional[str]
 
     # Performance preferences
     enable_profiling: bool

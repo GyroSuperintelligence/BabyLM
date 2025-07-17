@@ -1,7 +1,7 @@
 """
 S3: Inference - Interpretation & Meaning Management
 
-This module provides the EndogenousInferenceOperator class responsible for
+This module provides the InferenceEngine class responsible for
 converting physical state indices into semantic meanings and managing
 the learning process through gyrogroup coaddition.
 """
@@ -15,7 +15,7 @@ from baby.information import InformationEngine
 from baby import governance
 
 
-class EndogenousInferenceOperator:
+class InferenceEngine:
     """
     S3: Interpretation & Meaning Management.
 
@@ -136,7 +136,7 @@ class EndogenousInferenceOperator:
         modified_count = 0
         current_time = time.time()
 
-        for key, entry in getattr(self.store, 'iter_entries', lambda: self.store.data.items())():
+        for key, entry in getattr(self.store, "iter_entries", lambda: self.store.data.items())():
             age_counter = entry.get("age_counter", 0)
             last_updated = entry.get("last_updated", current_time)
 
@@ -167,7 +167,7 @@ class EndogenousInferenceOperator:
                 self.store.put(key, entry)
                 modified_count += 1
 
-        if hasattr(self.store, 'commit'):
+        if hasattr(self.store, "commit"):
             self.store.commit()
         return ValidationReport(
             total_entries=len(self.store.data) if hasattr(self.store, "data") else 0,  # type: ignore[attr-defined]
@@ -191,14 +191,14 @@ class EndogenousInferenceOperator:
 
         keys_to_remove = []
 
-        for key, entry in getattr(self.store, 'iter_entries', lambda: self.store.data.items())():
+        for key, entry in getattr(self.store, "iter_entries", lambda: self.store.data.items())():
             if entry.get("confidence", 1.0) < confidence_threshold:
                 keys_to_remove.append(key)
 
         for key in keys_to_remove:
             # Persist deletion by putting a tombstone dict
-            self.store.put(key, {'context_signature': key, '__deleted__': True})
-        if hasattr(self.store, 'commit'):
+            self.store.put(key, {"context_signature": key, "__deleted__": True})
+        if hasattr(self.store, "commit"):
             self.store.commit()
 
         return len(keys_to_remove)

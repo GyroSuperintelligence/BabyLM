@@ -7,7 +7,7 @@ import time
 import os
 from baby import governance
 from baby.information import InformationEngine, OrbitStore
-from baby.inference import EndogenousInferenceOperator
+from baby.inference import InferenceEngine
 from baby.types import PhenotypeEntry
 
 
@@ -17,10 +17,10 @@ def inference_operator(ontology_data, orbit_store):
     """Create an inference operator for testing."""
     _, mock_ontology = ontology_data
     s2_engine = InformationEngine(mock_ontology)
-    return EndogenousInferenceOperator(s2_engine, orbit_store)
+    return InferenceEngine(s2_engine, orbit_store)
 
 
-class TestEndogenousInferenceOperator:
+class TestInferenceEngine:
     """Test the inference operator."""
 
     def test_initialization(self, inference_operator):
@@ -140,7 +140,7 @@ class TestKnowledgeManagement:
             store.put((i, 0), entry)
 
         s2_engine = InformationEngine(mock_ontology)
-        return EndogenousInferenceOperator(s2_engine, store)
+        return InferenceEngine(s2_engine, store)
 
     def test_validate_integrity(self, populated_operator):
         """Test knowledge integrity validation."""
@@ -202,7 +202,7 @@ class TestLearningMechanics:
         """Create operator with specific test state."""
         _, mock_ontology = ontology_data
         s2_engine = InformationEngine(mock_ontology)
-        operator = EndogenousInferenceOperator(s2_engine, orbit_store)
+        operator = InferenceEngine(s2_engine, orbit_store)
 
         # Pre-create some phenotypes with known memory masks
         for i in range(5):

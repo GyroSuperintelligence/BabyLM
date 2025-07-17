@@ -4,6 +4,7 @@ Shared pytest fixtures and configuration for GyroSI test suite.
 
 import os
 import shutil
+
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
     import ujson as json  # type: ignore[import]
@@ -66,7 +67,7 @@ def ontology_data(temp_dir):
     # For testing, create a smaller mock ontology
     # In real tests, you'd use discover_and_save_ontology
     mock_ontology: ManifoldData = {
-        "schema_version": "1.0.0",
+        "schema_version": "0.9.6",
         "ontology_map": {i: i for i in range(1000)},  # Mock 1000 states
         "endogenous_modulus": 788_986,  # Keep the real constant
         "ontology_diameter": 6,
@@ -176,7 +177,6 @@ def preferences_config() -> PreferencesConfig:
         "max_agents_in_memory": 10,
         "agent_eviction_policy": "lru",
         "agent_ttl_minutes": 60,
-        "encryption_enabled": False,
         "enable_profiling": False,
         "batch_size": 100,
         "cache_size_mb": 10,

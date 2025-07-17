@@ -19,7 +19,7 @@ from threading import RLock
 
 from baby import governance
 from baby.information import InformationEngine
-from baby.inference import EndogenousInferenceOperator
+from baby.inference import InferenceEngine
 from baby.contracts import CycleHookFunction, AgentConfig, PreferencesConfig
 from baby.policies import OrbitStore, CanonicalView, OverlayView, ReadOnlyView
 
@@ -43,7 +43,7 @@ class IntelligenceEngine:
         """
         # Initialize subsystem engines
         self.s2 = InformationEngine(self._load_ontology(ontology_path))
-        self.operator = EndogenousInferenceOperator(self.s2, phenotype_store)
+        self.operator = InferenceEngine(self.s2, phenotype_store)
 
         # Agent state
         self.agent_id = agent_id or str(uuid.uuid4())
@@ -57,7 +57,9 @@ class IntelligenceEngine:
                 self.use_epistemology = True
                 print("INFO: State Transition Table (STT) loaded. Using optimized state transitions.")
             except Exception as e:
-                print(f"WARNING: Could not load STT from {epistemology_path}. Error: {e}. Falling back to dynamic physics.")
+                print(
+                    f"WARNING: Could not load STT from {epistemology_path}. Error: {e}. Falling back to dynamic physics."
+                )
 
         origin_int = self.s2.tensor_to_int(governance.GENE_Mac_S)
         if self.use_epistemology:

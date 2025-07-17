@@ -23,7 +23,7 @@ from baby.policies import (
     validate_ontology_integrity,
 )
 
-__version__ = "1.0.0"
+__version__ = "0.9.6"
 __all__ = [
     "PhenotypeEntry",
     "ManifoldData",

@@ -5,6 +5,7 @@ Write/policy logic for GyroSI (S5): OrbitStore and storage decorators.
 import os
 import gzip
 import pickle
+
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
     import ujson as json  # type: ignore[import]
@@ -652,6 +653,7 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
         entries_modified=0,
         elapsed_seconds=elapsed,
     )
+
 
 """
 NOTE: To ensure all stores/views are safely closed on process exit, register their close methods with atexit

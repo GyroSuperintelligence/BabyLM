@@ -103,7 +103,6 @@ This solves three fundamental problems:
 - ♾️ **Unlimited Memory**: Can remember and learn from infinite conversations without forgetting
 - ⚡ **1,000,000+ Bytes/Second**: Processes text faster than you can type on commodity hardware
 - 💾 **Entire Brain = 20MB**: The complete intelligence system is smaller than a single photo
-- 🔐 **Built-in Encryption**: Every conversation naturally generates unbreakable encryption keys
 - 🌍 **No GPU Required**: Runs on a Raspberry Pi, your phone, or even embedded systems
 - 📚 **No Training Data Needed**: Learns directly from conversation, not from scraped internet data
 - 🔍 **100% Explainable**: Every decision can be traced through simple physics operations
@@ -146,6 +145,8 @@ Mathematical formalism employs gyrogroup structures (generalizations of rotation
 ---
 
 ## 🔄 Current Status & Expectations
+
+**I am doing a huge refactoring - so nothing works at the present moment**
 
 **This is experimental research**, not a production language model. Current limitations:
 
@@ -211,6 +212,35 @@ gyrosi/
 
 ---
 
+## Getting Started with Git LFS
+
+This repository uses [Git Large File Storage (LFS)](https://git-lfs.github.com/) to manage large assets such as `.npy` and `.json` files in `memories/public/meta/`.
+
+**To get started:**
+
+1. **Install Git LFS (one-time):**
+   ```sh
+   git lfs install
+   ```
+
+2. **Clone the repository (recommended):**
+   ```sh
+   git clone https://github.com/GyroSuperintelligence/BabyLM.git
+   ```
+   - All large files will be downloaded automatically if LFS is installed.
+
+3. **If you already cloned before installing LFS:**
+   ```sh
+   git lfs pull
+   ```
+   - This will fetch any missing large files.
+
+**Note:**
+- With modern Git and Git LFS, running `git pull` or `git clone` is usually sufficient to get all code and large assets.
+- If you ever see small pointer files instead of the real data, make sure LFS is installed and run `git lfs pull`.
+
+---
+
 ## 📜 License
 
 MIT License - see [LICENSE](LICENSE) for details.
@@ -252,29 +282,4 @@ MIT License - see [LICENSE](LICENSE) for details.
   This project benefited from AI language model services accessed through Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).</p>
 </div>
 
-## Getting Started with Git LFS
 
-This repository uses [Git Large File Storage (LFS)](https://git-lfs.github.com/) to manage large assets such as `.npy` and `.json` files in `memories/public/meta/`.
-
-**To get started:**
-
-1. **Install Git LFS (one-time):**
-   ```sh
-   git lfs install
-   ```
-
-2. **Clone the repository (recommended):**
-   ```sh
-   git clone https://github.com/GyroSuperintelligence/BabyLM.git
-   ```
-   - All large files will be downloaded automatically if LFS is installed.
-
-3. **If you already cloned before installing LFS:**
-   ```sh
-   git lfs pull
-   ```
-   - This will fetch any missing large files.
-
-**Note:**
-- With modern Git and Git LFS, running `git pull` or `git clone` is usually sufficient to get all code and large assets.
-- If you ever see small pointer files instead of the real data, make sure LFS is installed and run `git lfs pull`.

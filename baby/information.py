@@ -14,6 +14,7 @@ storage coordination, and conversion between state representations.
 """
 
 import numpy as np
+
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
     import ujson as json  # type: ignore[import]
@@ -23,6 +24,7 @@ import time
 import os
 from typing import Dict, Any, Optional, Set
 from baby import governance
+
 
 # ---------- Fast phenomenology builder ----------
 def build_phenomenology_map_fast(ep_path: str, output_path: str) -> None:
@@ -36,10 +38,10 @@ def build_phenomenology_map_fast(ep_path: str, output_path: str) -> None:
     """
     import numpy as np, json, os
 
-    ep = np.load(ep_path, mmap_mode="r")          # N × 256
-    N  = ep.shape[0]
+    ep = np.load(ep_path, mmap_mode="r")  # N × 256
+    N = ep.shape[0]
 
-    parent = np.arange(N, dtype=np.int32)         # union‑find parent array
+    parent = np.arange(N, dtype=np.int32)  # union‑find parent array
 
     def find(i: int) -> int:
         # Path‑compression, iterative (Python‑level but tiny)
@@ -68,6 +70,7 @@ def build_phenomenology_map_fast(ep_path: str, output_path: str) -> None:
         json.dump(phenomenology, f)
 
     print(f"Phenomenology map written → {output_path}")
+
 
 class InformationEngine:
     """
@@ -188,7 +191,7 @@ class InformationEngine:
         state_packed_bytes = state_int.to_bytes(6, "big")
 
         # Unpack to individual bits
-        bits = np.unpackbits(np.frombuffer(state_packed_bytes, dtype=np.uint8), bitorder='big')
+        bits = np.unpackbits(np.frombuffer(state_packed_bytes, dtype=np.uint8), bitorder="big")
 
         # Convert: 0 -> +1, 1 -> -1
         tensor_flat = (1 - 2 * bits).astype(np.int8)
@@ -211,7 +214,7 @@ class InformationEngine:
         bits = (tensor.flatten(order="C") == -1).astype(np.uint8)
 
         # Pack bits into bytes
-        packed = np.packbits(bits, bitorder='big')
+        packed = np.packbits(bits, bitorder="big")
 
         # Convert to integer, big-endian
         return int.from_bytes(packed.tobytes(), "big")
@@ -315,7 +318,7 @@ def discover_and_save_ontology(output_path: str) -> None:
 
     # Package ontology data
     ontology_data: Dict[str, Any] = {
-        "schema_version": "1.0.0",
+        "schema_version": "0.9.6",
         "ontology_map": ontology_map,
         "endogenous_modulus": len(ontology_map),
         "ontology_diameter": depth,
@@ -340,16 +343,12 @@ def build_state_transition_table(ontology_path: str, output_path: str) -> None:
     """
     import numpy as np
     from numpy.lib.format import open_memmap
+
     data = json.load(open(ontology_path))
     idx_of = {int(k): v for k, v in data["ontology_map"].items()}
     states = np.fromiter((int(k) for k in sorted(idx_of.keys())), dtype=np.uint64)
     N = len(states)
-    ep = open_memmap(
-        output_path,
-        dtype=np.int32,
-        mode="w+",
-        shape=(N, 256)  # N rows, 256 introns
-    )
+    ep = open_memmap(output_path, dtype=np.int32, mode="w+", shape=(N, 256))  # N rows, 256 introns
     sorted_states = states.copy()
     for intron in range(256):
         next_states = np.vectorize(governance.apply_gyration_and_transform, otypes=[np.uint64])(states, intron)

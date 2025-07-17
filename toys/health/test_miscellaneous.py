@@ -5,6 +5,7 @@ Including maintenance tools, integration tests, and edge cases.
 
 import pytest
 import os
+
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
     import ujson as json  # type: ignore[import]
@@ -344,7 +345,7 @@ class TestSystemIntegration:
             # ujson does not support indent argument
             json.dump(
                 {
-                    "schema_version": "1.0.0",
+                    "schema_version": "0.9.6",
                     "ontology_map": {str(i): i for i in range(100)},
                     "endogenous_modulus": 788_986,
                     "ontology_diameter": 6,
