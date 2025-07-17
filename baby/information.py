@@ -1,11 +1,11 @@
 # 1. Generate ontology_map.json (the ontology)
-# python -m baby.information ontology --output memories/public/meta/ontology_map.json
+# python -m baby.information ontology --output memories/public/ontology/ontology_map.json
 #
 # 2. Generate phenomenology_map.json (the canonical mapping)
-# python -m baby.information canonical --ontology_map memories/public/meta/ontology_map.json --output memories/public/meta/phenomenology_map.json
+# python -m baby.information canonical --ontology_map memories/public/ontology/ontology_map.json --output memories/public/ontology/phenomenology_map.json
 #
 # 3. Generate epistemology.npy (the state transition table)
-# python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
+# python -m baby.information epistemology --ontology memories/public/ontology/ontology_map.json --output memories/public/ontology/epistemology.npy
 """
 S2: Information - Measurement & Storage
 
@@ -367,9 +367,9 @@ if __name__ == "__main__":
     parser_ontology = subparsers.add_parser("ontology", help="Build and save the ontology")
     parser_ontology.add_argument("--output", required=True, help="Path to output ontology_map.json")
 
-    parser_canonical = subparsers.add_parser("canonical", help="Build and save the canonical map")
-    parser_canonical.add_argument("--ontology_map", required=True, help="Path to ontology_map.json")
-    parser_canonical.add_argument("--output", required=True, help="Path to output phenomenology_map.json")
+    parser_phenomenology = subparsers.add_parser("phenomenology", help="Build and save the phenomenology map")
+    parser_phenomenology.add_argument("--ontology_map", required=True, help="Path to ontology_map.json")
+    parser_phenomenology.add_argument("--output", required=True, help="Path to output phenomenology_map.json")
 
     parser_epistemology = subparsers.add_parser("epistemology", help="Build and save the state transition table (STT)")
     parser_epistemology.add_argument("--ontology", required=True, help="Path to ontology_map.json")
@@ -378,7 +378,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.command == "ontology":
         discover_and_save_ontology(args.output)
-    elif args.command == "canonical":
+    elif args.command == "phenomenology":
         build_phenomenology_map(args.ontology_map, args.output)
     elif args.command == "epistemology":
         build_state_transition_table(args.ontology, args.output)

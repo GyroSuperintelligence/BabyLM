@@ -384,7 +384,7 @@ class GyroSI:
         if enable_canonical:
             phenomenology_map_path = self.config.get("phenomenology_map_path")
             if phenomenology_map_path is None:
-                phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
+                phenomenology_map_path = "memories/public/ontology/phenomenology_map.json"
             if os.path.exists(phenomenology_map_path):
                 return CanonicalView(base_store, phenomenology_map_path)
             else:
