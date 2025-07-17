@@ -339,11 +339,17 @@ def build_state_transition_table(ontology_path: str, output_path: str) -> None:
     Vectorized build of the state transition table (epistemology) using NumPy and memmap.
     """
     import numpy as np
+    from numpy.lib.format import open_memmap
     data = json.load(open(ontology_path))
     idx_of = {int(k): v for k, v in data["ontology_map"].items()}
     states = np.fromiter((int(k) for k in sorted(idx_of.keys())), dtype=np.uint64)
     N = len(states)
-    ep = np.memmap(output_path, dtype=np.int32, mode="w+", shape=(N, 256))
+    ep = open_memmap(
+        output_path,
+        dtype=np.int32,
+        mode="w+",
+        shape=(N, 256)  # N rows, 256 introns
+    )
     sorted_states = states.copy()
     for intron in range(256):
         next_states = np.vectorize(governance.apply_gyration_and_transform, otypes=[np.uint64])(states, intron)
