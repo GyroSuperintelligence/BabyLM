@@ -16,12 +16,16 @@ import numpy as np
 # ───────────────────────────────────────────────────────────────────
 
 # The canonical 48-element GENE_Mac_S tensor.
-GENE_MAC_S_TENSOR = np.array([
-    [[[-1, 1], [-1, 1], [-1, 1]], [[ 1,-1], [ 1,-1], [ 1,-1]]],
-    [[[ 1,-1], [ 1,-1], [ 1,-1]], [[-1, 1], [-1, 1], [-1, 1]]],
-    [[[-1, 1], [-1, 1], [-1, 1]], [[ 1,-1], [ 1,-1], [ 1,-1]]],
-    [[[ 1,-1], [ 1,-1], [ 1,-1]], [[-1, 1], [-1, 1], [-1, 1]]],
-], dtype=np.int8)
+GENE_MAC_S_TENSOR = np.array(
+    [
+        [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]],
+        [[[1, -1], [1, -1], [1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
+        [[[-1, 1], [-1, 1], [-1, 1]], [[1, -1], [1, -1], [1, -1]]],
+        [[[1, -1], [1, -1], [1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
+    ],
+    dtype=np.int8,
+)
+
 
 def _build_masks() -> tuple[int, int, int, list[int]]:
     """Private helper to pre-compute masks and broadcast patterns."""
@@ -30,36 +34,37 @@ def _build_masks() -> tuple[int, int, int, list[int]]:
         for frame in range(2):
             for row in range(3):
                 for col in range(2):
-                    bit_index = (((layer * 2 + frame) * 3 + row) * 2 + col)
+                    bit_index = ((layer * 2 + frame) * 3 + row) * 2 + col
                     if layer in (0, 2):
                         fg_mask |= 1 << bit_index
                     if layer in (1, 3):
                         bg_mask |= 1 << bit_index
-    
+
     full_mask = (1 << 48) - 1
-    
+
     # CORRECTED: A 48-bit integer requires repeating the 8-bit intron 6 times.
-    intron_broadcast_masks = [
-        int.from_bytes(i.to_bytes(1, 'little') * 6, 'little') 
-        for i in range(256)
-    ]
+    intron_broadcast_masks = [int.from_bytes(i.to_bytes(1, "little") * 6, "little") for i in range(256)]
     return fg_mask, bg_mask, full_mask, intron_broadcast_masks
+
 
 # Define physics constants at the module level
 FG_MASK, BG_MASK, FULL_MASK, INTRON_BROADCAST_MASKS = _build_masks()
+
 
 def tensor_to_int(T: np.ndarray) -> int:
     """Encodes a {-1, 1} tensor into a 48-bit integer (bit 1 = -1, bit 0 = +1)."""
     bits = 0
     # C-order flattening must match the mask construction order
-    for i, val in enumerate(T.flatten(order='C')):
+    for i, val in enumerate(T.flatten(order="C")):
         if val == -1:
-            bits |= (1 << i)
+            bits |= 1 << i
     return bits
 
+
 # ───────────────────────────────────────────────────────────────────
-# 2. THE CORE PHYSICAL OPERATION 
+# 2. THE CORE PHYSICAL OPERATION
 # ───────────────────────────────────────────────────────────────────
+
 
 def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     """
@@ -78,12 +83,14 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     intron_pattern = INTRON_BROADCAST_MASKS[intron]
     gyration = temp_state & intron_pattern
     final_state = temp_state ^ gyration
-    
+
     return final_state
+
 
 # ───────────────────────────────────────────────────────────────────
 # 3. THE EXPLORATION ENGINE
 # ───────────────────────────────────────────────────────────────────
+
 
 def explore_manifold(start_state_int: int) -> None:
     """

@@ -12,17 +12,17 @@ from typing import Dict, Any
 
 # Add the baby module to the Python path
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from baby import (
     discover_and_save_manifold,
     build_canonical_map,
-    PickleStore,
-    MultiAgentPhenotypeStore,
     GyroSI,
     AgentPool,
 )
 from baby.types import ManifoldData, AgentConfig, PreferencesConfig
+from baby.information import OrbitStore
 
 
 # Base temp directory for all tests
@@ -34,9 +34,9 @@ def setup_test_environment():
     """Setup and teardown test environment."""
     # Create base temp directory
     BASE_TEMP_DIR.mkdir(exist_ok=True)
-    
+
     yield
-    
+
     # Cleanup after all tests (optional - can be disabled for debugging)
     # shutil.rmtree(BASE_TEMP_DIR, ignore_errors=True)
 
@@ -46,9 +46,9 @@ def temp_dir():
     """Create a unique temporary directory for each test."""
     test_dir = BASE_TEMP_DIR / f"test_{os.getpid()}_{id(object())}"
     test_dir.mkdir(parents=True, exist_ok=True)
-    
+
     yield str(test_dir)
-    
+
     # Cleanup
     shutil.rmtree(test_dir, ignore_errors=True)
 
@@ -58,21 +58,21 @@ def manifold_data(temp_dir):
     """Create and return test manifold data."""
     manifold_path = os.path.join(temp_dir, "manifold", "genotype_map.json")
     os.makedirs(os.path.dirname(manifold_path), exist_ok=True)
-    
+
     # For testing, create a smaller mock manifold
     # In real tests, you'd use discover_and_save_manifold
     mock_manifold: ManifoldData = {
         "schema_version": "1.0.0",
-        "genotype_map": {str(i): i for i in range(1000)},  # Mock 1000 states
+        "genotype_map": {i: i for i in range(1000)},  # Mock 1000 states
         "endogenous_modulus": 788_986,  # Keep the real constant
         "manifold_diameter": 6,
         "total_states": 788_986,
-        "build_timestamp": 1234567890.0
+        "build_timestamp": 1234567890.0,
     }
-    
-    with open(manifold_path, 'w') as f:
+
+    with open(manifold_path, "w") as f:
         json.dump(mock_manifold, f)
-    
+
     return manifold_path, mock_manifold
 
 
@@ -81,42 +81,44 @@ def real_manifold(temp_dir):
     """Create the real manifold (expensive - use sparingly)."""
     manifold_path = os.path.join(temp_dir, "manifold", "genotype_map.json")
     os.makedirs(os.path.dirname(manifold_path), exist_ok=True)
-    
+
     # This is expensive but necessary for integration tests
     discover_and_save_manifold(manifold_path)
-    
+
     # Also build canonical map
     canonical_path = os.path.join(temp_dir, "manifold", "canonical_map.json")
     build_canonical_map(manifold_path, canonical_path)
-    
-    with open(manifold_path, 'r') as f:
+
+    with open(manifold_path, "r") as f:
         manifold_data = json.load(f)
-    
+
     return manifold_path, canonical_path, manifold_data
 
 
 @pytest.fixture
-def pickle_store(temp_dir):
-    """Create a PickleStore instance."""
+def orbit_store(temp_dir):
+    """Create an OrbitStore instance."""
     store_path = os.path.join(temp_dir, "knowledge.pkl.gz")
-    store = PickleStore(store_path)
+    store = OrbitStore(store_path)
     yield store
     store.close()
 
 
 @pytest.fixture
 def multi_agent_store(temp_dir):
-    """Create a MultiAgentPhenotypeStore instance."""
+    """Create an OrbitStore overlay instance."""
     public_path = os.path.join(temp_dir, "public", "knowledge.pkl.gz")
     private_path = os.path.join(temp_dir, "private", "agent1", "knowledge.pkl.gz")
-    
+
     # Create public knowledge
     os.makedirs(os.path.dirname(public_path), exist_ok=True)
-    public_store = PickleStore(public_path)
+    public_store = OrbitStore(public_path)
     public_store.put((0, 0), {"phenotype": "public", "confidence": 0.9})
     public_store.close()
-    
-    store = MultiAgentPhenotypeStore(public_path, private_path)
+
+    public_store = OrbitStore(public_path, read_only=True)
+    private_store = OrbitStore(private_path)
+    store = OrbitStore(private_path, public_store=public_store, private_store=private_store)
     yield store
     store.close()
 
@@ -128,7 +130,7 @@ def agent_config(manifold_data, temp_dir) -> AgentConfig:
     return {
         "manifold_path": manifold_path,
         "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
-        "enable_canonical_storage": False
+        "enable_canonical_storage": False,
     }
 
 
@@ -145,12 +147,12 @@ def agent_pool(manifold_data, temp_dir):
     """Create an agent pool."""
     manifold_path, _ = manifold_data
     public_knowledge = os.path.join(temp_dir, "public_knowledge.pkl.gz")
-    
+
     # Create empty public knowledge
     os.makedirs(os.path.dirname(public_knowledge), exist_ok=True)
-    store = PickleStore(public_knowledge)
+    store = OrbitStore(public_knowledge)
     store.close()
-    
+
     pool = AgentPool(manifold_path, public_knowledge)
     yield pool
     pool.close_all()
@@ -173,7 +175,7 @@ def preferences_config() -> PreferencesConfig:
         "encryption_enabled": False,
         "enable_profiling": False,
         "batch_size": 100,
-        "cache_size_mb": 10
+        "cache_size_mb": 10,
     }
 
 
@@ -189,7 +191,7 @@ def sample_phenotype_entry():
         "usage_count": 10,
         "age_counter": 5,
         "created_at": 1234567890.0,
-        "last_updated": 1234567890.0
+        "last_updated": 1234567890.0,
     }
 
 
@@ -197,52 +199,52 @@ def sample_phenotype_entry():
 def mock_time(monkeypatch):
     """Mock time.time() for deterministic tests."""
     current_time = [1234567890.0]
-    
+
     def mock_time_func():
         return current_time[0]
-    
+
     def advance_time(seconds):
         current_time[0] += seconds
-    
+
     monkeypatch.setattr("time.time", mock_time_func)
-    
+
     # Return controller
     class TimeController:
         def advance(self, seconds):
             advance_time(seconds)
-        
+
         @property
         def current(self):
             return current_time[0]
-    
+
     return TimeController()
 
 
 # Test data generators
 
+
 def generate_test_introns(count: int, seed: int = 42) -> list:
     """Generate deterministic test introns."""
     import random
+
     random.seed(seed)
     return [random.randint(0, 255) for _ in range(count)]
 
 
 def generate_test_bytes(text: str) -> bytes:
     """Convert text to bytes with padding if needed."""
-    return text.encode('utf-8')
+    return text.encode("utf-8")
 
 
 # Assertion helpers
 
+
 def assert_phenotype_entry_valid(entry: Dict[str, Any]):
     """Assert that a phenotype entry has all required fields."""
-    required_fields = [
-        "phenotype", "memory_mask", "confidence", 
-        "context_signature", "usage_count"
-    ]
+    required_fields = ["phenotype", "memory_mask", "confidence", "context_signature", "usage_count"]
     for field in required_fields:
         assert field in entry, f"Missing required field: {field}"
-    
+
     assert isinstance(entry["phenotype"], str)
     assert isinstance(entry["memory_mask"], int)
     assert 0 <= entry["memory_mask"] <= 255
@@ -261,16 +263,20 @@ def assert_manifold_valid(manifold_data: Dict[str, Any]):
 
 # Performance measurement helpers
 
+
 class Timer:
     """Simple timer context manager for performance tests."""
+
     def __init__(self):
         self.elapsed = 0
-        
+
     def __enter__(self):
         import time
+
         self.start = time.perf_counter()
         return self
-        
+
     def __exit__(self, *args):
         import time
+
         self.elapsed = time.perf_counter() - self.start
