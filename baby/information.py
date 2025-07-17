@@ -1,8 +1,8 @@
 # 1. Generate ontology_map.json (the ontology)
 # python -m baby.information ontology --output memories/public/meta/ontology_map.json
 #
-# 2. Generate phenomenology_map.json (the canonical mapping)
-# python -m baby.information canonical --ontology_map memories/public/meta/ontology_map.json --output memories/public/meta/phenomenology_map.json
+# 2. Generate phenomenology_map.json (the phenomenology mapping)
+# python -m baby.information phenomenology --ontology_map memories/public/meta/ontology_map.json --output memories/public/meta/phenomenology_map.json
 #
 # 3. Generate epistemology.npy (the state transition table)
 # python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
@@ -14,39 +14,60 @@ storage coordination, and conversion between state representations.
 """
 
 import numpy as np
-import json
+# Try to use ujson for speed, fall back to standard json if unavailable
+try:
+    import ujson as json  # type: ignore[import]
+except ImportError:
+    import json  # type: ignore
 import time
 import os
-from collections import deque
 from typing import Dict, Any, Optional, Set
 from baby import governance
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
-CHUNK = 50_000  # 788,986 / 50,000 ≈ 16 chunks – fits in 2 GB RAM
+# ---------- Fast phenomenology builder ----------
+def build_phenomenology_map_fast(ep_path: str, output_path: str) -> None:
+    """
+    Derives the canonical‑orbit map in O(N) union‑find time
+    using the pre‑computed epistemology transition table.
 
-def _orbit_chunk(start_idx, stop_idx, indices, states):
-    """Worker: return {orbit_index: canonical_index} for local slice."""
-    from collections import deque
-    out = {}
-    for canon_idx in range(start_idx, stop_idx):
-        state_int = states[canon_idx]
-        if state_int in out:  # already mapped by earlier orbit
-            continue
-        orbit = [state_int]
-        q = deque([state_int])
-        canonical_int = state_int
-        while q:
-            s = q.popleft()
-            for intron in range(256):
-                nxt = governance.apply_gyration_and_transform(s, intron)
-                if nxt not in orbit:
-                    orbit.append(nxt)
-                    q.append(nxt)
-                    canonical_int = min(canonical_int, nxt)
-        canonical_index = indices[canonical_int]
-        for s in orbit:
-            out[indices[s]] = canonical_index
-    return out
+    Args:
+        ep_path:   Path to epistemology.npy (int32 array, shape (N,256)).
+        output_path: Where to write phenomenology_map.json
+    """
+    import numpy as np, json, os
+
+    ep = np.load(ep_path, mmap_mode="r")          # N × 256
+    N  = ep.shape[0]
+
+    parent = np.arange(N, dtype=np.int32)         # union‑find parent array
+
+    def find(i: int) -> int:
+        # Path‑compression, iterative (Python‑level but tiny)
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    # One pass over every edge (i → ep[i, j])
+    for j in range(256):
+        nxt = ep[:, j]
+        for i, k in zip(range(N), nxt):
+            ri, rk = find(i), find(k)
+            if ri != rk:
+                # Retain smaller index as canonical root
+                if ri < rk:
+                    parent[rk] = ri
+                else:
+                    parent[ri] = rk
+
+    # Final compress and export dict(index → phenomenology_index)
+    phenomenology = {i: int(find(i)) for i in range(N)}
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(phenomenology, f)
+
+    print(f"Phenomenology map written → {output_path}")
 
 class InformationEngine:
     """
@@ -94,7 +115,7 @@ class InformationEngine:
 
     def get_index_from_state(self, state_int: int) -> int:
         """
-        Looks up the canonical index for a physical state integer.
+        Looks up the phenomenology index for a physical state integer.
 
         Args:
             state_int: 48-bit integer representing physical state
@@ -313,33 +334,6 @@ def discover_and_save_ontology(output_path: str) -> None:
     print(f"Saved to: {output_path}")
 
 
-def build_phenomenology_map(ontology_map_path: str, output_path: str) -> None:
-    """
-    Parallel build of canonical mapping for orbit representatives (phenomenology).
-    """
-    print("Building phenomenology map (parallel)...")
-    start_time = time.time()
-    with open(ontology_map_path, "r") as f:
-        data = json.load(f)
-    idx_of = {int(k): v for k, v in data["ontology_map"].items()}
-    state_by_idx = {v: k for k, v in idx_of.items()}
-    N = len(idx_of)
-    slice_bounds = list(range(0, N, CHUNK)) + [N]
-    with ProcessPoolExecutor() as pool:
-        futures = [
-            pool.submit(_orbit_chunk, slice_bounds[i], slice_bounds[i + 1], idx_of, state_by_idx)
-            for i in range(len(slice_bounds) - 1)
-        ]
-        canonical = {}
-        for f in as_completed(futures):
-            canonical.update(f.result())
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(canonical, f)
-    elapsed = time.time() - start_time
-    print(f"Phenomenology map built in {elapsed:.2f}s → {output_path}")
-
-
 def build_state_transition_table(ontology_path: str, output_path: str) -> None:
     """
     Vectorized build of the state transition table (epistemology) using NumPy and memmap.
@@ -367,8 +361,8 @@ if __name__ == "__main__":
     parser_ontology = subparsers.add_parser("ontology", help="Build and save the ontology")
     parser_ontology.add_argument("--output", required=True, help="Path to output ontology_map.json")
 
-    parser_phenomenology = subparsers.add_parser("phenomenology", help="Build and save the phenomenology map")
-    parser_phenomenology.add_argument("--ontology_map", required=True, help="Path to ontology_map.json")
+    parser_phenomenology = subparsers.add_parser("phenomenology", help="Build and save the phenomenology map (fast)")
+    parser_phenomenology.add_argument("--ep", required=True, help="Path to epistemology.npy")
     parser_phenomenology.add_argument("--output", required=True, help="Path to output phenomenology_map.json")
 
     parser_epistemology = subparsers.add_parser("epistemology", help="Build and save the state transition table (STT)")
@@ -379,7 +373,7 @@ if __name__ == "__main__":
     if args.command == "ontology":
         discover_and_save_ontology(args.output)
     elif args.command == "phenomenology":
-        build_phenomenology_map(args.ontology_map, args.output)
+        build_phenomenology_map_fast(args.ep, args.output)
     elif args.command == "epistemology":
         build_state_transition_table(args.ontology, args.output)
     else:

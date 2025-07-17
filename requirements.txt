@@ -8,6 +8,7 @@ rich
 emoji>=2.0.0
 orjson
 numba>=0.58.0  # Optional: provides 3x speedup for batch processing
+ujson
 
 # Testing dependencies
 pytest>=7.4.0

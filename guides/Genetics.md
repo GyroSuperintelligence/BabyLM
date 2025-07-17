@@ -64,7 +64,7 @@ GyroSI embodies the principle that each part contains information about the whol
 
 **Abstraction via Manifold and Hashing**: The system's primary mechanism for generalization is its finite physical ontology. An infinite variety of input sequences will inevitably drive the system into one of the 788,986 canonical states. When different experiences lead to the same internal state, the system learns they share a fundamental structural meaning. Hash collisions in the phenotype layer are a secondary, context-specific abstraction built upon this primary physical reality, where different physical contexts mapping to the same semantic address are learned to share an essential meaning.
 
-### **2.5 The Measured Manifold: Theory Meets Reality**
+### **2.4 The Measured Manifold: Theory Meets Reality**
 The CGM is not merely a theoretical framework; it is a predictive model whose consequences are now measured. The 8-bit instruction space (`GENE_Mic_M`), representing the "quantum of action," directly leads to an 8-step closure of the state space.
 - **The State (Qubit):** A 48-bit integer representing one of 788,986 possible physical configurations.
 - **The Operator (Gate):** An 8-bit integer (`intron`) that transforms the state according to the gyroscopic operations.
@@ -79,14 +79,14 @@ To further structure the ontology, we can define a canonical representative for 
 The canonicalization process is a one-time, build-time computation:
 
 ```python
-def find_canonical_representative(start_tensor_bytes: bytes, ontology_map: dict) -> bytes:
+def find_phenomenology_representative(start_tensor_bytes: bytes, ontology_map: dict) -> bytes:
     """Finds the lexicographically smallest state in the orbit of start_tensor_bytes."""
     orbit = {start_tensor_bytes}
     queue = [start_tensor_bytes]
     state_int = int.from_bytes(start_tensor_bytes, 'big')
     visited_ints = {state_int}
     queue_ints = [state_int]
-    canonical_int = state_int
+    phenomenology_int = state_int
     while queue_ints:
         current_int = queue_ints.pop(0)
         for intron in range(256):
@@ -94,14 +94,14 @@ def find_canonical_representative(start_tensor_bytes: bytes, ontology_map: dict)
             if next_int not in visited_ints:
                 visited_ints.add(next_int)
                 queue_ints.append(next_int)
-                if next_int < canonical_int:
-                    canonical_int = next_int
-    return canonical_int.to_bytes(48, 'big')
+                if next_int < phenomenology_int:
+                    phenomenology_int = next_int
+    return phenomenology_int.to_bytes(48, 'big')
 
 def build_phenomenology_map(ontology_map_path: str, output_path: str):
     """
     For each state in the ontology, computes its canonical representative.
-    Saves a map from every state_index to its canonical_state_index.
+    Saves a map from every state_index to its phenomenology_state_index.
     """
     with open(ontology_map_path, 'r') as f:
         genotype_data = json.load(f)
@@ -109,15 +109,15 @@ def build_phenomenology_map(ontology_map_path: str, output_path: str):
     # Ensure ontology_map uses int keys for performance and consistency
     ontology_map = {int(k): v for k, v in ontology_map.items()}
     inverse_ontology_map = {v: k for k, v in ontology_map.items()}
-    canonical_index_map = {}
+    phenomenology_index_map = {}
     print(f"Building canonical map for {len(ontology_map)} states...")
     for i, tensor_bytes in inverse_ontology_map.items():
         if i % 10000 == 0:
             print(f"Processing state {i}...")
-        canonical_bytes = find_canonical_representative(tensor_bytes, ontology_map)
-        canonical_index_map[i] = ontology_map[canonical_bytes]
+        phenomenology_bytes = find_phenomenology_representative(tensor_bytes, ontology_map)
+        phenomenology_index_map[i] = ontology_map[phenomenology_bytes]
     with open(output_path, 'w') as f:
-        json.dump(canonical_index_map, f)
+        json.dump(phenomenology_index_map, f)
 ```
 
 This process is computationally intensive but only needs to be run once per ontology. It enables the next-level storage abstraction described below.
@@ -903,13 +903,13 @@ base_store = PickleStore(store_path="knowledge.pkl.gz")
 
 # Wrap the base store with the canonicalizer.
 # This ensures abstraction is based on physical orbits.
-canonical_store = CanonicalizingStore(
+phenomenology_store = CanonicalizingStore(
     base_store=base_store,
     phenomenology_map_path="memories/public/meta/phenomenology_map.json"
 )
 
 # Pass to the engine.
-gyro_si = GyroSI(config, phenotype_store=canonical_store)
+gyro_si = GyroSI(config, phenotype_store=phenomenology_store)
 
 ```
 
@@ -1017,21 +1017,21 @@ class CanonicalizingStore:
             else:
                 self.phenomenology_map = {int(k): v for k, v in loaded.items()}
 
-    def _get_canonical_key(self, context_key: tuple) -> tuple:
+    def _get_phenomenology_key(self, context_key: tuple) -> tuple:
         tensor_index, intron = context_key
-        canonical_index = self.phenomenology_map.get(tensor_index, tensor_index)
-        return (canonical_index, intron)
+        phenomenology_index = self.phenomenology_map.get(tensor_index, tensor_index)
+        return (phenomenology_index, intron)
 
     def get(self, context_key: tuple) -> Optional[dict]:
-        canonical_key = self._get_canonical_key(context_key)
-        return self.base_store.get(canonical_key)
+        phenomenology_key = self._get_phenomenology_key(context_key)
+        return self.base_store.get(phenomenology_key)
 
     def put(self, context_key: tuple, entry: dict) -> None:
-        canonical_key = self._get_canonical_key(context_key)
+        phenomenology_key = self._get_phenomenology_key(context_key)
         # Ensure the entry itself references the original context for traceability
         if 'context_signature' not in entry:
             entry['context_signature'] = context_key
-        self.base_store.put(canonical_key, entry)
+        self.base_store.put(phenomenology_key, entry)
 
     def close(self) -> None:
         self.base_store.close()

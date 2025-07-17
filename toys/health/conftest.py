@@ -4,7 +4,11 @@ Shared pytest fixtures and configuration for GyroSI test suite.
 
 import os
 import shutil
-import json
+# Try to use ujson for speed, fall back to standard json if unavailable
+try:
+    import ujson as json  # type: ignore[import]
+except ImportError:
+    import json  # type: ignore
 import tempfile
 import pytest
 from pathlib import Path
@@ -85,14 +89,14 @@ def real_ontology(temp_dir):
     # This is expensive but necessary for integration tests
     discover_and_save_ontology(ontology_path)
 
-    # Also build canonical map
-    canonical_path = os.path.join(temp_dir, "ontology", "phenomenology_map.json")
-    build_phenomenology_map(ontology_path, canonical_path)
+    # Also build phenomenology map
+    phenomenology_path = os.path.join(temp_dir, "ontology", "phenomenology_map.json")
+    build_phenomenology_map(ontology_path, phenomenology_path)
 
     with open(ontology_path, "r") as f:
         ontology_data = json.load(f)
 
-    return ontology_path, canonical_path, ontology_data
+    return ontology_path, phenomenology_path, ontology_data
 
 
 @pytest.fixture
@@ -130,7 +134,7 @@ def agent_config(ontology_data, temp_dir) -> AgentConfig:
     return {
         "ontology_path": ontology_path,
         "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
-        "enable_canonical_storage": False,
+        "enable_phenomenology_storage": False,
     }
 
 

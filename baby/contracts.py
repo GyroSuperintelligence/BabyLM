@@ -39,7 +39,7 @@ class AgentConfig(TypedDict, total=False):
     private_knowledge_path: Optional[str]
     agent_metadata: Optional[Dict[str, Any]]
     max_memory_mb: Optional[int]
-    enable_canonical_storage: Optional[bool]
+    enable_phenomenology_storage: Optional[bool]
 
 
 class PreferencesConfig(TypedDict, total=False):

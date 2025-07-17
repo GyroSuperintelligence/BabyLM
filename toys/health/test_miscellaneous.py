@@ -5,7 +5,11 @@ Including maintenance tools, integration tests, and edge cases.
 
 import pytest
 import os
-import json
+# Try to use ujson for speed, fall back to standard json if unavailable
+try:
+    import ujson as json  # type: ignore[import]
+except ImportError:
+    import json  # type: ignore
 import time
 from pathlib import Path
 
@@ -281,15 +285,15 @@ class TestConfigurationAndPreferences:
 
         pool.close_all()
 
-    def test_canonical_storage_option(self, real_ontology, temp_dir):
+    def test_phenomenology_storage_option(self, real_ontology, temp_dir):
         """Test enabling canonical storage."""
-        ontology_path, canonical_path, _ = real_ontology
+        ontology_path, phenomenology_path, _ = real_ontology
 
         config = {
             "ontology_path": ontology_path,
             "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
-            "enable_canonical_storage": True,
-            "phenomenology_map_path": canonical_path,
+            "enable_phenomenology_storage": True,
+            "phenomenology_map_path": phenomenology_path,
         }
 
         agent = GyroSI(config)
@@ -337,6 +341,7 @@ class TestSystemIntegration:
         # Create minimal ontology for testing
         os.makedirs(os.path.dirname(config["ontology_path"]), exist_ok=True)
         with open(config["ontology_path"], "w") as f:
+            # ujson does not support indent argument
             json.dump(
                 {
                     "schema_version": "1.0.0",
@@ -379,7 +384,7 @@ class TestSystemIntegration:
     @pytest.mark.slow
     def test_full_system_stress(self, real_ontology, temp_dir):
         """Stress test with real ontology and multiple agents."""
-        ontology_path, canonical_path, _ = real_ontology
+        ontology_path, phenomenology_path, _ = real_ontology
         knowledge_path = os.path.join(temp_dir, "stress_knowledge.pkl.gz")
 
         # Create knowledge base

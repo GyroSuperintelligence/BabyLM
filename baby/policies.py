@@ -5,7 +5,11 @@ Write/policy logic for GyroSI (S5): OrbitStore and storage decorators.
 import os
 import gzip
 import pickle
-import json
+# Try to use ujson for speed, fall back to standard json if unavailable
+try:
+    import ujson as json  # type: ignore[import]
+except ImportError:
+    import json  # type: ignore
 import time
 from typing import List, Optional, Dict, Tuple, Any
 
@@ -196,21 +200,21 @@ class CanonicalView:
             else:
                 self.phenomenology_map = {int(k): v for k, v in loaded.items()}
 
-    def _get_canonical_key(self, context_key: Tuple[int, int]) -> Tuple[int, int]:
+    def _get_phenomenology_key(self, context_key: Tuple[int, int]) -> Tuple[int, int]:
         tensor_index, intron = context_key
-        canonical_index = self.phenomenology_map.get(tensor_index, tensor_index)
-        return (canonical_index, intron)
+        phenomenology_index = self.phenomenology_map.get(tensor_index, tensor_index)
+        return (phenomenology_index, intron)
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
-        canonical_key = self._get_canonical_key(context_key)
-        return self.base_store.get(canonical_key)
+        phenomenology_key = self._get_phenomenology_key(context_key)
+        return self.base_store.get(phenomenology_key)
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
-        canonical_key = self._get_canonical_key(context_key)
+        phenomenology_key = self._get_phenomenology_key(context_key)
         if "context_signature" not in entry:
             entry = entry.copy()
             entry["context_signature"] = context_key
-        self.base_store.put(canonical_key, entry)
+        self.base_store.put(phenomenology_key, entry)
 
     def close(self) -> None:
         self.base_store.close()
@@ -546,7 +550,8 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
     # Save statistics
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(stats, f, indent=2)
+        # ujson does not support indent argument
+        json.dump(stats, f)
 
     elapsed = time.time() - start_time
 
@@ -565,7 +570,7 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
 
     Args:
         ontology_path: Path to genotype map
-        phenomenology_map_path: Optional path to canonical map
+        phenomenology_map_path: Optional path to phenomenology map
 
     Returns:
         Maintenance report
@@ -613,8 +618,8 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
     if len(ontology_map) != 788_986:
         issues.append(f"Invalid genotype map size: {len(ontology_map)}")
 
-    # Check canonical map if provided
-    canonical_issues = 0
+    # Check phenomenology map if provided
+    phenomenology_issues = 0
     if phenomenology_map_path and os.path.exists(phenomenology_map_path):
         try:
             with open(phenomenology_map_path, "r") as f:
@@ -625,18 +630,18 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
                 phenomenology_map = {int(k): v for k, v in data.items()}
 
             # Validate all indices are in range
-            for idx, canonical_idx in phenomenology_map.items():
+            for idx, phenomenology_idx in phenomenology_map.items():
                 idx_int = int(idx)
                 if idx_int < 0 or idx_int >= 788_986:
-                    canonical_issues += 1
-                if canonical_idx < 0 or canonical_idx >= 788_986:
-                    canonical_issues += 1
+                    phenomenology_issues += 1
+                if phenomenology_idx < 0 or phenomenology_idx >= 788_986:
+                    phenomenology_issues += 1
 
-            if canonical_issues > 0:
-                issues.append(f"Found {canonical_issues} invalid canonical mappings")
+            if phenomenology_issues > 0:
+                issues.append(f"Found {phenomenology_issues} invalid phenomenology mappings")
 
         except Exception as e:
-            issues.append(f"Failed to validate canonical map: {e}")
+            issues.append(f"Failed to validate phenomenology map: {e}")
 
     elapsed = time.time() - start_time
 

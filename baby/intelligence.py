@@ -5,7 +5,11 @@ This module provides the IntelligenceEngine and GyroSI classes responsible for
 orchestrating the complete system and providing the external API.
 """
 
-import json
+# Try to use ujson for speed, fall back to standard json if unavailable
+try:
+    import ujson as json  # type: ignore[import]
+except ImportError:
+    import json  # type: ignore
 import uuid
 import os
 import time
@@ -358,8 +362,8 @@ class GyroSI:
 
     def _create_default_store(self) -> Any:
         """Create default storage based on configuration."""
-        # Check if canonical storage is enabled
-        enable_canonical = self.config.get("enable_canonical_storage", False)
+        # Check if phenomenology storage is enabled
+        enable_phenomenology = self.config.get("enable_phenomenology_storage", False)
 
         # Create base store
         public_knowledge_path = self.config.get("public_knowledge_path")
@@ -380,15 +384,15 @@ class GyroSI:
                 knowledge_path = "memories/knowledge.pkl.gz"
             base_store = OrbitStore(knowledge_path, write_threshold=batch_size)
 
-        # Wrap with canonicalizing decorator if enabled
-        if enable_canonical:
+        # Wrap with phenomenology decorator if enabled
+        if enable_phenomenology:
             phenomenology_map_path = self.config.get("phenomenology_map_path")
             if phenomenology_map_path is None:
                 phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
             if os.path.exists(phenomenology_map_path):
                 return CanonicalView(base_store, phenomenology_map_path)
             else:
-                print(f"Warning: Canonical map not found at {phenomenology_map_path}")
+                print(f"Warning: phenomenology map not found at {phenomenology_map_path}")
 
         return base_store
 
@@ -492,7 +496,7 @@ class AgentPool:
                     "ontology_path": self.ontology_path,
                     "public_knowledge_path": self.base_knowledge_path,
                     "private_knowledge_path": private_path,
-                    "enable_canonical_storage": self.preferences.get("enable_canonical_storage", False),
+                    "enable_phenomenology_storage": self.preferences.get("enable_phenomenology_storage", False),
                 }
 
                 # Add role hint to metadata if provided

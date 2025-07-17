@@ -4,7 +4,11 @@ Tests for S2: Information - Measurement & Storage
 
 import pytest
 import numpy as np
-import json
+# Try to use ujson for speed, fall back to standard json if unavailable
+try:
+    import ujson as json  # type: ignore[import]
+except ImportError:
+    import json  # type: ignore
 import os
 import threading
 import time
@@ -294,7 +298,7 @@ class TestCanonicalOrbitStore:
 
         return map_path, phenomenology_map
 
-    def test_canonical_resolution(self, orbit_store, phenomenology_map):
+    def test_phenomenology_resolution(self, orbit_store, phenomenology_map):
         """Test that equivalent states map to same storage."""
         map_path, _ = phenomenology_map
         canon_store = OrbitStore("temp_canonical.pkl.gz", phenomenology_map=map_path)
@@ -325,7 +329,7 @@ class TestCanonicalOrbitStore:
 class TestStorageIntegration:
     """Integration tests for storage components."""
 
-    def test_pickle_to_canonical_upgrade(self, temp_dir):
+    def test_pickle_to_phenomenology_upgrade(self, temp_dir):
         """Test upgrading from simple pickle to canonical storage."""
         # Start with simple pickle store
         store_path = os.path.join(temp_dir, "store.pkl.gz")
