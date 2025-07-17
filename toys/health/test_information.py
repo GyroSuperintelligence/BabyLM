@@ -27,7 +27,7 @@ class TestInformationEngine:
 
         assert engine.endogenous_modulus == 788_986
         assert engine.manifold_diameter == 6
-        assert len(engine.genotype_map) == 1000  # Our mock has 1000 states
+        assert len(engine.ontology_map) == 1000  # Our mock has 1000 states
 
     def test_state_index_conversion(self, manifold_data):
         """Test conversion between state integers and indices."""
@@ -78,7 +78,7 @@ class TestInformationEngine:
         """Test angular distance measurement."""
         engine = InformationEngine(
             {
-                "genotype_map": {},
+                "ontology_map": {},
                 "endogenous_modulus": 788_986,
                 "manifold_diameter": 6,
                 "schema_version": "1.0.0",
@@ -283,21 +283,21 @@ class TestCanonicalOrbitStore:
     """Test canonical storage functionality in OrbitStore."""
 
     @pytest.fixture
-    def canonical_map(self, temp_dir):
+    def phenomenology_map(self, temp_dir):
         """Create a simple canonical map for testing."""
         # Map: 0->0, 1->0, 2->2, 3->2 (two orbits)
-        canonical_map = {0: 0, 1: 0, 2: 2, 3: 2}
+        phenomenology_map = {0: 0, 1: 0, 2: 2, 3: 2}
 
         map_path = os.path.join(temp_dir, "canonical.json")
         with open(map_path, "w") as f:
-            json.dump(canonical_map, f)
+            json.dump(phenomenology_map, f)
 
-        return map_path, canonical_map
+        return map_path, phenomenology_map
 
-    def test_canonical_resolution(self, orbit_store, canonical_map):
+    def test_canonical_resolution(self, orbit_store, phenomenology_map):
         """Test that equivalent states map to same storage."""
-        map_path, _ = canonical_map
-        canon_store = OrbitStore("temp_canonical.pkl.gz", canonical_map=map_path)
+        map_path, _ = phenomenology_map
+        canon_store = OrbitStore("temp_canonical.pkl.gz", phenomenology_map=map_path)
 
         # Store under state 0
         canon_store.put((0, 10), {"phenotype": "A", "confidence": 1.0})
@@ -309,10 +309,10 @@ class TestCanonicalOrbitStore:
         # Both should resolve to same entry
         assert canon_store.get((0, 10)) == canon_store.get((1, 10))
 
-    def test_original_context_preserved(self, orbit_store, canonical_map):
+    def test_original_context_preserved(self, orbit_store, phenomenology_map):
         """Test that original context is preserved in entries."""
-        map_path, _ = canonical_map
-        canon_store = OrbitStore("temp_canonical.pkl.gz", canonical_map=map_path)
+        map_path, _ = phenomenology_map
+        canon_store = OrbitStore("temp_canonical.pkl.gz", phenomenology_map=map_path)
 
         # Store under non-canonical state
         canon_store.put((1, 10), {"phenotype": "B", "confidence": 1.0})
@@ -336,13 +336,13 @@ class TestStorageIntegration:
             orbit_store.put((i, 0), {"phenotype": f"Entry{i}", "confidence": 1.0})
 
         # Create canonical map (identity map for simplicity)
-        canonical_map = {i: i for i in range(10)}
+        phenomenology_map = {i: i for i in range(10)}
         map_path = os.path.join(temp_dir, "canonical.json")
         with open(map_path, "w") as f:
-            json.dump(canonical_map, f)
+            json.dump(phenomenology_map, f)
 
         # Upgrade to canonical store
-        canon_store = OrbitStore("temp_canonical.pkl.gz", canonical_map=map_path)
+        canon_store = OrbitStore("temp_canonical.pkl.gz", phenomenology_map=map_path)
 
         # Verify all entries still accessible
         for i in range(10):

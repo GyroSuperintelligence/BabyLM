@@ -289,13 +289,13 @@ class TestConfigurationAndPreferences:
             "manifold_path": manifold_path,
             "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
             "enable_canonical_storage": True,
-            "canonical_map_path": canonical_path,
+            "phenomenology_map_path": canonical_path,
         }
 
         agent = GyroSI(config)
 
         # Verify canonical store is being used
-        assert hasattr(agent.engine.operator.store, "canonical_map")
+        assert hasattr(agent.engine.operator.store, "phenomenology_map")
 
         agent.close()
 
@@ -340,7 +340,7 @@ class TestSystemIntegration:
             json.dump(
                 {
                     "schema_version": "1.0.0",
-                    "genotype_map": {str(i): i for i in range(100)},
+                    "ontology_map": {str(i): i for i in range(100)},
                     "endogenous_modulus": 788_986,
                     "manifold_diameter": 6,
                     "total_states": 788_986,

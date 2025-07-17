@@ -184,21 +184,21 @@ class OrbitStore:
 
 
 class CanonicalView:
-    def __init__(self, base_store: Any, canonical_map_path: str):
+    def __init__(self, base_store: Any, phenomenology_map_path: str):
         import threading
 
         self.base_store = base_store
         self.lock = getattr(base_store, "lock", threading.RLock())
-        with open(canonical_map_path, "r") as f:
+        with open(phenomenology_map_path, "r") as f:
             loaded = json.load(f)
             if isinstance(loaded, list):
-                self.canonical_map = dict(enumerate(loaded))
+                self.phenomenology_map = dict(enumerate(loaded))
             else:
-                self.canonical_map = {int(k): v for k, v in loaded.items()}
+                self.phenomenology_map = {int(k): v for k, v in loaded.items()}
 
     def _get_canonical_key(self, context_key: Tuple[int, int]) -> Tuple[int, int]:
         tensor_index, intron = context_key
-        canonical_index = self.canonical_map.get(tensor_index, tensor_index)
+        canonical_index = self.phenomenology_map.get(tensor_index, tensor_index)
         return (canonical_index, intron)
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
@@ -559,13 +559,13 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
     )
 
 
-def validate_manifold_integrity(manifold_path: str, canonical_map_path: Optional[str] = None) -> MaintenanceReport:
+def validate_manifold_integrity(manifold_path: str, phenomenology_map_path: Optional[str] = None) -> MaintenanceReport:
     """
     Validate the integrity of manifold data files.
 
     Args:
         manifold_path: Path to genotype map
-        canonical_map_path: Optional path to canonical map
+        phenomenology_map_path: Optional path to canonical map
 
     Returns:
         Maintenance report
@@ -596,7 +596,7 @@ def validate_manifold_integrity(manifold_path: str, canonical_map_path: Optional
         )
 
     # Validate manifold structure
-    expected_keys = ["schema_version", "genotype_map", "endogenous_modulus", "manifold_diameter", "total_states"]
+    expected_keys = ["schema_version", "ontology_map", "endogenous_modulus", "manifold_diameter", "total_states"]
 
     for key in expected_keys:
         if key not in manifold_data:
@@ -609,23 +609,23 @@ def validate_manifold_integrity(manifold_path: str, canonical_map_path: Optional
     if manifold_data.get("manifold_diameter") != 6:
         issues.append(f"Invalid manifold diameter: {manifold_data.get('manifold_diameter')}")
 
-    genotype_map = manifold_data.get("genotype_map", {})
-    if len(genotype_map) != 788_986:
-        issues.append(f"Invalid genotype map size: {len(genotype_map)}")
+    ontology_map = manifold_data.get("ontology_map", {})
+    if len(ontology_map) != 788_986:
+        issues.append(f"Invalid genotype map size: {len(ontology_map)}")
 
     # Check canonical map if provided
     canonical_issues = 0
-    if canonical_map_path and os.path.exists(canonical_map_path):
+    if phenomenology_map_path and os.path.exists(phenomenology_map_path):
         try:
-            with open(canonical_map_path, "r") as f:
+            with open(phenomenology_map_path, "r") as f:
                 data = json.load(f)
             if isinstance(data, list):
-                canonical_map = dict(enumerate(data))
+                phenomenology_map = dict(enumerate(data))
             else:
-                canonical_map = {int(k): v for k, v in data.items()}
+                phenomenology_map = {int(k): v for k, v in data.items()}
 
             # Validate all indices are in range
-            for idx, canonical_idx in canonical_map.items():
+            for idx, canonical_idx in phenomenology_map.items():
                 idx_int = int(idx)
                 if idx_int < 0 or idx_int >= 788_986:
                     canonical_issues += 1
@@ -643,7 +643,7 @@ def validate_manifold_integrity(manifold_path: str, canonical_map_path: Optional
     return MaintenanceReport(
         operation="validate_manifold_integrity",
         success=len(issues) == 0,
-        entries_processed=len(genotype_map),
+        entries_processed=len(ontology_map),
         entries_modified=0,
         elapsed_seconds=elapsed,
     )

@@ -21,24 +21,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build genotype_map.json
+      - name: Build ontology_map.json
         run: |
-          python -m baby.information manifold --output memories/public/manifold/genotype_map.json
+          python -m baby.information ontology --output memories/public/manifold/ontology_map.json
 
-      - name: Build canonical_map.json
+      - name: Build phenomenology_map.json
         run: |
-          python -m baby.information canonical --genotype_map memories/public/manifold/genotype_map.json --output memories/public/manifold/canonical_map.json
+          python -m baby.information phenomenology --ontology_map memories/public/manifold/ontology_map.json --output memories/public/manifold/phenomenology_map.json
 
-      - name: Build stt.npy
+      - name: Build epistemology.npy
         run: |
-          python -m baby.information stt --manifold memories/public/manifold/genotype_map.json --output memories/public/manifold/stt.npy
+          python -m baby.information epistemology --manifold memories/public/manifold/ontology_map.json --output memories/public/manifold/epistemology.npy
 
       - name: Add and commit LFS files
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git lfs track "*.npy" "*.json"
-          git add memories/public/manifold/genotype_map.json memories/public/manifold/canonical_map.json memories/public/manifold/stt.npy
+          git add memories/public/manifold/ontology_map.json memories/public/manifold/phenomenology_map.json memories/public/manifold/epistemology.npy
           git commit -m "Add prebuilt manifold assets [skip ci]" || echo "No changes to commit"
           git push
         env:

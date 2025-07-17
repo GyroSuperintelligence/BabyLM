@@ -1,11 +1,11 @@
-# 1. Generate genotype_map.json (the manifold)
-# python -m baby.information manifold --output memories/public/manifold/genotype_map.json
+# 1. Generate ontology_map.json (the manifold)
+# python -m baby.information manifold --output memories/public/manifold/ontology_map.json
 #
-# 2. Generate canonical_map.json (the canonical mapping)
-# python -m baby.information canonical --genotype_map memories/public/manifold/genotype_map.json --output memories/public/manifold/canonical_map.json
+# 2. Generate phenomenology_map.json (the canonical mapping)
+# python -m baby.information canonical --ontology_map memories/public/manifold/ontology_map.json --output memories/public/manifold/phenomenology_map.json
 #
-# 3. Generate stt.npy (the state transition table)
-# python -m baby.information stt --manifold memories/public/manifold/genotype_map.json --output memories/public/manifold/stt.npy
+# 3. Generate epistemology.npy (the state transition table)
+# python -m baby.information epistemology --manifold memories/public/manifold/ontology_map.json --output memories/public/manifold/epistemology.npy
 """
 S2: Information - Measurement & Storage
 
@@ -20,7 +20,33 @@ import os
 from collections import deque
 from typing import Dict, Any, Optional, Set
 from baby import governance
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
+CHUNK = 50_000  # 788,986 / 50,000 ≈ 16 chunks – fits in 2 GB RAM
+
+def _orbit_chunk(start_idx, stop_idx, indices, states):
+    """Worker: return {orbit_index: canonical_index} for local slice."""
+    from collections import deque
+    out = {}
+    for canon_idx in range(start_idx, stop_idx):
+        state_int = states[canon_idx]
+        if state_int in out:  # already mapped by earlier orbit
+            continue
+        orbit = [state_int]
+        q = deque([state_int])
+        canonical_int = state_int
+        while q:
+            s = q.popleft()
+            for intron in range(256):
+                nxt = governance.apply_gyration_and_transform(s, intron)
+                if nxt not in orbit:
+                    orbit.append(nxt)
+                    q.append(nxt)
+                    canonical_int = min(canonical_int, nxt)
+        canonical_index = indices[canonical_int]
+        for s in orbit:
+            out[indices[s]] = canonical_index
+    return out
 
 class InformationEngine:
     """
@@ -29,7 +55,7 @@ class InformationEngine:
     Sole authority for measurement and conversion between state representations.
     Provides the sensory apparatus through angular gyrodistance measurement.
 
-    If use_memmap is True, genotype_map and inverse_genotype_map are stored as numpy arrays for better memory/cache performance.
+    If use_memmap is True, ontology_map and inverse_ontology_map are stored as numpy arrays for better memory/cache performance.
     """
 
     def __init__(
@@ -41,24 +67,24 @@ class InformationEngine:
         if use_memmap is None:
             use_memmap = manifold_data["endogenous_modulus"] > 100_000
         self.use_memmap = use_memmap
-        self.genotype_map = manifold_data["genotype_map"]
-        keys = list(self.genotype_map.keys())
+        self.ontology_map = manifold_data["ontology_map"]
+        keys = list(self.ontology_map.keys())
         if keys and isinstance(keys[0], str):
-            self.genotype_map = {int(k): v for k, v in self.genotype_map.items()}
+            self.ontology_map = {int(k): v for k, v in self.ontology_map.items()}
         self.endogenous_modulus = manifold_data["endogenous_modulus"]
         self.manifold_diameter = manifold_data["manifold_diameter"]
         if use_memmap:
-            keys_arr = np.array(sorted(self.genotype_map.keys()), dtype=np.uint64)
+            keys_arr = np.array(sorted(self.ontology_map.keys()), dtype=np.uint64)
             self._keys = keys_arr
             self._values = np.arange(len(self._keys), dtype=np.int32)
             self._inverse = self._keys  # index -> state_int
-            self.genotype_map = {k: i for i, k in enumerate(self._keys)}  # tiny dict for fallback
-            self.inverse_genotype_map = None  # free ~30 MB
+            self.ontology_map = {k: i for i, k in enumerate(self._keys)}  # tiny dict for fallback
+            self.inverse_ontology_map = None  # free ~30 MB
         else:
             self._keys = None
             self._values = None
             self._inverse = None
-            self.inverse_genotype_map = {v: k for k, v in self.genotype_map.items()}
+            self.inverse_ontology_map = {v: k for k, v in self.ontology_map.items()}
 
         # Validate expected constants
         if self.endogenous_modulus != 788_986:
@@ -90,7 +116,7 @@ class InformationEngine:
                 )
             return int(self._values[idx])
         else:
-            index = self.genotype_map.get(state_int, -1)
+            index = self.ontology_map.get(state_int, -1)
             if index == -1:
                 raise ValueError(
                     f"CRITICAL: State integer {state_int} not found in discovered manifold. "
@@ -115,9 +141,9 @@ class InformationEngine:
                 raise ValueError(f"Index {index} out of bounds for memmap.")
             state_int = int(self._inverse[index])
         else:
-            if self.inverse_genotype_map is None:
-                raise RuntimeError("inverse_genotype_map not initialized.")
-            state_int = self.inverse_genotype_map.get(index)
+            if self.inverse_ontology_map is None:
+                raise RuntimeError("inverse_ontology_map not initialized.")
+            state_int = self.inverse_ontology_map.get(index)
             if state_int is None or state_int == -1:
                 raise ValueError(f"Invalid index {index}, must be 0 to {self.endogenous_modulus - 1}")
             return state_int
@@ -264,13 +290,13 @@ def discover_and_save_manifold(output_path: str) -> None:
 
     # Create canonical mapping
     sorted_state_ints = sorted(discovered_states)
-    genotype_map = {state_int: i for i, state_int in enumerate(sorted_state_ints)}
+    ontology_map = {state_int: i for i, state_int in enumerate(sorted_state_ints)}
 
     # Package manifold data
     manifold_data: Dict[str, Any] = {
         "schema_version": "1.0.0",
-        "genotype_map": genotype_map,
-        "endogenous_modulus": len(genotype_map),
+        "ontology_map": ontology_map,
+        "endogenous_modulus": len(ontology_map),
         "manifold_diameter": depth,
         "total_states": len(discovered_states),
         "build_timestamp": time.time(),
@@ -287,108 +313,49 @@ def discover_and_save_manifold(output_path: str) -> None:
     print(f"Saved to: {output_path}")
 
 
-def build_canonical_map(genotype_map_path: str, output_path: str) -> None:
+def build_phenomenology_map(ontology_map_path: str, output_path: str) -> None:
     """
-    Build canonical mapping for orbit representatives.
-
-    For each state in the manifold, computes its canonical representative
-    (lexicographically smallest state in its orbit). This enables grouping
-    of physically equivalent states and improves cache coherency.
-
-    Args:
-        genotype_map_path: Path to genotype map JSON
-        output_path: Path to save canonical map
+    Parallel build of canonical mapping for orbit representatives (phenomenology).
     """
-    print("Building canonical map...")
+    print("Building phenomenology map (parallel)...")
     start_time = time.time()
-
-    # Load genotype map
-    with open(genotype_map_path, "r") as f:
-        genotype_data = json.load(f)
-
-    genotype_map = genotype_data["genotype_map"]
-    # Ensure integer keys
-    genotype_map = {int(k): v for k, v in genotype_map.items()}
-
-    # Build inverse map
-    inverse_genotype_map = {v: k for k, v in genotype_map.items()}
-
-    # Find canonical representative for each state
-    canonical_index_map = {}
-    processed_states: Set[int] = set()
-
-    print(f"Processing {len(genotype_map)} states...")
-
-    for i, state_int in enumerate(inverse_genotype_map.values()):
-        if i % 10000 == 0:
-            print(f"Progress: {i}/{len(genotype_map)} states processed")
-
-        if state_int in processed_states:
-            continue
-
-        # Find all states in the orbit
-        orbit = {state_int}
-        queue = deque([state_int])
-        canonical_int = state_int
-
-        while queue:
-            current_int = queue.popleft()
-
-            for intron in range(256):
-                next_int = governance.apply_gyration_and_transform(current_int, intron)
-
-                if next_int not in orbit:
-                    orbit.add(next_int)
-                    queue.append(next_int)
-
-                    # Update canonical if we found a smaller one
-                    if next_int < canonical_int:
-                        canonical_int = next_int
-
-        # Map all states in orbit to canonical representative
-        canonical_index = genotype_map[canonical_int]
-        for orbit_state in orbit:
-            if orbit_state in genotype_map:
-                orbit_index = genotype_map[orbit_state]
-                canonical_index_map[orbit_index] = canonical_index
-                processed_states.add(orbit_state)
-
-    # Save canonical map
+    with open(ontology_map_path, "r") as f:
+        data = json.load(f)
+    idx_of = {int(k): v for k, v in data["ontology_map"].items()}
+    state_by_idx = {v: k for k, v in idx_of.items()}
+    N = len(idx_of)
+    slice_bounds = list(range(0, N, CHUNK)) + [N]
+    with ProcessPoolExecutor() as pool:
+        futures = [
+            pool.submit(_orbit_chunk, slice_bounds[i], slice_bounds[i + 1], idx_of, state_by_idx)
+            for i in range(len(slice_bounds) - 1)
+        ]
+        canonical = {}
+        for f in as_completed(futures):
+            canonical.update(f.result())
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(canonical_index_map, f)
-
+        json.dump(canonical, f)
     elapsed = time.time() - start_time
-    unique_canonicals = len(set(canonical_index_map.values()))
-
-    print(f"Canonical map built in {elapsed:.2f}s")
-    print(f"Found {unique_canonicals:,} unique canonical representatives")
-    print(f"Compression ratio: {len(genotype_map) / unique_canonicals:.2f}x")
-    print(f"Saved to: {output_path}")
+    print(f"Phenomenology map built in {elapsed:.2f}s → {output_path}")
 
 
 def build_state_transition_table(manifold_path: str, output_path: str) -> None:
     """
-    Build and save the State Transition Table (STT) as a NumPy array.
-    Each entry [i, intron] gives the next state index for state i and intron.
+    Vectorized build of the state transition table (epistemology) using NumPy and memmap.
     """
     import numpy as np
-
-    # Load the manifold data
-    with open(manifold_path, "r") as f:
-        manifold_data = json.load(f)
-    genotype_map = {int(k): v for k, v in manifold_data["genotype_map"].items()}
-    inverse_genotype_map = {v: k for k, v in genotype_map.items()}
-    num_states = len(genotype_map)
-    stt = np.zeros((num_states, 256), dtype=np.int32)
-    for idx in range(num_states):
-        state_int = inverse_genotype_map[idx]
-        for intron in range(256):
-            next_state_int = governance.apply_gyration_and_transform(state_int, intron)
-            next_idx = genotype_map[next_state_int]
-            stt[idx, intron] = next_idx
-    np.save(output_path, stt)
-    print(f"STT saved to {output_path}")
+    data = json.load(open(manifold_path))
+    idx_of = {int(k): v for k, v in data["ontology_map"].items()}
+    states = np.fromiter((int(k) for k in sorted(idx_of.keys())), dtype=np.uint64)
+    N = len(states)
+    ep = np.memmap(output_path, dtype=np.int32, mode="w+", shape=(N, 256))
+    sorted_states = states.copy()
+    for intron in range(256):
+        next_states = np.vectorize(governance.apply_gyration_and_transform, otypes=[np.uint64])(states, intron)
+        ep[:, intron] = np.searchsorted(sorted_states, next_states)
+    ep.flush()
+    print(f"Epistemology table built → {output_path}")
 
 
 if __name__ == "__main__":
@@ -398,22 +365,22 @@ if __name__ == "__main__":
     subparsers = parser.add_subparsers(dest="command")
 
     parser_manifold = subparsers.add_parser("manifold", help="Build and save the manifold")
-    parser_manifold.add_argument("--output", required=True, help="Path to output genotype_map.json")
+    parser_manifold.add_argument("--output", required=True, help="Path to output ontology_map.json")
 
     parser_canonical = subparsers.add_parser("canonical", help="Build and save the canonical map")
-    parser_canonical.add_argument("--genotype_map", required=True, help="Path to genotype_map.json")
-    parser_canonical.add_argument("--output", required=True, help="Path to output canonical_map.json")
+    parser_canonical.add_argument("--ontology_map", required=True, help="Path to ontology_map.json")
+    parser_canonical.add_argument("--output", required=True, help="Path to output phenomenology_map.json")
 
-    parser_stt = subparsers.add_parser("stt", help="Build and save the state transition table (STT)")
-    parser_stt.add_argument("--manifold", required=True, help="Path to genotype_map.json")
-    parser_stt.add_argument("--output", required=True, help="Path to output stt.npy")
+    parser_epistemology = subparsers.add_parser("epistemology", help="Build and save the state transition table (STT)")
+    parser_epistemology.add_argument("--manifold", required=True, help="Path to ontology_map.json")
+    parser_epistemology.add_argument("--output", required=True, help="Path to output epistemology.npy")
 
     args = parser.parse_args()
     if args.command == "manifold":
         discover_and_save_manifold(args.output)
     elif args.command == "canonical":
-        build_canonical_map(args.genotype_map, args.output)
-    elif args.command == "stt":
+        build_phenomenology_map(args.ontology_map, args.output)
+    elif args.command == "epistemology":
         build_state_transition_table(args.manifold, args.output)
     else:
         print("\nHint: You can run this as 'python -m baby.information manifold --output ...' to avoid path headaches.")

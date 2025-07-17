@@ -1,5 +1,5 @@
 """
-Shared contracts (protocols and type definitions) for the GyroSI S4 system.
+Shared type definitions for the GyroSI system.
 """
 
 from typing import Protocol, Optional, Dict, Any, Tuple, TypedDict
@@ -101,14 +101,3 @@ class MaintenanceReport(TypedDict):
     entries_processed: int
     entries_modified: int
     elapsed_seconds: float
-
-
-__all__ = [
-    "PhenotypeEntry",
-    "ManifoldData",
-    "AgentConfig",
-    "PreferencesConfig",
-    "CycleHookFunction",
-    "ValidationReport",
-    "MaintenanceReport",
-]

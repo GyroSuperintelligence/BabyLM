@@ -51,7 +51,7 @@ This algebraic foundation ensures that every operation in GyroSI is a direct imp
 
 ### **2.3 The Holographic Principle**
 
-GyroSI embodies the principle that each part contains information about the whole. A single input byte acts as a holographic quantum of spacetime topology, encoding complete transformation instructions that modify the system's 48-byte internal state according to precise physical laws. This holographic property ensures that the system can achieve substantial compression while preserving essential structural relationships.
+GyroSI embodies the principle that each part contains information about the whole. A single input byte acts as a holographic quantum of spacetime topology, encoding complete transformation instructions that modify the system's internal state according to topological physics; a 48‑element tensor, 48 bytes in RAM, packed to 6 bytes when stored. This holographic property ensures that the system can achieve substantial compression while preserving essential structural relationships.
 
 > Note: The system's internal state can be represented in two equivalent ways:
 > - As a 48-element NumPy tensor (each element ±1, stored as int8), which occupies 48 bytes in memory.
@@ -79,7 +79,7 @@ To further structure the manifold, we can define a canonical representative for 
 The canonicalization process is a one-time, build-time computation:
 
 ```python
-def find_canonical_representative(start_tensor_bytes: bytes, genotype_map: dict) -> bytes:
+def find_canonical_representative(start_tensor_bytes: bytes, ontology_map: dict) -> bytes:
     """Finds the lexicographically smallest state in the orbit of start_tensor_bytes."""
     orbit = {start_tensor_bytes}
     queue = [start_tensor_bytes]
@@ -98,24 +98,24 @@ def find_canonical_representative(start_tensor_bytes: bytes, genotype_map: dict)
                     canonical_int = next_int
     return canonical_int.to_bytes(48, 'big')
 
-def build_canonical_map(genotype_map_path: str, output_path: str):
+def build_phenomenology_map(ontology_map_path: str, output_path: str):
     """
     For each state in the manifold, computes its canonical representative.
     Saves a map from every state_index to its canonical_state_index.
     """
-    with open(genotype_map_path, 'r') as f:
+    with open(ontology_map_path, 'r') as f:
         genotype_data = json.load(f)
-    genotype_map = genotype_data['genotype_map']
-    # Ensure genotype_map uses int keys for performance and consistency
-    genotype_map = {int(k): v for k, v in genotype_map.items()}
-    inverse_genotype_map = {v: k for k, v in genotype_map.items()}
+    ontology_map = genotype_data['ontology_map']
+    # Ensure ontology_map uses int keys for performance and consistency
+    ontology_map = {int(k): v for k, v in ontology_map.items()}
+    inverse_ontology_map = {v: k for k, v in ontology_map.items()}
     canonical_index_map = {}
-    print(f"Building canonical map for {len(genotype_map)} states...")
-    for i, tensor_bytes in inverse_genotype_map.items():
+    print(f"Building canonical map for {len(ontology_map)} states...")
+    for i, tensor_bytes in inverse_ontology_map.items():
         if i % 10000 == 0:
             print(f"Processing state {i}...")
-        canonical_bytes = find_canonical_representative(tensor_bytes, genotype_map)
-        canonical_index_map[i] = genotype_map[canonical_bytes]
+        canonical_bytes = find_canonical_representative(tensor_bytes, ontology_map)
+        canonical_index_map[i] = ontology_map[canonical_bytes]
     with open(output_path, 'w') as f:
         json.dump(canonical_index_map, f)
 ```
@@ -546,13 +546,13 @@ class InformationEngine:
     S2: Measurement & Resource Coordination. Sole authority for measurement and conversion between state representations.
     """
     def __init__(self, manifold_data: dict):
-        self.genotype_map = manifold_data['genotype_map']
-        if isinstance(next(iter(self.genotype_map.keys())), str):
-            self.genotype_map = {int(k): v for k, v in self.genotype_map.items()}
+        self.ontology_map = manifold_data['ontology_map']
+        if isinstance(next(iter(self.ontology_map.keys())), str):
+            self.ontology_map = {int(k): v for k, v in self.ontology_map.items()}
 
     def get_index_from_state(self, state_int: int) -> int:
         """Looks up the canonical index for a physical state integer."""
-        index = self.genotype_map.get(state_int, -1)
+        index = self.ontology_map.get(state_int, -1)
         if index == -1:
             raise ValueError(f"CRITICAL: State integer {state_int} not found in discovered manifold.")
         return index
@@ -605,12 +605,12 @@ def discover_and_save_manifold(output_path: str):
         )
 
     sorted_state_ints = sorted(discovered_states)
-    genotype_map = {state_int: i for i, state_int in enumerate(sorted_state_ints)}
+    ontology_map = {state_int: i for i, state_int in enumerate(sorted_state_ints)}
 
     manifold_data = {
         "schema_version": "1.0.0",
-        "genotype_map": genotype_map,
-        "endogenous_modulus": len(genotype_map),
+        "ontology_map": ontology_map,
+        "endogenous_modulus": len(ontology_map),
         "manifold_diameter": depth,
         "total_states": len(discovered_states),
         "build_timestamp": time.time()
@@ -620,7 +620,7 @@ def discover_and_save_manifold(output_path: str):
         json.dump(manifold_data, f)
 
 # After discovering the manifold, you may optionally run:
-def build_canonical_map(genotype_map_path: str, output_path: str):
+def build_phenomenology_map(ontology_map_path: str, output_path: str):
     """S2: Discovers canonical representatives for storage optimization.
     See theoretical section for algorithm details. This is a build-time utility to be run after discover_and_save_manifold().
     """
@@ -642,7 +642,7 @@ class EndogenousInferenceOperator:
     def __init__(self, s2_engine: information.InformationEngine, phenotype_store: information.PhenotypeStore):
         self.s2 = s2_engine
         self.store = phenotype_store
-        self.endogenous_modulus = len(self.s2.genotype_map)
+        self.endogenous_modulus = len(self.s2.ontology_map)
 
     def get_phenotype(self, state_int: int, intron: int) -> dict:
         """Convert physical state identity to semantic meaning."""
@@ -905,7 +905,7 @@ base_store = PickleStore(store_path="knowledge.pkl.gz")
 # This ensures abstraction is based on physical orbits.
 canonical_store = CanonicalizingStore(
     base_store=base_store,
-    canonical_map_path="memories/public/manifold/canonical_map.json"
+    phenomenology_map_path="memories/public/manifold/phenomenology_map.json"
 )
 
 # Pass to the engine.
@@ -1007,19 +1007,19 @@ class CanonicalizingStore:
     A decorator that ensures all storage operations use the canonical
     representative of a physical state's orbit.
     """
-    def __init__(self, base_store: PhenotypeStore, canonical_map_path: str):
+    def __init__(self, base_store: PhenotypeStore, phenomenology_map_path: str):
         self.base_store = base_store
-        with open(canonical_map_path, 'r') as f:
+        with open(phenomenology_map_path, 'r') as f:
             loaded = json.load(f)
             # Support both dict and list formats for canonical map
             if isinstance(loaded, list):
-                self.canonical_map = dict(enumerate(loaded))
+                self.phenomenology_map = dict(enumerate(loaded))
             else:
-                self.canonical_map = {int(k): v for k, v in loaded.items()}
+                self.phenomenology_map = {int(k): v for k, v in loaded.items()}
 
     def _get_canonical_key(self, context_key: tuple) -> tuple:
         tensor_index, intron = context_key
-        canonical_index = self.canonical_map.get(tensor_index, tensor_index)
+        canonical_index = self.phenomenology_map.get(tensor_index, tensor_index)
         return (canonical_index, intron)
 
     def get(self, context_key: tuple) -> Optional[dict]:
@@ -1109,8 +1109,8 @@ gyrosi/
 ├── memories/                       # Runtime Data and Knowledge
 │   ├── public/
 │   │   ├── manifold/
-│   │   │   ├── genotype_map.json
-│   │   │   └── canonical_map.json
+│   │   │   ├── ontology_map.json
+│   │   │   └── phenomenology_map.json
 │   │   │
 │   │   └── knowledge.pkl.gz        # Curated public knowledge
 │   │

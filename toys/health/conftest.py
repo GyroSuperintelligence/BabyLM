@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from baby import (
     discover_and_save_manifold,
-    build_canonical_map,
+    build_phenomenology_map,
     GyroSI,
     AgentPool,
 )
@@ -56,14 +56,14 @@ def temp_dir():
 @pytest.fixture
 def manifold_data(temp_dir):
     """Create and return test manifold data."""
-    manifold_path = os.path.join(temp_dir, "manifold", "genotype_map.json")
+    manifold_path = os.path.join(temp_dir, "manifold", "ontology_map.json")
     os.makedirs(os.path.dirname(manifold_path), exist_ok=True)
 
     # For testing, create a smaller mock manifold
     # In real tests, you'd use discover_and_save_manifold
     mock_manifold: ManifoldData = {
         "schema_version": "1.0.0",
-        "genotype_map": {i: i for i in range(1000)},  # Mock 1000 states
+        "ontology_map": {i: i for i in range(1000)},  # Mock 1000 states
         "endogenous_modulus": 788_986,  # Keep the real constant
         "manifold_diameter": 6,
         "total_states": 788_986,
@@ -79,15 +79,15 @@ def manifold_data(temp_dir):
 @pytest.fixture
 def real_manifold(temp_dir):
     """Create the real manifold (expensive - use sparingly)."""
-    manifold_path = os.path.join(temp_dir, "manifold", "genotype_map.json")
+    manifold_path = os.path.join(temp_dir, "manifold", "ontology_map.json")
     os.makedirs(os.path.dirname(manifold_path), exist_ok=True)
 
     # This is expensive but necessary for integration tests
     discover_and_save_manifold(manifold_path)
 
     # Also build canonical map
-    canonical_path = os.path.join(temp_dir, "manifold", "canonical_map.json")
-    build_canonical_map(manifold_path, canonical_path)
+    canonical_path = os.path.join(temp_dir, "manifold", "phenomenology_map.json")
+    build_phenomenology_map(manifold_path, canonical_path)
 
     with open(manifold_path, "r") as f:
         manifold_data = json.load(f)
@@ -257,7 +257,7 @@ def assert_manifold_valid(manifold_data: Dict[str, Any]):
     """Assert that manifold data is valid."""
     assert manifold_data["endogenous_modulus"] == 788_986
     assert manifold_data["manifold_diameter"] == 6
-    assert "genotype_map" in manifold_data
+    assert "ontology_map" in manifold_data
     assert "schema_version" in manifold_data
 
 

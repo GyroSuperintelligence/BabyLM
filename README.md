@@ -187,8 +187,8 @@ gyrosi/
 ├── memories/                       # Runtime Data and Knowledge
 │   ├── public/
 │   │   ├── manifold/
-│   │   │   ├── genotype_map.json   # The complete 788,986-state physical manifold
-│   │   │   └── canonical_map.json  # Maps states to their canonical orbit representative
+│   │   │   ├── ontology_map.json   # The complete 788,986-state physical manifold
+│   │   │   └── phenomenology_map.json  # Maps states to their canonical orbit representative
 │   │   └── knowledge.pkl.gz        # Curated public knowledge base
 │   └── private/
 │       └── agents/

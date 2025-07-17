@@ -43,20 +43,20 @@ class IntelligenceEngine:
 
         # Agent state
         self.agent_id = agent_id or str(uuid.uuid4())
-        self.use_stt = False
-        stt_path = manifold_path.replace("genotype_map.json", "stt.npy")
-        if os.path.exists(stt_path):
+        self.use_epistemology = False
+        epistemology_path = manifold_path.replace("ontology_map.json", "epistemology.npy")
+        if os.path.exists(epistemology_path):
             try:
                 import numpy as np
 
-                self.stt = np.load(stt_path, mmap_mode="r")
-                self.use_stt = True
+                self.epistemology = np.load(epistemology_path, mmap_mode="r")
+                self.use_epistemology = True
                 print("INFO: State Transition Table (STT) loaded. Using optimized state transitions.")
             except Exception as e:
-                print(f"WARNING: Could not load STT from {stt_path}. Error: {e}. Falling back to dynamic physics.")
+                print(f"WARNING: Could not load STT from {epistemology_path}. Error: {e}. Falling back to dynamic physics.")
 
         origin_int = self.s2.tensor_to_int(governance.GENE_Mac_S)
-        if self.use_stt:
+        if self.use_epistemology:
             self.current_state_index = self.s2.get_index_from_state(origin_int)
             self.gene_mac_m_int = origin_int  # Ensure always defined
         else:
@@ -83,8 +83,8 @@ class IntelligenceEngine:
         intron = governance.transcribe_byte(input_byte)
 
         # S1: Apply gyroscopic transformation to physical state
-        if self.use_stt:
-            self.current_state_index = self.stt[self.current_state_index, intron]
+        if self.use_epistemology:
+            self.current_state_index = self.epistemology[self.current_state_index, intron]
             # No eager sync here
         else:
             self.gene_mac_m_int = governance.apply_gyration_and_transform(self.gene_mac_m_int, intron)
@@ -107,7 +107,7 @@ class IntelligenceEngine:
             Output byte representing intelligent response
         """
         # S3: Get semantic meaning of current state + context
-        if self.use_stt:
+        if self.use_epistemology:
             state_index = self.current_state_index
         else:
             state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
@@ -181,7 +181,7 @@ class IntelligenceEngine:
         # Learn from the final accumulated intron
         if acc != 0:
             # Use the correct state index depending on STT
-            if self.use_stt:
+            if self.use_epistemology:
                 state_index = self.current_state_index
             else:
                 state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
@@ -221,11 +221,11 @@ class IntelligenceEngine:
         return data  # type: ignore
 
     def _sync_state_fields_from_index(self):
-        if self.use_stt:
+        if self.use_epistemology:
             self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
 
     def _sync_index_from_state_int(self):
-        if self.use_stt:
+        if self.use_epistemology:
             self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
 
 
@@ -382,13 +382,13 @@ class GyroSI:
 
         # Wrap with canonicalizing decorator if enabled
         if enable_canonical:
-            canonical_map_path = self.config.get("canonical_map_path")
-            if canonical_map_path is None:
-                canonical_map_path = "memories/public/manifold/canonical_map.json"
-            if os.path.exists(canonical_map_path):
-                return CanonicalView(base_store, canonical_map_path)
+            phenomenology_map_path = self.config.get("phenomenology_map_path")
+            if phenomenology_map_path is None:
+                phenomenology_map_path = "memories/public/manifold/phenomenology_map.json"
+            if os.path.exists(phenomenology_map_path):
+                return CanonicalView(base_store, phenomenology_map_path)
             else:
-                print(f"Warning: Canonical map not found at {canonical_map_path}")
+                print(f"Warning: Canonical map not found at {phenomenology_map_path}")
 
         return base_store
 
