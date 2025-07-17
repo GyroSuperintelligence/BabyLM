@@ -1,11 +1,3 @@
-{
-  "version": "0.2.0",
-  "configurations": [
-      {
-          "name": "Python: Current File",
-          "type": "debugpy",
-          "request": "launch",
-          "program": "${file}"
-      }
-  ]
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:ad7123bba220c75fc5e496885a770282150dd5c9f244b46050ef296eeb129e6b
+size 200

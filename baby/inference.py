@@ -136,7 +136,7 @@ class EndogenousInferenceOperator:
         modified_count = 0
         current_time = time.time()
 
-        for entry in self.store.data.values():  # type: ignore[attr-defined]
+        for key, entry in getattr(self.store, 'iter_entries', lambda: self.store.data.items())():
             age_counter = entry.get("age_counter", 0)
             last_updated = entry.get("last_updated", current_time)
 
@@ -164,12 +164,11 @@ class EndogenousInferenceOperator:
                 # Prevent complete confidence loss
                 entry["confidence"] = max(0.01, entry["confidence"])
 
+                self.store.put(key, entry)
                 modified_count += 1
 
-        # Persist changes if store supports it
-        if modified_count > 0 and hasattr(self.store, "_save"):
-            self.store._save()  # type: ignore[attr-defined]
-
+        if hasattr(self.store, 'commit'):
+            self.store.commit()
         return ValidationReport(
             total_entries=len(self.store.data) if hasattr(self.store, "data") else 0,  # type: ignore[attr-defined]
             average_confidence=0.0,  # Would need full recalculation
@@ -192,15 +191,15 @@ class EndogenousInferenceOperator:
 
         keys_to_remove = []
 
-        for key, entry in self.store.data.items():  # type: ignore[attr-defined]
+        for key, entry in getattr(self.store, 'iter_entries', lambda: self.store.data.items())():
             if entry.get("confidence", 1.0) < confidence_threshold:
                 keys_to_remove.append(key)
 
         for key in keys_to_remove:
-            del self.store.data[key]  # type: ignore[attr-defined]
-
-        if keys_to_remove and hasattr(self.store, "_save"):
-            self.store._save()  # type: ignore[attr-defined]
+            # Persist deletion by putting a tombstone dict
+            self.store.put(key, {'context_signature': key, '__deleted__': True})
+        if hasattr(self.store, 'commit'):
+            self.store.commit()
 
         return len(keys_to_remove)
 

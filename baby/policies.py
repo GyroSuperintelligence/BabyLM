@@ -60,28 +60,35 @@ class OrbitStore:
         return None
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
+        pending_fsync = None
         with self.lock:
             if "context_signature" not in entry:
                 entry = entry.copy()
                 entry["context_signature"] = context_key
             self.pending_writes.append((context_key, entry.copy()))
             if len(self.pending_writes) >= self.write_threshold:
-                self._flush()
+                pending_fsync = self._flush()
+        if pending_fsync:
+            pending_fsync.result()
 
     def commit(self) -> None:
+        pending_fsync = None
         with self.lock:
             if self.pending_writes:
-                self._flush()
+                pending_fsync = self._flush()
             with gzip.open(self.index_path, "wb") as f:
                 pickle.dump(self.index, f, protocol=pickle.HIGHEST_PROTOCOL)
             if self.use_mmap:
                 current_size = os.path.getsize(self.log_path)
                 if self._mmap is None or current_size != self._mmap_size:
                     self._open_mmap()
+        if pending_fsync:
+            pending_fsync.result()
 
     def _flush(self):
+        pending_fsync = None
         if not self.log_file or not self.pending_writes:
-            return
+            return None
         for context_key, entry in self.pending_writes:
             data = pickle.dumps(entry, protocol=pickle.HIGHEST_PROTOCOL)
             offset = self.log_file.tell()
@@ -90,7 +97,7 @@ class OrbitStore:
             self.index[context_key] = (offset, size)
         self.log_file.flush()
         if self._pending_fsync:
-            self._pending_fsync.result()
+            pending_fsync = self._pending_fsync
         self._pending_fsync = self._fsync_executor.submit(os.fsync, self.log_file.fileno())
         self.pending_writes.clear()
         self._flush_count += 1
@@ -98,6 +105,7 @@ class OrbitStore:
             with gzip.open(self.index_path, "wb") as f:
                 pickle.dump(self.index, f, protocol=pickle.HIGHEST_PROTOCOL)
             self._flush_count = 0
+        return pending_fsync
 
     def _load_index(self) -> None:
         if os.path.exists(self.index_path):
@@ -159,6 +167,20 @@ class OrbitStore:
             for k, v in data.items():
                 self.put(k, v)
             self._flush()
+
+    def iter_entries(self):
+        """
+        Yields (key, entry) pairs for only the latest entry for each key, using self.index.
+        Mutating the entry requires calling store.put(key, entry) to persist.
+        """
+        if not os.path.exists(self.log_path):
+            return
+        with open(self.log_path, "rb") as f:
+            for context_key, (offset, size) in self.index.items():
+                f.seek(offset)
+                entry = pickle.load(f)
+                if "context_signature" in entry:
+                    yield context_key, entry
 
 
 class CanonicalView:
@@ -390,7 +412,7 @@ def apply_global_confidence_decay(
     processed_count = 0
     current_time = time.time()
 
-    for entry in store.data.values():
+    for key, entry in store.iter_entries():
         processed_count += 1
 
         age_counter = entry.get("age_counter", 0)
@@ -414,6 +436,8 @@ def apply_global_confidence_decay(
                 decay_mask = int(255 * decay_strength)
                 entry["memory_mask"] = old_mask & decay_mask
                 entry["confidence"] = max(0.01, entry.get("confidence", 0.0) * decay_strength)
+                # Persist the mutation
+                store.put(key, entry)
 
             modified_count += 1
 
@@ -594,7 +618,11 @@ def validate_manifold_integrity(manifold_path: str, canonical_map_path: Optional
     if canonical_map_path and os.path.exists(canonical_map_path):
         try:
             with open(canonical_map_path, "r") as f:
-                canonical_map = json.load(f)
+                data = json.load(f)
+            if isinstance(data, list):
+                canonical_map = dict(enumerate(data))
+            else:
+                canonical_map = {int(k): v for k, v in data.items()}
 
             # Validate all indices are in range
             for idx, canonical_idx in canonical_map.items():

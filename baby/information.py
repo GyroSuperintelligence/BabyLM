@@ -1,3 +1,11 @@
+# 1. Generate genotype_map.json (the manifold)
+# python -m baby.information manifold --output memories/public/manifold/genotype_map.json
+#
+# 2. Generate canonical_map.json (the canonical mapping)
+# python -m baby.information canonical --genotype_map memories/public/manifold/genotype_map.json --output memories/public/manifold/canonical_map.json
+#
+# 3. Generate stt.npy (the state transition table)
+# python -m baby.information stt --manifold memories/public/manifold/genotype_map.json --output memories/public/manifold/stt.npy
 """
 S2: Information - Measurement & Storage
 
@@ -50,7 +58,7 @@ class InformationEngine:
             self._keys = None
             self._values = None
             self._inverse = None
-        self.inverse_genotype_map = {v: k for k, v in self.genotype_map.items()}
+            self.inverse_genotype_map = {v: k for k, v in self.genotype_map.items()}
 
         # Validate expected constants
         if self.endogenous_modulus != 788_986:
@@ -133,7 +141,7 @@ class InformationEngine:
         state_packed_bytes = state_int.to_bytes(6, "big")
 
         # Unpack to individual bits
-        bits = np.unpackbits(np.frombuffer(state_packed_bytes, dtype=np.uint8))
+        bits = np.unpackbits(np.frombuffer(state_packed_bytes, dtype=np.uint8), bitorder='big')
 
         # Convert: 0 -> +1, 1 -> -1
         tensor_flat = (1 - 2 * bits).astype(np.int8)
@@ -156,7 +164,7 @@ class InformationEngine:
         bits = (tensor.flatten(order="C") == -1).astype(np.uint8)
 
         # Pack bits into bytes
-        packed = np.packbits(bits)
+        packed = np.packbits(bits, bitorder='big')
 
         # Convert to integer, big-endian
         return int.from_bytes(packed.tobytes(), "big")

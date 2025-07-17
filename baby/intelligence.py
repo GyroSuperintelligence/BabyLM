@@ -37,10 +37,6 @@ class IntelligenceEngine:
             phenotype_store: Storage interface for learned knowledge
             agent_id: Unique identifier for this agent instance
         """
-        # Load manifold data
-        with open(manifold_path, "r") as f:
-            json.load(f)
-
         # Initialize subsystem engines
         self.s2 = InformationEngine(self._load_manifold(manifold_path))
         self.operator = EndogenousInferenceOperator(self.s2, phenotype_store)
