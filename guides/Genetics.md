@@ -905,7 +905,7 @@ base_store = PickleStore(store_path="knowledge.pkl.gz")
 # This ensures abstraction is based on physical orbits.
 canonical_store = CanonicalizingStore(
     base_store=base_store,
-    phenomenology_map_path="memories/public/ontology/phenomenology_map.json"
+    phenomenology_map_path="memories/public/meta/phenomenology_map.json"
 )
 
 # Pass to the engine.

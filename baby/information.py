@@ -1,11 +1,11 @@
 # 1. Generate ontology_map.json (the ontology)
-# python -m baby.information ontology --output memories/public/ontology/ontology_map.json
+# python -m baby.information ontology --output memories/public/meta/ontology_map.json
 #
 # 2. Generate phenomenology_map.json (the canonical mapping)
-# python -m baby.information canonical --ontology_map memories/public/ontology/ontology_map.json --output memories/public/ontology/phenomenology_map.json
+# python -m baby.information canonical --ontology_map memories/public/meta/ontology_map.json --output memories/public/meta/phenomenology_map.json
 #
 # 3. Generate epistemology.npy (the state transition table)
-# python -m baby.information epistemology --ontology memories/public/ontology/ontology_map.json --output memories/public/ontology/epistemology.npy
+# python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
 """
 S2: Information - Measurement & Storage
 
