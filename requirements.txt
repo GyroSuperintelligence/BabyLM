@@ -24,3 +24,5 @@ psutil
 
 nltk
 tqdm
+
+# For large file support, install git-lfs: https://git-lfs.github.com/

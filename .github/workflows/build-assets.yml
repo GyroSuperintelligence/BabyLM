@@ -1,0 +1,45 @@
+name: Build Manifold Assets
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build genotype_map.json
+        run: |
+          python -m baby.information manifold --output memories/public/manifold/genotype_map.json
+
+      - name: Build canonical_map.json
+        run: |
+          python -m baby.information canonical --genotype_map memories/public/manifold/genotype_map.json --output memories/public/manifold/canonical_map.json
+
+      - name: Build stt.npy
+        run: |
+          python -m baby.information stt --manifold memories/public/manifold/genotype_map.json --output memories/public/manifold/stt.npy
+
+      - name: Add and commit LFS files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git lfs track "*.npy" "*.json"
+          git add memories/public/manifold/genotype_map.json memories/public/manifold/canonical_map.json memories/public/manifold/stt.npy
+          git commit -m "Add prebuilt manifold assets [skip ci]" || echo "No changes to commit"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
