@@ -25,13 +25,13 @@ jobs:
         run: |
           python -m baby.information ontology --output memories/public/meta/ontology_map.json
 
-      - name: Build phenomenology_map.json
-        run: |
-          python -m baby.information phenomenology --ontology_map memories/public/meta/ontology_map.json --output memories/public/meta/phenomenology_map.json
-
       - name: Build epistemology.npy
         run: |
           python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
+
+      - name: Build phenomenology_map.json
+        run: |
+          python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy --output memories/public/meta/phenomenology_map.json
 
       - name: Add and commit LFS files
         run: |
