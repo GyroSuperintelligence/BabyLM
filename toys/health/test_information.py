@@ -20,29 +20,29 @@ from baby.information import (
 class TestInformationEngine:
     """Test the measurement and conversion engine."""
 
-    def test_initialization(self, manifold_data):
-        """Test engine initialization with manifold data."""
-        manifold_path, mock_manifold = manifold_data
-        engine = InformationEngine(mock_manifold)
+    def test_initialization(self, ontology_data):
+        """Test engine initialization with ontology data."""
+        ontology_path, mock_ontology = ontology_data
+        engine = InformationEngine(mock_ontology)
 
         assert engine.endogenous_modulus == 788_986
-        assert engine.manifold_diameter == 6
+        assert engine.ontology_diameter == 6
         assert len(engine.ontology_map) == 1000  # Our mock has 1000 states
 
-    def test_state_index_conversion(self, manifold_data):
+    def test_state_index_conversion(self, ontology_data):
         """Test conversion between state integers and indices."""
-        manifold_path, mock_manifold = manifold_data
-        engine = InformationEngine(mock_manifold)
+        ontology_path, mock_ontology = ontology_data
+        engine = InformationEngine(mock_ontology)
 
         # Test known mapping from mock
         for i in range(10):
             assert engine.get_index_from_state(i) == i
             assert engine.get_state_from_index(i) == i
 
-    def test_state_not_in_manifold(self, manifold_data):
+    def test_state_not_in_ontology(self, ontology_data):
         """Test error handling for invalid states."""
-        manifold_path, mock_manifold = manifold_data
-        engine = InformationEngine(mock_manifold)
+        ontology_path, mock_ontology = ontology_data
+        engine = InformationEngine(mock_ontology)
 
         with pytest.raises(ValueError, match="CRITICAL"):
             engine.get_index_from_state(999999)
@@ -80,7 +80,7 @@ class TestInformationEngine:
             {
                 "ontology_map": {},
                 "endogenous_modulus": 788_986,
-                "manifold_diameter": 6,
+                "ontology_diameter": 6,
                 "schema_version": "1.0.0",
                 "total_states": 0,
                 "build_timestamp": 0.0,

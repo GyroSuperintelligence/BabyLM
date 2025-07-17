@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """
-manifold.py
+ontology.py
 
 This script is the definitive implementation for discovering the GyroSI physical
-manifold. It uses a 48-bit integer representation for high performance while
+ontology. It uses a 48-bit integer representation for high performance while
 perfectly preserving the state-dependent, broadcasting gyration physics of the
 original tensor-based model.
 """
@@ -92,7 +92,7 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
 # ───────────────────────────────────────────────────────────────────
 
 
-def explore_manifold(start_state_int: int) -> None:
+def explore_ontology(start_state_int: int) -> None:
     """
     Performs a breadth-first search to discover the entire state space,
     recording the minimal depth each state is first reached.
@@ -102,7 +102,7 @@ def explore_manifold(start_state_int: int) -> None:
     frontier = deque([start_state_int])
     total_time = 0
 
-    print("Starting manifold exploration with depth recording.")
+    print("Starting ontology exploration with depth recording.")
     print("-" * 68)
     print(f"{'Depth':>5} | {'New States':>12} | {'Total States':>14} | {'Time (s)':>10}")
     print("-" * 68)
@@ -136,7 +136,7 @@ def explore_manifold(start_state_int: int) -> None:
     print(f"Closure reached. Max minimal path length to any state: {max_depth}")
     print(f"Exploration finished. Total states found: {len(discovered):,}")
     print(f"Total time elapsed: {total_time:.3f}s")
-    print("The manifold is fully explored and finite.")
+    print("The ontology is fully explored and finite.")
 
 
 # ───────────────────────────────────────────────────────────────────
@@ -145,4 +145,4 @@ def explore_manifold(start_state_int: int) -> None:
 
 if __name__ == "__main__":
     initial_state_int = tensor_to_int(GENE_MAC_S_TENSOR)
-    explore_manifold(initial_state_int)
+    explore_ontology(initial_state_int)

@@ -28,23 +28,23 @@ class IntelligenceEngine:
     and implements operational strategies. Handles adaptation to external demands.
     """
 
-    def __init__(self, manifold_path: str, phenotype_store: Any, agent_id: Optional[str] = None):
+    def __init__(self, ontology_path: str, phenotype_store: Any, agent_id: Optional[str] = None):
         """
         Initialize intelligence engine.
 
         Args:
-            manifold_path: Path to discovered manifold data
+            ontology_path: Path to discovered ontology data
             phenotype_store: Storage interface for learned knowledge
             agent_id: Unique identifier for this agent instance
         """
         # Initialize subsystem engines
-        self.s2 = InformationEngine(self._load_manifold(manifold_path))
+        self.s2 = InformationEngine(self._load_ontology(ontology_path))
         self.operator = EndogenousInferenceOperator(self.s2, phenotype_store)
 
         # Agent state
         self.agent_id = agent_id or str(uuid.uuid4())
         self.use_epistemology = False
-        epistemology_path = manifold_path.replace("ontology_map.json", "epistemology.npy")
+        epistemology_path = ontology_path.replace("ontology_map.json", "epistemology.npy")
         if os.path.exists(epistemology_path):
             try:
                 import numpy as np
@@ -214,9 +214,9 @@ class IntelligenceEngine:
         self._sync_index_from_state_int()
         self.cycle_count = 0
 
-    def _load_manifold(self, manifold_path: str) -> Dict[str, Any]:
-        """Loads the manifold data from a JSON file as ManifoldData."""
-        with open(manifold_path, "r") as f:
+    def _load_ontology(self, ontology_path: str) -> Dict[str, Any]:
+        """Loads the ontology data from a JSON file as ManifoldData."""
+        with open(ontology_path, "r") as f:
             data = json.load(f)
         return data  # type: ignore
 
@@ -254,11 +254,11 @@ class GyroSI:
             phenotype_store = self._create_default_store()
 
         # Initialize core engine
-        manifold_path = config.get("manifold_path")
-        if not manifold_path:
-            raise ValueError("AgentConfig must include 'manifold_path'.")
+        ontology_path = config.get("ontology_path")
+        if not ontology_path:
+            raise ValueError("AgentConfig must include 'ontology_path'.")
         self.engine = IntelligenceEngine(
-            manifold_path=manifold_path, phenotype_store=phenotype_store, agent_id=self.agent_id
+            ontology_path=ontology_path, phenotype_store=phenotype_store, agent_id=self.agent_id
         )
 
     def ingest(self, data: bytes) -> None:
@@ -384,7 +384,7 @@ class GyroSI:
         if enable_canonical:
             phenomenology_map_path = self.config.get("phenomenology_map_path")
             if phenomenology_map_path is None:
-                phenomenology_map_path = "memories/public/manifold/phenomenology_map.json"
+                phenomenology_map_path = "memories/public/ontology/phenomenology_map.json"
             if os.path.exists(phenomenology_map_path):
                 return CanonicalView(base_store, phenomenology_map_path)
             else:
@@ -426,16 +426,16 @@ class LRUAgentCache(OrderedDict):
 class AgentPool:
     """Manages a collection of independent GyroSI agents with eviction policy."""
 
-    def __init__(self, manifold_path: str, base_knowledge_path: str, preferences: Optional[PreferencesConfig] = None):
+    def __init__(self, ontology_path: str, base_knowledge_path: str, preferences: Optional[PreferencesConfig] = None):
         """
         Initialize agent pool.
 
         Args:
-            manifold_path: Path to physical manifold data
+            ontology_path: Path to physical ontology data
             base_knowledge_path: Path to shared knowledge base
             preferences: Optional preferences configuration
         """
-        self.manifold_path = manifold_path
+        self.ontology_path = ontology_path
         self.base_knowledge_path = base_knowledge_path
 
         # Load preferences
@@ -489,7 +489,7 @@ class AgentPool:
 
                 # Create agent config
                 config: AgentConfig = {
-                    "manifold_path": self.manifold_path,
+                    "ontology_path": self.ontology_path,
                     "public_knowledge_path": self.base_knowledge_path,
                     "private_knowledge_path": private_path,
                     "enable_canonical_storage": self.preferences.get("enable_canonical_storage", False),

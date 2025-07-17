@@ -16,7 +16,7 @@ This architecture treats data not as information to be processed, but as physica
 
 **Design Philosophy**: This specification provides a complete, production-ready system that is simple enough to implement immediately while being architected for seamless scaling to massive distributed deployments. The core physics remains pure and dependency-free, with well-defined interfaces that allow for future enhancements without touching the theoretical foundation.
 
-> This specification is therefore not just a design but a **map of a newly discovered territory**. It is grounded in a rigorous theoretical framework (CGM) and verified by a definitive computational experiment that proves the system's state space is a finite, closed manifold of precisely 788,986 states. Every component, from the core physics to the storage architecture, is built upon this **measured ground truth**, ensuring a system that is robust, scalable, and free from the arbitrary complexities of traditional AI.
+> This specification is therefore not just a design but a **map of a newly discovered territory**. It is grounded in a rigorous theoretical framework (CGM) and verified by a definitive computational experiment that proves the system's state space is a finite, closed ontology of precisely 788,986 states. Every component, from the core physics to the storage architecture, is built upon this **measured ground truth**, ensuring a system that is robust, scalable, and free from the arbitrary complexities of traditional AI.
 
 > **Note:** Throughout this document, all tensor indices use the standard order: [layer, frame, row, col], with zero-based indexing. All references to tensor elements, operations, or masks use these terms exclusively for clarity.
 
@@ -60,9 +60,9 @@ GyroSI embodies the principle that each part contains information about the whol
 
 **Angular Progression**: The CGM stages follow the precise angular sequence π/2 → π/4 → π/4 → 0, corresponding to CS → UNA → ONA → BU. This progression ensures complete closure with zero defect, achieving perfect recursive alignment.
 
-> The build-time discovery process, a cornerstone of GyroSI, explores this physical reality and discovers an immutable, finite manifold of **precisely 788,986 unique physical states**. The entire universe of possible system configurations is not only known but also compact, with a measured **diameter of 6 steps**, meaning any state is reachable from any other in at most seven transformations. This is the 'Genome', the system's complete set of possible states.
+> The build-time discovery process, a cornerstone of GyroSI, explores this physical reality and discovers an immutable, finite ontology of **precisely 788,986 unique physical states**. The entire universe of possible system configurations is not only known but also compact, with a measured **diameter of 6 steps**, meaning any state is reachable from any other in at most seven transformations. This is the 'Genome', the system's complete set of possible states.
 
-**Abstraction via Manifold and Hashing**: The system's primary mechanism for generalization is its finite physical manifold. An infinite variety of input sequences will inevitably drive the system into one of the 788,986 canonical states. When different experiences lead to the same internal state, the system learns they share a fundamental structural meaning. Hash collisions in the phenotype layer are a secondary, context-specific abstraction built upon this primary physical reality, where different physical contexts mapping to the same semantic address are learned to share an essential meaning.
+**Abstraction via Manifold and Hashing**: The system's primary mechanism for generalization is its finite physical ontology. An infinite variety of input sequences will inevitably drive the system into one of the 788,986 canonical states. When different experiences lead to the same internal state, the system learns they share a fundamental structural meaning. Hash collisions in the phenotype layer are a secondary, context-specific abstraction built upon this primary physical reality, where different physical contexts mapping to the same semantic address are learned to share an essential meaning.
 
 ### **2.5 The Measured Manifold: Theory Meets Reality**
 The CGM is not merely a theoretical framework; it is a predictive model whose consequences are now measured. The 8-bit instruction space (`GENE_Mic_M`), representing the "quantum of action," directly leads to an 8-step closure of the state space.
@@ -74,7 +74,7 @@ This empirical result validates the principle of recursive closure, demonstratin
 
 **Canonicalization of Orbits:**
 
-To further structure the manifold, we can define a canonical representative for each physical state orbit. The canonical representative is the state in its orbit with the lexicographically smallest byte representation. This enables grouping of physically equivalent states and improves cache coherency in storage.
+To further structure the ontology, we can define a canonical representative for each physical state orbit. The canonical representative is the state in its orbit with the lexicographically smallest byte representation. This enables grouping of physically equivalent states and improves cache coherency in storage.
 
 The canonicalization process is a one-time, build-time computation:
 
@@ -100,7 +100,7 @@ def find_canonical_representative(start_tensor_bytes: bytes, ontology_map: dict)
 
 def build_phenomenology_map(ontology_map_path: str, output_path: str):
     """
-    For each state in the manifold, computes its canonical representative.
+    For each state in the ontology, computes its canonical representative.
     Saves a map from every state_index to its canonical_state_index.
     """
     with open(ontology_map_path, 'r') as f:
@@ -120,7 +120,7 @@ def build_phenomenology_map(ontology_map_path: str, output_path: str):
         json.dump(canonical_index_map, f)
 ```
 
-This process is computationally intensive but only needs to be run once per manifold. It enables the next-level storage abstraction described below.
+This process is computationally intensive but only needs to be run once per ontology. It enables the next-level storage abstraction described below.
 
 ---
 
@@ -545,8 +545,8 @@ class InformationEngine:
     """
     S2: Measurement & Resource Coordination. Sole authority for measurement and conversion between state representations.
     """
-    def __init__(self, manifold_data: dict):
-        self.ontology_map = manifold_data['ontology_map']
+    def __init__(self, ontology_data: dict):
+        self.ontology_map = ontology_data['ontology_map']
         if isinstance(next(iter(self.ontology_map.keys())), str):
             self.ontology_map = {int(k): v for k, v in self.ontology_map.items()}
 
@@ -554,7 +554,7 @@ class InformationEngine:
         """Looks up the canonical index for a physical state integer."""
         index = self.ontology_map.get(state_int, -1)
         if index == -1:
-            raise ValueError(f"CRITICAL: State integer {state_int} not found in discovered manifold.")
+            raise ValueError(f"CRITICAL: State integer {state_int} not found in discovered ontology.")
         return index
 
     @staticmethod
@@ -578,8 +578,8 @@ class InformationEngine:
         cosine_similarity = np.clip(cosine_similarity, -1.0, 1.0)
         return np.arccos(cosine_similarity)
 
-def discover_and_save_manifold(output_path: str):
-    """S2 responsibility: Measurement of the complete physical manifold. Discovers the full state space and saves to disk. The manifold diameter is always 6."""
+def discover_and_save_ontology(output_path: str):
+    """S2 responsibility: Measurement of the complete physical ontology. Discovers the full state space and saves to disk. The ontology diameter is always 6."""
     origin_int = int.from_bytes(governance.GENE_Mac_S.tobytes(), 'big')
     discovered_states = {origin_int}
     queue = [origin_int]
@@ -607,22 +607,22 @@ def discover_and_save_manifold(output_path: str):
     sorted_state_ints = sorted(discovered_states)
     ontology_map = {state_int: i for i, state_int in enumerate(sorted_state_ints)}
 
-    manifold_data = {
+    ontology_data = {
         "schema_version": "1.0.0",
         "ontology_map": ontology_map,
         "endogenous_modulus": len(ontology_map),
-        "manifold_diameter": depth,
+        "ontology_diameter": depth,
         "total_states": len(discovered_states),
         "build_timestamp": time.time()
     }
 
     with open(output_path, 'w') as f:
-        json.dump(manifold_data, f)
+        json.dump(ontology_data, f)
 
-# After discovering the manifold, you may optionally run:
+# After discovering the ontology, you may optionally run:
 def build_phenomenology_map(ontology_map_path: str, output_path: str):
     """S2: Discovers canonical representatives for storage optimization.
-    See theoretical section for algorithm details. This is a build-time utility to be run after discover_and_save_manifold().
+    See theoretical section for algorithm details. This is a build-time utility to be run after discover_and_save_ontology().
     """
     pass  # See theory for full algorithm
 ```
@@ -737,10 +737,10 @@ from typing import Callable
 from . import governance, information, inference
 
 class IntelligenceEngine:
-    def __init__(self, manifold_path: str, phenotype_store: 'PhenotypeStore', agent_id: str = None):
-        with open(manifold_path, 'r') as f:
-            manifold_data = json.load(f)
-        self.s2 = information.InformationEngine(manifold_data)
+    def __init__(self, ontology_path: str, phenotype_store: 'PhenotypeStore', agent_id: str = None):
+        with open(ontology_path, 'r') as f:
+            ontology_data = json.load(f)
+        self.s2 = information.InformationEngine(ontology_data)
         self.operator = inference.EndogenousInferenceOperator(self.s2, phenotype_store)
         self.agent_id = agent_id or str(uuid.uuid4())
         self.gene_mac_m_int = self.s2.tensor_to_int(governance.GENE_Mac_S)
@@ -797,7 +797,7 @@ class GyroSI:
                 )
 
         self.engine = IntelligenceEngine(
-            manifold_path=config['manifold_path'],
+            ontology_path=config['ontology_path'],
             phenotype_store=phenotype_store,
             agent_id=agent_id
         )
@@ -905,7 +905,7 @@ base_store = PickleStore(store_path="knowledge.pkl.gz")
 # This ensures abstraction is based on physical orbits.
 canonical_store = CanonicalizingStore(
     base_store=base_store,
-    phenomenology_map_path="memories/public/manifold/phenomenology_map.json"
+    phenomenology_map_path="memories/public/ontology/phenomenology_map.json"
 )
 
 # Pass to the engine.
@@ -1049,7 +1049,7 @@ This architecture ensures a clean separation of concerns: the InferenceEngine cr
 While agents are fundamentally role-agnostic physical entities, applications may benefit from tracking an agent's intended role or relationships. This is achieved through lightweight metadata without modifying the core architecture.
 
 **Agent Metadata Schema (Optional):**
-Applications may maintain an `agent_metadata.json` file alongside the manifold:
+Applications may maintain an `agent_metadata.json` file alongside the ontology:
 
 ```json
 {
@@ -1108,7 +1108,7 @@ gyrosi/
 │
 ├── memories/                       # Runtime Data and Knowledge
 │   ├── public/
-│   │   ├── manifold/
+│   │   ├── ontology/
 │   │   │   ├── ontology_map.json
 │   │   │   └── phenomenology_map.json
 │   │   │
@@ -1188,8 +1188,8 @@ Applications maintain a pool of active agents, each with its own lifecycle:
 class AgentPool:
     """Manages a collection of independent GyroSI agents."""
 
-    def __init__(self, manifold_path: str, base_knowledge_path: str):
-        self.manifold_path = manifold_path
+    def __init__(self, ontology_path: str, base_knowledge_path: str):
+        self.ontology_path = ontology_path
         self.base_knowledge_path = base_knowledge_path
         self.agents = {}  # agent_id -> GyroSI instance
         self._lock = threading.RLock()
@@ -1204,7 +1204,7 @@ class AgentPool:
                     private_store_path=f"memories/private/agents/{agent_id}/knowledge.pkl.gz"
                 )
                 self.agents[agent_id] = GyroSI(
-                    config={"manifold_path": self.manifold_path},
+                    config={"ontology_path": self.ontology_path},
                     agent_id=agent_id,
                     phenotype_store=store
                 )
@@ -1403,7 +1403,7 @@ def merge_phenotype_maps(source_paths: List[str], dest_path: str,
 **Core Components**:
 
 - Physical State (GENE_Mac_M): 48 bytes
-- Genotype Map: **~15-20 MB** (complete physical manifold, 788,986 states)
+- Genotype Map: **~15-20 MB** (complete physical ontology, 788,986 states)
 - Phenotype Map: ~128 bytes × learned entries
 - Total Runtime: <100 MB for typical deployments
 

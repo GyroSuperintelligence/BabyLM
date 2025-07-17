@@ -1,11 +1,11 @@
-# 1. Generate ontology_map.json (the manifold)
-# python -m baby.information manifold --output memories/public/manifold/ontology_map.json
+# 1. Generate ontology_map.json (the ontology)
+# python -m baby.information ontology --output memories/public/ontology/ontology_map.json
 #
 # 2. Generate phenomenology_map.json (the canonical mapping)
-# python -m baby.information canonical --ontology_map memories/public/manifold/ontology_map.json --output memories/public/manifold/phenomenology_map.json
+# python -m baby.information canonical --ontology_map memories/public/ontology/ontology_map.json --output memories/public/ontology/phenomenology_map.json
 #
 # 3. Generate epistemology.npy (the state transition table)
-# python -m baby.information epistemology --manifold memories/public/manifold/ontology_map.json --output memories/public/manifold/epistemology.npy
+# python -m baby.information epistemology --ontology memories/public/ontology/ontology_map.json --output memories/public/ontology/epistemology.npy
 """
 S2: Information - Measurement & Storage
 
@@ -60,19 +60,19 @@ class InformationEngine:
 
     def __init__(
         self,
-        manifold_data: Dict[str, Any],
+        ontology_data: Dict[str, Any],
         use_memmap: Optional[bool] = None,
     ):
-        # Auto-enable memmap if not set and large manifold
+        # Auto-enable memmap if not set and large ontology
         if use_memmap is None:
-            use_memmap = manifold_data["endogenous_modulus"] > 100_000
+            use_memmap = ontology_data["endogenous_modulus"] > 100_000
         self.use_memmap = use_memmap
-        self.ontology_map = manifold_data["ontology_map"]
+        self.ontology_map = ontology_data["ontology_map"]
         keys = list(self.ontology_map.keys())
         if keys and isinstance(keys[0], str):
             self.ontology_map = {int(k): v for k, v in self.ontology_map.items()}
-        self.endogenous_modulus = manifold_data["endogenous_modulus"]
-        self.manifold_diameter = manifold_data["manifold_diameter"]
+        self.endogenous_modulus = ontology_data["endogenous_modulus"]
+        self.ontology_diameter = ontology_data["ontology_diameter"]
         if use_memmap:
             keys_arr = np.array(sorted(self.ontology_map.keys()), dtype=np.uint64)
             self._keys = keys_arr
@@ -89,8 +89,8 @@ class InformationEngine:
         # Validate expected constants
         if self.endogenous_modulus != 788_986:
             raise ValueError(f"Expected endogenous modulus 788,986, got {self.endogenous_modulus}")
-        if self.manifold_diameter != 6:
-            raise ValueError(f"Expected manifold diameter 6, got {self.manifold_diameter}")
+        if self.ontology_diameter != 6:
+            raise ValueError(f"Expected ontology diameter 6, got {self.ontology_diameter}")
 
     def get_index_from_state(self, state_int: int) -> int:
         """
@@ -100,10 +100,10 @@ class InformationEngine:
             state_int: 48-bit integer representing physical state
 
         Returns:
-            Index in the discovered manifold (0 to 788,985)
+            Index in the discovered ontology (0 to 788,985)
 
         Raises:
-            ValueError: If state not found in manifold
+            ValueError: If state not found in ontology
         """
         if self.use_memmap:
             if self._keys is None or self._values is None:
@@ -111,7 +111,7 @@ class InformationEngine:
             idx = np.searchsorted(self._keys, state_int)
             if idx == len(self._keys) or self._keys[idx] != state_int:
                 raise ValueError(
-                    f"State integer {state_int} not found in discovered manifold. "
+                    f"State integer {state_int} not found in discovered ontology. "
                     f"This indicates a fundamental physics violation."
                 )
             return int(self._values[idx])
@@ -119,7 +119,7 @@ class InformationEngine:
             index = self.ontology_map.get(state_int, -1)
             if index == -1:
                 raise ValueError(
-                    f"CRITICAL: State integer {state_int} not found in discovered manifold. "
+                    f"CRITICAL: State integer {state_int} not found in discovered ontology. "
                     f"This indicates a fundamental physics violation."
                 )
             return index
@@ -232,20 +232,20 @@ class InformationEngine:
         return self.gyrodistance_angular(current_tensor, governance.GENE_Mac_S)
 
 
-def discover_and_save_manifold(output_path: str) -> None:
+def discover_and_save_ontology(output_path: str) -> None:
     """
-    S2 responsibility: Discovers the complete physical manifold.
+    S2 responsibility: Discovers the complete physical ontology.
 
     Explores the full state space starting from GENE_Mac_S and discovers
     all reachable states. Validates the expected 788,986 states at diameter 6.
 
     Args:
-        output_path: Path to save manifold data
+        output_path: Path to save ontology data
 
     Raises:
-        RuntimeError: If discovered manifold doesn't match expected constants
+        RuntimeError: If discovered ontology doesn't match expected constants
     """
-    print("Discovering physical manifold...")
+    print("Discovering physical ontology...")
     start_time = time.time()
 
     # Start from the archetypal state
@@ -285,19 +285,19 @@ def discover_and_save_manifold(output_path: str) -> None:
 
     if depth != 6:
         raise RuntimeError(
-            f"CRITICAL: Expected manifold diameter 6, found {depth}. " f"This violates the theoretical predictions."
+            f"CRITICAL: Expected ontology diameter 6, found {depth}. " f"This violates the theoretical predictions."
         )
 
     # Create canonical mapping
     sorted_state_ints = sorted(discovered_states)
     ontology_map = {state_int: i for i, state_int in enumerate(sorted_state_ints)}
 
-    # Package manifold data
-    manifold_data: Dict[str, Any] = {
+    # Package ontology data
+    ontology_data: Dict[str, Any] = {
         "schema_version": "1.0.0",
         "ontology_map": ontology_map,
         "endogenous_modulus": len(ontology_map),
-        "manifold_diameter": depth,
+        "ontology_diameter": depth,
         "total_states": len(discovered_states),
         "build_timestamp": time.time(),
     }
@@ -305,7 +305,7 @@ def discover_and_save_manifold(output_path: str) -> None:
     # Save to disk
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(manifold_data, f)
+        json.dump(ontology_data, f)
 
     elapsed = time.time() - start_time
     print(f"Manifold discovery complete in {elapsed:.2f}s")
@@ -340,12 +340,12 @@ def build_phenomenology_map(ontology_map_path: str, output_path: str) -> None:
     print(f"Phenomenology map built in {elapsed:.2f}s → {output_path}")
 
 
-def build_state_transition_table(manifold_path: str, output_path: str) -> None:
+def build_state_transition_table(ontology_path: str, output_path: str) -> None:
     """
     Vectorized build of the state transition table (epistemology) using NumPy and memmap.
     """
     import numpy as np
-    data = json.load(open(manifold_path))
+    data = json.load(open(ontology_path))
     idx_of = {int(k): v for k, v in data["ontology_map"].items()}
     states = np.fromiter((int(k) for k in sorted(idx_of.keys())), dtype=np.uint64)
     N = len(states)
@@ -361,27 +361,27 @@ def build_state_transition_table(manifold_path: str, output_path: str) -> None:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Build manifold assets (manifold, canonical map, STT)")
+    parser = argparse.ArgumentParser(description="Build ontology assets (ontology, canonical map, STT)")
     subparsers = parser.add_subparsers(dest="command")
 
-    parser_manifold = subparsers.add_parser("manifold", help="Build and save the manifold")
-    parser_manifold.add_argument("--output", required=True, help="Path to output ontology_map.json")
+    parser_ontology = subparsers.add_parser("ontology", help="Build and save the ontology")
+    parser_ontology.add_argument("--output", required=True, help="Path to output ontology_map.json")
 
     parser_canonical = subparsers.add_parser("canonical", help="Build and save the canonical map")
     parser_canonical.add_argument("--ontology_map", required=True, help="Path to ontology_map.json")
     parser_canonical.add_argument("--output", required=True, help="Path to output phenomenology_map.json")
 
     parser_epistemology = subparsers.add_parser("epistemology", help="Build and save the state transition table (STT)")
-    parser_epistemology.add_argument("--manifold", required=True, help="Path to ontology_map.json")
+    parser_epistemology.add_argument("--ontology", required=True, help="Path to ontology_map.json")
     parser_epistemology.add_argument("--output", required=True, help="Path to output epistemology.npy")
 
     args = parser.parse_args()
-    if args.command == "manifold":
-        discover_and_save_manifold(args.output)
+    if args.command == "ontology":
+        discover_and_save_ontology(args.output)
     elif args.command == "canonical":
         build_phenomenology_map(args.ontology_map, args.output)
     elif args.command == "epistemology":
-        build_state_transition_table(args.manifold, args.output)
+        build_state_transition_table(args.ontology, args.output)
     else:
-        print("\nHint: You can run this as 'python -m baby.information manifold --output ...' to avoid path headaches.")
+        print("\nHint: You can run this as 'python -m baby.information ontology --output ...' to avoid path headaches.")
         parser.print_help()

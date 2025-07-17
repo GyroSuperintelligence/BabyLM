@@ -41,7 +41,7 @@ The structural parallels between GyroSI and biophysics are precise and intention
 | 64 codons (3 nucleotides × 2 bits) | 64 active intron patterns (6 working bits) | Complete instruction space |
 | 32 tRNA wobble classes | 32 LI-quotiented equivalence classes | Functional degeneracy |
 
-The profound parallel is that both systems use a compact instruction set (a byte or a 4-mer) to govern a vast, complex physical state. Just as epigenetic context determines how DNA is expressed, GyroSI’s evolving physical state governs which transformation is activated in response to each input. The 256 instructions are the *operators*, not the *states*. They operate on a physical manifold of precisely **788,986** unique states.
+The profound parallel is that both systems use a compact instruction set (a byte or a 4-mer) to govern a vast, complex physical state. Just as epigenetic context determines how DNA is expressed, GyroSI’s evolving physical state governs which transformation is activated in response to each input. The 256 instructions are the *operators*, not the *states*. They operate on a physical ontology of precisely **788,986** unique states.
 
 ---
 
@@ -87,13 +87,13 @@ Learning is not backpropagation. It is the integration of experience into memory
 
 ### 🎯 What This Achieves
 
-This architecture does not merely map bytes to operations; it renders each instruction as a transformation on a physical manifold. Symbolic input becomes physical geometry. Intelligence emerges as a dynamo of structural transformations orbiting within a gyroscopic topology. Alignment is not imposed or inferred, but emerges naturally as the system follows the physical laws of its own architecture.
+This architecture does not merely map bytes to operations; it renders each instruction as a transformation on a physical ontology. Symbolic input becomes physical geometry. Intelligence emerges as a dynamo of structural transformations orbiting within a gyroscopic topology. Alignment is not imposed or inferred, but emerges naturally as the system follows the physical laws of its own architecture.
 
 This solves three fundamental problems:
 
 - **Black Box**: Every decision traces through explicit, auditable physical state changes.
 - **Alignment**: The system's actions are constrained by its own structural history and physical laws.
-- **Efficiency**: The core physics are dependency-free and operate with extreme speed. Memory growth is bounded by the finite size of the physical manifold.
+- **Efficiency**: The core physics are dependency-free and operate with extreme speed. Memory growth is bounded by the finite size of the physical ontology.
 
 ---
 
@@ -166,7 +166,7 @@ Mathematical formalism employs gyrogroup structures (generalizations of rotation
 The system consists of four interconnected engines aligned with the Viable System Model (VSM), creating a recursive, self-regulating architecture:
 
 - **S1: `governance.py`** - Defines the immutable constants and pure physics functions.
-- **S2: `information.py`** - Handles measurement, storage interfaces, and manifold discovery.
+- **S2: `information.py`** - Handles measurement, storage interfaces, and ontology discovery.
 - **S3: `inference.py`** - Manages the interpretation of physical states into semantic meaning.
 - **S4/5: `intelligence.py`** - Orchestrates the full cycle, manages agent state, and provides the external API.
 
@@ -186,8 +186,8 @@ gyrosi/
 │
 ├── memories/                       # Runtime Data and Knowledge
 │   ├── public/
-│   │   ├── manifold/
-│   │   │   ├── ontology_map.json   # The complete 788,986-state physical manifold
+│   │   ├── ontology/
+│   │   │   ├── ontology_map.json   # The complete 788,986-state physical ontology
 │   │   │   └── phenomenology_map.json  # Maps states to their canonical orbit representative
 │   │   └── knowledge.pkl.gz        # Curated public knowledge base
 │   └── private/
@@ -206,7 +206,7 @@ gyrosi/
 
 **Persistent Storage (`memories/`)**: Contains all runtime data.
 
-- **`manifold/`**: The complete, pre-discovered physical universe of the system.
+- **`ontology/`**: The complete, pre-discovered physical universe of the system.
 - **`knowledge.pkl.gz`**: The learned associations (phenotypes) stored in a compact format. Public knowledge is shared, while private knowledge is agent-specific.
 
 ---

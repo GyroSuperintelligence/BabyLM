@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from baby import (
-    discover_and_save_manifold,
+    discover_and_save_ontology,
     build_phenomenology_map,
     GyroSI,
     AgentPool,
@@ -54,45 +54,45 @@ def temp_dir():
 
 
 @pytest.fixture
-def manifold_data(temp_dir):
-    """Create and return test manifold data."""
-    manifold_path = os.path.join(temp_dir, "manifold", "ontology_map.json")
-    os.makedirs(os.path.dirname(manifold_path), exist_ok=True)
+def ontology_data(temp_dir):
+    """Create and return test ontology data."""
+    ontology_path = os.path.join(temp_dir, "ontology", "ontology_map.json")
+    os.makedirs(os.path.dirname(ontology_path), exist_ok=True)
 
-    # For testing, create a smaller mock manifold
-    # In real tests, you'd use discover_and_save_manifold
-    mock_manifold: ManifoldData = {
+    # For testing, create a smaller mock ontology
+    # In real tests, you'd use discover_and_save_ontology
+    mock_ontology: ManifoldData = {
         "schema_version": "1.0.0",
         "ontology_map": {i: i for i in range(1000)},  # Mock 1000 states
         "endogenous_modulus": 788_986,  # Keep the real constant
-        "manifold_diameter": 6,
+        "ontology_diameter": 6,
         "total_states": 788_986,
         "build_timestamp": 1234567890.0,
     }
 
-    with open(manifold_path, "w") as f:
-        json.dump(mock_manifold, f)
+    with open(ontology_path, "w") as f:
+        json.dump(mock_ontology, f)
 
-    return manifold_path, mock_manifold
+    return ontology_path, mock_ontology
 
 
 @pytest.fixture
-def real_manifold(temp_dir):
-    """Create the real manifold (expensive - use sparingly)."""
-    manifold_path = os.path.join(temp_dir, "manifold", "ontology_map.json")
-    os.makedirs(os.path.dirname(manifold_path), exist_ok=True)
+def real_ontology(temp_dir):
+    """Create the real ontology (expensive - use sparingly)."""
+    ontology_path = os.path.join(temp_dir, "ontology", "ontology_map.json")
+    os.makedirs(os.path.dirname(ontology_path), exist_ok=True)
 
     # This is expensive but necessary for integration tests
-    discover_and_save_manifold(manifold_path)
+    discover_and_save_ontology(ontology_path)
 
     # Also build canonical map
-    canonical_path = os.path.join(temp_dir, "manifold", "phenomenology_map.json")
-    build_phenomenology_map(manifold_path, canonical_path)
+    canonical_path = os.path.join(temp_dir, "ontology", "phenomenology_map.json")
+    build_phenomenology_map(ontology_path, canonical_path)
 
-    with open(manifold_path, "r") as f:
-        manifold_data = json.load(f)
+    with open(ontology_path, "r") as f:
+        ontology_data = json.load(f)
 
-    return manifold_path, canonical_path, manifold_data
+    return ontology_path, canonical_path, ontology_data
 
 
 @pytest.fixture
@@ -124,11 +124,11 @@ def multi_agent_store(temp_dir):
 
 
 @pytest.fixture
-def agent_config(manifold_data, temp_dir) -> AgentConfig:
+def agent_config(ontology_data, temp_dir) -> AgentConfig:
     """Create a test agent configuration."""
-    manifold_path, _ = manifold_data
+    ontology_path, _ = ontology_data
     return {
-        "manifold_path": manifold_path,
+        "ontology_path": ontology_path,
         "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
         "enable_canonical_storage": False,
     }
@@ -143,9 +143,9 @@ def gyrosi_agent(agent_config):
 
 
 @pytest.fixture
-def agent_pool(manifold_data, temp_dir):
+def agent_pool(ontology_data, temp_dir):
     """Create an agent pool."""
-    manifold_path, _ = manifold_data
+    ontology_path, _ = ontology_data
     public_knowledge = os.path.join(temp_dir, "public_knowledge.pkl.gz")
 
     # Create empty public knowledge
@@ -153,7 +153,7 @@ def agent_pool(manifold_data, temp_dir):
     store = OrbitStore(public_knowledge)
     store.close()
 
-    pool = AgentPool(manifold_path, public_knowledge)
+    pool = AgentPool(ontology_path, public_knowledge)
     yield pool
     pool.close_all()
 
@@ -253,12 +253,12 @@ def assert_phenotype_entry_valid(entry: Dict[str, Any]):
     assert len(entry["context_signature"]) == 2
 
 
-def assert_manifold_valid(manifold_data: Dict[str, Any]):
-    """Assert that manifold data is valid."""
-    assert manifold_data["endogenous_modulus"] == 788_986
-    assert manifold_data["manifold_diameter"] == 6
-    assert "ontology_map" in manifold_data
-    assert "schema_version" in manifold_data
+def assert_ontology_valid(ontology_data: Dict[str, Any]):
+    """Assert that ontology data is valid."""
+    assert ontology_data["endogenous_modulus"] == 788_986
+    assert ontology_data["ontology_diameter"] == 6
+    assert "ontology_map" in ontology_data
+    assert "schema_version" in ontology_data
 
 
 # Performance measurement helpers

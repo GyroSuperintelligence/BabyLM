@@ -20,12 +20,12 @@ class PhenotypeEntry(TypedDict, total=False):
 
 
 class ManifoldData(TypedDict):
-    """Structure of the discovered manifold data."""
+    """Structure of the discovered ontology data."""
 
     schema_version: str
     ontology_map: Dict[int, int]
     endogenous_modulus: int
-    manifold_diameter: int
+    ontology_diameter: int
     total_states: int
     build_timestamp: float
 
@@ -33,7 +33,7 @@ class ManifoldData(TypedDict):
 class AgentConfig(TypedDict, total=False):
     """Configuration for GyroSI agents."""
 
-    manifold_path: str
+    ontology_path: str
     knowledge_path: Optional[str]
     public_knowledge_path: Optional[str]
     private_knowledge_path: Optional[str]

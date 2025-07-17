@@ -20,10 +20,10 @@ class TestIntelligenceEngine:
     """Test the intelligence engine orchestration."""
 
     @pytest.fixture
-    def intelligence_engine(self, manifold_data, orbit_store):
+    def intelligence_engine(self, ontology_data, orbit_store):
         """Create an intelligence engine for testing."""
-        manifold_path, _ = manifold_data
-        return IntelligenceEngine(manifold_path, orbit_store)
+        ontology_path, _ = ontology_data
+        return IntelligenceEngine(ontology_path, orbit_store)
 
     def test_initialization(self, intelligence_engine):
         """Test engine initialization."""
@@ -212,14 +212,14 @@ class TestAgentPool:
         # Try to remove non-existent
         assert not agent_pool.remove_agent("temp_agent")
 
-    def test_lru_eviction(self, manifold_data, temp_dir):
+    def test_lru_eviction(self, ontology_data, temp_dir):
         """Test LRU eviction policy."""
-        manifold_path, _ = manifold_data
+        ontology_path, _ = ontology_data
         knowledge_path = os.path.join(temp_dir, "knowledge.pkl.gz")
 
         # Create pool with small capacity
         preferences = {"max_agents_in_memory": 3, "agent_eviction_policy": "lru"}
-        pool = AgentPool(manifold_path, knowledge_path, preferences)
+        pool = AgentPool(ontology_path, knowledge_path, preferences)
 
         # Create more agents than capacity
         for i in range(5):

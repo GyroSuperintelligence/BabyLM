@@ -559,12 +559,12 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
     )
 
 
-def validate_manifold_integrity(manifold_path: str, phenomenology_map_path: Optional[str] = None) -> MaintenanceReport:
+def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Optional[str] = None) -> MaintenanceReport:
     """
-    Validate the integrity of manifold data files.
+    Validate the integrity of ontology data files.
 
     Args:
-        manifold_path: Path to genotype map
+        ontology_path: Path to genotype map
         phenomenology_map_path: Optional path to canonical map
 
     Returns:
@@ -573,10 +573,10 @@ def validate_manifold_integrity(manifold_path: str, phenomenology_map_path: Opti
     start_time = time.time()
     issues = []
 
-    # Check manifold file
-    if not os.path.exists(manifold_path):
+    # Check ontology file
+    if not os.path.exists(ontology_path):
         return MaintenanceReport(
-            operation="validate_manifold_integrity",
+            operation="validate_ontology_integrity",
             success=False,
             entries_processed=0,
             entries_modified=0,
@@ -584,32 +584,32 @@ def validate_manifold_integrity(manifold_path: str, phenomenology_map_path: Opti
         )
 
     try:
-        with open(manifold_path, "r") as f:
-            manifold_data = json.load(f)
+        with open(ontology_path, "r") as f:
+            ontology_data = json.load(f)
     except Exception:
         return MaintenanceReport(
-            operation="validate_manifold_integrity",
+            operation="validate_ontology_integrity",
             success=False,
             entries_processed=0,
             entries_modified=0,
             elapsed_seconds=0,
         )
 
-    # Validate manifold structure
-    expected_keys = ["schema_version", "ontology_map", "endogenous_modulus", "manifold_diameter", "total_states"]
+    # Validate ontology structure
+    expected_keys = ["schema_version", "ontology_map", "endogenous_modulus", "ontology_diameter", "total_states"]
 
     for key in expected_keys:
-        if key not in manifold_data:
+        if key not in ontology_data:
             issues.append(f"Missing required key: {key}")
 
     # Validate constants
-    if manifold_data.get("endogenous_modulus") != 788_986:
-        issues.append(f"Invalid endogenous modulus: {manifold_data.get('endogenous_modulus')}")
+    if ontology_data.get("endogenous_modulus") != 788_986:
+        issues.append(f"Invalid endogenous modulus: {ontology_data.get('endogenous_modulus')}")
 
-    if manifold_data.get("manifold_diameter") != 6:
-        issues.append(f"Invalid manifold diameter: {manifold_data.get('manifold_diameter')}")
+    if ontology_data.get("ontology_diameter") != 6:
+        issues.append(f"Invalid ontology diameter: {ontology_data.get('ontology_diameter')}")
 
-    ontology_map = manifold_data.get("ontology_map", {})
+    ontology_map = ontology_data.get("ontology_map", {})
     if len(ontology_map) != 788_986:
         issues.append(f"Invalid genotype map size: {len(ontology_map)}")
 
@@ -641,7 +641,7 @@ def validate_manifold_integrity(manifold_path: str, phenomenology_map_path: Opti
     elapsed = time.time() - start_time
 
     return MaintenanceReport(
-        operation="validate_manifold_integrity",
+        operation="validate_ontology_integrity",
         success=len(issues) == 0,
         entries_processed=len(ontology_map),
         entries_modified=0,

@@ -20,7 +20,7 @@ from baby.policies import (
     merge_phenotype_maps,
     apply_global_confidence_decay,
     export_knowledge_statistics,
-    validate_manifold_integrity,
+    validate_ontology_integrity,
 )
 
 __version__ = "1.0.0"
@@ -37,5 +37,5 @@ __all__ = [
     "merge_phenotype_maps",
     "apply_global_confidence_decay",
     "export_knowledge_statistics",
-    "validate_manifold_integrity",
+    "validate_ontology_integrity",
 ]

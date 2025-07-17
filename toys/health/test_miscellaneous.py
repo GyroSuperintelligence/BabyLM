@@ -15,7 +15,7 @@ from baby import (
     merge_phenotype_maps,
     apply_global_confidence_decay,
     export_knowledge_statistics,
-    validate_manifold_integrity,
+    validate_ontology_integrity,
 )
 from baby.types import PreferencesConfig, PhenotypeEntry, AgentConfig
 from baby.information import OrbitStore
@@ -140,13 +140,13 @@ class TestMaintenanceTools:
         assert "memory" in stats
         assert "phenotype_diversity" in stats
 
-    def test_validate_manifold_integrity(self, manifold_data):
-        """Test manifold integrity validation."""
-        manifold_path, _ = manifold_data
+    def test_validate_ontology_integrity(self, ontology_data):
+        """Test ontology integrity validation."""
+        ontology_path, _ = ontology_data
 
-        report = validate_manifold_integrity(manifold_path)
+        report = validate_ontology_integrity(ontology_path)
 
-        # Mock manifold should fail some validations
+        # Mock ontology should fail some validations
         assert not report["success"]  # Mock has only 1000 states
         assert "issues" in report.get("details", {})
         assert len(report.get("details", {}).get("issues", [])) > 0
@@ -155,18 +155,18 @@ class TestMaintenanceTools:
 class TestEdgeCases:
     """Test edge cases and error conditions."""
 
-    def test_corrupt_manifold_handling(self, temp_dir):
-        """Test handling of corrupted manifold data."""
-        # Create corrupted manifold
-        bad_manifold_path = os.path.join(temp_dir, "bad_manifold.json")
-        with open(bad_manifold_path, "w") as f:
+    def test_corrupt_ontology_handling(self, temp_dir):
+        """Test handling of corrupted ontology data."""
+        # Create corrupted ontology
+        bad_ontology_path = os.path.join(temp_dir, "bad_ontology.json")
+        with open(bad_ontology_path, "w") as f:
             f.write("This is not valid JSON!")
 
         # Should handle gracefully
         with pytest.raises(Exception):
             from baby.information import InformationEngine
 
-            with open(bad_manifold_path, "r") as f:
+            with open(bad_ontology_path, "r") as f:
                 data = json.load(f)  # This will fail
 
     def test_missing_files(self, temp_dir):
@@ -257,9 +257,9 @@ class TestConfigurationAndPreferences:
             assert "maintenance" in prefs
             assert "agent_pool" in prefs
 
-    def test_custom_preferences(self, temp_dir, manifold_data):
+    def test_custom_preferences(self, temp_dir, ontology_data):
         """Test using custom preferences."""
-        manifold_path, _ = manifold_data
+        ontology_path, _ = ontology_data
         knowledge_path = os.path.join(temp_dir, "knowledge.pkl.gz")
 
         # Create store first
@@ -273,7 +273,7 @@ class TestConfigurationAndPreferences:
             "confidence_threshold": 0.1,
         }
 
-        pool = AgentPool(manifold_path, knowledge_path, custom_prefs)
+        pool = AgentPool(ontology_path, knowledge_path, custom_prefs)
 
         # Verify preferences are applied
         assert pool.max_agents == 5
@@ -281,12 +281,12 @@ class TestConfigurationAndPreferences:
 
         pool.close_all()
 
-    def test_canonical_storage_option(self, real_manifold, temp_dir):
+    def test_canonical_storage_option(self, real_ontology, temp_dir):
         """Test enabling canonical storage."""
-        manifold_path, canonical_path, _ = real_manifold
+        ontology_path, canonical_path, _ = real_ontology
 
         config = {
-            "manifold_path": manifold_path,
+            "ontology_path": ontology_path,
             "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
             "enable_canonical_storage": True,
             "phenomenology_map_path": canonical_path,
@@ -332,17 +332,17 @@ class TestSystemIntegration:
         # Track knowledge growth
         knowledge_path = os.path.join(temp_dir, "evolving.pkl.gz")
 
-        config = {"manifold_path": os.path.join(temp_dir, "manifold.json"), "knowledge_path": knowledge_path}
+        config = {"ontology_path": os.path.join(temp_dir, "ontology.json"), "knowledge_path": knowledge_path}
 
-        # Create minimal manifold for testing
-        os.makedirs(os.path.dirname(config["manifold_path"]), exist_ok=True)
-        with open(config["manifold_path"], "w") as f:
+        # Create minimal ontology for testing
+        os.makedirs(os.path.dirname(config["ontology_path"]), exist_ok=True)
+        with open(config["ontology_path"], "w") as f:
             json.dump(
                 {
                     "schema_version": "1.0.0",
                     "ontology_map": {str(i): i for i in range(100)},
                     "endogenous_modulus": 788_986,
-                    "manifold_diameter": 6,
+                    "ontology_diameter": 6,
                     "total_states": 788_986,
                     "build_timestamp": time.time(),
                 },
@@ -377,9 +377,9 @@ class TestSystemIntegration:
         agent.close()
 
     @pytest.mark.slow
-    def test_full_system_stress(self, real_manifold, temp_dir):
-        """Stress test with real manifold and multiple agents."""
-        manifold_path, canonical_path, _ = real_manifold
+    def test_full_system_stress(self, real_ontology, temp_dir):
+        """Stress test with real ontology and multiple agents."""
+        ontology_path, canonical_path, _ = real_ontology
         knowledge_path = os.path.join(temp_dir, "stress_knowledge.pkl.gz")
 
         # Create knowledge base
@@ -389,7 +389,7 @@ class TestSystemIntegration:
         # PickleStore(knowledge_path).close()
 
         # Create pool with multiple agents
-        pool = AgentPool(manifold_path, knowledge_path)
+        pool = AgentPool(ontology_path, knowledge_path)
 
         # Simulate heavy usage
         import random

@@ -38,8 +38,8 @@ This update represents a major conceptual and architectural refactoring of the G
 **I. Major Architectural & Conceptual Refactoring**
 
 1.  **Introduction of the Measured Manifold:**
-    *   The system is now grounded in the **empirically measured and provably finite physical manifold** of precisely **788,986 unique states**. This replaces the previous, more abstract notion of a state space.
-    *   The manifold's **diameter is a measured constant of 6**, meaning any state is reachable from any other in at most seven steps.
+    *   The system is now grounded in the **empirically measured and provably finite physical ontology** of precisely **788,986 unique states**. This replaces the previous, more abstract notion of a state space.
+    *   The ontology's **diameter is a measured constant of 6**, meaning any state is reachable from any other in at most seven steps.
     *   This "measured ground truth" is now the cornerstone of the entire architecture, moving the system from "physics-inspired" to "physics-grounded".
 
 2.  **VSM-Aligned Engine Architecture:**
@@ -61,7 +61,7 @@ This update represents a major conceptual and architectural refactoring of the G
 
 5.  **Canonicalization of Orbits:**
     *   A new, fundamental abstraction layer has been introduced: **Canonicalization**.
-    *   A build-time process identifies a single canonical representative for each state orbit within the manifold.
+    *   A build-time process identifies a single canonical representative for each state orbit within the ontology.
     *   The **`CanonicalizingStore` decorator** ensures all physically equivalent states map to the same storage entry, improving data coherency and abstraction.
 
 **II. Core Physics & Foundational Changes**

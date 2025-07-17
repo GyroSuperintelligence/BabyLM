@@ -13,10 +13,10 @@ from baby.types import PhenotypeEntry
 
 # Move inference_operator fixture to module level
 @pytest.fixture
-def inference_operator(manifold_data, orbit_store):
+def inference_operator(ontology_data, orbit_store):
     """Create an inference operator for testing."""
-    _, mock_manifold = manifold_data
-    s2_engine = InformationEngine(mock_manifold)
+    _, mock_ontology = ontology_data
+    s2_engine = InformationEngine(mock_ontology)
     return EndogenousInferenceOperator(s2_engine, orbit_store)
 
 
@@ -31,7 +31,7 @@ class TestEndogenousInferenceOperator:
 
     def test_get_phenotype_new(self, inference_operator):
         """Test getting phenotype for new context."""
-        # Use a known state from our mock manifold
+        # Use a known state from our mock ontology
         state_int = 42
         intron = 137
         state_index = inference_operator.s2.get_index_from_state(state_int)
@@ -118,9 +118,9 @@ class TestKnowledgeManagement:
     """Test knowledge base management features."""
 
     @pytest.fixture
-    def populated_operator(self, manifold_data, temp_dir, mock_time):
+    def populated_operator(self, ontology_data, temp_dir, mock_time):
         """Create operator with populated knowledge base."""
-        _, mock_manifold = manifold_data
+        _, mock_ontology = ontology_data
         store_path = os.path.join(temp_dir, "knowledge.pkl.gz")
         store = OrbitStore(store_path)
 
@@ -139,7 +139,7 @@ class TestKnowledgeManagement:
             )
             store.put((i, 0), entry)
 
-        s2_engine = InformationEngine(mock_manifold)
+        s2_engine = InformationEngine(mock_ontology)
         return EndogenousInferenceOperator(s2_engine, store)
 
     def test_validate_integrity(self, populated_operator):
@@ -198,10 +198,10 @@ class TestLearningMechanics:
     """Test the learning mechanics and gyrogroup operations."""
 
     @pytest.fixture
-    def operator_with_state(self, manifold_data, orbit_store):
+    def operator_with_state(self, ontology_data, orbit_store):
         """Create operator with specific test state."""
-        _, mock_manifold = manifold_data
-        s2_engine = InformationEngine(mock_manifold)
+        _, mock_ontology = ontology_data
+        s2_engine = InformationEngine(mock_ontology)
         operator = EndogenousInferenceOperator(s2_engine, orbit_store)
 
         # Pre-create some phenotypes with known memory masks
