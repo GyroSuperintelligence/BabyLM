@@ -251,3 +251,30 @@ MIT License - see [LICENSE](LICENSE) for details.
   <p><strong>Acknowledgements:</strong><br>
   This project benefited from AI language model services accessed through Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).</p>
 </div>
+
+## Getting Started with Git LFS
+
+This repository uses [Git Large File Storage (LFS)](https://git-lfs.github.com/) to manage large assets such as `.npy` and `.json` files in `memories/public/meta/`.
+
+**To get started:**
+
+1. **Install Git LFS (one-time):**
+   ```sh
+   git lfs install
+   ```
+
+2. **Clone the repository (recommended):**
+   ```sh
+   git clone https://github.com/GyroSuperintelligence/BabyLM.git
+   ```
+   - All large files will be downloaded automatically if LFS is installed.
+
+3. **If you already cloned before installing LFS:**
+   ```sh
+   git lfs pull
+   ```
+   - This will fetch any missing large files.
+
+**Note:**
+- With modern Git and Git LFS, running `git pull` or `git clone` is usually sufficient to get all code and large assets.
+- If you ever see small pointer files instead of the real data, make sure LFS is installed and run `git lfs pull`.
