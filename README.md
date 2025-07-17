@@ -143,15 +143,17 @@ Gyroscopic Superintelligence is meta-language for computation, ontology, phenome
 
 The system is designed for extreme efficiency. All core runtime operations are constant-time (O(1)) and memory-bandwidth limited, not compute-limited.
 
-### Pragmatic Capacity (Estimated)
+### Memory Capacity (Estimated)
 
-An agent's memory is dominated by its knowledge index (`OrbitStore`). A modern laptop can comfortably hold the entirety of WordNet and the English Wikipedia title graph in RAM.
+Each learned association (phenotype) requires ~90 bytes in RAM for the OrbitStore index. This determines how many unique facts the system can hold in memory for fast lookup.
 
-| Device | Free RAM for GyroSI | Estimated Facts in RAM |
-| --- | --- | --- |
+| Device | Available RAM | Max Phenotypes in Memory |
+|--------|---------------|-------------------------|
 | MacBook Air 2015 (8GB) | ~4 GB | ~45 million |
 | MacBook M4 (16GB) | ~12 GB | ~130 million |
 | Server (256GB) | ~220 GB | ~2.4 billion |
+
+For context: WordNet contains ~150,000 facts, and the English Wikipedia title/abstract graph contains ~40 million facts. A modern laptop can comfortably hold both entirely in RAM.
 
 ### Throughput Examples (Estimated)
 
