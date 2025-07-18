@@ -44,6 +44,7 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
     import numpy as np, json, os, time, itertools, sys
     from baby import governance
 
+    done = 0
     ep = np.load(ep_path, mmap_mode="r")  # N × 256 int32
     N = ep.shape[0]
 
@@ -82,7 +83,6 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
             print()  # Newline on completion
 
     BATCH = 100_000   # 100 000 × 256 × 4 B = 98 MB
-    done = 0
     for seed in range(N):
         if rep[seed] != -1:
             continue
