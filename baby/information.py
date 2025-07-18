@@ -21,7 +21,6 @@ import time
 import os
 import sys
 from typing import Dict, Any, List, Tuple, Set, Optional
-from collections import deque
 
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
@@ -38,19 +37,19 @@ class InformationEngine:
     Sole authority for measurement and conversion between state representations.
     Provides the sensory apparatus through angular gyrodistance measurement.
 
-    If use_memmap is True, ontology_map and inverse_ontology_map are stored as numpy arrays for better memory/cache performance.
+    If use_array_indexing is True, ontology_map and inverse_ontology_map are stored as numpy arrays for better memory/cache performance.
     """
 
     def __init__(
         self,
         ontology_data: Dict[str, Any],
-        use_memmap: Optional[bool] = None,
+        use_array_indexing: Optional[bool] = None,
         strict_validation: bool = True,
     ):
-        # Auto-enable memmap if not set and large ontology
-        if use_memmap is None:
-            use_memmap = ontology_data["endogenous_modulus"] > 100_000
-        self.use_memmap = use_memmap
+        # Auto-enable array indexing if not set and large ontology
+        if use_array_indexing is None:
+            use_array_indexing = ontology_data["endogenous_modulus"] > 100_000
+        self.use_array_indexing = use_array_indexing
         self.ontology_map = ontology_data["ontology_map"]
         keys = list(self.ontology_map.keys())
         if keys and isinstance(keys[0], str):
@@ -58,13 +57,14 @@ class InformationEngine:
         self.endogenous_modulus = ontology_data["endogenous_modulus"]
         self.ontology_diameter = ontology_data["ontology_diameter"]
         
-        if use_memmap:
+        if use_array_indexing:
             # Note: This assumes ontology indices were assigned in sorted order of state integers
             # If ontology was generated differently, this implicitly redefines indices via sorted position
             keys_arr = np.array(sorted(self.ontology_map.keys()), dtype=np.uint64)
             self._keys = keys_arr
             self._inverse = keys_arr  # index -> state_int
-            # Keep original mapping intact for non-memmap fallback
+            # Free memory: drop the original mapping in array mode
+            self.ontology_map = None
             self.inverse_ontology_map = None  # free memory
         else:
             self._keys = None
@@ -85,30 +85,42 @@ class InformationEngine:
             phenomap_path = ontology_data['ontology_map_path'].replace("ontology_map.json","phenomenology_map.json")
         if not phenomap_path:
             phenomap_path = "memories/public/meta/phenomenology_map.json"
+
         if os.path.exists(phenomap_path):
             with open(phenomap_path) as f:
                 payload = json.load(f)
-            sz = payload.get("orbit_sizes", {})
-            self.orbit_cardinality = np.fromiter(
-                (sz.get(str(i),1) for i in range(self.endogenous_modulus)),
-                dtype=np.uint32)
+
+            pheno_map = payload.get("phenomenology_map")
+            orbit_sizes = payload.get("orbit_sizes", {})
+
+            if pheno_map and isinstance(pheno_map, list):
+                pheno_arr = np.array(pheno_map, dtype=np.int32)
+                # Fast vectorized fill: look up size via representative
+                size_lookup = np.ones(self.endogenous_modulus, dtype=np.uint32)
+                for rep_str, sz in orbit_sizes.items():
+                    size_lookup[int(rep_str)] = int(sz)
+                self.orbit_cardinality = size_lookup[pheno_arr]
+            else:
+                # Fallback: keep all ones
+                pass
 
     def get_index_from_state(self, state_int: int) -> int:
         """
-        Looks up the phenomenology index for a physical state integer.
+        Return ontology (state) index (0..N-1) for a 48-bit state integer.
+        Uses fast array indexing if use_array_indexing is True, otherwise dict lookup.
 
         Args:
             state_int: 48-bit integer representing physical state
 
         Returns:
-            Index in the discovered ontology (0 to N-1)
+            Ontology index (0 to N-1)
 
         Raises:
             ValueError: If state not found in ontology
         """
-        if self.use_memmap:
+        if self.use_array_indexing:
             if self._keys is None:
-                raise RuntimeError("Memmap arrays not initialized.")
+                raise RuntimeError("Array indexing arrays not initialized.")
             idx = np.searchsorted(self._keys, state_int)
             if idx == len(self._keys) or self._keys[idx] != state_int:
                 raise ValueError(
@@ -117,6 +129,8 @@ class InformationEngine:
                 )
             return int(idx)
         else:
+            if self.ontology_map is None:
+                raise RuntimeError("ontology_map is not available in array indexing mode.")
             index = self.ontology_map.get(state_int, -1)
             if index == -1:
                 raise ValueError(
@@ -135,11 +149,11 @@ class InformationEngine:
         Returns:
             48-bit state integer
         """
-        if self.use_memmap:
+        if self.use_array_indexing:
             if self._inverse is None:
-                raise RuntimeError("Memmap arrays not initialized.")
+                raise RuntimeError("Array indexing arrays not initialized.")
             if index < 0 or index >= len(self._inverse):
-                raise ValueError(f"Index {index} out of bounds for memmap.")
+                raise ValueError(f"Index {index} out of bounds for array indexing.")
             return int(self._inverse[index])
         else:
             if self.inverse_ontology_map is None:
@@ -208,8 +222,9 @@ class InformationEngine:
         
         # Round-trip validation (debug mode)
         if __debug__:
-            assert InformationEngine.int_to_tensor(result).shape == tensor.shape
-            assert np.array_equal(InformationEngine.int_to_tensor(result), tensor)
+            round_trip = InformationEngine.int_to_tensor(result)
+            assert round_trip.shape == tensor.shape
+            assert np.array_equal(round_trip, tensor)
         
         return result
 
@@ -249,6 +264,8 @@ class InformationEngine:
         current_tensor = self.int_to_tensor(state_int)
         return self.gyrodistance_angular(current_tensor, governance.GENE_Mac_S)
     
+    def get_orbit_cardinality(self, state_index: int) -> int:
+        return int(self.orbit_cardinality[state_index])
 
 # ==============================================================================
 # Utility: Clean single-line progress reporter
@@ -296,6 +313,7 @@ def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
     discovered = {origin_int}
     current_level = [origin_int]
     depth = 0
+    layer_sizes = []  # Track number of new states at each BFS depth
     
     while current_level:
         next_level_set = set()
@@ -310,9 +328,14 @@ def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
         if not current_level:
             break
         depth += 1
+        layer_sizes.append(len(current_level))
         progress.update(len(discovered), total=788_986, extra=f"depth={depth}")
     
     progress.done()
+
+    # Print expansion pattern for verification
+    print(f"Layer sizes (expansion pattern): {layer_sizes}")
+    assert sum(layer_sizes) + 1 == len(discovered), "Layer sizes do not sum to total states (including origin)"
 
     # Validate
     if len(discovered) != 788_986:
@@ -357,158 +380,347 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
     for chunk_start in range(0, N, CHUNK_SIZE):
         chunk_end = min(chunk_start + CHUNK_SIZE, N)
         chunk_states = states[chunk_start:chunk_end]
-        
         for intron in range(256):
-            # Vectorized transformation (note: np.vectorize is Python-level loop, no speed gain over list comprehension)
-            next_states = np.vectorize(governance.apply_gyration_and_transform, otypes=[np.uint64])(chunk_states, intron)
-            
-            # Validate that all next_states are in the ontology
+            next_states = governance.apply_gyration_and_transform_batch(chunk_states, intron)
             idxs = np.searchsorted(states, next_states)
-            valid_mask = (idxs < len(states)) & (states[idxs] == next_states)
-            if not np.all(valid_mask):
-                invalid_states = next_states[~valid_mask]
-                raise RuntimeError(f"Invalid next_states detected for intron {intron}: {invalid_states[:5]}...")
-            
+            # Debug check: ensure all next_states are in the ontology
+            if __debug__:
+                if idxs.max() >= states.size or not np.array_equal(states[idxs], next_states):
+                    raise RuntimeError("Transition produced unknown state.")
             ep[chunk_start:chunk_end, intron] = idxs
-        
         progress.update(chunk_end, N)
     
     ep.flush()
     progress.done()
 
+## Curated autonomic cycle discovery
+def _is_elementary(cycle: Tuple[int, ...]) -> bool:
+    n = len(cycle)
+    for k in range(1, n // 2 + 1):
+        if n % k == 0 and cycle == cycle[:k] * (n // k):
+            return False
+    return True
+
+def _canonical_rotation(cycle: Tuple[int, ...]) -> Tuple[int, ...]:
+    if not cycle:
+        return cycle
+    best = cycle
+    for i in range(1, len(cycle)):
+        rotated = cycle[i:] + cycle[:i]
+        if rotated < best:
+            best = rotated
+    return best
+
+def _mean_divergence_for_cycle(ep: np.ndarray, idx_to_state: np.ndarray, origin_idx: int, cycle: Tuple[int, ...]) -> float:
+    archetype_tensor = governance.GENE_Mac_S
+    visited_indices = []
+    current = origin_idx
+    for intron in cycle[:-1]:
+        current = ep[current, intron]
+        visited_indices.append(current)
+    if not visited_indices:
+        return 0.0
+    state_ints = idx_to_state[np.array(visited_indices, dtype=np.int32)]  # shape (k,)
+    # We exclude the final origin revisit to avoid double-weighting the archetype.
+    # Extract bits: bit 47 = MSB → position 0
+    bit_positions = np.arange(47, -1, -1, dtype=np.uint64)  # 47..0
+    bits = ((state_ints[:, None] >> bit_positions) & 1).astype(np.uint8)  # shape (k,48)
+    tensors = (1 - 2 * bits).astype(np.int8).reshape(-1, 4, 2, 3, 2)
+    flat_archetype = archetype_tensor.flatten()
+    flats = tensors.reshape(tensors.shape[0], -1)
+    cos = (flats @ flat_archetype) / 48.0
+    np.clip(cos, -1.0, 1.0, out=cos)
+    angles = np.arccos(cos)
+    return float(np.mean(angles))
+
+def curate_autonomic_cycles(ep: np.ndarray, origin_idx: int, idx_to_state: np.ndarray, max_length: int = 6, per_length: int = 2, operation_cap: int = 5_000_000) -> dict:
+    raw_count = 0
+    elementary_count = 0
+    canonical_count = 0
+    operation_count = 0
+    op_cap_hit = False
+    store = {L: {"homeo": [], "explore": []} for L in range(2, max_length + 1)}
+    canonical_seen: set = set()
+    for target_length in range(2, max_length + 1):
+        stack = [(origin_idx, tuple(), {origin_idx})]
+        while stack:
+            operation_count += 1
+            if operation_count > operation_cap:
+                op_cap_hit = True
+                stack.clear()
+                break
+            current_idx, path, visited = stack.pop()
+            path_len = len(path)
+            if path_len == target_length - 1:
+                returning_introns = np.where(ep[current_idx] == origin_idx)[0]
+                for intron in returning_introns:
+                    raw_count += 1
+                    cycle = path + (int(intron),)
+                    if not _is_elementary(cycle):
+                        continue
+                    elementary_count += 1
+                    canon = _canonical_rotation(cycle)
+                    if canon in canonical_seen:
+                        continue
+                    canonical_seen.add(canon)
+                    canonical_count += 1
+                    divergence = _mean_divergence_for_cycle(ep, idx_to_state, origin_idx, canon)
+                    L = target_length
+                    homeo = store[L]["homeo"]
+                    homeo.append((divergence, canon))
+                    homeo.sort(key=lambda x: x[0])
+                    if len(homeo) > per_length:
+                        homeo.pop()
+                    explore = store[L]["explore"]
+                    explore.append((divergence, canon))
+                    explore.sort(key=lambda x: x[0], reverse=True)
+                    if len(explore) > per_length:
+                        explore.pop()
+                continue
+            if path_len < target_length - 1:
+                for intron in range(256):
+                    nxt = ep[current_idx, intron]
+                    if nxt not in visited:
+                        stack.append((nxt, path + (intron,), visited | {nxt}))
+    structured = {}
+    stored_total = 0
+    for L in range(2, max_length + 1):
+        homeo_cycles = [list(c) for _, c in store[L]["homeo"]]
+        explore_cycles = [list(c) for _, c in store[L]["explore"]]
+        stored_total += len(homeo_cycles) + len(explore_cycles)
+        structured[f"length_{L}"] = {
+            "homeostatic": homeo_cycles,
+            "exploratory": explore_cycles
+        }
+    return {
+        "schema_version": "1",
+        "cycles": structured,
+        "stats": {
+            "max_length": max_length,
+            "per_length_each_class": per_length,
+            "total_raw": raw_count,
+            "total_elementary": elementary_count,
+            "total_canonical": canonical_count,
+            "stored": stored_total,
+            "operation_cap_reached": op_cap_hit,
+            "operation_cap": operation_cap
+        }
+    }
+
 # ==============================================================================
 # STEP 3: Phenomenology Map (OPTIMIZED)
 # ==============================================================================
-def find_simple_cycles(ep: np.ndarray, start_idx: int, max_length: int = 6) -> Tuple[List[Tuple[int, ...]], bool]:
+def build_phenomenology_map(ep_path: str, ontology_map: Dict[int, int], output_path: str, curate_cycles: bool = True, cycles_per_length: int = 2):
     """
-    Finds all simple cycles of length 2 to max_length starting/ending at start_idx.
-    Forward closure analysis - documents that this finds forward reachability cycles.
-    
-    Returns:
-        Tuple of (cycles_list, truncated_flag)
-    """
-    cycles = []
-    operation_count = 0
-    MAX_OPERATIONS = 10_000_000  # Bail-out for safety
-    truncated = False
-    
-    for target_length in range(2, max_length + 1):
-        stack = [(start_idx, tuple(), {start_idx})]
-        
-        while stack:
-            operation_count += 1
-            if operation_count > MAX_OPERATIONS:
-                print(f"\nWarning: Cycle search reached operation limit at length {target_length}")
-                truncated = True
-                return cycles, truncated
-                
-            curr_idx, path, visited = stack.pop()
-            
-            if len(path) == target_length - 1:
-                # Find ALL introns that return to start (not just first)
-                return_introns = np.where(ep[curr_idx] == start_idx)[0]
-                for intron in return_introns:
-                    cycles.append(path + (int(intron),))
-                continue
-            
-            # Enumerate all transitions (deduplication here might not be worth the O(256 log 256) cost)
-            for intron in range(256):
-                next_idx = ep[curr_idx, intron]
-                if next_idx not in visited:
-                    stack.append((next_idx, path + (intron,), visited | {next_idx}))
-    
-    return cycles, truncated
+    Build the phenomenology (canonical orbit) map using *strongly connected components* (SCCs).
 
-def build_phenomenology_map(ep_path: str, ontology_map: Dict[int, int], output_path: str):
-    """
-    Builds canonical orbit map and finds autonomic cycles.
-    Uses forward closure (semigroup closure) under 256 generators.
+    Definition (authoritative):
+        Two states belong to the same phenomenological orbit iff they are mutually reachable
+        via sequences of intron-induced transitions (i.e. they lie in the same SCC of the
+        directed transition graph defined by epistemology table rows).
+
+    Canonical representative:
+        For each SCC C, let rep = argmin_{i in C} state_integer(i).
+        The phenomenology map assigns every i in C → rep (using the *index* of that rep).
+        This ensures:
+            - Idempotence of canonicalization
+            - Representative is minimal in its class (tests can verify)
+            - Stable under rebuild if ontology_map ordering is stable
+
+    Output JSON structure:
+        {
+            "phenomenology_map": [... representative_index per node ...],
+            "orbit_sizes": { "<rep_index>": size, ... },
+            "autonomic_cycles": [...],  # legacy: flattened, bounded list
+            "autonomic_cycles_curated": {...},  # structured, stratified cycles and stats
+            "build_timestamp": <unix>,
+            "metadata": {
+                "total_orbits": <count>,
+                "largest_orbit": <max_size>,
+                "total_cycles": <cycles_found>,
+                "cycles_truncated": <bool>
+            }
+        }
+
+    Performance notes:
+        - Uses an *iterative* Tarjan SCC algorithm (no Python recursion).
+        - Each node's outgoing edges are deduplicated with np.unique to reduce work
+          when transitions repeat (common in highly symmetric regions).
+        - Memory overhead: O(N) for arrays (indices, lowlink, stack flags, canonical map).
+
+    Args:
+        ep_path: Path to epistemology.npy (shape N x 256, int32).
+        ontology_map: Dict[state_int -> index] (size N).
+        output_path: Destination JSON file.
     """
     ep = np.load(ep_path, mmap_mode="r")
     N = ep.shape[0]
-    
-    canonical = np.full(N, -1, dtype=np.int32)
-    processed = np.zeros(N, dtype=bool)  # O(1) processed check
-    
+
+    # Map: index -> 48-bit state integer (uint64)
     idx_to_state = np.empty(N, dtype=np.uint64)
-    for state, idx in ontology_map.items():
-        idx_to_state[idx] = state
-    
-    orbit_sizes = {}
+    for state_int, idx in ontology_map.items():
+        idx_to_state[idx] = state_int
+
+    # Tarjan (iterative) data structures
+    indices = np.full(N, -1, dtype=np.int32)       # discovery index
+    lowlink = np.zeros(N, dtype=np.int32)
+    on_stack = np.zeros(N, dtype=bool)
+    stack = []                                     # SCC stack (node indices)
+    canonical = np.full(N, -1, dtype=np.int32)     # final representative index per node
+
+    orbit_sizes: Dict[int, int] = {}
+    index_counter = 0
     orbits_found = 0
-    states_done = 0
+    processed_nodes = 0
+
+    # Progress
     start_time = time.time()
     REPORT_EVERY = 50_000
-    
-    def print_progress():
-        elapsed = time.time() - start_time
-        rate = states_done / elapsed if elapsed > 0 else 0
-        pct = 100.0 * states_done / N
-        msg = f"\rPhenomenology: {states_done:,}/{N:,} ({pct:5.1f}%) | {rate:,.0f}/s | orbits={orbits_found}"
-        print(msg, end='', flush=True)
-    
-    print_progress()
-    
-    for seed in range(N):
-        if processed[seed]:
+
+    def print_progress(force: bool = False):
+        if processed_nodes == 0 and not force:
+            return
+        if force or processed_nodes % REPORT_EVERY == 0:
+            elapsed = time.time() - start_time
+            rate = processed_nodes / elapsed if elapsed > 0 else 0
+            pct = 100.0 * processed_nodes / N
+            msg = (f"\rPhenomenology (SCC): {processed_nodes:,}/{N:,} "
+                   f"({pct:5.1f}%) | {rate:,.0f}/s | orbits={orbits_found}")
+            print(msg, end='', flush=True)
+
+    # Frame structure for iterative DFS:
+    # (node, next_child_idx, neighbors_array)
+    class Frame:
+        __slots__ = ("v", "i", "nbrs")
+        def __init__(self, v: int, nbrs: np.ndarray):
+            self.v = v
+            self.i = 0
+            self.nbrs = nbrs
+
+    # Main loop: visit all nodes
+    for root in range(N):
+        if indices[root] != -1:
             continue
-        
-        # Mark seed as processed immediately
-        processed[seed] = True
-        orbit = {seed}
-        frontier = deque([seed])  # O(1) popleft vs O(n) list.pop(0)
-        min_state = idx_to_state[seed]
-        min_idx = seed
-        
-        while frontier:
-            current = frontier.popleft()
-            # Optional optimization: deduplicate if many duplicate transitions per row
-            # unique_neighbors = np.unique(ep[current])
-            # for next_idx in unique_neighbors:
-            for next_idx in ep[current]:
-                if not processed[next_idx]:
-                    processed[next_idx] = True
-                    orbit.add(next_idx)
-                    frontier.append(next_idx)
-                    state = idx_to_state[next_idx]
-                    if state < min_state:
-                        min_state = state
-                        min_idx = next_idx
-        
-        orbit_arr = np.fromiter(orbit, dtype=np.int32)
-        canonical[orbit_arr] = min_idx
-        orbit_sizes[min_idx] = orbit_arr.size
-        orbits_found += 1
-        states_done += orbit_arr.size
-        
-        # Report progress every REPORT_EVERY states
-        if states_done // REPORT_EVERY != (states_done - orbit_arr.size) // REPORT_EVERY:
-            print_progress()
-    
-    print_progress()
-    print()
-    
-    # Validate orbit construction
-    assert states_done == N, f"States processed mismatch: {states_done} != {N}"
-    assert len(set(orbit_sizes.keys())) == len(orbit_sizes), "Duplicate canonical representatives"
-    
-    print("Finding autonomic cycles...", end='', flush=True)
+
+        # Build neighbor list for root (deduplicate as per docstring)
+        root_neighbors = np.unique(ep[root])
+        # Initialize DFS stack with root frame AFTER assigning index/root state
+        dfs_stack: List[Frame] = []
+
+        # "Visit" root
+        indices[root] = index_counter
+        lowlink[root] = index_counter
+        index_counter += 1
+        stack.append(root)
+        on_stack[root] = True
+        dfs_stack.append(Frame(root, root_neighbors))
+
+        # Iterative Tarjan DFS
+        while dfs_stack:
+            frame = dfs_stack[-1]
+            v = frame.v
+
+            if frame.i < frame.nbrs.size:
+                w = int(frame.nbrs[frame.i])
+                frame.i += 1
+
+                if indices[w] == -1:
+                    # First time we see w
+                    nbrs_w = np.unique(ep[w])
+                    indices[w] = index_counter
+                    lowlink[w] = index_counter
+                    index_counter += 1
+                    stack.append(w)
+                    on_stack[w] = True
+                    dfs_stack.append(Frame(w, nbrs_w))
+                elif on_stack[w]:
+                    # Update lowlink on back-edge
+                    if indices[w] < lowlink[v]:
+                        lowlink[v] = indices[w]
+            else:
+                # Finished exploring v's neighbors
+                dfs_stack.pop()
+                # Propagate lowlink to parent (if any)
+                if dfs_stack:
+                    parent = dfs_stack[-1].v
+                    if lowlink[v] < lowlink[parent]:
+                        lowlink[parent] = lowlink[v]
+
+                # If root of SCC
+                if lowlink[v] == indices[v]:
+                    # Pop stack until v included
+                    component = []
+                    while True:
+                        w = stack.pop()
+                        on_stack[w] = False
+                        component.append(w)
+                        if w == v:
+                            break
+
+                    comp_arr = np.array(component, dtype=np.int32)
+                    # Choose representative by minimal *state integer*
+                    comp_states = idx_to_state[comp_arr]
+                    rep_local_idx = int(comp_arr[np.argmin(comp_states)])
+                    canonical[comp_arr] = rep_local_idx
+                    size = comp_arr.size
+                    orbit_sizes[rep_local_idx] = size
+                    orbits_found += 1
+                    processed_nodes += size
+                    print_progress()
+
+    print_progress(force=True)
+    print()  # newline after progress line
+
+    # Validation
+    assert processed_nodes == N, f"SCC coverage mismatch: processed {processed_nodes} of {N}"
+    assert np.all(canonical >= 0), "Canonical map contains unassigned entries"
+    assert len(orbit_sizes) == len(set(orbit_sizes.keys())), "Duplicate representatives detected"
+
+    # --- Autonomic cycles (curated) ---
+    print("Curating autonomic cycles...", end='', flush=True)
     origin_state = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
     origin_idx = ontology_map[origin_state]
-    cycles, cycles_truncated = find_simple_cycles(ep, origin_idx, max_length=6)
-    print(f"\rFound {len(cycles)} autonomic cycles." + " " * 30)
-    
+    if curate_cycles:
+        cycles_payload = curate_autonomic_cycles(
+            ep,
+            origin_idx,
+            idx_to_state,
+            max_length=6,
+            per_length=cycles_per_length
+        )
+        cycles_truncated = cycles_payload["stats"]["operation_cap_reached"]
+        legacy_cycle_list = []
+        for L_key, classes in cycles_payload["cycles"].items():
+            legacy_cycle_list.extend(classes["homeostatic"])
+            legacy_cycle_list.extend(classes["exploratory"])
+        print(f"\rCurated {cycles_payload['stats']['stored']} autonomic cycles (bounded)." + " " * 30)
+        if curate_cycles and cycles_payload["stats"]["stored"] == 0:
+            print("\nWarning: No autonomic cycles curated.")
+    else:
+        cycles_payload = {
+            "schema_version": "1",
+            "cycles": {},
+            "stats": {
+                "stored": 0,
+                "operation_cap_reached": False
+            }
+        }
+        legacy_cycle_list = []
+        cycles_truncated = False
+
+    # Persist
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
         json.dump({
             "phenomenology_map": canonical.tolist(),
             "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes.items()},
-            "autonomic_cycles": [list(c) for c in cycles],
+            "autonomic_cycles": legacy_cycle_list,
+            "autonomic_cycles_curated": cycles_payload,
             "build_timestamp": int(time.time()),
             "metadata": {
                 "total_orbits": len(orbit_sizes),
-                "largest_orbit": max(orbit_sizes.values()) if orbit_sizes else 0,
-                "total_cycles": len(cycles),
+                "largest_orbit": int(max(orbit_sizes.values())) if orbit_sizes else 0,
+                "total_cycles": cycles_payload["stats"]["stored"],
                 "cycles_truncated": cycles_truncated
             }
         }, f)

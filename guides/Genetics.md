@@ -507,6 +507,8 @@ Handles all measurement utilities, including:
 * Canonical state indices and integer forms are mapped bidirectionally.
 * State transition tables (epistemology) and canonical-orbit (phenomenology) maps are generated and saved as part of the build process.
 
+**Phenomenological Equivalence:** Two states belong to the same phenomenological orbit if and only if they are mutually reachable through epistemic transformations. Formally, states a and b are equivalent iff there exist intron sequences σ₁, σ₂ such that a →σ₁ b and b →σ₂ a. The phenomenology map assigns to each state the minimal (by 48-bit integer value) member of its equivalence class.
+
 **Measurement Functions:**
 
 * **gyrodistance\_angular(T1, T2):** Computes the angular divergence (radians) between two states in tensor form, using cosine similarity in 48-dimensional space.

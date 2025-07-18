@@ -197,9 +197,16 @@ class CanonicalView:
         with open(phenomenology_map_path, "r") as f:
             loaded = json.load(f)
             if isinstance(loaded, list):
-                self.phenomenology_map = dict(enumerate(loaded))
+                raw_map = loaded
+            elif isinstance(loaded, dict) and "phenomenology_map" in loaded:
+                raw_map = loaded["phenomenology_map"]
             else:
-                self.phenomenology_map = {int(k): v for k, v in loaded.items()}
+                raise ValueError("Unrecognized phenomenology map format")
+
+            if isinstance(raw_map, list):
+                self.phenomenology_map = {i: rep for i, rep in enumerate(raw_map)}
+            else:
+                self.phenomenology_map = {int(k): int(v) for k, v in raw_map.items()}
 
     def _get_phenomenology_key(self, context_key: Tuple[int, int]) -> Tuple[int, int]:
         tensor_index, intron = context_key
@@ -617,7 +624,7 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
 
     ontology_map = ontology_data.get("ontology_map", {})
     if len(ontology_map) != 788_986:
-        issues.append(f"Invalid genotype map size: {len(ontology_map)}")
+        issues.append(f"Invalid ontology map size: {len(ontology_map)}")
 
     # Check phenomenology map if provided
     phenomenology_issues = 0
@@ -626,9 +633,16 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
             with open(phenomenology_map_path, "r") as f:
                 data = json.load(f)
             if isinstance(data, list):
-                phenomenology_map = dict(enumerate(data))
+                raw_map = data
+            elif isinstance(data, dict) and "phenomenology_map" in data:
+                raw_map = data["phenomenology_map"]
             else:
-                phenomenology_map = {int(k): v for k, v in data.items()}
+                raise ValueError("Unrecognized phenomenology map format")
+
+            if isinstance(raw_map, list):
+                phenomenology_map = {i: rep for i, rep in enumerate(raw_map)}
+            else:
+                phenomenology_map = {int(k): int(v) for k, v in raw_map.items()}
 
             # Validate all indices are in range
             for idx, phenomenology_idx in phenomenology_map.items():

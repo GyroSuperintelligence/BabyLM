@@ -46,7 +46,7 @@ def temp_dir():
     shutil.rmtree(test_dir, ignore_errors=True)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def real_ontology():
     """
     Fixture returning paths to the real ontology and phenomenology files, for integration tests.

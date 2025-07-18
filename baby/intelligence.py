@@ -82,9 +82,12 @@ class IntelligenceEngine:
         phenomap = ontology_path.replace("ontology_map.json","phenomenology_map.json")
         try:
             with open(phenomap) as f:
-                self._autonomic_cycles = json.load(f).get("autonomic_cycles", [])
+                pheno_data = json.load(f)
+                self._autonomic_cycles = pheno_data.get("autonomic_cycles", [])
+                self._autonomic_cycles_curated = pheno_data.get("autonomic_cycles_curated", {})
         except Exception:
             self._autonomic_cycles = []
+            self._autonomic_cycles_curated = {}
         self._pain_streak = 0
 
     def process_egress(self, input_byte: int) -> int:
@@ -147,18 +150,7 @@ class IntelligenceEngine:
         for hook in self.post_cycle_hooks:
             hook(self, phenotype_entry, last_intron)
 
-        # Generate response from phenotype
-        phenotype = phenotype_entry.get("phenotype")
-        if isinstance(phenotype, str) and phenotype:
-            return ord(phenotype[0])
-        elif isinstance(phenotype, str):
-            return ord("?")
-        elif phenotype is not None:
-            return int(phenotype) & 0xFF  # Ensure byte range
-        else:
-            return ord("?")
-
-        # Algedonic decision at start
+        # Algedonic decision at start (must run before output)
         θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
         if θ > self._θ_high:
             self._pain_streak += 1
@@ -175,6 +167,17 @@ class IntelligenceEngine:
                 self._pain_streak = 0
         elif θ < self._θ_low:
             self._pain_streak = 0
+
+        # Generate response from phenotype
+        phenotype = phenotype_entry.get("phenotype")
+        if isinstance(phenotype, str) and phenotype:
+            return ord(phenotype[0])
+        elif isinstance(phenotype, str):
+            return ord("?")
+        elif phenotype is not None:
+            return int(phenotype) & 0xFF  # Ensure byte range
+        else:
+            return ord("?")
 
     def add_hook(self, hook: CycleHookFunction) -> None:
         """

@@ -69,6 +69,20 @@ def build_masks_and_constants() -> Tuple[int, int, int, List[int]]:
 
 # Pre-compute the masks at module load time
 FG_MASK, BG_MASK, FULL_MASK, INTRON_BROADCAST_MASKS = build_masks_and_constants()
+INTRON_BROADCAST_MASKS = np.array(INTRON_BROADCAST_MASKS, dtype=np.uint64)
+
+# Precompute transformation masks for all 256 introns
+XFORM_MASK = np.empty(256, dtype=np.uint64)
+for i in range(256):
+    m = 0
+    if i & 0b01000010:  # LI
+        m ^= FULL_MASK
+    if i & 0b00100100:  # FG
+        m ^= FG_MASK
+    if i & 0b00011000:  # BG
+        m ^= BG_MASK
+    XFORM_MASK[i] = m
+PATTERN_MASK = INTRON_BROADCAST_MASKS  # semantic alias, now a NumPy array
 
 
 def apply_gyration_and_transform(state_int: int, intron: int) -> int:
@@ -103,6 +117,34 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     final_state = temp_state ^ gyration
 
     return final_state
+
+
+def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> np.ndarray:
+    """
+    Vectorised transform for a batch of states (uint64).
+    Semantics identical to apply_gyration_and_transform per element.
+    """
+    mask = XFORM_MASK[intron]
+    pattern = PATTERN_MASK[intron]
+    temp = states ^ mask
+    return temp ^ (temp & pattern)
+
+def apply_gyration_and_transform_all_introns(states: np.ndarray) -> np.ndarray:
+    """
+    Returns an array shape (states.size, 256) of successor states.
+    Memory-heavy; prefer intron loop for large batches.
+    """
+    temp = states[:, None] ^ XFORM_MASK[None, :]
+    return temp ^ (temp & PATTERN_MASK[None, :])
+
+# Optional: test helper for equivalence (not run by default)
+def _test_vector_equivalence():
+    rng = np.random.default_rng(0)
+    sample_states = rng.integers(0, 1 << 48, size=4096, dtype=np.uint64)
+    for intron in range(256):
+        scalar = np.array([apply_gyration_and_transform(int(s), intron) for s in sample_states], dtype=np.uint64)
+        batch = apply_gyration_and_transform_batch(sample_states, intron)
+        assert np.array_equal(scalar, batch)
 
 
 def transcribe_byte(byte: int) -> int:
