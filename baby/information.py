@@ -84,6 +84,9 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
 
     BATCH = 100_000   # 100 000 × 256 × 4 B = 98 MB
     done = 0
+    REPORT_STEP = max(50_000, N // 100)
+    next_report = REPORT_STEP
+    last_log_time = time.time()
     for seed in range(N):
         if rep[seed] != -1:
             continue
@@ -120,13 +123,17 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
             sample_members = sorted(list(members))[:5]
             print(f"\nSample orbit {sample_printed+1}/{max_samples} (seed={seed}): size={members.size}, rep={lex_rep_idx}, members={sample_members} ...")
             sample_printed += 1
-        # Progress bar
-        update_interval = max(1, min(N // 1000, 100))
-        if seed % update_interval == 0 or done == N:
-            elapsed = time.time() - start_time
-            print_progress_bar((rep != -1).sum(), N, elapsed=elapsed)
-    # Final progress bar
-    print_progress_bar(N, N, elapsed=time.time() - start_time)
+        # In-place, concise progress reporting
+        now = time.time()
+        if done >= next_report or now - last_log_time >= 60 or done == N:
+            pct = 100.0 * done / N
+            elapsed = now - start_time
+            msg = f"\r[phenomenology] {done:>7d}/{N}  ({pct:5.1f}%)  elapsed {elapsed:6.1f}s"
+            print(msg, end='', flush=True)
+            last_log_time = now
+            while next_report <= done:
+                next_report += REPORT_STEP
+    print()  # Newline at end for clean prompt
 
     # Compute autonomic cycles of length 2-6 from archetype
     def _enumerate_autonomic_cycles(inverse, governance):
