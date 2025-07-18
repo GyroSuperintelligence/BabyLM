@@ -41,19 +41,33 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
         output_path: Where to write phenomenology_map.json
         ontology_path: Path to ontology_map.json (needed for state_int <-> index mapping)
     """
-    import numpy as np, json, os, itertools
+    import numpy as np, json, os, time, itertools, sys
+    from baby import governance
 
-    ep = np.load(ep_path, mmap_mode="r")  # N × 256
+    ep = np.load(ep_path, mmap_mode="r")  # N × 256 int32
     N = ep.shape[0]
-    with open(ontology_path, "r") as f:
-        ontology_data = json.load(f)
-    # index -> state_int
-    inverse_ontology_map = {v: int(k) for k, v in ontology_data["ontology_map"].items()}
 
-    visited = set()
-    phenomenology = {}
-    import sys
-    import time
+    # canonical representative for every state, –1 = unknown
+    rep = np.full(N, -1, np.int32)
+
+    # index → physical‑state integer (needed to choose lexicographic minima)
+    inverse = np.empty(N, np.uint64)
+    with open(ontology_path) as f:
+        data = json.load(f)["ontology_map"]
+    for k, v in data.items():
+        inverse[v] = int(k)
+
+    orbit_sizes = {}
+    start_time = time.time()
+    sample_indices = set()
+    if N >= 3:
+        sample_indices = {0, N // 2, N - 1}
+    elif N == 2:
+        sample_indices = {0, 1}
+    elif N == 1:
+        sample_indices = {0}
+    sample_printed = 0
+    max_samples = 3
 
     def print_progress_bar(iteration, total, length=40, elapsed=None):
         percent = 100 * (iteration / float(total))
@@ -67,77 +81,68 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
         if iteration == total:
             print()  # Newline on completion
 
-    start_time = time.time()
-    sample_indices = set()
-    if N >= 3:
-        sample_indices = {0, N // 2, N - 1}
-    elif N == 2:
-        sample_indices = {0, 1}
-    elif N == 1:
-        sample_indices = {0}
-    sample_printed = 0
-    max_samples = 3
-
-    for idx in range(N):
-        update_interval = max(1, min(N // 1000, 100))
-        if idx % update_interval == 0 or idx == N - 1:
-            elapsed = time.time() - start_time
-            print_progress_bar(idx + 1, N, elapsed=elapsed)
-        if idx in visited:
+    done = 0
+    for seed in range(N):
+        if rep[seed] != -1:
             continue
-        # BFS to find all states in this orbit
         orbit_start = time.time()
-        queue = [idx]
-        orbit = set([idx])
-        while queue:
-            current = queue.pop()
-            for intron in range(256):
-                next_idx = int(ep[current, intron])
-                if next_idx not in orbit:
-                    orbit.add(next_idx)
-                    queue.append(next_idx)
+        # Vectorized BFS
+        frontier = np.array([seed], dtype=np.int32)
+        members = []
+        while frontier.size:
+            members.append(frontier)
+            neigh = ep[frontier].ravel()  # front_size × 256
+            unseen = neigh[rep[neigh] == -1]
+            rep[unseen] = seed  # provisional
+            frontier = unseen
+        members = np.concatenate(members)
+        # pick lexicographically smallest physical state as final representative
+        lex_rep_state = inverse[members].min()
+        lex_rep_idx = members[inverse[members].argmin()]
+        rep[members] = lex_rep_idx
+        orbit_sizes[int(lex_rep_idx)] = members.size
+        done += members.size
         orbit_elapsed = time.time() - orbit_start
         if orbit_elapsed > 300:
-            print(f"\nWarning: Orbit {idx} took {orbit_elapsed:.1f}s")
-        # Print up to 3 sample orbits, spaced through the run
-        if sample_printed < max_samples and idx in sample_indices:
-            lex_smallest_state = min(inverse_ontology_map[i] for i in orbit)
-            rep_idx = [i for i in orbit if inverse_ontology_map[i] == lex_smallest_state][0]
-            sample_members = sorted(list(orbit))[:5]
-            print(f"\nSample orbit {sample_printed+1}/{max_samples} (idx={idx}): size={len(orbit)}, rep={rep_idx}, members={sample_members} ...")
+            print(f"\nWarning: Orbit {seed} took {orbit_elapsed:.1f}s")
+        if sample_printed < max_samples and seed in sample_indices:
+            sample_members = sorted(list(members))[:5]
+            print(f"\nSample orbit {sample_printed+1}/{max_samples} (seed={seed}): size={members.size}, rep={lex_rep_idx}, members={sample_members} ...")
             sample_printed += 1
-        # Find the lex smallest state_int in the orbit
-        lex_smallest_state = min(inverse_ontology_map[i] for i in orbit)
-        # Find its index
-        rep_idx = [i for i in orbit if inverse_ontology_map[i] == lex_smallest_state][0]
-        for i in orbit:
-            phenomenology[i] = rep_idx
-        visited.update(orbit)
-
-    # Compute orbit sizes
-    orbit_sizes = {}
-    for rep in phenomenology.values():
-        orbit_sizes[rep] = orbit_sizes.get(rep, 0) + 1
+        # Progress bar
+        update_interval = max(1, min(N // 1000, 100))
+        if seed % update_interval == 0 or done == N:
+            elapsed = time.time() - start_time
+            print_progress_bar((rep != -1).sum(), N, elapsed=elapsed)
+    # Final progress bar
+    print_progress_bar(N, N, elapsed=time.time() - start_time)
 
     # Compute autonomic cycles of length 2-6 from archetype
-    origin = int.from_bytes(governance.GENE_Mac_S.tobytes(), 'big')
-    autonomic_cycles = []
-    for length in range(2, 7):
-        for seq in itertools.product(range(256), repeat=length):
-            s = origin
-            for intr in seq:
-                s = governance.apply_gyration_and_transform(s, intr)
-            if s == origin:
-                autonomic_cycles.append(seq)
+    def _enumerate_autonomic_cycles(inverse, governance):
+        origin = int.from_bytes(governance.GENE_Mac_S.tobytes(), 'big')
+        autonomic_cycles = []
+        for length in range(2, 7):
+            for seq in itertools.product(range(256), repeat=length):
+                s = origin
+                for intr in seq:
+                    s = governance.apply_gyration_and_transform(s, intr)
+                if s == origin:
+                    autonomic_cycles.append(seq)
+        return autonomic_cycles
+
+    autonomic_cycles = _enumerate_autonomic_cycles(inverse, governance)
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump({
-            "phenomenology": phenomenology,
-            "orbit_sizes": orbit_sizes,
-            "autonomic_cycles": autonomic_cycles
-        }, f)
-    print(f"Phenomenology map written → {output_path} (unique orbits: {len(set(phenomenology.values()))})")
+        json.dump(
+            {
+                "phenomenology": rep.tolist(),
+                "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes.items()},
+                "autonomic_cycles": autonomic_cycles,
+            },
+            f,
+        )
+    print(f"\nphenomenology_map written → {output_path}")
 
 
 class InformationEngine:
