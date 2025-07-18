@@ -91,8 +91,7 @@ class InferenceEngine:
                 state_index = phenotype_entry.get("context_signature", (0, 0))[0]
                 variety = self.s2.orbit_cardinality[state_index]
                 phenotype_entry["confidence"] = min(
-                    1.0,
-                    phenotype_entry.get("confidence", 0.1) * 1.1 * np.log2(variety + 1) / 8.0
+                    1.0, phenotype_entry.get("confidence", 0.1) * 1.1 * np.log2(variety + 1) / 8.0
                 )
 
             # Persist the updated entry

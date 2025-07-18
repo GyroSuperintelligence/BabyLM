@@ -12,6 +12,7 @@ from typing import Dict, Any
 # Add the baby module to the Python path
 # NOTE: This is for test discovery convenience. For packaging or CI, prefer 'pip install -e .' to avoid sys.path hacks.
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from baby.intelligence import GyroSI, AgentPool
@@ -169,6 +170,7 @@ def mock_time(monkeypatch):
     class TimeController:
         def advance(self, seconds):
             advance_time(seconds)
+
         @property
         def current(self):
             return current_time[0]
@@ -179,9 +181,11 @@ def mock_time(monkeypatch):
 @pytest.fixture
 def generate_test_introns():
     import random
+
     def _gen(count: int, seed: int = 42):
         random.seed(seed)
         return [random.randint(0, 255) for _ in range(count)]
+
     return _gen
 
 
@@ -210,12 +214,17 @@ def assert_ontology_valid(ontology_data: Dict[str, Any]):
 
 class Timer:
     """Context manager for timing code blocks in tests."""
+
     def __init__(self):
         self.elapsed = 0
+
     def __enter__(self):
         import time
+
         self.start = time.perf_counter()
         return self
+
     def __exit__(self, *args):
         import time
+
         self.elapsed = time.perf_counter() - self.start

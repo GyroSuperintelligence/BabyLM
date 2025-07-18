@@ -76,10 +76,10 @@ class IntelligenceEngine:
 
         # Algedonic regulation and autonomic cycles
         self._θ_buf = deque(maxlen=128)
-        self._θ_high = 0.9   # radians
-        self._θ_low  = 0.3
+        self._θ_high = 0.9  # radians
+        self._θ_low = 0.3
         self._cool_introns = (0b01000010,)
-        phenomap = ontology_path.replace("ontology_map.json","phenomenology_map.json")
+        phenomap = ontology_path.replace("ontology_map.json", "phenomenology_map.json")
         try:
             with open(phenomap) as f:
                 pheno_data = json.load(f)
@@ -118,8 +118,8 @@ class IntelligenceEngine:
 
         # Record divergence in θ buffer
         div = self.s2.measure_state_divergence(
-            self.gene_mac_m_int if not self.use_epistemology
-            else self.s2.get_state_from_index(self.current_state_index))
+            self.gene_mac_m_int if not self.use_epistemology else self.s2.get_state_from_index(self.current_state_index)
+        )
         self._θ_buf.append(div)
         return intron
 
@@ -160,10 +160,15 @@ class IntelligenceEngine:
                     self.process_egress(intr)
                     self.operator.learn(
                         self.operator.get_phenotype(
-                            self.current_state_index if self.use_epistemology
-                            else self.s2.get_index_from_state(self.gene_mac_m_int),
-                            intr),
-                        intr)
+                            (
+                                self.current_state_index
+                                if self.use_epistemology
+                                else self.s2.get_index_from_state(self.gene_mac_m_int)
+                            ),
+                            intr,
+                        ),
+                        intr,
+                    )
                 self._pain_streak = 0
         elif θ < self._θ_low:
             self._pain_streak = 0

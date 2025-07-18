@@ -129,6 +129,7 @@ def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> np.nd
     temp = states ^ mask
     return temp ^ (temp & pattern)
 
+
 def apply_gyration_and_transform_all_introns(states: np.ndarray) -> np.ndarray:
     """
     Returns an array shape (states.size, 256) of successor states.
@@ -136,6 +137,7 @@ def apply_gyration_and_transform_all_introns(states: np.ndarray) -> np.ndarray:
     """
     temp = states[:, None] ^ XFORM_MASK[None, :]
     return temp ^ (temp & PATTERN_MASK[None, :])
+
 
 # Optional: test helper for equivalence (not run by default)
 def _test_vector_equivalence():

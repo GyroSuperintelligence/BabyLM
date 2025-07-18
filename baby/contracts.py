@@ -30,6 +30,16 @@ class ManifoldData(TypedDict):
     build_timestamp: float
 
 
+class PhenomenologyData(TypedDict):
+    """Structure of the phenomenology mapping data."""
+
+    schema_version: str
+    phenomenology_map: list[int]
+    orbit_sizes: Dict[str, int]
+    mirror_map: Dict[str, int]
+    metadata: Dict[str, Any]
+
+
 class AgentConfig(TypedDict, total=False):
     """Configuration for GyroSI agents."""
 
@@ -104,6 +114,7 @@ class MaintenanceReport(TypedDict):
 __all__ = [
     "PhenotypeEntry",
     "ManifoldData",
+    "PhenomenologyData",
     "AgentConfig",
     "PreferencesConfig",
     "CycleHookFunction",
