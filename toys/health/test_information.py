@@ -22,13 +22,14 @@ except ImportError:
 from baby import governance
 from baby.information import (
     InformationEngine,
-    build_phenomenology_map_fast,
+    build_phenomenology_map,
     discover_and_save_ontology,
     build_state_transition_table,
 )
 from baby.contracts import ManifoldData
 
 import random
+import hashlib
 
 class TestInformationEngine:
     """Test the InformationEngine class using the real ontology from the meta folder."""
@@ -258,3 +259,68 @@ class TestMapConsistency:
                 next_idx = ep[idx, intron]
                 assert next_idx in all_indices, (
                     f"Epistemology transition from {idx} with intron {intron} lands at invalid index {next_idx}")
+
+
+class TestMetaAssetIntegrity:
+    """Meta asset integrity and post-build checks."""
+
+    @pytest.fixture(scope="class")
+    def meta_paths(self, real_ontology):
+        ontology_path, phenomenology_path, epistemology_path = real_ontology
+        return ontology_path, phenomenology_path, epistemology_path
+
+    def test_ontology_size_and_diameter(self, meta_paths):
+        ontology_path, _, _ = meta_paths
+        with open(ontology_path, "r") as f:
+            ontology_data = json.load(f)
+        assert ontology_data["endogenous_modulus"] == 788_986
+        assert ontology_data["ontology_diameter"] == 6
+        assert len(ontology_data["ontology_map"]) == 788_986
+
+    def test_epistemology_shape_and_range(self, meta_paths):
+        _, _, epistemology_path = meta_paths
+        ep = np.load(epistemology_path, mmap_mode="r")
+        assert ep.shape == (788986, 256)
+        assert ep.dtype == np.int32
+        # Check all entries are valid indices
+        assert np.all((ep >= 0) & (ep < 788986)), "STT contains out-of-bounds indices"
+
+    def test_phenomenology_size_and_range(self, meta_paths):
+        ontology_path, phenomenology_path, _ = meta_paths
+        with open(ontology_path, "r") as f:
+            ontology_data = json.load(f)
+        with open(phenomenology_path, "r") as f:
+            phenomenology = json.load(f)
+        all_indices = set(int(v) for v in ontology_data["ontology_map"].values())
+        assert len(phenomenology) == 788_986
+        for k, v in phenomenology.items():
+            assert int(k) in all_indices, f"Phenomenology key {k} not a valid ontology index"
+            assert int(v) in all_indices, f"Phenomenology value {v} not a valid ontology index"
+
+    def test_tensor_roundtrip(self):
+        # Archetypal state
+        archetype = governance.GENE_Mac_S
+        state_int = InformationEngine.tensor_to_int(archetype)
+        tensor = InformationEngine.int_to_tensor(state_int)
+        assert np.array_equal(tensor, archetype)
+        # A few random states
+        for i in range(5):
+            test_tensor = np.random.choice([-1, 1], size=(4, 2, 3, 2)).astype(np.int8)
+            test_int = InformationEngine.tensor_to_int(test_tensor)
+            roundtrip_tensor = InformationEngine.int_to_tensor(test_int)
+            assert np.array_equal(test_tensor, roundtrip_tensor)
+
+    def test_json_keys_are_strings(self, meta_paths):
+        ontology_path, phenomenology_path, _ = meta_paths
+        with open(ontology_path, "r") as f:
+            ontology_data = json.load(f)
+        with open(phenomenology_path, "r") as f:
+            phenomenology = json.load(f)
+        # All keys/values in ontology_map should be strings (keys) and ints (values)
+        for k, v in ontology_data["ontology_map"].items():
+            assert isinstance(k, str), f"Ontology map key {k} is not a string"
+            assert isinstance(v, int), f"Ontology map value {v} is not an int"
+        # All keys/values in phenomenology should be strings (keys) and ints (values)
+        for k, v in phenomenology.items():
+            assert isinstance(k, str), f"Phenomenology map key {k} is not a string"
+            assert isinstance(v, int), f"Phenomenology map value {v} is not an int"

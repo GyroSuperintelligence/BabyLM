@@ -516,6 +516,22 @@ Handles all measurement utilities, including:
 
 **All measurement, ontology, and state conversion operations are accessed through absolute imports from `baby.information`.**
 
+---
+
+#### Variety-weighted Confidence (Structural Variety Factor):
+
+**Functionality:**
+The InformationEngine provides access to orbit cardinality for each state, enabling structural variety weighting of knowledge confidence. This is used by S3 to attenuate phenotype confidence according to the size of the state’s equivalence class (orbit).
+
+**Method(s):**
+
+get_orbit_cardinality(state_index: int) -> int
+
+All mappings and lookup tables are maintained internally for use by the inference layer.
+
+**Benefit:**
+Ensures that learning is faster and more robust in high-symmetry regions of state space, and more cautious in rare, low-symmetry states. This enforces structural epistemic trust and makes inference more stable.
+
 ### 6.3 S3: `inference.py` – Interpretation & Meaning Management
 
 **Physical Principle:** Mediated duality through endogenous operator
@@ -537,6 +553,36 @@ Implements the `InferenceEngine` class, which converts canonical state indices i
   Returns detailed knowledge base statistics, including confidence, memory utilisation, and age distribution.
 
 All operations reference the absolute imports from `baby.information` and `baby.contracts`. Phenotype storage and type protocols are implemented and accessed through the canonical interfaces.
+
+---
+
+#### Variety-weighted Confidence Integration
+
+**Functionality:**
+When updating a phenotype’s confidence, S3 must use the structural_variety_factor (orbit cardinality) obtained from S2 to modulate how confidence is updated.
+
+**Method(s):**
+- `apply_variety_weighting(phenotype_entry: PhenotypeEntry, state_index: int) -> float`
+
+This is called during the learning update in `learn`.
+
+**Benefit:**
+Prevents overconfident learning in structurally rare states and accelerates trust in robust, symmetric ones.
+
+---
+
+#### Algedonic Regulation (Divergence Alert)
+
+**Functionality:**
+S3/S4 maintain a running buffer of angular divergences (gyrodistance) from the archetype. If the running average exceeds a defined threshold (high or low), an algedonic alert is triggered.
+
+**Method(s):**
+- `check_algedonic_condition() -> str`
+
+Invoked after each ingress/egress cycle, returns "pain", "pleasure", or "homeostatic" according to divergence.
+
+**Benefit:**
+Provides internal homeostatic regulation: runaway divergence is dampened and the system is kept within viable operational bounds. This self-regulation is automatic, requiring no external policy tuning.
 
 ### 6.4 S4/5: `intelligence.py` – Orchestration & API
 
@@ -560,9 +606,39 @@ Implements the `IntelligenceEngine` and `GyroSI` classes, responsible for orches
 
 * **AgentPool** implements robust multi-agent management with configurable eviction and overlay storage.
 
-* **orchestrate\_turn** composes a conversational turn using agents from the pool, mapping application dialogue to fundamental primitives without exposing internal state or physics.
+* **orchestrate_turn** composes a conversational turn using agents from the pool, mapping application dialogue to fundamental primitives without exposing internal state or physics.
 
 All orchestration and external API logic is provided through the minimal interfaces defined in `baby.intelligence`, with strict import discipline and clear separation between physical state, knowledge, and external protocol.
+
+---
+
+#### Algedonic Regulation Execution
+
+**Functionality:**
+IntelligenceEngine must invoke `check_algedonic_condition()` after each full cycle. If "pain" is signalled, the engine applies corrective action to reduce divergence (by replaying stabilising instructions or autonomic cycles). If "pleasure" is signalled, diversity-increasing operations may be introduced to restore exploration.
+
+**Method(s):**
+- `post_cycle_hooks` list must include a hook which runs the algedonic regulator.
+- Corrective actions are modular and may call:
+  - `run_autonomic_cycle()`
+  - `inject_stabilising_instruction()`
+
+**Benefit:**
+The agent will self-stabilise and recover from excursions into pathological or chaotic state regions. This increases resilience and eliminates most runaway failure conditions.
+
+---
+
+#### Autonomic Cycles (Operational Resonance)
+
+**Functionality:**
+During build, S2/S3 identify closed cycles (short loops) in the state transition table. S4 maintains a list of these as autonomic cycles. If the agent is unable to resolve high divergence or receives persistent "pain" alerts, it executes an autonomic cycle to return to a stable state.
+
+**Method(s):**
+- `load_autonomic_cycles()` (called at engine initialisation)
+- `run_autonomic_cycle()` (invoked under persistent divergence)
+
+**Benefit:**
+Guarantees a fail-safe, low-energy “reflex arc” for the agent. If inference, learning, or response generation encounters instability, the agent runs a known safe loop, maintaining viability.
 
 ## 6.5 Shared Contracts and Storage Policies
 

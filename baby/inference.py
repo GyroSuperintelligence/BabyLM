@@ -13,6 +13,7 @@ from typing import Dict, Any, Tuple
 from baby.contracts import PhenotypeEntry, ValidationReport
 from baby.information import InformationEngine
 from baby import governance
+import numpy as np
 
 
 class InferenceEngine:
@@ -86,7 +87,13 @@ class InferenceEngine:
             # Periodic confidence boost for frequently used entries
             if phenotype_entry["usage_count"] % 1000 == 0:
                 phenotype_entry["age_counter"] = min(255, phenotype_entry.get("age_counter", 0) + 1)
-                phenotype_entry["confidence"] = min(1.0, phenotype_entry.get("confidence", 0.1) * 1.1)
+                # Variety-weighted confidence update
+                state_index = phenotype_entry.get("context_signature", (0, 0))[0]
+                variety = self.s2.orbit_cardinality[state_index]
+                phenotype_entry["confidence"] = min(
+                    1.0,
+                    phenotype_entry.get("confidence", 0.1) * 1.1 * np.log2(variety + 1) / 8.0
+                )
 
             # Persist the updated entry
             self.store.put(phenotype_entry.get("context_signature", (0, 0)), phenotype_entry)

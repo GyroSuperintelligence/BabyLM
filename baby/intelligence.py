@@ -16,6 +16,8 @@ import time
 from typing import Dict, Any, Optional, List, cast
 from collections import OrderedDict
 from threading import RLock
+from collections import deque
+import numpy as np
 
 from baby import governance
 from baby.information import InformationEngine
@@ -72,6 +74,19 @@ class IntelligenceEngine:
         # Extension points
         self.post_cycle_hooks: List[CycleHookFunction] = []
 
+        # Algedonic regulation and autonomic cycles
+        self._θ_buf = deque(maxlen=128)
+        self._θ_high = 0.9   # radians
+        self._θ_low  = 0.3
+        self._cool_introns = (0b01000010,)
+        phenomap = ontology_path.replace("ontology_map.json","phenomenology_map.json")
+        try:
+            with open(phenomap) as f:
+                self._autonomic_cycles = json.load(f).get("autonomic_cycles", [])
+        except Exception:
+            self._autonomic_cycles = []
+        self._pain_streak = 0
+
     def process_egress(self, input_byte: int) -> int:
         """
         Process Intelligence Egress: Transform input into action.
@@ -97,6 +112,12 @@ class IntelligenceEngine:
             self._sync_index_from_state_int()
 
         self.cycle_count += 1
+
+        # Record divergence in θ buffer
+        div = self.s2.measure_state_divergence(
+            self.gene_mac_m_int if not self.use_epistemology
+            else self.s2.get_state_from_index(self.current_state_index))
+        self._θ_buf.append(div)
         return intron
 
     def process_ingress(self, last_intron: int) -> int:
@@ -136,6 +157,24 @@ class IntelligenceEngine:
             return int(phenotype) & 0xFF  # Ensure byte range
         else:
             return ord("?")
+
+        # Algedonic decision at start
+        θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
+        if θ > self._θ_high:
+            self._pain_streak += 1
+            last_intron = self._cool_introns[self.cycle_count % len(self._cool_introns)]
+            if self._pain_streak > 256 and self._autonomic_cycles:
+                for intr in self._autonomic_cycles[self.cycle_count % len(self._autonomic_cycles)]:
+                    self.process_egress(intr)
+                    self.operator.learn(
+                        self.operator.get_phenotype(
+                            self.current_state_index if self.use_epistemology
+                            else self.s2.get_index_from_state(self.gene_mac_m_int),
+                            intr),
+                        intr)
+                self._pain_streak = 0
+        elif θ < self._θ_low:
+            self._pain_streak = 0
 
     def add_hook(self, hook: CycleHookFunction) -> None:
         """

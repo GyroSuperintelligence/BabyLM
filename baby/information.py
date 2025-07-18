@@ -31,8 +31,8 @@ from typing import Dict, Any, Optional, Set
 from baby import governance
 
 
-# ---------- Fast phenomenology builder ----------
-def build_phenomenology_map_fast(ep_path: str, output_path: str, ontology_path: str) -> None:
+# ---------- Phenomenology builder ----------
+def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) -> None:
     """
     Robustly derives the canonical-orbit map using explicit orbit finding (BFS) as described in Genetics.md.
     For each state, finds all states in its orbit, determines the lex smallest state, and maps each state index to its canonical representative.
@@ -41,7 +41,7 @@ def build_phenomenology_map_fast(ep_path: str, output_path: str, ontology_path: 
         output_path: Where to write phenomenology_map.json
         ontology_path: Path to ontology_map.json (needed for state_int <-> index mapping)
     """
-    import numpy as np, json, os
+    import numpy as np, json, os, itertools
 
     ep = np.load(ep_path, mmap_mode="r")  # N × 256
     N = ep.shape[0]
@@ -52,10 +52,41 @@ def build_phenomenology_map_fast(ep_path: str, output_path: str, ontology_path: 
 
     visited = set()
     phenomenology = {}
+    import sys
+    import time
+
+    def print_progress_bar(iteration, total, length=40, elapsed=None):
+        percent = 100 * (iteration / float(total))
+        filled_length = int(length * iteration // total)
+        bar = '█' * filled_length + '-' * (length - filled_length)
+        msg = f'\rPhenomenology: |{bar}| {percent:5.1f}% ({iteration}/{total})'
+        if elapsed is not None:
+            msg += f' | Elapsed: {elapsed:.1f}s'
+        print(msg, end='')
+        sys.stdout.flush()
+        if iteration == total:
+            print()  # Newline on completion
+
+    start_time = time.time()
+    sample_indices = set()
+    if N >= 3:
+        sample_indices = {0, N // 2, N - 1}
+    elif N == 2:
+        sample_indices = {0, 1}
+    elif N == 1:
+        sample_indices = {0}
+    sample_printed = 0
+    max_samples = 3
+
     for idx in range(N):
+        update_interval = max(1, min(N // 1000, 100))
+        if idx % update_interval == 0 or idx == N - 1:
+            elapsed = time.time() - start_time
+            print_progress_bar(idx + 1, N, elapsed=elapsed)
         if idx in visited:
             continue
         # BFS to find all states in this orbit
+        orbit_start = time.time()
         queue = [idx]
         orbit = set([idx])
         while queue:
@@ -65,6 +96,16 @@ def build_phenomenology_map_fast(ep_path: str, output_path: str, ontology_path: 
                 if next_idx not in orbit:
                     orbit.add(next_idx)
                     queue.append(next_idx)
+        orbit_elapsed = time.time() - orbit_start
+        if orbit_elapsed > 300:
+            print(f"\nWarning: Orbit {idx} took {orbit_elapsed:.1f}s")
+        # Print up to 3 sample orbits, spaced through the run
+        if sample_printed < max_samples and idx in sample_indices:
+            lex_smallest_state = min(inverse_ontology_map[i] for i in orbit)
+            rep_idx = [i for i in orbit if inverse_ontology_map[i] == lex_smallest_state][0]
+            sample_members = sorted(list(orbit))[:5]
+            print(f"\nSample orbit {sample_printed+1}/{max_samples} (idx={idx}): size={len(orbit)}, rep={rep_idx}, members={sample_members} ...")
+            sample_printed += 1
         # Find the lex smallest state_int in the orbit
         lex_smallest_state = min(inverse_ontology_map[i] for i in orbit)
         # Find its index
@@ -72,9 +113,30 @@ def build_phenomenology_map_fast(ep_path: str, output_path: str, ontology_path: 
         for i in orbit:
             phenomenology[i] = rep_idx
         visited.update(orbit)
+
+    # Compute orbit sizes
+    orbit_sizes = {}
+    for rep in phenomenology.values():
+        orbit_sizes[rep] = orbit_sizes.get(rep, 0) + 1
+
+    # Compute autonomic cycles of length 2-6 from archetype
+    origin = int.from_bytes(governance.GENE_Mac_S.tobytes(), 'big')
+    autonomic_cycles = []
+    for length in range(2, 7):
+        for seq in itertools.product(range(256), repeat=length):
+            s = origin
+            for intr in seq:
+                s = governance.apply_gyration_and_transform(s, intr)
+            if s == origin:
+                autonomic_cycles.append(seq)
+
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(phenomenology, f)
+        json.dump({
+            "phenomenology": phenomenology,
+            "orbit_sizes": orbit_sizes,
+            "autonomic_cycles": autonomic_cycles
+        }, f)
     print(f"Phenomenology map written → {output_path} (unique orbits: {len(set(phenomenology.values()))})")
 
 
@@ -121,6 +183,28 @@ class InformationEngine:
             raise ValueError(f"Expected endogenous modulus 788,986, got {self.endogenous_modulus}")
         if self.ontology_diameter != 6:
             raise ValueError(f"Expected ontology diameter 6, got {self.ontology_diameter}")
+
+        # Load orbit sizes if available
+        self.orbit_cardinality = np.ones(self.endogenous_modulus, dtype=np.uint32)
+        phenomap_path = ontology_data.get('phenomap_path')
+        if not phenomap_path and hasattr(self, 'ontology_map'):
+            # Try to infer path from known conventions
+            phenomap_path = None
+            if hasattr(self, 'ontology_map'):
+                # If ontology_map was loaded from a file, try to guess the path
+                # (This is a fallback; ideally, the caller should provide the path)
+                pass
+        if not phenomap_path and 'ontology_map_path' in ontology_data:
+            phenomap_path = ontology_data['ontology_map_path'].replace("ontology_map.json","phenomenology_map.json")
+        if not phenomap_path:
+            phenomap_path = "memories/public/meta/phenomenology_map.json"
+        if os.path.exists(phenomap_path):
+            with open(phenomap_path) as f:
+                payload = json.load(f)
+            sz = payload.get("orbit_sizes", {})
+            self.orbit_cardinality = np.fromiter(
+                (sz.get(str(i),1) for i in range(self.endogenous_modulus)),
+                dtype=np.uint32)
 
     def get_index_from_state(self, state_int: int) -> int:
         """
@@ -349,7 +433,9 @@ def build_state_transition_table(ontology_path: str, output_path: str) -> None:
     """
     import numpy as np
     from numpy.lib.format import open_memmap
+    import time
 
+    start_time = time.time()
     data = json.load(open(ontology_path))
     idx_of = {int(k): v for k, v in data["ontology_map"].items()}
     states = np.fromiter((int(k) for k in sorted(idx_of.keys())), dtype=np.uint64)
@@ -360,7 +446,8 @@ def build_state_transition_table(ontology_path: str, output_path: str) -> None:
         next_states = np.vectorize(governance.apply_gyration_and_transform, otypes=[np.uint64])(states, intron)
         ep[:, intron] = np.searchsorted(sorted_states, next_states)
     ep.flush()
-    print(f"Epistemology table built → {output_path}")
+    elapsed = time.time() - start_time
+    print(f"Epistemology table built → {output_path} in {elapsed:.2f}s")
 
 
 if __name__ == "__main__":
@@ -385,7 +472,7 @@ if __name__ == "__main__":
     if args.command == "ontology":
         discover_and_save_ontology(args.output)
     elif args.command == "phenomenology":
-        build_phenomenology_map_fast(args.ep, args.output, args.ontology)
+        build_phenomenology_map(args.ep, args.output, args.ontology)
     elif args.command == "epistemology":
         build_state_transition_table(args.ontology, args.output)
     else:
