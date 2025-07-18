@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", message=".*found in sys.modules after import of package.*")
 # 1. Generate ontology_map.json (the ontology)
 # python -m baby.information ontology --output memories/public/meta/ontology_map.json
 #
