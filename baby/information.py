@@ -506,8 +506,11 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) 
     assert np.all(canonical >= 0), "FATAL: Not all states were assigned to an orbit."
 
     # --- 3. Mirror Map ---
+    reps = sorted(set(canonical.tolist()))  # the true canonical representative indices
+    
     print("Step 3: Identifying mirror pairs...")
     mirror_map: Dict[int, int] = {}
+    
     for rep in reps:
         if rep in mirror_map:
             continue
@@ -520,6 +523,11 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) 
             mirror_map[mirror_rep] = rep
         except ValueError:
             mirror_map[rep] = -1
+    
+    # Debug assertion to verify mirror symmetry
+    for k, v in mirror_map.items():
+        if v != -1:
+            assert mirror_map.get(v) == k, f"Mirror symmetry violated: {k} ↔ {v} inconsistency"
 
     # --- 4. Create and Save Artifact ---
     print("Step 4: Writing final artifact...")
