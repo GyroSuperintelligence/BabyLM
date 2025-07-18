@@ -285,25 +285,31 @@ def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
     depth = 0
     
     while current_level:
-        next_level = []
+        next_level_set = set()
         for state in current_level:
             for intron in range(256):
                 next_state = governance.apply_gyration_and_transform(state, intron)
                 if next_state not in discovered:
                     discovered.add(next_state)
-                    next_level.append(next_state)
+                    next_level_set.add(next_state)
         
-        current_level = next_level
+        # Prepare for the next iteration
+        current_level = list(next_level_set)
         depth += 1
-        progress.update(len(discovered), extra=f"depth={depth}")
+        progress.update(len(discovered), total=788_986, extra=f"depth={depth}")
     
     progress.done()
     
+    # The final number of levels IS the depth. The diameter is depth - 1.
+    measured_diameter = depth - 1
+
     # Validate
     if len(discovered) != 788_986:
         raise RuntimeError(f"Expected 788,986 states, found {len(discovered):,}")
-    if depth != 6:
-        raise RuntimeError(f"Expected diameter 6, found {depth}")
+    
+    # BUG FIX #1: Correctly check the measured diameter.
+    if measured_diameter != 6:
+        raise RuntimeError(f"Expected diameter 6, found {measured_diameter}")
     
     # Create mapping
     ontology_map = {state: idx for idx, state in enumerate(sorted(discovered))}
@@ -311,9 +317,10 @@ def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
     # Save
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
+        json_compatible_map = {str(k): v for k, v in ontology_map.items()}
         json.dump({
             "schema_version": "0.9.6",
-            "ontology_map": ontology_map,
+            "ontology_map": json_compatible_map,
             "endogenous_modulus": 788_986,
             "ontology_diameter": 6,
             "total_states": 788_986,
