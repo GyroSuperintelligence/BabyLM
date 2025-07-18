@@ -82,6 +82,7 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
             print()  # Newline on completion
 
     BATCH = 100_000   # 100 000 × 256 × 4 B = 98 MB
+    done = 0
     for seed in range(N):
         if rep[seed] != -1:
             continue
