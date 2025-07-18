@@ -3,11 +3,11 @@ warnings.filterwarnings("ignore", message=".*found in sys.modules after import o
 # 1. Generate ontology_map.json (the ontology)
 # python -m baby.information ontology --output memories/public/meta/ontology_map.json
 #
-# 2. Generate phenomenology_map.json (the phenomenology mapping)
-# python -m baby.information phenomenology --ontology_map memories/public/meta/ontology_map.json --output memories/public/meta/phenomenology_map.json
-#
-# 3. Generate epistemology.npy (the state transition table)
+# 2. Generate epistemology.npy (the state transition table)
 # python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
+#
+# 3. Generate phenomenology_map.json (the phenomenology mapping)
+# python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy --output memories/public/meta/phenomenology_map.json --ontology memories/public/meta/ontology_map.json
 """
 S2: Information - Measurement & Storage
 
@@ -16,6 +16,7 @@ storage coordination, and conversion between state representations.
 """
 
 import numpy as np
+import argparse
 
 # Try to use ujson for speed, fall back to standard json if unavailable
 # NOTE: The following import may trigger a false positive from Pyright (reportMissingModuleSource)
@@ -27,141 +28,11 @@ except ImportError:
     import json  # type: ignore
 import time
 import os
-from typing import Dict, Any, Optional, Set
+import numpy as np
+import sys
+from typing import Dict, Any, List, Tuple, Set, Optional
+
 from baby import governance
-
-
-# ---------- Phenomenology builder ----------
-def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) -> None:
-    """
-    Robustly derives the canonical-orbit map using explicit orbit finding (BFS) as described in Genetics.md.
-    For each state, finds all states in its orbit, determines the lex smallest state, and maps each state index to its canonical representative.
-    Args:
-        ep_path: Path to epistemology.npy (int32 array, shape (N,256)).
-        output_path: Where to write phenomenology_map.json
-        ontology_path: Path to ontology_map.json (needed for state_int <-> index mapping)
-    """
-    import numpy as np, json, os, time, itertools, sys
-    from baby import governance
-
-    done = 0
-    ep = np.load(ep_path, mmap_mode="r")  # N × 256 int32
-    N = ep.shape[0]
-
-    # canonical representative for every state, –1 = unknown
-    rep = np.full(N, -1, np.int32)
-
-    # index → physical‑state integer (needed to choose lexicographic minima)
-    inverse = np.empty(N, np.uint64)
-    with open(ontology_path) as f:
-        data = json.load(f)["ontology_map"]
-    for k, v in data.items():
-        inverse[v] = int(k)
-
-    orbit_sizes = {}
-    start_time = time.time()
-    sample_indices = set()
-    if N >= 3:
-        sample_indices = {0, N // 2, N - 1}
-    elif N == 2:
-        sample_indices = {0, 1}
-    elif N == 1:
-        sample_indices = {0}
-    sample_printed = 0
-    max_samples = 3
-
-    def print_progress_bar(iteration, total, length=40, elapsed=None):
-        percent = 100 * (iteration / float(total))
-        filled_length = int(length * iteration // total)
-        bar = '█' * filled_length + '-' * (length - filled_length)
-        msg = f'\rPhenomenology: |{bar}| {percent:5.1f}% ({iteration}/{total})'
-        if elapsed is not None:
-            msg += f' | Elapsed: {elapsed:.1f}s'
-        print(msg, end='')
-        sys.stdout.flush()
-        if iteration == total:
-            print()  # Newline on completion
-
-    BATCH = 100_000   # 100 000 × 256 × 4 B = 98 MB
-    done = 0
-    REPORT_STEP = max(50_000, N // 100)
-    next_report = REPORT_STEP
-    last_log_time = time.time()
-    for seed in range(N):
-        if rep[seed] != -1:
-            continue
-        orbit_start = time.time()
-        # Vectorized BFS with batching and deduplication
-        frontier = np.array([seed], dtype=np.int32)
-        members = []
-        while frontier.size:
-            members.append(frontier)
-            new_chunks = []
-            for start in range(0, frontier.size, BATCH):
-                f_batch = frontier[start:start+BATCH]
-                neigh   = ep[f_batch].ravel()
-                mask    = rep[neigh] == -1
-                if mask.any():
-                    unseen = neigh[mask]
-                    rep[unseen] = seed
-                    new_chunks.append(unseen)
-            if new_chunks:
-                frontier = np.unique(np.concatenate(new_chunks))  # deduplicate
-            else:
-                frontier = np.empty(0, np.int32)
-        members = np.concatenate(members)
-        # pick lexicographically smallest physical state as final representative
-        lex_rep_state = inverse[members].min()
-        lex_rep_idx = members[inverse[members].argmin()]
-        rep[members] = lex_rep_idx
-        orbit_sizes[int(lex_rep_idx)] = members.size
-        done += members.size
-        orbit_elapsed = time.time() - orbit_start
-        if orbit_elapsed > 300:
-            print(f"\nWarning: Orbit {seed} took {orbit_elapsed:.1f}s")
-        if sample_printed < max_samples and seed in sample_indices:
-            sample_members = sorted(list(members))[:5]
-            print(f"\nSample orbit {sample_printed+1}/{max_samples} (seed={seed}): size={members.size}, rep={lex_rep_idx}, members={sample_members} ...")
-            sample_printed += 1
-        # In-place, concise progress reporting
-        now = time.time()
-        if done >= next_report or now - last_log_time >= 60 or done == N:
-            pct = 100.0 * done / N
-            elapsed = now - start_time
-            msg = f"\r[phenomenology] {done:>7d}/{N}  ({pct:5.1f}%)  elapsed {elapsed:6.1f}s"
-            print(msg, end='', flush=True)
-            last_log_time = now
-            while next_report <= done:
-                next_report += REPORT_STEP
-    print()  # Newline at end for clean prompt
-
-    # Compute autonomic cycles of length 2-6 from archetype
-    def _enumerate_autonomic_cycles(inverse, governance):
-        origin = int.from_bytes(governance.GENE_Mac_S.tobytes(), 'big')
-        autonomic_cycles = []
-        for length in range(2, 7):
-            for seq in itertools.product(range(256), repeat=length):
-                s = origin
-                for intr in seq:
-                    s = governance.apply_gyration_and_transform(s, intr)
-                if s == origin:
-                    autonomic_cycles.append(seq)
-        return autonomic_cycles
-
-    autonomic_cycles = _enumerate_autonomic_cycles(inverse, governance)
-
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(
-            {
-                "phenomenology": rep.tolist(),
-                "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes.items()},
-                "autonomic_cycles": autonomic_cycles,
-            },
-            f,
-        )
-    print(f"\nphenomenology_map written → {output_path}")
-
 
 class InformationEngine:
     """
@@ -367,137 +238,273 @@ class InformationEngine:
         """
         current_tensor = self.int_to_tensor(state_int)
         return self.gyrodistance_angular(current_tensor, governance.GENE_Mac_S)
+    
+    
+# ==============================================================================
+# Utility: Clean single-line progress reporter
+# ==============================================================================
+class ProgressReporter:
+    def __init__(self, desc: str):
+        self.desc = desc
+        self.start_time = time.time()
+        self.last_update = 0
+        
+    def update(self, current: int, total: Optional[int] = None, extra: str = ""):
+        now = time.time()
+        if now - self.last_update < 0.1:  # Throttle updates to 10Hz
+            return
+        
+        elapsed = now - self.start_time
+        rate = current / elapsed if elapsed > 0 else 0
+        
+        msg = f"\r{self.desc}: {current:,}"
+        if total is not None:
+            pct = 100.0 * current / total
+            msg += f"/{total:,} ({pct:.1f}%)"
+        msg += f" | {rate:.0f}/s | {elapsed:.1f}s"
+        if extra:
+            msg += f" | {extra}"
+        
+        print(msg + " " * 10, end='', flush=True)
+        self.last_update = now
+    
+    def done(self):
+        elapsed = time.time() - self.start_time
+        print(f"\r{self.desc}: Done in {elapsed:.1f}s" + " " * 50)
 
-
-def discover_and_save_ontology(output_path: str) -> None:
-    """
-    S2 responsibility: Discovers the complete physical ontology.
-
-    Explores the full state space starting from GENE_Mac_S and discovers
-    all reachable states. Validates the expected 788,986 states at diameter 6.
-
-    Args:
-        output_path: Path to save ontology data
-
-    Raises:
-        RuntimeError: If discovered ontology doesn't match expected constants
-    """
-    print("Discovering physical ontology...")
-    start_time = time.time()
-
-    # Start from the archetypal state
+# ==============================================================================
+# STEP 1: Ontology Discovery
+# ==============================================================================
+def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
+    """Discovers the complete 788,986 state manifold via BFS."""
+    progress = ProgressReporter("Discovering ontology")
+    
     origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
-    discovered_states = {origin_int}
-    queue = [origin_int]
+    discovered = {origin_int}
+    current_level = [origin_int]
     depth = 0
-
-    # Breadth-first exploration
-    while queue:
-        next_queue = []
-
-        for current_int in queue:
-            # Try all possible intron transformations
+    
+    while current_level:
+        next_level = []
+        for state in current_level:
             for intron in range(256):
-                next_int = governance.apply_gyration_and_transform(current_int, intron)
-
-                if next_int not in discovered_states:
-                    discovered_states.add(next_int)
-                    next_queue.append(next_int)
-
-        if not next_queue:
-            break
-
-        queue = next_queue
+                next_state = governance.apply_gyration_and_transform(state, intron)
+                if next_state not in discovered:
+                    discovered.add(next_state)
+                    next_level.append(next_state)
+        
+        current_level = next_level
         depth += 1
-
-        if depth % 1 == 0:
-            print(f"Depth {depth}: {len(discovered_states):,} states discovered")
-
-    # Validate against expected constants
-    if len(discovered_states) != 788_986:
-        raise RuntimeError(
-            f"CRITICAL: Expected 788,986 states, found {len(discovered_states):,}. "
-            f"This indicates a fundamental error in the physics implementation."
-        )
-
+        progress.update(len(discovered), extra=f"depth={depth}")
+    
+    progress.done()
+    
+    # Validate
+    if len(discovered) != 788_986:
+        raise RuntimeError(f"Expected 788,986 states, found {len(discovered):,}")
     if depth != 6:
-        raise RuntimeError(
-            f"CRITICAL: Expected ontology diameter 6, found {depth}. " f"This violates the theoretical predictions."
-        )
-
-    # Create canonical mapping
-    sorted_state_ints = sorted(discovered_states)
-    ontology_map = {state_int: i for i, state_int in enumerate(sorted_state_ints)}
-
-    # Package ontology data
-    ontology_data: Dict[str, Any] = {
-        "schema_version": "0.9.6",
-        "ontology_map": ontology_map,
-        "endogenous_modulus": len(ontology_map),
-        "ontology_diameter": depth,
-        "total_states": len(discovered_states),
-        "build_timestamp": time.time(),
-    }
-
-    # Save to disk
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        raise RuntimeError(f"Expected diameter 6, found {depth}")
+    
+    # Create mapping
+    ontology_map = {state: idx for idx, state in enumerate(sorted(discovered))}
+    
+    # Save
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(ontology_data, f)
+        json.dump({
+            "schema_version": "0.9.6",
+            "ontology_map": ontology_map,
+            "endogenous_modulus": 788_986,
+            "ontology_diameter": 6,
+            "total_states": 788_986,
+            "build_timestamp": time.time()
+        }, f)
+    
+    return ontology_map
 
-    elapsed = time.time() - start_time
-    print(f"Manifold discovery complete in {elapsed:.2f}s")
-    print(f"Discovered {len(discovered_states):,} states at diameter {depth}")
-    print(f"Saved to: {output_path}")
-
-
-def build_state_transition_table(ontology_path: str, output_path: str) -> None:
-    """
-    Vectorized build of the state transition table (epistemology) using NumPy and memmap.
-    """
-    import numpy as np
-    from numpy.lib.format import open_memmap
-    import time
-
-    start_time = time.time()
-    data = json.load(open(ontology_path))
-    idx_of = {int(k): v for k, v in data["ontology_map"].items()}
-    states = np.fromiter((int(k) for k in sorted(idx_of.keys())), dtype=np.uint64)
-    N = len(states)
-    ep = open_memmap(output_path, dtype=np.int32, mode="w+", shape=(N, 256))  # N rows, 256 introns
-    sorted_states = states.copy()
-    for intron in range(256):
-        next_states = np.vectorize(governance.apply_gyration_and_transform, otypes=[np.uint64])(states, intron)
-        ep[:, intron] = np.searchsorted(sorted_states, next_states)
+# ==============================================================================
+# STEP 2: Epistemology Table
+# ==============================================================================
+def build_state_transition_table(ontology_map: Dict[int, int], output_path: str):
+    """Builds the N×256 state transition table."""
+    progress = ProgressReporter("Building epistemology")
+    
+    N = len(ontology_map)
+    states = np.array(sorted(ontology_map.keys()), dtype=np.uint64)
+    
+    # Memory-mapped output
+    ep = np.lib.format.open_memmap(output_path, dtype=np.int32, mode="w+", shape=(N, 256))
+    
+    # Process in chunks for memory efficiency
+    CHUNK_SIZE = 10_000
+    for chunk_start in range(0, N, CHUNK_SIZE):
+        chunk_end = min(chunk_start + CHUNK_SIZE, N)
+        chunk_states = states[chunk_start:chunk_end]
+        
+        for intron in range(256):
+            # Vectorized transformation
+            next_states = np.array([
+                governance.apply_gyration_and_transform(int(s), intron) 
+                for s in chunk_states
+            ], dtype=np.uint64)
+            
+            # Map to indices via binary search
+            ep[chunk_start:chunk_end, intron] = np.searchsorted(states, next_states)
+        
+        progress.update(chunk_end, N)
+    
     ep.flush()
-    elapsed = time.time() - start_time
-    print(f"Epistemology table built → {output_path} in {elapsed:.2f}s")
+    progress.done()
+    return ep
+
+# ==============================================================================
+# STEP 3: Phenomenology Map with Fixed Autonomic Cycles
+# ==============================================================================
+def find_simple_cycles(ep: np.ndarray, start_idx: int, max_length: int = 6) -> List[Tuple[int, ...]]:
+    """Finds simple cycles using iterative deepening DFS with path tracking."""
+    cycles = []
+    for target_length in range(2, max_length + 1):
+        # Use iterative deepening to find cycles of exactly target_length
+        stack: List[Tuple[int, Tuple[int, ...], Set[int]]] = [(start_idx, tuple(), set([start_idx]))]
+        while stack:
+            curr_idx, path, visited = stack.pop()
+            if len(path) == target_length:
+                # Check if we can return to start
+                if start_idx in ep[curr_idx]:
+                    intron = np.where(ep[curr_idx] == start_idx)[0][0]
+                    cycles.append(path + (int(intron),))
+                continue
+            # Explore neighbors
+            for intron in range(256):
+                next_idx = ep[curr_idx, intron]
+                if next_idx not in visited or (next_idx == start_idx and len(path) == target_length - 1):
+                    new_visited = visited | {next_idx} if next_idx != start_idx else visited
+                    stack.append((next_idx, path + (intron,), new_visited))
+    return cycles
+
+def build_phenomenology_map(ep_path: str, ontology_map: Dict[int, int], output_path: str):
+    """Builds canonical orbit map and finds autonomic cycles."""
+    progress = ProgressReporter("Building phenomenology")
+    
+    ep = np.load(ep_path, mmap_mode="r")
+    N = ep.shape[0]
+    
+    # Canonical representatives
+    canonical = np.full(N, -1, dtype=np.int32)
+    
+    # Inverse mapping for lexicographic comparison
+    idx_to_state = {idx: state for state, idx in ontology_map.items()}
+    
+    orbit_sizes = {}
+    orbits_found = 0
+    
+    # Find orbits
+    for seed in range(N):
+        if canonical[seed] != -1:
+            continue
+        
+        # BFS to find orbit
+        orbit = {seed}
+        frontier = [seed]
+        min_state = idx_to_state[seed]
+        min_idx = seed
+        
+        while frontier:
+            current = frontier.pop(0)
+            for next_idx in ep[current]:
+                if next_idx not in orbit:
+                    orbit.add(next_idx)
+                    frontier.append(next_idx)
+                    
+                    # Track lexicographic minimum
+                    state = idx_to_state[next_idx]
+                    if state < min_state:
+                        min_state = state
+                        min_idx = next_idx
+        
+        # Assign canonical representative
+        for idx in orbit:
+            canonical[idx] = min_idx
+        
+        orbit_sizes[min_idx] = len(orbit)
+        orbits_found += 1
+        progress.update(sum(orbit_sizes.values()), N, f"orbits={orbits_found}")
+    
+    progress.done()
+    
+    # Find autonomic cycles from archetype
+    print("\rFinding autonomic cycles...", end='', flush=True)
+    origin_state = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
+    origin_idx = ontology_map[origin_state]
+    cycles = find_simple_cycles(ep, origin_idx, max_length=6)
+    print(f"\rFound {len(cycles)} autonomic cycles" + " " * 30)
+    
+    # Save results
+    with open(output_path, "w") as f:
+        json.dump({
+            "phenomenology_map": canonical.tolist(),
+            "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes.items()},
+            "autonomic_cycles": [list(c) for c in cycles]
+        }, f)
+            
+def parse_args():
+    parser = argparse.ArgumentParser(description="GyroSI asset builder")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Ontology
+    p_ont = subparsers.add_parser("ontology")
+    p_ont.add_argument("--output", required=True)
+
+    # Epistemology
+    p_epi = subparsers.add_parser("epistemology")
+    p_epi.add_argument("--ontology", required=True)
+    p_epi.add_argument("--output", required=True)
+
+    # Phenomenology
+    p_pheno = subparsers.add_parser("phenomenology")
+    p_pheno.add_argument("--ep", required=True)
+    p_pheno.add_argument("--output", required=True)
+    p_pheno.add_argument("--ontology", required=True)
+
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    import argparse
+    args = parse_args()
 
-    parser = argparse.ArgumentParser(description="Build ontology assets (ontology, canonical map, STT)")
-    subparsers = parser.add_subparsers(dest="command")
-
-    parser_ontology = subparsers.add_parser("ontology", help="Build and save the ontology")
-    parser_ontology.add_argument("--output", required=True, help="Path to output ontology_map.json")
-
-    parser_phenomenology = subparsers.add_parser("phenomenology", help="Build and save the phenomenology map (fast)")
-    parser_phenomenology.add_argument("--ep", required=True, help="Path to epistemology.npy")
-    parser_phenomenology.add_argument("--output", required=True, help="Path to output phenomenology_map.json")
-    parser_phenomenology.add_argument("--ontology", required=True, help="Path to ontology_map.json")
-
-    parser_epistemology = subparsers.add_parser("epistemology", help="Build and save the state transition table (STT)")
-    parser_epistemology.add_argument("--ontology", required=True, help="Path to ontology_map.json")
-    parser_epistemology.add_argument("--output", required=True, help="Path to output epistemology.npy")
-
-    args = parser.parse_args()
     if args.command == "ontology":
-        discover_and_save_ontology(args.output)
-    elif args.command == "phenomenology":
-        build_phenomenology_map(args.ep, args.output, args.ontology)
+        print("=== [Step 1] Ontology Generation ===")
+        ontology_map = discover_and_save_ontology(args.output)
+        print(f"✓ Saved: {args.output}")
+        print(f"✓ Total states discovered: {len(ontology_map):,}")
+        print()
+
     elif args.command == "epistemology":
-        build_state_transition_table(args.ontology, args.output)
+        print("=== [Step 2] Epistemology Table ===")
+        with open(args.ontology) as f:
+            ontology_data = json.load(f)
+        ontology_map = {int(k): v for k, v in ontology_data["ontology_map"].items()}
+        build_state_transition_table(ontology_map, args.output)
+        file_size = os.path.getsize(args.output) / 1024**2
+        print(f"✓ Saved: {args.output}")
+        print(f"✓ File size: {file_size:.1f} MB")
+        print()
+
+    elif args.command == "phenomenology":
+        print("=== [Step 3] Phenomenology Mapping ===")
+        with open(args.ontology) as f:
+            ontology_data = json.load(f)
+        ontology_map = {int(k): v for k, v in ontology_data["ontology_map"].items()}
+        build_phenomenology_map(args.ep, ontology_map, args.output)
+        print(f"✓ Saved: {args.output}")
+        with open(args.output) as f:
+            pheno_data = json.load(f)
+        print(f"✓ Total states: {ontology_data['endogenous_modulus']:,}")
+        print(f"✓ Unique orbits: {len(pheno_data['orbit_sizes']):,}")
+        print(f"✓ Autonomic cycles: {len(pheno_data['autonomic_cycles']):,}")
+        print(f"✓ Largest orbit: {max(pheno_data['orbit_sizes'].values()):,} states")
+        print()
+
     else:
-        print("\nHint: You can run this as 'python -m baby.information ontology --output ...' to avoid path headaches.")
-        parser.print_help()
+        print("Unknown command", file=sys.stderr)
+        sys.exit(1)

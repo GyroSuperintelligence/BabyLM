@@ -32,7 +32,6 @@ jobs:
       - name: Build phenomenology_map.json
         run: |
           python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy --output memories/public/meta/phenomenology_map.json --ontology memories/public/meta/ontology_map.json
-# If you want even more speed, add numba to requirements.txt and pip install numba
 
       - name: Add and commit LFS files
         run: |
@@ -43,4 +42,4 @@ jobs:
           git commit -m "Add prebuilt ontology assets [skip ci]" || echo "No changes to commit"
           git push
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
