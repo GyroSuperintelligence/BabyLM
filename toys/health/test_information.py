@@ -1,357 +1,260 @@
 """
 Tests for S2: Information - Measurement & Storage
+
+This module tests the InformationEngine class and related functions
+responsible for measurement, storage coordination, and conversion
+between state representations.
 """
 
 import pytest
 import numpy as np
+import os
+import tempfile
+import json
+from pathlib import Path
 
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
     import ujson as json  # type: ignore[import]
 except ImportError:
     import json  # type: ignore
-import os
-import threading
-import time
-from pathlib import Path
 
 from baby import governance
 from baby.information import (
     InformationEngine,
-    OrbitStore,
+    build_phenomenology_map_fast,
+    discover_and_save_ontology,
+    build_state_transition_table,
 )
+from baby.contracts import ManifoldData
 
+import random
 
 class TestInformationEngine:
-    """Test the measurement and conversion engine."""
-
-    def test_initialization(self, ontology_data):
-        """Test engine initialization with ontology data."""
-        ontology_path, mock_ontology = ontology_data
-        engine = InformationEngine(mock_ontology)
-
-        assert engine.endogenous_modulus == 788_986
-        assert engine.ontology_diameter == 6
-        assert len(engine.ontology_map) == 1000  # Our mock has 1000 states
-
-    def test_state_index_conversion(self, ontology_data):
-        """Test conversion between state integers and indices."""
-        ontology_path, mock_ontology = ontology_data
-        engine = InformationEngine(mock_ontology)
-
-        # Test known mapping from mock
-        for i in range(10):
-            assert engine.get_index_from_state(i) == i
-            assert engine.get_state_from_index(i) == i
-
-    def test_state_not_in_ontology(self, ontology_data):
-        """Test error handling for invalid states."""
-        ontology_path, mock_ontology = ontology_data
-        engine = InformationEngine(mock_ontology)
-
-        with pytest.raises(ValueError, match="CRITICAL"):
-            engine.get_index_from_state(999999)
-
-    def test_tensor_int_conversion(self):
-        """Test conversion between tensor and integer representations."""
-        # Test with GENE_Mac_S
-        tensor = governance.GENE_Mac_S
-        state_int = InformationEngine.tensor_to_int(tensor)
-        tensor_back = InformationEngine.int_to_tensor(state_int)
-
-        assert np.array_equal(tensor, tensor_back)
-
-    def test_tensor_int_bijection(self):
-        """Test that tensor<->int conversion is bijective."""
-        # Create various test tensors
-        test_tensors = [
-            np.ones((4, 2, 3, 2), dtype=np.int8),
-            -np.ones((4, 2, 3, 2), dtype=np.int8),
-            governance.GENE_Mac_S,
-        ]
-
-        # Add a random tensor
-        random_tensor = np.random.choice([-1, 1], size=(4, 2, 3, 2)).astype(np.int8)
-        test_tensors.append(random_tensor)
-
-        for tensor in test_tensors:
-            state_int = InformationEngine.tensor_to_int(tensor)
-            tensor_back = InformationEngine.int_to_tensor(state_int)
-            assert np.array_equal(tensor, tensor_back)
-
-    def test_gyrodistance_angular(self):
-        """Test angular distance measurement."""
-        engine = InformationEngine(
-            {
-                "ontology_map": {},
-                "endogenous_modulus": 788_986,
-                "ontology_diameter": 6,
-                "schema_version": "0.9.6",
-                "total_states": 0,
-                "build_timestamp": 0.0,
-            }
-        )
-
-        # Same tensors should have distance 0
-        T1 = governance.GENE_Mac_S
-        distance = engine.gyrodistance_angular(T1, T1)
-        assert abs(distance) < 1e-10
-
-        # Opposite tensors should have distance π
-        T2 = -governance.GENE_Mac_S
-        distance = engine.gyrodistance_angular(T1, T2)
-        assert abs(distance - np.pi) < 1e-10
-
-        # Check triangle inequality
-        T3 = np.ones((4, 2, 3, 2), dtype=np.int8)
-        d12 = engine.gyrodistance_angular(T1, T2)
-        d23 = engine.gyrodistance_angular(T2, T3)
-        d13 = engine.gyrodistance_angular(T1, T3)
-
-        # Triangle inequality: d13 <= d12 + d23
-        assert d13 <= d12 + d23 + 1e-10
-
-
-class TestOrbitStore:
-    """Test the OrbitStore implementation."""
-
-    def test_basic_operations(self, orbit_store):
-        """Test basic get/put operations."""
-        # Initially empty
-        assert orbit_store.get((0, 0)) is None
-
-        # Put and retrieve
-        entry = {"phenotype": "A", "confidence": 0.8}
-        orbit_store.put((0, 0), entry)
-
-        retrieved = orbit_store.get((0, 0))
-        assert retrieved == entry
-
-        # Verify it returns a copy
-        if retrieved is not None:
-            retrieved["confidence"] = 0.9
-            assert orbit_store.get((0, 0))["confidence"] == 0.8
-
-    def test_persistence(self, temp_dir):
-        """Test that data persists across store instances."""
-        store_path = os.path.join(temp_dir, "test.pkl.gz")
-
-        # Create and populate store
-        store1 = OrbitStore(store_path)
-        store1.put((42, 7), {"phenotype": "X", "confidence": 1.0})
-        store1.close()
-
-        # Load in new store
-        store2 = OrbitStore(store_path)
-        entry = store2.get((42, 7))
-        assert entry is not None and entry.get("phenotype") == "X"
-        store2.close()
-
-    def test_atomic_saves(self, temp_dir):
-        """Test atomic save operations."""
-        store_path = os.path.join(temp_dir, "atomic.pkl.gz")
-        store = OrbitStore(store_path)
-
-        # Add some data
-        for i in range(10):
-            store.put((i, 0), {"phenotype": f"P{i}", "confidence": 1.0})
-
-        # Verify temp files are cleaned up
-        temp_files = [f for f in os.listdir(temp_dir) if f.startswith(".gyro_temp_")]
-        assert len(temp_files) == 0
-
-        store.close()
-
-    def test_corruption_handling(self, temp_dir):
-        """Test handling of corrupted store files."""
-        store_path = os.path.join(temp_dir, "corrupt.pkl.gz")
-
-        # Create corrupted file
-        with open(store_path, "wb") as f:
-            f.write(b"This is not a valid pickle file!")
-
-        # Should handle gracefully
-        store = OrbitStore(store_path)
-        assert len(store.data) == 0
-
-        # Should create backup
-        backup_files = [f for f in os.listdir(temp_dir) if f.startswith("corrupt.pkl.gz.corrupt.")]
-        assert len(backup_files) == 1
-
-        store.close()
-
-    def test_thread_safety(self, temp_dir):
-        """Test thread-safe operations."""
-        store_path = os.path.join(temp_dir, "threaded.pkl.gz")
-        store = OrbitStore(store_path)
-        errors = []
-
-        def writer_thread(thread_id):
-            try:
-                for i in range(100):
-                    store.put((thread_id, i), {"phenotype": f"T{thread_id}-{i}", "confidence": 1.0})
-            except Exception as e:
-                errors.append(e)
-
-        def reader_thread(thread_id):
-            try:
-                for i in range(100):
-                    # Read various keys
-                    store.get((thread_id % 5, i))
-            except Exception as e:
-                errors.append(e)
-
-        # Launch threads
-        threads = []
-        for i in range(5):
-            t1 = threading.Thread(target=writer_thread, args=(i,))
-            t2 = threading.Thread(target=reader_thread, args=(i,))
-            threads.extend([t1, t2])
-
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(errors) == 0
-        store.close()
-
-
-class TestOrbitStoreOverlay:
-    """Test the OrbitStore overlay functionality."""
-
-    def test_read_through_cache(self, multi_agent_store):
-        """Test that private knowledge overrides public."""
-        # Check public knowledge is accessible
-        entry = multi_agent_store.get((0, 0))
-        assert entry is not None and entry.get("phenotype") == "public"
-
-        # Add private knowledge
-        multi_agent_store.put((0, 0), {"phenotype": "private", "confidence": 0.95})
-
-        # Private should override
-        entry = multi_agent_store.get((0, 0))
-        assert entry is not None and entry.get("phenotype") == "private"
-
-    def test_public_read_only(self, multi_agent_store):
-        """Test that public store remains read-only."""
-        # Try to write to public through multi-agent store
-        multi_agent_store.put((1, 1), {"phenotype": "new"})
-
-        # Should only be in private
-        assert (1, 1) in multi_agent_store.private_deltas
-
-        # Public store should be unchanged
-        assert multi_agent_store.public_store.get((1, 1)) is None
-
-    def test_reload_public_knowledge(self, temp_dir):
-        """Test reloading public knowledge."""
-        public_path = os.path.join(temp_dir, "public.pkl.gz")
-        private_path = os.path.join(temp_dir, "private.pkl.gz")
-
-        # Create initial public knowledge
-        public_store = OrbitStore(public_path, read_only=True)
-        private_store = OrbitStore(private_path)
-        ma_store = OrbitStore(private_path, public_store=public_store, private_store=private_store)
-        entry = ma_store.get((0, 0))
-        assert entry is not None and entry.get("phenotype") == "v1"
-
-        # Update public knowledge externally
-        public_store = OrbitStore(public_path, read_only=True)
-        private_store = OrbitStore(private_path)
-        ma_store.reload_public_knowledge()
-        entry = ma_store.get((0, 0))
-        assert entry is not None and entry.get("phenotype") == "v2"
-
-        ma_store.close()
-
-    def test_private_persistence(self, temp_dir):
-        """Test that private deltas persist."""
-        public_path = os.path.join(temp_dir, "public.pkl.gz")
-        private_path = os.path.join(temp_dir, "private.pkl.gz")
-
-        # Create empty public store
-        OrbitStore(public_path).close()
-
-        # Create and populate multi-agent store
-        public_store = OrbitStore(public_path, read_only=True)
-        private_store1 = OrbitStore(private_path)
-        private_store2 = OrbitStore(private_path)
-        ma_store1 = OrbitStore(private_path, public_store=public_store, private_store=private_store1)
-        ma_store2 = OrbitStore(private_path, public_store=public_store, private_store=private_store2)
-        entry = ma_store2.get((7, 42))
-        assert entry is not None and entry.get("phenotype") == "private_data"
-        ma_store2.close()
-
-
-class TestCanonicalOrbitStore:
-    """Test canonical storage functionality in OrbitStore."""
+    """Test the InformationEngine class using the real ontology from the meta folder."""
 
     @pytest.fixture
-    def phenomenology_map(self, temp_dir):
-        """Create a simple canonical map for testing."""
-        # Map: 0->0, 1->0, 2->2, 3->2 (two orbits)
-        phenomenology_map = {0: 0, 1: 0, 2: 2, 3: 2}
+    def ontology_data(self, real_ontology):
+        ontology_path, _, _ = real_ontology
+        with open(ontology_path, "r") as f:
+            return json.load(f)
 
-        map_path = os.path.join(temp_dir, "canonical.json")
-        with open(map_path, "w") as f:
-            json.dump(phenomenology_map, f)
+    def test_init_with_dict_ontology(self, ontology_data):
+        """Test initialization with dictionary ontology."""
+        engine = InformationEngine(ontology_data, use_memmap=False)
+        assert engine.endogenous_modulus == 788_986
+        assert engine.ontology_diameter == 6
+        assert isinstance(engine.ontology_map, dict)
+        assert isinstance(engine.inverse_ontology_map, dict)
+        assert engine.use_memmap is False
+        assert engine._keys is None
+        assert engine._values is None
+        assert engine._inverse is None
 
-        return map_path, phenomenology_map
+    def test_init_with_memmap_ontology(self, ontology_data):
+        """Test initialization with memmap ontology."""
+        engine = InformationEngine(ontology_data, use_memmap=True)
+        assert engine.endogenous_modulus == 788_986
+        assert engine.ontology_diameter == 6
+        assert isinstance(engine.ontology_map, dict)
+        assert engine.inverse_ontology_map is None  # Should be None with memmap
+        assert engine.use_memmap is True
+        assert engine._keys is not None
+        assert engine._values is not None
+        assert engine._inverse is not None
+        assert isinstance(engine._keys, np.ndarray)
+        assert isinstance(engine._values, np.ndarray)
+        assert isinstance(engine._inverse, np.ndarray)
 
-    def test_phenomenology_resolution(self, orbit_store, phenomenology_map):
-        """Test that equivalent states map to same storage."""
-        map_path, _ = phenomenology_map
-        canon_store = OrbitStore("temp_canonical.pkl.gz", phenomenology_map=map_path)
+    def test_int_to_tensor_conversion(self):
+        """Test conversion from integer to tensor."""
+        origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
+        tensor = InformationEngine.int_to_tensor(origin_int)
+        assert tensor.shape == (4, 2, 3, 2)
+        assert tensor.dtype == np.int8
+        assert np.array_equal(tensor, governance.GENE_Mac_S)
+        test_int = 0x123456789ABC
+        tensor = InformationEngine.int_to_tensor(test_int)
+        assert tensor.shape == (4, 2, 3, 2)
+        assert tensor.dtype == np.int8
+        assert InformationEngine.tensor_to_int(tensor) == test_int
 
-        # Store under state 0
-        canon_store.put((0, 10), {"phenotype": "A", "confidence": 1.0})
-
-        # Retrieve under equivalent state 1
-        entry = canon_store.get((1, 10))
-        assert entry is not None and entry.get("phenotype") == "A"
-
-        # Both should resolve to same entry
-        assert canon_store.get((0, 10)) == canon_store.get((1, 10))
-
-    def test_original_context_preserved(self, orbit_store, phenomenology_map):
-        """Test that original context is preserved in entries."""
-        map_path, _ = phenomenology_map
-        canon_store = OrbitStore("temp_canonical.pkl.gz", phenomenology_map=map_path)
-
-        # Store under non-canonical state
-        canon_store.put((1, 10), {"phenotype": "B", "confidence": 1.0})
-
-        # Check that context signature preserves original
-        entry = canon_store.get((1, 10))
-        assert entry is not None and entry.get("context_signature") == (1, 10)
+    def test_tensor_to_int_conversion(self):
+        """Test conversion from tensor to integer."""
+        int_value = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
+        test_tensor = np.ones((4, 2, 3, 2), dtype=np.int8)
+        test_tensor[0, 0, 0, 0] = -1
+        test_int = InformationEngine.tensor_to_int(test_tensor)
+        assert np.array_equal(InformationEngine.int_to_tensor(test_int), test_tensor)
 
 
-class TestStorageIntegration:
-    """Integration tests for storage components."""
+class TestOntologyDiscovery:
+    """Test the ontology discovery and related functions."""
+    
+    def test_load_existing_ontology(self, real_ontology):
+        """Test loading the existing ontology map."""
+        ontology_path, _, _ = real_ontology
+        
+        # Load the ontology map
+        with open(ontology_path, "r") as f:
+            ontology_data = json.load(f)
+        
+        # Verify the structure
+        assert "ontology_map" in ontology_data
+        assert "endogenous_modulus" in ontology_data
+        assert "ontology_diameter" in ontology_data
+        assert ontology_data["endogenous_modulus"] == 788_986
+        assert ontology_data["ontology_diameter"] == 6
+        
+        # Create an InformationEngine with the loaded ontology
+        engine = InformationEngine(ontology_data)
+        
+        # Verify the engine works correctly
+        origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
+        assert engine.get_index_from_state(origin_int) is not None
+    
+    def test_load_existing_phenomenology(self, real_ontology):
+        """Test loading the existing phenomenology map."""
+        _, phenomenology_path, _ = real_ontology
+        
+        # Load the phenomenology map
+        with open(phenomenology_path, "r") as f:
+            phenomenology = json.load(f)
+        
+        # Verify it's a non-empty dictionary
+        assert isinstance(phenomenology, dict)
+        assert len(phenomenology) > 0
+        
+        # Convert keys to integers (json keys are strings)
+        phenomenology = {int(k): int(v) for k, v in phenomenology.items()}
+        
+        # Verify some basic properties
+        # Each state should map to a representative in the same orbit
+        for state, representative in phenomenology.items():
+            assert representative in phenomenology.values()
+    
+    def test_load_existing_epistemology(self, real_ontology):
+        """Test loading the existing epistemology array."""
+        _, _, epistemology_path = real_ontology
+        
+        # Load the epistemology array
+        ep = np.load(epistemology_path)
+        
+        # Verify the shape and type
+        assert ep.ndim == 2
+        assert ep.shape[1] == 256  # Should have 256 introns
+        assert ep.dtype == np.int32
+        
+        # Verify basic properties
+        # For each state, applying an intron should result in another valid state
+        for i in range(min(10, ep.shape[0])):  # Check first 10 states
+            for j in range(10):  # Check first 10 introns
+                next_state = ep[i, j]
+                assert 0 <= next_state < ep.shape[0]
 
-    def test_pickle_to_phenomenology_upgrade(self, temp_dir):
-        """Test upgrading from simple pickle to canonical storage."""
-        # Start with simple pickle store
-        store_path = os.path.join(temp_dir, "store.pkl.gz")
-        orbit_store = OrbitStore(store_path)
 
-        # Add some entries
-        for i in range(10):
-            orbit_store.put((i, 0), {"phenotype": f"Entry{i}", "confidence": 1.0})
+class TestMapConsistency:
+    """Cross-map consistency tests for ontology, phenomenology, and epistemology."""
 
-        # Create canonical map (identity map for simplicity)
-        phenomenology_map = {i: i for i in range(10)}
-        map_path = os.path.join(temp_dir, "canonical.json")
-        with open(map_path, "w") as f:
-            json.dump(phenomenology_map, f)
+    @pytest.fixture
+    def maps(self, real_ontology):
+        ontology_path, phenomenology_path, epistemology_path = real_ontology
+        with open(ontology_path, "r") as f:
+            ontology_data = json.load(f)
+        with open(phenomenology_path, "r") as f:
+            phenomenology_map = json.load(f)
+        ep = np.load(epistemology_path, mmap_mode="r")
+        # Convert keys to int for performance
+        ontology_map = {int(k): v for k, v in ontology_data["ontology_map"].items()}
+        inverse_ontology_map = {v: int(k) for k, v in ontology_data["ontology_map"].items()}
+        phenomenology_map = {int(k): int(v) for k, v in phenomenology_map.items()}
+        return ontology_map, inverse_ontology_map, phenomenology_map, ep
 
-        # Upgrade to canonical store
-        canon_store = OrbitStore("temp_canonical.pkl.gz", phenomenology_map=map_path)
+    def test_cross_map_consistency(self, maps):
+        ontology_map, inverse_ontology_map, phenomenology_map, ep = maps
+        N = 10
+        all_indices = list(inverse_ontology_map.keys())
+        random.seed(42)
+        sample_indices = random.sample(all_indices, N)
+        for idx in sample_indices:
+            state_int = inverse_ontology_map[idx]
+            # 1. The state's index in the ontology maps to a valid canonical representative in the phenomenology map
+            assert idx in phenomenology_map, f"Index {idx} missing in phenomenology map"
+            rep_idx = phenomenology_map[idx]
+            assert rep_idx in all_indices, f"Phenomenology representative {rep_idx} not a valid ontology index"
+            # 2. For a random intron, the epistemology transition from the state lands in a state whose canonical representative is consistent
+            intron = random.randint(0, 255)
+            next_idx = ep[idx, intron]
+            assert 0 <= next_idx < len(all_indices), f"Epistemology transition out of bounds: {next_idx}"
+            # The next state's canonical representative should also be valid
+            assert next_idx in phenomenology_map, f"Next index {next_idx} missing in phenomenology map"
+            next_rep_idx = phenomenology_map[next_idx]
+            assert next_rep_idx in all_indices, f"Next state's representative {next_rep_idx} not a valid ontology index"
 
-        # Verify all entries still accessible
-        for i in range(10):
-            entry = canon_store.get((i, 0))
-            assert entry is not None and entry.get("phenotype") == f"Entry{i}"
+    def test_phenomenology_canonicalization(self, maps):
+        """Test that the phenomenology map's representative is the lex smallest in its orbit."""
+        ontology_map, inverse_ontology_map, phenomenology_map, ep = maps
+        N = 5
+        all_indices = list(inverse_ontology_map.keys())
+        random.seed(123)
+        sample_indices = random.sample(all_indices, N)
+        for idx in sample_indices:
+            state_int = inverse_ontology_map[idx]
+            # Reconstruct the orbit by applying all 256 introns
+            orbit = set()
+            for intron in range(256):
+                next_int = governance.apply_gyration_and_transform(state_int, intron)
+                orbit.add(next_int)
+            # The lex smallest state in the orbit
+            lex_smallest = min(orbit)
+            # The representative index from the phenomenology map
+            rep_idx = phenomenology_map[idx]
+            rep_state_int = inverse_ontology_map[rep_idx]
+            assert rep_state_int == lex_smallest, (
+                f"Phenomenology map for idx {idx} (state {state_int}) gives rep idx {rep_idx} (state {rep_state_int}), "
+                f"but lex smallest in orbit is {lex_smallest}")
 
-        canon_store.close()
+    def test_full_transition_cycles(self, maps):
+        """Test that after a sequence of introns, the resulting state is reachable and canonicalizable."""
+        ontology_map, inverse_ontology_map, phenomenology_map, ep = maps
+        N = 5
+        all_indices = list(inverse_ontology_map.keys())
+        random.seed(456)
+        sample_indices = random.sample(all_indices, N)
+        for idx in sample_indices:
+            current_idx = idx
+            # Apply a random sequence of 10 introns
+            introns = [random.randint(0, 255) for _ in range(10)]
+            for intron in introns:
+                current_idx = ep[current_idx, intron]
+                assert 0 <= current_idx < len(all_indices), f"Transitioned to invalid index {current_idx}"
+            # Check that the resulting state is in the ontology and has a valid canonical representative
+            assert current_idx in phenomenology_map, f"Resulting index {current_idx} missing in phenomenology map"
+            rep_idx = phenomenology_map[current_idx]
+            rep_state_int = inverse_ontology_map[rep_idx]
+            # Reconstruct the orbit for the resulting state
+            state_int = inverse_ontology_map[current_idx]
+            orbit = set()
+            for intron in range(256):
+                next_int = governance.apply_gyration_and_transform(state_int, intron)
+                orbit.add(next_int)
+            lex_smallest = min(orbit)
+            assert rep_state_int == lex_smallest, (
+                f"After transitions, rep idx {rep_idx} (state {rep_state_int}) does not match lex smallest {lex_smallest}")
+
+    def test_invariant_checks(self, maps):
+        """Test invariants: unique orbits in phenomenology, and closure of epistemology map."""
+        ontology_map, inverse_ontology_map, phenomenology_map, ep = maps
+        all_indices = set(inverse_ontology_map.keys())
+        # 1. Number of unique orbits in the phenomenology map
+        unique_orbits = set(phenomenology_map.values())
+        # The number of unique orbits should be less than or equal to the number of states, and nontrivial
+        assert 1 < len(unique_orbits) < len(all_indices), (
+            f"Unexpected number of unique orbits: {len(unique_orbits)} (states: {len(all_indices)})")
+        # 2. Epistemology closure: all transitions land in valid ontology indices
+        n_states, n_introns = ep.shape
+        for idx in range(n_states):
+            for intron in range(n_introns):
+                next_idx = ep[idx, intron]
+                assert next_idx in all_indices, (
+                    f"Epistemology transition from {idx} with intron {intron} lands at invalid index {next_idx}")

@@ -671,10 +671,6 @@ The above interfaces and contracts are authoritative for all agent, engine, and 
 
 ---
 
-
-
----
-
 ## 7 Complete File Structure and Memory Architecture
 
 ### 7.1 Project Organization

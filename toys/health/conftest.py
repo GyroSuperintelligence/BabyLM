@@ -4,105 +4,59 @@ Shared pytest fixtures and configuration for GyroSI test suite.
 
 import os
 import shutil
-
-# Try to use ujson for speed, fall back to standard json if unavailable
-try:
-    import ujson as json  # type: ignore[import]
-except ImportError:
-    import json  # type: ignore
 import tempfile
 import pytest
 from pathlib import Path
 from typing import Dict, Any
 
 # Add the baby module to the Python path
+# NOTE: This is for test discovery convenience. For packaging or CI, prefer 'pip install -e .' to avoid sys.path hacks.
 import sys
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from baby import (
-    discover_and_save_ontology,
-    build_phenomenology_map,
-    GyroSI,
-    AgentPool,
-)
-from baby.types import ManifoldData, AgentConfig, PreferencesConfig
-from baby.information import OrbitStore
+from baby.intelligence import GyroSI, AgentPool
+from baby.contracts import AgentConfig, PreferencesConfig
+from baby.policies import OrbitStore, OverlayView, ReadOnlyView
 
+# Use the main stateless data files for all tests
+MAIN_MEMORIES_META = Path(__file__).parent.parent.parent / "memories" / "public" / "meta"
+ONTOLOGY_PATH = str(MAIN_MEMORIES_META / "ontology_map.json")
+PHENOMENOLOGY_PATH = str(MAIN_MEMORIES_META / "phenomenology_map.json")
+EPISTEMOLOGY_PATH = str(MAIN_MEMORIES_META / "epistemology.npy")
 
-# Base temp directory for all tests
+# Base temp directory for all test-generated files
 BASE_TEMP_DIR = Path(__file__).parent / "memories"
 
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     """Setup and teardown test environment."""
-    # Create base temp directory
     BASE_TEMP_DIR.mkdir(exist_ok=True)
-
     yield
-
-    # Cleanup after all tests (optional - can be disabled for debugging)
-    # shutil.rmtree(BASE_TEMP_DIR, ignore_errors=True)
+    # For CI or production, uncomment the following line to ensure a clean slate after tests:
+    shutil.rmtree(BASE_TEMP_DIR, ignore_errors=True)
 
 
 @pytest.fixture
 def temp_dir():
-    """Create a unique temporary directory for each test."""
+    """Create a unique temporary directory for each test. Safe for parallel test runs."""
     test_dir = BASE_TEMP_DIR / f"test_{os.getpid()}_{id(object())}"
     test_dir.mkdir(parents=True, exist_ok=True)
-
     yield str(test_dir)
-
-    # Cleanup
     shutil.rmtree(test_dir, ignore_errors=True)
 
 
 @pytest.fixture
-def ontology_data(temp_dir):
-    """Create and return test ontology data."""
-    ontology_path = os.path.join(temp_dir, "ontology", "ontology_map.json")
-    os.makedirs(os.path.dirname(ontology_path), exist_ok=True)
-
-    # For testing, create a smaller mock ontology
-    # In real tests, you'd use discover_and_save_ontology
-    mock_ontology: ManifoldData = {
-        "schema_version": "0.9.6",
-        "ontology_map": {i: i for i in range(1000)},  # Mock 1000 states
-        "endogenous_modulus": 788_986,  # Keep the real constant
-        "ontology_diameter": 6,
-        "total_states": 788_986,
-        "build_timestamp": 1234567890.0,
-    }
-
-    with open(ontology_path, "w") as f:
-        json.dump(mock_ontology, f)
-
-    return ontology_path, mock_ontology
-
-
-@pytest.fixture
-def real_ontology(temp_dir):
-    """Create the real ontology (expensive - use sparingly)."""
-    ontology_path = os.path.join(temp_dir, "ontology", "ontology_map.json")
-    os.makedirs(os.path.dirname(ontology_path), exist_ok=True)
-
-    # This is expensive but necessary for integration tests
-    discover_and_save_ontology(ontology_path)
-
-    # Also build phenomenology map
-    phenomenology_path = os.path.join(temp_dir, "ontology", "phenomenology_map.json")
-    build_phenomenology_map(ontology_path, phenomenology_path)
-
-    with open(ontology_path, "r") as f:
-        ontology_data = json.load(f)
-
-    return ontology_path, phenomenology_path, ontology_data
+def real_ontology():
+    """
+    Fixture returning paths to the real ontology and phenomenology files, for integration tests.
+    """
+    return ONTOLOGY_PATH, PHENOMENOLOGY_PATH, EPISTEMOLOGY_PATH
 
 
 @pytest.fixture
 def orbit_store(temp_dir):
-    """Create an OrbitStore instance."""
+    """Create an OrbitStore instance (empty) in a test directory."""
     store_path = os.path.join(temp_dir, "knowledge.pkl.gz")
     store = OrbitStore(store_path)
     yield store
@@ -110,30 +64,34 @@ def orbit_store(temp_dir):
 
 
 @pytest.fixture
-def multi_agent_store(temp_dir):
-    """Create an OrbitStore overlay instance."""
-    public_path = os.path.join(temp_dir, "public", "knowledge.pkl.gz")
-    private_path = os.path.join(temp_dir, "private", "agent1", "knowledge.pkl.gz")
-
-    # Create public knowledge
-    os.makedirs(os.path.dirname(public_path), exist_ok=True)
-    public_store = OrbitStore(public_path)
-    public_store.put((0, 0), {"phenotype": "public", "confidence": 0.9})
+def overlay_store(temp_dir):
+    """
+    Provide an OverlayView composed of a read-only public store and a writable private store.
+    Public store points to a main (or shared) store, private store is in temp_dir.
+    """
+    # Public store is a (possibly empty) shared file, treated as read-only
+    public_store_path = os.path.join(temp_dir, "public_knowledge.pkl.gz")
+    os.makedirs(os.path.dirname(public_store_path), exist_ok=True)
+    # Ensure the file exists and has one entry
+    public_store = OrbitStore(public_store_path)
+    public_store.put((0, 0), {"phenotype": "public", "confidence": 0.9, "context_signature": (0, 0)})
+    public_store.commit()
     public_store.close()
-
-    public_store = OrbitStore(public_path, read_only=True)
-    private_store = OrbitStore(private_path)
-    store = OrbitStore(private_path, public_store=public_store, private_store=private_store)
-    yield store
-    store.close()
+    # Wrap as read-only
+    public_readonly = ReadOnlyView(OrbitStore(public_store_path))
+    # Private store for this test
+    private_store_path = os.path.join(temp_dir, "private_knowledge.pkl.gz")
+    private_store = OrbitStore(private_store_path)
+    overlay = OverlayView(public_readonly, private_store)
+    yield overlay
+    overlay.close()
 
 
 @pytest.fixture
-def agent_config(ontology_data, temp_dir) -> AgentConfig:
-    """Create a test agent configuration."""
-    ontology_path, _ = ontology_data
+def agent_config(temp_dir) -> AgentConfig:
+    """Create a test agent configuration, always using the real ontology."""
     return {
-        "ontology_path": ontology_path,
+        "ontology_path": ONTOLOGY_PATH,
         "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
         "enable_phenomenology_storage": False,
     }
@@ -148,17 +106,13 @@ def gyrosi_agent(agent_config):
 
 
 @pytest.fixture
-def agent_pool(ontology_data, temp_dir):
-    """Create an agent pool."""
-    ontology_path, _ = ontology_data
+def agent_pool(temp_dir):
+    """Create an agent pool using the real ontology."""
     public_knowledge = os.path.join(temp_dir, "public_knowledge.pkl.gz")
-
-    # Create empty public knowledge
     os.makedirs(os.path.dirname(public_knowledge), exist_ok=True)
     store = OrbitStore(public_knowledge)
     store.close()
-
-    pool = AgentPool(ontology_path, public_knowledge)
+    pool = AgentPool(ONTOLOGY_PATH, public_knowledge)
     yield pool
     pool.close_all()
 
@@ -212,11 +166,9 @@ def mock_time(monkeypatch):
 
     monkeypatch.setattr("time.time", mock_time_func)
 
-    # Return controller
     class TimeController:
         def advance(self, seconds):
             advance_time(seconds)
-
         @property
         def current(self):
             return current_time[0]
@@ -224,31 +176,23 @@ def mock_time(monkeypatch):
     return TimeController()
 
 
-# Test data generators
-
-
-def generate_test_introns(count: int, seed: int = 42) -> list:
-    """Generate deterministic test introns."""
+@pytest.fixture
+def generate_test_introns():
     import random
-
-    random.seed(seed)
-    return [random.randint(0, 255) for _ in range(count)]
+    def _gen(count: int, seed: int = 42):
+        random.seed(seed)
+        return [random.randint(0, 255) for _ in range(count)]
+    return _gen
 
 
 def generate_test_bytes(text: str) -> bytes:
-    """Convert text to bytes with padding if needed."""
     return text.encode("utf-8")
 
 
-# Assertion helpers
-
-
 def assert_phenotype_entry_valid(entry: Dict[str, Any]):
-    """Assert that a phenotype entry has all required fields."""
     required_fields = ["phenotype", "memory_mask", "confidence", "context_signature", "usage_count"]
     for field in required_fields:
         assert field in entry, f"Missing required field: {field}"
-
     assert isinstance(entry["phenotype"], str)
     assert isinstance(entry["memory_mask"], int)
     assert 0 <= entry["memory_mask"] <= 255
@@ -258,29 +202,20 @@ def assert_phenotype_entry_valid(entry: Dict[str, Any]):
 
 
 def assert_ontology_valid(ontology_data: Dict[str, Any]):
-    """Assert that ontology data is valid."""
     assert ontology_data["endogenous_modulus"] == 788_986
     assert ontology_data["ontology_diameter"] == 6
     assert "ontology_map" in ontology_data
     assert "schema_version" in ontology_data
 
 
-# Performance measurement helpers
-
-
 class Timer:
-    """Simple timer context manager for performance tests."""
-
+    """Context manager for timing code blocks in tests."""
     def __init__(self):
         self.elapsed = 0
-
     def __enter__(self):
         import time
-
         self.start = time.perf_counter()
         return self
-
     def __exit__(self, *args):
         import time
-
         self.elapsed = time.perf_counter() - self.start

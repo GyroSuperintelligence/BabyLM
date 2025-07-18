@@ -16,6 +16,9 @@ storage coordination, and conversion between state representations.
 import numpy as np
 
 # Try to use ujson for speed, fall back to standard json if unavailable
+# NOTE: The following import may trigger a false positive from Pyright (reportMissingModuleSource)
+# if 'ujson' is not installed in your environment. This is expected and safe to ignore:
+# the code falls back to standard 'json' if 'ujson' is unavailable.
 try:
     import ujson as json  # type: ignore[import]
 except ImportError:
@@ -27,49 +30,50 @@ from baby import governance
 
 
 # ---------- Fast phenomenology builder ----------
-def build_phenomenology_map_fast(ep_path: str, output_path: str) -> None:
+def build_phenomenology_map_fast(ep_path: str, output_path: str, ontology_path: str) -> None:
     """
-    Derives the canonical‑orbit map in O(N) union‑find time
-    using the pre‑computed epistemology transition table.
-
+    Robustly derives the canonical-orbit map using explicit orbit finding (BFS) as described in Genetics.md.
+    For each state, finds all states in its orbit, determines the lex smallest state, and maps each state index to its canonical representative.
     Args:
-        ep_path:   Path to epistemology.npy (int32 array, shape (N,256)).
+        ep_path: Path to epistemology.npy (int32 array, shape (N,256)).
         output_path: Where to write phenomenology_map.json
+        ontology_path: Path to ontology_map.json (needed for state_int <-> index mapping)
     """
     import numpy as np, json, os
 
     ep = np.load(ep_path, mmap_mode="r")  # N × 256
     N = ep.shape[0]
+    with open(ontology_path, "r") as f:
+        ontology_data = json.load(f)
+    # index -> state_int
+    inverse_ontology_map = {v: int(k) for k, v in ontology_data["ontology_map"].items()}
 
-    parent = np.arange(N, dtype=np.int32)  # union‑find parent array
-
-    def find(i: int) -> int:
-        # Path‑compression, iterative (Python‑level but tiny)
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    # One pass over every edge (i → ep[i, j])
-    for j in range(256):
-        nxt = ep[:, j]
-        for i, k in zip(range(N), nxt):
-            ri, rk = find(i), find(k)
-            if ri != rk:
-                # Retain smaller index as canonical root
-                if ri < rk:
-                    parent[rk] = ri
-                else:
-                    parent[ri] = rk
-
-    # Final compress and export dict(index → phenomenology_index)
-    phenomenology = {i: int(find(i)) for i in range(N)}
-
+    visited = set()
+    phenomenology = {}
+    for idx in range(N):
+        if idx in visited:
+            continue
+        # BFS to find all states in this orbit
+        queue = [idx]
+        orbit = set([idx])
+        while queue:
+            current = queue.pop()
+            for intron in range(256):
+                next_idx = int(ep[current, intron])
+                if next_idx not in orbit:
+                    orbit.add(next_idx)
+                    queue.append(next_idx)
+        # Find the lex smallest state_int in the orbit
+        lex_smallest_state = min(inverse_ontology_map[i] for i in orbit)
+        # Find its index
+        rep_idx = [i for i in orbit if inverse_ontology_map[i] == lex_smallest_state][0]
+        for i in orbit:
+            phenomenology[i] = rep_idx
+        visited.update(orbit)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(phenomenology, f)
-
-    print(f"Phenomenology map written → {output_path}")
+    print(f"Phenomenology map written → {output_path} (unique orbits: {len(set(phenomenology.values()))})")
 
 
 class InformationEngine:
@@ -369,6 +373,7 @@ if __name__ == "__main__":
     parser_phenomenology = subparsers.add_parser("phenomenology", help="Build and save the phenomenology map (fast)")
     parser_phenomenology.add_argument("--ep", required=True, help="Path to epistemology.npy")
     parser_phenomenology.add_argument("--output", required=True, help="Path to output phenomenology_map.json")
+    parser_phenomenology.add_argument("--ontology", required=True, help="Path to ontology_map.json")
 
     parser_epistemology = subparsers.add_parser("epistemology", help="Build and save the state transition table (STT)")
     parser_epistemology.add_argument("--ontology", required=True, help="Path to ontology_map.json")
@@ -378,7 +383,7 @@ if __name__ == "__main__":
     if args.command == "ontology":
         discover_and_save_ontology(args.output)
     elif args.command == "phenomenology":
-        build_phenomenology_map_fast(args.ep, args.output)
+        build_phenomenology_map_fast(args.ep, args.output, args.ontology)
     elif args.command == "epistemology":
         build_state_transition_table(args.ontology, args.output)
     else:

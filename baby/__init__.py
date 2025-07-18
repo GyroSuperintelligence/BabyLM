@@ -22,6 +22,7 @@ from baby.policies import (
     export_knowledge_statistics,
     validate_ontology_integrity,
 )
+from baby.information import discover_and_save_ontology
 
 __version__ = "0.9.6"
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "apply_global_confidence_decay",
     "export_knowledge_statistics",
     "validate_ontology_integrity",
+    "discover_and_save_ontology",
 ]
