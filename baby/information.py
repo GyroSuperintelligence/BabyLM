@@ -83,16 +83,17 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
             print()  # Newline on completion
 
     BATCH = 100_000   # 100 000 × 256 × 4 B = 98 MB
+    done = 0
     for seed in range(N):
         if rep[seed] != -1:
             continue
         orbit_start = time.time()
-        # Vectorized BFS with batching
+        # Vectorized BFS with batching and deduplication
         frontier = np.array([seed], dtype=np.int32)
         members = []
         while frontier.size:
             members.append(frontier)
-            new_unseen = []
+            new_chunks = []
             for start in range(0, frontier.size, BATCH):
                 f_batch = frontier[start:start+BATCH]
                 neigh   = ep[f_batch].ravel()
@@ -100,8 +101,11 @@ def build_phenomenology_map(ep_path: str, output_path: str, ontology_path: str) 
                 if mask.any():
                     unseen = neigh[mask]
                     rep[unseen] = seed
-                    new_unseen.append(unseen)
-            frontier = np.concatenate(new_unseen) if new_unseen else np.empty(0, np.int32)
+                    new_chunks.append(unseen)
+            if new_chunks:
+                frontier = np.unique(np.concatenate(new_chunks))  # deduplicate
+            else:
+                frontier = np.empty(0, np.int32)
         members = np.concatenate(members)
         # pick lexicographically smallest physical state as final representative
         lex_rep_state = inverse[members].min()
