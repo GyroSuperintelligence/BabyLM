@@ -20,28 +20,30 @@
 
 ## 🌀 What is GyroSI?
 
+A physics-based approach to artificial intelligence that learns like a baby, remembers everything, and operates within natural constraints.
+
 GyroSI Baby LM demonstrates a superintelligence architecture through physics-grounded algorithms and gyroscopic dynamics (gyrogroup mathematical formalism).
 
-Traditional AI treats intelligence as a pattern-matching problem to be solved with massive datasets and billions of parameters. GyroSI treats intelligence as an intrinsic structural property that emerges from the recursive alignment whithin physical topology. Like the latent potential in a human baby, intelligence is present from the beginning.
+Traditional AI treats intelligence as a pattern-matching problem to be solved with massive datasets and billions of parameters. GyroSI treats intelligence as an intrinsic structural property that emerges from the recursive alignment within physical topology. Like the latent potential in a human baby, intelligence is present from the beginning.
 
 Instead of storing knowledge in gigabytes of weights, GyroSI uses the inherent physics of gyroscopic operations to navigate a provably finite and fully discovered physical state space. Each input byte acts as a holographic quantum of instruction, transforming the system's internal state according to precise algebraic laws.
 
 ---
 
-### **🧬 Genetic Code**
+## 🧬 Genetic Code
 
 The structural parallels between GyroSI and biophysics are precise and intentional:
 
-| **Biology / Biophysics** | **GyroSI Architecture** | **Significance** |
+| Biology / Biophysics | GyroSI Architecture | Significance |
 | --- | --- | --- |
-| 4 nucleotides (A T/U C G) | 4 fundamental operations (I, Inv, FG, BG) | Alphabet of change (2 bits per symbol) |
-| 3 positions in a binding motif | 3 spatial axes in tensor structure | Encodes 3D structural information |
+| 4 nucleotides (A T/U C G) | 4 fundamental operations (L0, LI, FG, BG) | Alphabet of change (2 bits per symbol) |
+| 3 positions in a codon | 3 spatial axes in tensor structure | Encodes 3D structural information |
 | 2 complementary strands | 2 tensor polarities (+ / –) | Provides 6 Degrees of Freedom (3×2) |
-| 4-mer sequence → 4 symbols × 2 bits = 8 bits → **2⁸ = 256** combinations | 1 byte = 8 bits → **2⁸ = 256** instructions | Identical information quantum for action |
+| 4-mer sequence → 8 bits → 256 combinations | 1 byte = 8 bits → 256 instructions | Identical information quantum for action |
 | 64 codons (3 nucleotides × 2 bits) | 64 active intron patterns (6 working bits) | Complete instruction space |
 | 32 tRNA wobble classes | 32 LI-quotiented equivalence classes | Functional degeneracy |
 
-The profound parallel is that both systems use a compact instruction set (a byte or a 4-mer) to govern a vast, complex physical state. Just as epigenetic context determines how DNA is expressed, GyroSI’s evolving physical state governs which transformation is activated in response to each input. The 256 instructions are the *operators*, not the *states*. They operate on a physical ontology of precisely **788,986** unique states.
+The profound parallel is that both systems use a compact instruction set to govern a vast, complex physical state. Just as epigenetic context determines how DNA is expressed, GyroSI's evolving physical state governs which transformation is activated in response to each input. The 256 instructions are the operators, not the states. They operate on a physical ontology of precisely 788,986 unique states.
 
 ---
 
@@ -51,17 +53,27 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 
 **We explore a different path:** Intelligence grounded in physics rather than abstraction. Human ethics emerge from shared physical reality and natural constraints. GyroSI operates within these same physical principles, developing understanding through structural boundaries rather than abstract optimization. This suggests a path toward intrinsic alignment, where ethical behavior is a consequence of the system's physical nature.
 
-### ⚖️ Why This Matters
-
-Current language models require massive resources, opaque training, and billions of uninterpretable parameters. GyroSI explores whether intelligence can emerge through:
-
-- **Transparent operations** that can be traced and audited
-- **Structural navigation** rather than statistical optimization
-- **Intrinsic alignment** through physics-based constraints
-
 ---
 
-## 🌐 The Byte as a Holographic Quantum of Spacetime Topology
+## ✨ Mind-Blowing Features
+
+- 🧠 **Learns Like a Baby**: Starts with zero knowledge and learns from raw experience, no pre-training needed.
+- ♾️ **Unlimited Memory**: Never forgets; knowledge is limited by disk space, not RAM, via an efficient append-only log.
+- ⚡ **High Throughput**: Estimated ~1 million bytes/sec per core on modern hardware.
+- 💾 **Compact Brain**: The core logic and ontology maps fit in ~30MB. An optional 770MB State Transition Table (STT) unlocks maximum performance.
+- 🌍 **No GPU Required**: Runs on a Raspberry Pi, your phone, or even embedded systems.
+- 📚 **No Training Data Needed**: Learns directly from conversation, not from scraped internet data.
+- 🔍 **100% Explainable**: Every decision can be traced through simple physics operations.
+- 🎯 **Zero Hallucination**: Can only generate what it has physically learned, not random guesses.
+- 🔄 **No Tokenizer**: Understands any language, emoji, or binary data at the byte level.
+- 🔢 **Holographic Geometry**: Built on numerical patterns (3, 6, 12, 24, 48) found in crystals and rotation groups.
+- 🌐 **Six Degrees of Everything**: Any knowledge is reachable from any other in at most 6 steps, a provable property of the state space.
+
+--- 
+
+## ⚙️ How It Works
+
+**🌐 The Byte as a Holographic Quantum of Spacetime Topology**
 
 Data isn't just information here. It's a physical force that transforms structure. The architecture unfolds from one idea: a single byte acts as a holographic set of instructions for navigating a gyroscopic state space.
 
@@ -97,34 +109,21 @@ This solves three fundamental problems:
 
 ---
 
-### ✨ **Mind-Blowing Features**
+## A Trinity of Maps: The System's Reality
 
-- 🧠 **Learns Like a Baby**: Starts with zero knowledge and learns from raw experience, no pre-training needed
-- ♾️ **Unlimited Memory**: Can remember and learn from infinite conversations without forgetting
-- ⚡ **1,000,000+ Bytes/Second**: Processes text faster than you can type on commodity hardware
-- 💾 **Entire Brain = 20MB**: The complete intelligence system is smaller than a single photo
-- 🌍 **No GPU Required**: Runs on a Raspberry Pi, your phone, or even embedded systems
-- 📚 **No Training Data Needed**: Learns directly from conversation, not from scraped internet data
-- 🔍 **100% Explainable**: Every decision can be traced through simple physics operations
-- 🎯 **Zero Hallucination**: Can only generate what it has physically learned, not random guesses
-- 🔄 **No Tokenizer**: Understands any language, emoji, or binary data at the byte level
-- 🔢 **Holographic Geometry**: Built on the same numerical patterns (3,6,12,24,48) found in crystals, DNA, and rotation groups
-- 🌐 **Six Degrees of Everything**: Any knowledge is reachable from any other in at most 6 steps (like six degrees of separation, but provable)
+GyroSI's intelligence is built upon three pre-computed "meta-assets" that define its universe. These maps separate what exists, how it appears, and how it changes.
 
-
-### ⚙️ How It Works
-
-- **Instruction Creation**: Input byte XORs with `0xAA` to create an 8-bit instruction (`intron`).
-- **State Evolution**: The `intron`'s operations transform the system's 48-bit integer state according to gyroscopic physics.
-- **Response Generation**: The new state and the `intron` are used as a key to retrieve a learned `phenotype` (output) from the knowledge store.
-- **Learning**: The experience is integrated into the knowledge store using path-dependent coaddition, strengthening the association for that context.
-
-### 📈 How Learning Works
-
-Two simultaneous mechanisms:
-
-1. **Structural** (Irreversible): Each byte permanently alters the system's physical state, creating an indelible history.
-2. **Integrative** (Path-Dependent): The system uses gyrogroup coaddition to update its knowledge, ensuring the order of events shapes its understanding.
+- **Ontology Map (`ontology_map.json`): What Exists.**
+    
+    The complete, enumerable set of 788,986 physically realizable states. It defines the "being" of the system—what is real and possible.
+    
+- **Phenomenology Map (`phenomenology_map.json`): How States Appear.**
+    
+    This map groups states into equivalence classes based on symmetry. It gives the system the ability to recognize that different perspectives can represent the same underlying phenomenon.
+    
+- **Epistemology Map (`epistemology.npy`): How We Know Change.**
+    
+    The State Transition Table (STT). It encodes the causal rules of the universe: given any state and any action, what state follows. It is the system's predictive model of transformation.
 
 ---
 
@@ -134,13 +133,45 @@ GyroSI implements the **Common Governance Model (CGM)**, where intelligence emer
 
 Mathematical formalism employs gyrogroup structures (generalizations of rotation groups) following Abraham Ungar's work, providing precise language for transitions from undifferentiated potential to structured reality.
 
+Gyroscopic Superintelligence is meta-language for computation, ontology, phenomenology and epistemology, enabling agents and agencies to reason about states, symmetry, and evolution economically and efficiently.
+
+---
+
+## ⚡ Performance Estimates
+
+***Note:*** *The following performance figures are estimates based on the architectural specification. Real-world results will be validated on target hardware.*
+
+The system is designed for extreme efficiency. All core runtime operations are constant-time (O(1)) and memory-bandwidth limited, not compute-limited.
+
+### Memory Capacity (Estimated)
+
+Each learned association (phenotype) requires ~90 bytes in RAM for the OrbitStore index. This determines how many unique facts the system can hold in memory for fast lookup.
+
+| Device | Available RAM | Max Phenotypes in Memory |
+|--------|---------------|-------------------------|
+| MacBook Air 2015 (8GB) | ~4 GB | ~45 million |
+| MacBook M4 (16GB) | ~12 GB | ~130 million |
+| Server (256GB) | ~220 GB | ~2.4 billion |
+
+For context: WordNet contains ~150,000 facts, and the English Wikipedia title/abstract graph contains ~40 million facts. A modern laptop can comfortably hold both entirely in RAM.
+
+### Throughput Examples (Estimated)
+
+A "cycle" is one byte in, one internal update, and one byte out.
+
+| Hardware | Cores | Estimated Characters/sec |
+| --- | --- | --- |
+| MacBook Air 2015 | 2 | ~1.4 M |
+| MacBook M4 (8 performance) | 8 | ~7–8 M |
+| EPYC 32-core Server | 32 | ~25 M |
+
 ---
 
 ## 📚 Documentation
 
-- 📖 [Genetics - Technical Specification](https://github.com/GyroSuperintelligence/BabyLM/blob/main/guides/Genetics.md)
+- 📖 [Genetics - Technical Specification: The complete technical specification, system constants, and build-time discovery processes.](https://github.com/GyroSuperintelligence/BabyLM/blob/main/guides/Genetics.md)
 
-- 📖 [Physics - Common Governance Model Theory](https://korompilias.notion.site/Common-Governance-Model-Foundations-1ee9ff44f4368050af28d1c0f8aae89a)
+- 📖 [Physics - Common Governance Model Theory: The theoretical foundations](https://korompilias.notion.site/Common-Governance-Model-Foundations-1ee9ff44f4368050af28d1c0f8aae89a)
 
 ---
 
@@ -173,42 +204,38 @@ The system consists of four interconnected engines aligned with the Viable Syste
 
 ---
 
-## 📁 File Organization
+## 📁 Project Structure
 
 ```
-gyrosi/
-├── baby/                           # Core VSM Engine
-│   ├── __init__.py
-│   ├── governance.py               # System 1: Physics & Primitives
-│   ├── information.py              # System 2: Measurement & Storage
-│   ├── inference.py                # System 3: Interpretation & Meaning
-│   ├── intelligence.py             # System 4/5: API & Orchestration
-│   └── baby_preferences.json       # Reserved for local settings
-│
-├── memories/                       # Runtime Data and Knowledge
+.
+├── .github/
+├── baby/                   # Core GyroSI System
+│   ├── contracts.py        # Protocols and shared types (PhenotypeStore, etc.)
+│   ├── governance.py       # Physics, Primitives, Build-Time Discovery
+│   ├── inference.py        # Interpretation, Maintenance & Validation
+│   ├── information.py      # Measurement, Storage, Knowledge Curation
+│   ├── intelligence.py     # API, Orchestration, Protocol Adapters
+│   └── policies.py         # OrbitStore, storage overlays, and maintenance functions
+├── guides/                 # In-depth documentation
+├── memories/               # Persistent state and knowledge
 │   ├── public/
-│   │   ├── ontology/
-│   │   │   ├── ontology_map.json   # The complete 788,986-state physical ontology
-│   │   │   └── phenomenology_map.json  # Maps states to their canonical orbit representative
-│   │   └── knowledge.pkl.gz        # Curated public knowledge base
-│   └── private/
-│       └── agents/
-│           └── <agent_id>/
-│               └── knowledge.pkl.gz   # Agent-specific (private) knowledge
-│
-└── toys/                           # Tools & Tests
-
+│   │   └── meta/           # Pre-computed physics maps:
+│   │       ├── epistemology.npy        # State Transition Table (770 MB)
+│   │       ├── ontology_map.json       # Complete physical ontology (20 MB)
+│   │       └── phenomenology_map.json  # Canonical-orbit mapping (9.7 MB)
+│   └── private/            # Agent-specific knowledge overlays
+└── toys/                   # Tests and utilities
+    └── health/             # Comprehensive test suite
 
 ```
 
-### Key Components:
+The GyroSI system enforces strict separation between:
 
-**Core System (`baby/`)**: The four VSM engines implementing the physics and logic.
+- **Core physics kernel** (`baby/`) - Six specialized modules implementing the physics and logic
+- **Runtime data** (`memories/`) - Persistent state with learned knowledge and meta-assets
+- **Auxiliary applications** (`toys/`) - Testing and development tools
 
-**Persistent Storage (`memories/`)**: Contains all runtime data.
-
-- **`ontology/`**: The complete, pre-discovered physical universe of the system.
-- **`knowledge.pkl.gz`**: The learned associations (phenotypes) stored in a compact format. Public knowledge is shared, while private knowledge is agent-specific.
+Knowledge is managed via canonical OrbitStore instances, with public and private overlays maintaining agent-specific and shared knowledge indexed by canonical context keys.
 
 ---
 
@@ -279,7 +306,7 @@ MIT License - see [LICENSE](LICENSE) for details.
   <p>All foundational ideas, design decisions, and conceptual frameworks originate from the Author.</p>
   <p>Responsibility for the validity, coherence, and ethical direction of this project remains fully human.</p>
   <p><strong>Acknowledgements:</strong><br>
-  This project benefited from AI language model services accessed through Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).</p>
+  This project benefited from AI language model services accessed through LMArena, Cursor IDE, OpenAI (ChatGPT), Anthropic (Opus), and Google (Gemini).</p>
 </div>
 
 
