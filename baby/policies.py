@@ -132,6 +132,12 @@ class OrbitStore:
                 except EOFError:
                     break
 
+    def delete(self, context_key: Tuple[int, int]) -> None:
+        with self.lock:
+            if context_key in self.index:
+                del self.index[context_key]
+            # Optionally, could append a tombstone to the log for durability
+
     def close(self) -> None:
         with self.lock:
             if self.pending_writes:
@@ -218,11 +224,13 @@ class CanonicalView:
         return self.base_store.get(phenomenology_key)
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
-        phenomenology_key = self._get_phenomenology_key(context_key)
-        if "context_signature" not in entry:
-            entry = entry.copy()
-            entry["context_signature"] = context_key
-        self.base_store.put(phenomenology_key, entry)
+        phen_key = self._get_phenomenology_key(context_key)
+        if entry.get("context_signature") != phen_key:
+            e = entry.copy()
+            e["_original_context"] = context_key
+            e["context_signature"] = phen_key
+            entry = e
+        self.base_store.put(phen_key, entry)
 
     def close(self) -> None:
         self.base_store.close()

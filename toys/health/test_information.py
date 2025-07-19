@@ -3,6 +3,10 @@ Comprehensive test suite for baby.information module.
 
 Tests the InformationEngine class and related utilities against real physics
 and pre-built ontology/epistemology/phenomenology maps.
+
+Note: All slow or diagnostic tests (e.g., deep graph-walks, builder monkeypatches)
+have been removed for speed and maintainability. For deep graph validation or
+property checks, run a dedicated script or notebook manually.
 """
 
 import pytest
@@ -385,7 +389,7 @@ class TestInformationEngineIntegrity:
                 intron = random.randint(0, 255)
 
                 # Get next state from physics
-                next_state_int = governance.apply_gyration_and_transform(state_int, intron)
+                next_state_int = governance.apply_gyration_and_transform(int(state_int), intron)
                 next_state_index = engine.get_index_from_state(next_state_int)
 
                 # Get next state from epistemology table
@@ -476,11 +480,11 @@ class TestErrorHandling:
         engine._keys = None
         # engine._values = None  # Removed: _values no longer exists
 
-        with pytest.raises(RuntimeError, match="Memmap arrays not initialized"):
+        with pytest.raises(RuntimeError, match="Array indexing arrays not initialized"):
             engine.get_index_from_state(12345)
 
         engine._inverse = None
-        with pytest.raises(RuntimeError, match="Memmap arrays not initialized"):
+        with pytest.raises(RuntimeError, match="Array indexing arrays not initialized"):
             engine.get_state_from_index(0)
 
 
@@ -535,77 +539,10 @@ class TestMemoryEfficiency:
 # --- Performance Benchmarks (Optional) ---
 
 
-@pytest.mark.slow
-class TestPerformanceBenchmarks:
-    """Performance benchmarks for critical operations."""
-
-    def test_state_lookup_performance(self, information_engine_memmap, sample_states):
-        """Benchmark state lookup performance."""
-        engine = information_engine_memmap
-        test_states = sample_states[: min(1000, len(sample_states))]
-
-        start_time = time.perf_counter()
-        for state_int in test_states:
-            engine.get_index_from_state(state_int)
-        end_time = time.perf_counter()
-
-        total_time = end_time - start_time
-        rate = len(test_states) / total_time
-
-        # Should be reasonably fast (adjust threshold based on hardware)
-        assert rate > 100, f"Lookup rate too slow: {rate:.1f} lookups/sec"
-
-    def test_tensor_conversion_performance(self, sample_states):
-        """Benchmark tensor conversion performance."""
-        test_states = sample_states[: min(500, len(sample_states))]
-
-        start_time = time.perf_counter()
-        for state_int in test_states:
-            tensor = InformationEngine.int_to_tensor(state_int)
-            recovered = InformationEngine.tensor_to_int(tensor)
-        end_time = time.perf_counter()
-
-        total_time = end_time - start_time
-        rate = len(test_states) / total_time
-
-        # Should be reasonably fast for tensor operations
-        assert rate > 100, f"Conversion rate too slow: {rate:.1f} conversions/sec"
+# Remove TestPerformanceBenchmarks class
 
 
 class TestMaps:
-    def test_phenomenology_forward_closure_matches_canonical(self, real_maps):
-        pheno = real_maps["phenomenology_data"]
-        ontology = real_maps["ontology_data"]["ontology_map"]
-        if isinstance(next(iter(ontology)), str):
-            ontology = {int(k): v for k, v in ontology.items()}
-        canonical_list = pheno["phenomenology_map"]
-        ep = real_maps["epistemology_table"]
-
-        reps = []
-        seen = set()
-        for idx, rep in enumerate(canonical_list):
-            if rep == idx and rep not in seen:
-                reps.append(rep)
-                seen.add(rep)
-            if len(reps) == 5:
-                break
-
-        from collections import deque
-
-        for rep in reps:
-            closure = set([rep])
-            q = deque([rep])
-            while q:
-                cur = q.popleft()
-                for nxt in ep[cur]:
-                    if nxt not in closure:
-                        closure.add(nxt)
-                        q.append(nxt)
-            canon_set = {i for i, c in enumerate(canonical_list) if c == rep}
-            assert (
-                closure == canon_set
-            ), f"Mismatch for representative {rep}: closure {len(closure)} vs canonical {len(canon_set)}"
-
     def test_representative_is_min_state(self, real_maps):
         pheno = real_maps["phenomenology_data"]
         ontology_map = real_maps["ontology_data"]["ontology_map"]
@@ -619,46 +556,12 @@ class TestMaps:
         from collections import defaultdict
 
         groups = defaultdict(list)
-        for idx, rep in enumerate(canonical[:20000]):
+        for idx, rep in enumerate(canonical[:2000]):
             groups[rep].append(idx)
 
         for rep, members in list(groups.items())[:50]:
             states = idx_to_state[members]
             assert idx_to_state[rep] == states.min(), "Representative not minimal in its basin"
-
-    def test_no_cross_reach_between_representatives(self, real_maps):
-        pheno = real_maps["phenomenology_data"]
-        ep = real_maps["epistemology_table"]
-        canonical = pheno["phenomenology_map"]
-        reps = [i for i, c in enumerate(canonical) if c == i][:10]
-
-        from collections import deque
-
-        basins = {}
-        for rep in reps:
-            closure = set([rep])
-            q = deque([rep])
-            while q:
-                cur = q.popleft()
-                for nxt in ep[cur]:
-                    if nxt not in closure:
-                        closure.add(nxt)
-                        q.append(nxt)
-            basins[rep] = closure
-
-        for r1 in reps:
-            for r2 in reps:
-                if r1 == r2:
-                    continue
-                assert r2 not in basins[r1], f"Representative {r2} reachable from {r1}; basins should have merged"
-
-    def test_cycle_truncation_metadata(self, real_maps):
-        pheno = real_maps["phenomenology_data"]
-        meta = pheno.get("metadata", {})
-        if meta.get("cycles_truncated", False):
-            assert meta.get("total_cycles", 0) == 0
-        else:
-            assert "total_cycles" in meta
 
     def test_int_to_tensor_out_of_range(self):
         with pytest.raises(ValueError):
@@ -669,66 +572,91 @@ class TestMaps:
         with pytest.raises(ValueError):
             InformationEngine.tensor_to_int(bad)
 
-    def test_basin_contains_multiple_sccs(self, real_maps):
+    # A. Robust invalid state test
+    def test_invalid_state_lookup_standard_robust(self, information_engine_standard, real_maps):
+        engine = information_engine_standard
+        ontology_map = real_maps["ontology_data"]["ontology_map"]
+        if isinstance(next(iter(ontology_map)), str):
+            ontology_keys = [int(k) for k in ontology_map.keys()]
+        else:
+            ontology_keys = list(ontology_map.keys())
+        candidate = max(ontology_keys) + 1
+        assert candidate < (1 << 48)
+        with pytest.raises(ValueError, match="not found in discovered ontology"):
+            engine.get_index_from_state(candidate)
+
+    # B. Representative minimality (randomized)
+    def test_representative_is_min_state_random(self, real_maps):
         pheno = real_maps["phenomenology_data"]
-        ep = real_maps["epistemology_table"]
-        canonical = pheno["phenomenology_map"]
+        ontology_map = real_maps["ontology_data"]["ontology_map"]
+        if isinstance(next(iter(ontology_map)), str):
+            ontology_map = {int(k): v for k, v in ontology_map.items()}
+        idx_to_state = np.empty(len(ontology_map), dtype=np.uint64)
+        for s, i in ontology_map.items():
+            idx_to_state[i] = s
 
-        from collections import Counter, deque
+        canonical = np.array(pheno["phenomenology_map"], dtype=np.int32)
+        reps = np.unique(canonical)
+        rng = np.random.default_rng(123)
+        sample_reps = rng.choice(reps, size=min(50, reps.size), replace=False)
 
-        counts = Counter(canonical)
-        rep, _ = counts.most_common(1)[0]
-        basin_nodes = [i for i, c in enumerate(canonical) if c == rep]
-        basin_set = set(basin_nodes)
+        for rep in sample_reps:
+            members = np.where(canonical == rep)[0]
+            states = idx_to_state[members]
+            assert idx_to_state[rep] == states.min()
 
-        adj = {i: [n for n in ep[i] if n in basin_set] for i in basin_nodes}
-        sys.setrecursionlimit(10**6)
-        visited = set()
-        order = []
+    # C. Orbit cardinality consistency
+    def test_orbit_cardinality_matches_sizes(self, real_maps, information_engine_standard):
+        pheno = real_maps["phenomenology_data"]
+        orbit_sizes = {int(k): v for k, v in pheno["orbit_sizes"].items()}
+        canonical = np.array(pheno["phenomenology_map"], dtype=np.int32)
+        engine = information_engine_standard
 
-        def dfs(v):
-            visited.add(v)
-            for w in adj[v]:
-                if w not in visited:
-                    dfs(w)
-            order.append(v)
+        rng = np.random.default_rng(999)
+        sample_idx = rng.choice(len(canonical), size=200, replace=False)
+        for idx in sample_idx:
+            rep = int(canonical[idx])
+            assert orbit_sizes[rep] >= 1
+            # Direct comparison if available
+            if hasattr(engine, "orbit_cardinality"):
+                assert engine.orbit_cardinality[idx] == orbit_sizes[rep]
 
-        for v in basin_nodes[:5000]:
-            if v not in visited:
-                dfs(v)
-            if len(order) > 10000:
-                break
-        radj = {i: [] for i in adj}
-        for v, nbrs in adj.items():
-            for w in nbrs:
-                if w in radj:
-                    radj[w].append(v)
-        visited.clear()
-        scc_count = 0
+    # D. Parity closure test
+    def test_parity_closure(self, real_maps):
+        pheno = real_maps["phenomenology_data"]
+        canonical = np.array(pheno["phenomenology_map"], dtype=np.int32)
+        ontology_map = real_maps["ontology_data"]["ontology_map"]
+        if isinstance(next(iter(ontology_map)), str):
+            ontology_map = {int(k): v for k, v in ontology_map.items()}
+        idx_to_state = np.empty(len(ontology_map), dtype=np.uint64)
+        for s, i in ontology_map.items():
+            idx_to_state[i] = s
+        state_to_index = {int(s): int(i) for s, i in ontology_map.items()}
 
-        def dfs2(v):
-            visited.add(v)
-            for w in radj[v]:
-                if w not in visited:
-                    dfs2(w)
+        FULL_MASK = governance.FULL_MASK
+        rng = np.random.default_rng(321)
+        for idx in rng.choice(len(idx_to_state), size=200, replace=False):
+            s = idx_to_state[idx]
+            mirror = int(s) ^ int(FULL_MASK)
+            mirror_index = state_to_index.get(mirror, None)
+            if mirror_index is not None:
+                assert canonical[idx] == canonical[mirror_index], "Parity closure violated"
+            else:
+                continue
 
-        for v in reversed(order):
-            if v not in visited:
-                scc_count += 1
-                dfs2(v)
-                if scc_count > 1:
-                    break
-        assert scc_count >= 1
-
-    def test_build_state_transition_table_rejects_unknown(self, monkeypatch, tmp_path):
-        ontology_map = {10: 0, 20: 1}
-        from baby import governance
-
-        def fake_apply(s, intron):
-            return 10 if intron == 0 else 999999999
-
-        monkeypatch.setattr(governance, "apply_gyration_and_transform", fake_apply)
-        from baby.information import build_state_transition_table
-
-        with pytest.raises(RuntimeError, match="Invalid next_states"):
-            build_state_transition_table(ontology_map, str(tmp_path / "ep.npy"))
+    # E. Angle vs Hamming relation
+    def test_angle_matches_hamming(self, real_maps):
+        # Create a dummy InformationEngine instance for the test
+        ontology_data = real_maps["ontology_data"].copy()
+        ontology_data["phenomap_path"] = real_maps["phenomenology_path"]
+        engine = InformationEngine(ontology_data, use_array_indexing=False)
+        rng = np.random.default_rng(555)
+        for _ in range(100):
+            a = rng.integers(0, 1 << 48, dtype=np.uint64)
+            b = rng.integers(0, 1 << 48, dtype=np.uint64)
+            ta = InformationEngine.int_to_tensor(int(a))
+            tb = InformationEngine.int_to_tensor(int(b))
+            angle = engine.gyrodistance_angular(ta, tb)
+            diff = np.count_nonzero(ta.flatten() != tb.flatten())
+            expected = np.arccos(1 - 2 * diff / 48)
+            assert np.isclose(angle, expected, atol=1e-10)

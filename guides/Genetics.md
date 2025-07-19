@@ -72,55 +72,19 @@ The CGM is not merely a theoretical framework; it is a predictive model whose co
 
 This empirical result validates the principle of recursive closure, demonstrating a perfect, efficient balance between the instruction set and the state space it governs. The endogenous modulus of the system is not an arbitrary choice but a measured physical constant: **788,986**.
 
-**Canonicalization of Orbits:**
+Phenomenological Structure: Equivalence and Flow
 
-To further structure the ontology, we can define a canonical representative for each physical state orbit. The canonical representative is the state in its orbit with the lexicographically smallest byte representation. This enables grouping of physically equivalent states and improves cache coherency in storage.
+The 788,986 states of the ontology are not a uniform sea; they are organized into distinct equivalence classes, or phenomenological orbits. The system's operational phenomenology is built by discovering these orbits at build-time.
 
-The canonicalization process is a one-time, build-time computation:
+Definition of Equivalence: A phenomenological orbit is a set of states where every state is mutually reachable from every other state within that set, through some sequence of the 256 possible intron transformations. This is formally computed as a Strongly Connected Component (SCC) of the complete state transition graph.
 
-```python
-def find_phenomenology_representative(start_tensor_bytes: bytes, ontology_map: dict) -> bytes:
-    """Finds the lexicographically smallest state in the orbit of start_tensor_bytes."""
-    orbit = {start_tensor_bytes}
-    queue = [start_tensor_bytes]
-    state_int = int.from_bytes(start_tensor_bytes, 'big')
-    visited_ints = {state_int}
-    queue_ints = [state_int]
-    phenomenology_int = state_int
-    while queue_ints:
-        current_int = queue_ints.pop(0)
-        for intron in range(256):
-            next_int = apply_gyration_and_transform(current_int, intron)
-            if next_int not in visited_ints:
-                visited_ints.add(next_int)
-                queue_ints.append(next_int)
-                if next_int < phenomenology_int:
-                    phenomenology_int = next_int
-    return phenomenology_int.to_bytes(48, 'big')
+Measured Result: The build process empirically finds that the 788,986 states collapse into exactly 256 distinct phenomenological orbits. This is not a coincidence; it is a profound structural property of the system, where each of the 256 introns imparts a unique "flavor" or signature, creating 256 basins of mutual reachability.
 
-def build_phenomenology_map(ontology_map_path: str, output_path: str):
-    """
-    For each state in the ontology, computes its canonical representative.
-    Saves a map from every state_index to its phenomenology_state_index.
-    """
-    with open(ontology_map_path, 'r') as f:
-        genotype_data = json.load(f)
-    ontology_map = genotype_data['ontology_map']
-    # Ensure ontology_map uses int keys for performance and consistency
-    ontology_map = {int(k): v for k, v in ontology_map.items()}
-    inverse_ontology_map = {v: k for k, v in ontology_map.items()}
-    phenomenology_index_map = {}
-    print(f"Building canonical map for {len(ontology_map)} states...")
-    for i, tensor_bytes in inverse_ontology_map.items():
-        if i % 10000 == 0:
-            print(f"Processing state {i}...")
-        phenomenology_bytes = find_phenomenology_representative(tensor_bytes, ontology_map)
-        phenomenology_index_map[i] = ontology_map[phenomenology_bytes]
-    with open(output_path, 'w') as f:
-        json.dump(phenomenology_index_map, f)
-```
+Parity-Closed Orbits (Self-Mirroring): A key discovery is that the global parity operation (LI, the physical manifestation of UNA) is contained within these equivalence classes. This means every orbit is parity-closed—for any state S in an orbit, its mirror image S_mirror is also in the same orbit. This aligns perfectly with the CGM axiom that CS is unobservable and UNA (light/reflexivity) acts as a universal confinement. The system, at an operational level, cannot distinguish a state from its mirror image; they belong to the same phenomenological "concept."
 
-This process is computationally intensive but only needs to be run once per ontology. It enables the next-level storage abstraction described below.
+The canonical representative for each of the 256 orbits is defined as the state with the smallest 48-bit integer value within that orbit. This provides a stable, deterministic way to normalize any state to its fundamental phenomenological type.
+
+Diagnostic View (Parity-Free Structure): For research and theoretical validation, a secondary, "parity-free" analysis can be performed by computing SCCs on a graph that excludes the LI operation. This diagnostic view reveals a much finer structure of 194,698 smaller orbits, including 21,456 chiral (mirror-paired) orbits and 151,786 achiral (self-mirrored) orbits. This confirms the foundational role of chirality in the system and quantifies the powerful binding effect of the LI operation, which fuses these smaller structures into the 256 operational orbits. This diagnostic data is stored in the phenomenology artifact but is not used by the runtime engines.
 
 ---
 
@@ -507,7 +471,11 @@ Handles all measurement utilities, including:
 * Canonical state indices and integer forms are mapped bidirectionally.
 * State transition tables (epistemology) and canonical-orbit (phenomenology) maps are generated and saved as part of the build process.
 
-**Phenomenological Equivalence:** Two states belong to the same phenomenological orbit if and only if they are mutually reachable through epistemic transformations. Formally, states a and b are equivalent iff there exist intron sequences σ₁, σ₂ such that a →σ₁ b and b →σ₂ a. The phenomenology map assigns to each state the minimal (by 48-bit integer value) member of its equivalence class.
+**Phenomenology and Canonicalization:** The build process generates a phenomenology_map.json artifact that provides the canonical representative for every state in the ontology.
+
+Operational Phenomenology (Full Graph): The primary phenomenology_map is computed by finding the Strongly Connected Components (SCCs) over the complete state transition graph, using all 256 introns. This results in exactly 256 parity-closed, self-mirrored orbits. For any given state index, the map provides the index of its canonical representative (the state with the minimal integer value in its orbit). This is the map used by the runtime CanonicalView to normalize states before storage and retrieval.
+
+Diagnostic Phenomenology (Parity-Free Graph): The artifact may optionally contain a diagnostic section computed by excluding global parity (LI) introns from the SCC calculation. This reveals a much finer-grained structure of chiral and achiral orbits, confirming the theoretical predictions of the CGM. This data is for analysis and is not used by the core runtime engines.
 
 **Measurement Functions:**
 
@@ -912,8 +880,7 @@ This approach supports multi-tenant, multi-user, networked, and hierarchical age
   Construction of the full state transition tensor (`epistemology.npy`, 770 MB, shape 788,986 × 256, int32) is performed via vectorised NumPy routines. The measured runtime is **5 minutes 30 seconds**.
 
 * **Phenomenology map construction** (`python -m baby.information phenomenology`):
-  The canonical-orbit (phenomenology) mapping is built in a single pass, using a union-find algorithm over the STT. Wall-time: **11 seconds**.
-
+The canonical phenomenology is built by computing the Strongly Connected Components (SCCs) of the entire 788,986-state graph using an iterative Tarjan's algorithm. This is a computationally intensive but one-time process. On commodity hardware (e.g., modern laptop CPU), this completes in approximately 2-4 minutes. The build can optionally include a second pass to generate diagnostic data, adding a similar amount of time.
 These operations are not required at runtime and are run once per release.
 
 **Run-time operation (per agent):**
@@ -938,7 +905,8 @@ There are no components whose computational cost scales faster than linearly wit
   20 MB on disk. In default memmap mode, three NumPy arrays are constructed (keys, values, inverse), collectively occupying \~15 MB RAM per process.
 
 * **phenomenology\_map.json:**
-  9.7 MB on disk; once parsed, resident size is \~12 MB.
+  The core artifact is approximately 15-20 MB on disk. It contains the primary canonical map (a list of 788,986 integers) and metadata. If generated with the optional diagnostic layer, the file size increases. When loaded, the primary map occupies approximately 3 MB of memory as a NumPy integer array.
+
 
 * **OrbitStore index:**
   25 bytes per stored phenotype. For 100,000 phenotypes: \~2.5 MB.
@@ -1059,23 +1027,42 @@ This appendix records the essential bridges between GyroSI’s formal physics an
 
 ---
 
-#### 1. Genetic‑code analogies
+Below is a precise, up-to-date wording for the “Genetic-code analogies” appendix that keeps the 64 / 32 narrative, clarifies how those counts relate to the newly-measured 256 operational orbits, and avoids hand-waving numbers such as “~195 000” unless you explicitly include the diagnostic layer.
 
-GyroSI’s instruction algebra in the eight‑bit space ℤ₂⁸ happens to echo several small‑number structures familiar from molecular genetics, though no claim is made that the two domains share the same state count or evolutionary origin.
+---
 
-* Four intron actions (L0, LI, FG, BG) are the minimal set that closes the algebra, just as four nucleotides form the minimal alphabet for base pairing.
+### 1  Genetics
 
-* Three spatial axes in every tensor slice match the three positions in a codon, each position modulating a different degree of freedom inside the lattice.
+GyroSI’s instruction algebra in the eight-bit space ℤ₂⁸ echoes a ladder of small cardinalities familiar from molecular genetics.  No claim is made that the two domains share the same state count or evolutionary origin; the correspondence is purely structural.
 
-* Two sign polarities ±1 reflect the two strands of complementary base pairing.
+| GyroSI level | Cardinality | Biology analogy | Comment |
+|--------------|-------------|-----------------|---------|
+| **Intron action families** | **4** (`L0`, `LI`, `FG`, `BG`) | Four nucleotides | Minimal set that closes the algebra. |
+| **Tensor axes per slice** | **3** | Three codon positions | Each axis modulates a different DoF. |
+| **Sign polarities** | **2** ( ±1 ) | Two DNA strands | Fundamental chirality. |
+| **Bit width of intron** | **8 bits** → 2⁸ = 256 patterns | 2 bits × 4-symbol alphabet | Full instruction space. |
+| **Active masks (anchors stripped)** | **64** patterns | 64 mRNA codons | Bits 0 & 7 (`L0`) are anchors; removing them leaves 6 informative bits (2⁶ = 64). |
+| **Parity-quotiented classes** | **32** | Wobble pairing halves the codon set | Identifying global parity (`LI` bits 1 & 6) folds the 64 active masks into 32 equivalence classes. |
+| **Operational phenomenology** | **256** orbits | — | When path-dependent memory is included, the 788 986 states collapse into 256 parity-closed SCCs. |
 
-* Eight bits per intron provide 2⁸ distinct instructions, mirroring the 2 bits × 4‑symbol representation of a four‑mer in DNA notation.
+Key points:
 
-* Sixty‑four active intron patterns (the six working bits after stripping the L0 anchors) cover the complete operational alphabet. Biology’s sixty‑four codons occupy the same combinatorial volume.
+*  **Anchors vs. Physics:**  
+  Bits 0 and 7 (`L0`) never alter the state; they act only as identity anchors.  Stripping them reveals the **64** distinct “active” masks that actually drive transformations.
 
-* Thirty‑two LI‑quotiented classes arise when whole‑tensor parity is identified; this folding is formally identical to wobble pairing that halves the codon set.
+*  **Global parity (`LI`) as confinement:**  
+  The `LI` bits (1 & 6) implement the universal chirality flip.  Quotienting by this symmetry folds the 64 masks into **32** classes—precisely mirroring how wobble pairing halves the biological codon table.
 
-The large orbit of 788 986 physical states belongs purely to GyroSI’s internal physics and has no biological counterpart. The comparison therefore stops at the level of instruction algebra, not at the size of the state space.
+*  **Why 256 operational orbits, not 64 / 32:**  
+  Once the state-dependent carry term is included, each nominal intron mask can steer the system along many memory-laden paths.  The full SCC analysis shows that these paths organise the 788 986 states into **256** parity-closed phenomenological orbits—one basin of mutual reachability for each eight-bit instruction pattern.  Thus the 64/32 counts live at the **mask-algebra** layer, while 256 lives at the **full physics + memory** layer.  Both ladders are valid; they simply sit at different depths of the model.
+
+The large orbit count (788 986) and its measured diameter (6) belong purely to GyroSI’s internal physics and have no biological counterpart; the analogy stops at the level of small-number structures.
+
+---
+
+#### “~195 000 parity-free orbits”
+
+If you include the optional diagnostic SCC pass that **excludes `LI` introns**, the canonical 256 orbits split into 194 698 finer “parity-free” islands.  About 21 456 of those appear in chiral mirror pairs; the rest (≈ 152 k) are achiral self-mirrors.  This finer decomposition is **research metadata only** and has been moved to the `_diagnostics` section of the phenomenology artifact; it is not part of the operational ladder above.
 
 ---
 
@@ -1132,6 +1119,23 @@ Other mappings noted in the main text are retained without restatement:
 * The role of the endogenous modulus as a hard physical constant.
 
 Readers seeking proofs or implementation details will find the relevant functions in `baby.governance`, `baby.information`, and `baby.inference`.
+
+#### 7. Core Invariants (Build‑Time Assertions)
+
+1. Ontology modulus: |States| = 788,986 (assert exact).
+2. Archetypal eccentricity ≤ 6; no path > 6 verified in sampled BFS; (optionally) full diameter = 6.
+3. Phenomenology (canonical): length(phenomenology_map) = 788,986; values ∈ [0, 788,985].
+4. Each orbit representative r satisfies: 
+     r = min{ state_int(s) | canonical[s] = r } (48-bit integer order).
+5. Sum of orbit_sizes.values() = 788,986.
+6. For every index i: canonical[i] in orbit_sizes, orbit_sizes[canonical[i]] ≥ 1.
+7. Parity closure: For every state s with integer value v, v ⊕ FULL_MASK belongs to same canonical orbit (empirically validated).
+8. Tensor mapping: int_to_tensor(tensor_to_int(T)) == T for all test tensors (validated on random + boundary states).
+9. Coaddition:
+     - Non-commutative: ∃ a,b: a⊞b ≠ b⊞a (unit test ensures).
+     - Non-associative: ∃ a,b,c: (a⊞b)⊞c ≠ a⊞(b⊞c).
+10. Angular distance formula: 
+     gyrodistance_angular(T1,T2) = arccos( dot(T1,T2)/48 ) ∈ [0,π].
 
 ===
 

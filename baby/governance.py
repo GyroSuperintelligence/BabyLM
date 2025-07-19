@@ -90,7 +90,7 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     Applies the complete gyroscopic physics transformation.
 
     This implements gyro-addition followed by Thomas gyration:
-    1. Apply transformational forces based on intron bit patterns
+    1. Apply transformational forces based on intron bit patterns (using precomputed mask)
     2. Apply path-dependent memory/carry term
 
     Args:
@@ -100,19 +100,14 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     Returns:
         New 48-bit state after transformation
     """
-    # Step 1: Gyro-addition (applying transformational forces)
-    temp_state = state_int
-
-    # Apply bit-pattern transformations
-    if intron & 0b01000010:  # LI: Global parity flip (bits 1,6)
-        temp_state ^= FULL_MASK
-    if intron & 0b00100100:  # FG: Forward gyration (bits 2,5)
-        temp_state ^= FG_MASK
-    if intron & 0b00011000:  # BG: Backward gyration (bits 3,4)
-        temp_state ^= BG_MASK
+    # Ensure Python int types for bitwise operations
+    state_int = int(state_int)
+    intron = int(intron)
+    # Step 1: Gyro-addition (applying transformational forces) using precomputed mask
+    temp_state = state_int ^ XFORM_MASK[intron & 0xFF]
 
     # Step 2: Thomas Gyration (path-dependent memory)
-    intron_pattern = INTRON_BROADCAST_MASKS[intron]
+    intron_pattern = int(INTRON_BROADCAST_MASKS[intron])
     gyration = temp_state & intron_pattern
     final_state = temp_state ^ gyration
 

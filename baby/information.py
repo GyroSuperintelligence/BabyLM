@@ -1,4 +1,5 @@
 import warnings
+
 warnings.filterwarnings("ignore", message=".*found in sys.modules after import of package.*")
 """
 S2: Information - Measurement & Storage
@@ -408,19 +409,18 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
 # STEP 3: Phenomenology Map (Core + Optional Diagnostics)
 # ==============================================================================
 
+
 def _compute_sccs(
-    ep: np.ndarray,
-    idx_to_state: np.ndarray,
-    introns_to_use: List[int]
+    ep: np.ndarray, idx_to_state: np.ndarray, introns_to_use: List[int]
 ) -> Tuple[np.ndarray, Dict[int, int], List[int]]:
     """
     Core Tarjan's SCC algorithm restricted to a subset of introns.
-    
+
     Args:
         ep: Epistemology table of shape (N, 256)
         idx_to_state: Mapping from index to state integer
         introns_to_use: Subset of introns to include in the graph
-        
+
     Returns:
         Tuple of (canonical_map, orbit_sizes, representatives)
     """
@@ -485,27 +485,28 @@ def _compute_sccs(
     return canonical, orbit_sizes, reps
 
 
-def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str, 
-                           include_diagnostics: bool = False) -> None:
+def build_phenomenology_map(
+    ep_path: str, ontology_path: str, output_path: str, include_diagnostics: bool = False
+) -> None:
     """
     Builds the canonical phenomenology map for GyroSI runtime operations.
-    
+
     The core phenomenology uses SCCs over all 256 introns, creating 256 parity-closed
     orbits. This honors the theoretical principle that CS (Common Source) is unobservable
     and that UNA (global parity/LI) represents the reflexive confinement of light itself.
-    
+
     Each orbit is self-mirrored, meaning states and their parity complements belong to
     the same equivalence class. This preserves the fundamental symmetry while providing
     the deterministic canonicalization needed for the knowledge store.
-    
+
     Args:
         ep_path: Path to epistemology.npy
-        ontology_path: Path to ontology_map.json  
+        ontology_path: Path to ontology_map.json
         output_path: Path to save phenomenology_map.json
         include_diagnostics: If True, also compute parity-free analysis for research
     """
     print("=== [Phenomenology Core Builder] ===")
-    
+
     # Load data
     ep = np.load(ep_path, mmap_mode="r")
     with open(ontology_path) as f:
@@ -539,21 +540,21 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str,
                     "Canonical phenomenology with LI (global parity) included.",
                     "Each orbit is parity-closed and self-mirrored.",
                     "This honors the principle that CS (Common Source) is unobservable.",
-                    "UNA (LI) represents reflexive confinement - the 'light' that cannot be stepped outside of."
-                ]
-            }
-        }
+                    "UNA (LI) represents reflexive confinement - the 'light' that cannot be stepped outside of.",
+                ],
+            },
+        },
     }
 
     # Optional: Add diagnostic analysis
     if include_diagnostics:
         print("Computing diagnostic analysis (parity-free structure)...")
-        
+
         # Global parity (LI) bit mask pattern
         LI_MASK = 0b01000010
         parity_free_introns = [i for i in all_introns if not (i & LI_MASK)]
         canonical_pf, orbit_sizes_pf, reps_pf = _compute_sccs(ep, idx_to_state, parity_free_introns)
-        
+
         # Mirror pair analysis on parity-free structure
         mirror_map: Dict[int, int] = {}
         for rep in reps_pf:
@@ -561,18 +562,18 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str,
                 continue
             state_int = int(idx_to_state[rep])
             mirror_state = state_int ^ governance.FULL_MASK
-            
+
             m_pos = np.searchsorted(idx_to_state, mirror_state)
             if m_pos >= N or idx_to_state[m_pos] != mirror_state:
                 mirror_map[rep] = -1
                 continue
-                
+
             mirror_rep = int(canonical_pf[m_pos])
             mirror_map[rep] = mirror_rep
             mirror_map[mirror_rep] = rep
-            
+
         mirror_pairs = [(a, b) for a, b in mirror_map.items() if a < b and b != -1]
-        
+
         # Cross-layer mapping analysis
         pf_to_canonical = {pf_rep: int(canonical[pf_rep]) for pf_rep in reps_pf}
         split_counter: Dict[int, int] = {}
@@ -581,7 +582,7 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str,
         split_histogram = {}
         for count in split_counter.values():
             split_histogram[str(count)] = split_histogram.get(str(count), 0) + 1
-        
+
         # Add diagnostics to artifact
         artifact["_diagnostics"] = {
             "note": "Research data - not used by runtime engines",
@@ -589,15 +590,15 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str,
                 "total_orbits": len(reps_pf),
                 "mirror_pairs": len(mirror_pairs),
                 "largest_orbit": int(max(orbit_sizes_pf.values())) if orbit_sizes_pf else 0,
-                "canonical_orbit_split_histogram": split_histogram
+                "canonical_orbit_split_histogram": split_histogram,
             },
             "theoretical_insights": [
                 f"Removing LI reveals {len(reps_pf)} fine-grained orbits vs {len(representatives)} canonical orbits",
                 f"Found {len(mirror_pairs)} chiral pairs and {len(reps_pf) - 2*len(mirror_pairs)} achiral orbits",
-                "This demonstrates the binding power of global parity (UNA/LI) in the system"
-            ]
+                "This demonstrates the binding power of global parity (UNA/LI) in the system",
+            ],
         }
-        
+
         print(f"  Diagnostic: {len(reps_pf)} parity-free orbits, {len(mirror_pairs)} mirror pairs")
 
     # Save artifact
@@ -633,8 +634,9 @@ def parse_args():
     p_pheno.add_argument("--ep", required=True, help="Path to epistemology.npy")
     p_pheno.add_argument("--output", required=True, help="Path to save phenomenology_map.json")
     p_pheno.add_argument("--ontology", required=True, help="Path to ontology_map.json")
-    p_pheno.add_argument("--diagnostics", action="store_true", 
-                        help="Include parity-free analysis for research (optional)")
+    p_pheno.add_argument(
+        "--diagnostics", action="store_true", help="Include parity-free analysis for research (optional)"
+    )
 
     return parser.parse_args()
 
@@ -661,23 +663,25 @@ if __name__ == "__main__":
 
         elif args.command == "phenomenology":
             print("=== [Step 3] Phenomenology Mapping ===")
-            include_diag = getattr(args, 'diagnostics', False)
+            include_diag = getattr(args, "diagnostics", False)
             build_phenomenology_map(args.ep, args.ontology, args.output, include_diag)
-            
+
             # Print final summary
             with open(args.output) as f:
                 pheno = json.load(f)
             with open(args.ontology) as f:
                 ont = json.load(f)
-                
+
             print("\n--- Final Summary ---")
             print(f"Total states: {ont['endogenous_modulus']:,}")
             print(f"Canonical orbits: {pheno['metadata']['total_orbits']} (parity-closed)")
             print(f"Largest orbit: {pheno['metadata']['largest_orbit']:,} states")
-            
+
             if "_diagnostics" in pheno:
                 diag = pheno["_diagnostics"]["parity_free_analysis"]
-                print(f"Research diagnostic: {diag['total_orbits']} parity-free orbits, {diag['mirror_pairs']} chiral pairs")
+                print(
+                    f"Research diagnostic: {diag['total_orbits']} parity-free orbits, {diag['mirror_pairs']} chiral pairs"
+                )
 
         else:
             print("Unknown command", file=sys.stderr)

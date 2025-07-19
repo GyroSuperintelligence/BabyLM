@@ -137,6 +137,7 @@ class IntelligenceEngine:
             Output byte representing intelligent response
         """
         # S3: Get semantic meaning of current state + context
+        # state_index is physical index; canonicalisation (if enabled) is applied at storage layer (CanonicalView)
         if self.use_epistemology:
             state_index = self.current_state_index
         else:
@@ -154,7 +155,18 @@ class IntelligenceEngine:
         θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
         if θ > self._θ_high:
             self._pain_streak += 1
-            last_intron = self._cool_introns[self.cycle_count % len(self._cool_introns)]
+            cooling_intron = self._cool_introns[self.cycle_count % len(self._cool_introns)]
+            last_intron = cooling_intron
+
+            # Immediately apply a stabilising micro-step (egress + learn)
+            self.process_egress(cooling_intron)
+            if self.use_epistemology:
+                state_index = self.current_state_index
+            else:
+                state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
+            phenotype_entry = self.operator.get_phenotype(state_index, cooling_intron)
+            self.operator.learn(phenotype_entry, cooling_intron)
+
             if self._pain_streak > 256 and self._autonomic_cycles:
                 for intr in self._autonomic_cycles[self.cycle_count % len(self._autonomic_cycles)]:
                     self.process_egress(intr)
@@ -329,8 +341,7 @@ class GyroSI:
         store = self.engine.operator.store
         if isinstance(store, OrbitStore):
             cast(OrbitStore, store).commit()
-        elif hasattr(store, "close"):
-            store.close()
+        # Removed automatic close()
 
     def respond(self, data: bytes) -> bytes:
         """
@@ -362,8 +373,7 @@ class GyroSI:
         store = self.engine.operator.store
         if isinstance(store, OrbitStore):
             cast(OrbitStore, store).commit()
-        elif hasattr(store, "close"):
-            store.close()
+        # Removed automatic close()
         return bytes(response)
 
     def get_agent_info(self) -> Dict[str, Any]:
@@ -386,19 +396,19 @@ class GyroSI:
         """Add a monitoring hook to the intelligence engine."""
         self.engine.add_hook(hook)
 
-    def apply_maintenance(self, decay_factor: float = 0.999, confidence_threshold: float = 0.05) -> Dict[str, Any]:
+    def apply_maintenance(self, decay_rate: float = 0.001, confidence_threshold: float = 0.05) -> Dict[str, Any]:
         """
         Apply maintenance operations to the knowledge base.
 
         Args:
-            decay_factor: Confidence decay factor for aging entries
+            decay_rate: Confidence decay rate for aging entries (small value, e.g. 0.001)
             confidence_threshold: Minimum confidence for entry retention
 
         Returns:
             Maintenance report
         """
         # Apply confidence decay
-        decay_report = self.engine.operator.apply_confidence_decay(decay_factor)
+        decay_report = self.engine.operator.apply_confidence_decay(decay_rate)
 
         # Prune low-confidence entries
         pruned_count = self.engine.operator.prune_low_confidence_entries(confidence_threshold)
@@ -411,8 +421,8 @@ class GyroSI:
 
     def _create_default_store(self) -> Any:
         """Create default storage based on configuration."""
-        # Check if phenomenology storage is enabled
-        enable_phenomenology = self.config.get("enable_phenomenology_storage", False)
+        # Canonicalisation enablement consistency: autodetect if flag is None or missing
+        enable_phenomenology = self.config.get("enable_phenomenology_storage", None)
 
         # Create base store
         public_knowledge_path = self.config.get("public_knowledge_path")
@@ -433,15 +443,16 @@ class GyroSI:
                 knowledge_path = "memories/knowledge.pkl.gz"
             base_store = OrbitStore(knowledge_path, write_threshold=batch_size)
 
-        # Wrap with phenomenology decorator if enabled
-        if enable_phenomenology:
-            phenomenology_map_path = self.config.get("phenomenology_map_path")
-            if phenomenology_map_path is None:
-                phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
-            if os.path.exists(phenomenology_map_path):
-                return CanonicalView(base_store, phenomenology_map_path)
-            else:
-                print(f"Warning: phenomenology map not found at {phenomenology_map_path}")
+        # CanonicalView: enable if flag is True, or autodetect if None and file exists
+        phenomenology_map_path = self.config.get("phenomenology_map_path")
+        if phenomenology_map_path is None:
+            phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
+        if enable_phenomenology is not False:
+            if enable_phenomenology or (enable_phenomenology is None and os.path.exists(phenomenology_map_path)):
+                if os.path.exists(phenomenology_map_path):
+                    return CanonicalView(base_store, phenomenology_map_path)
+                else:
+                    print(f"Warning: phenomenology map not found at {phenomenology_map_path}")
 
         return base_store
 

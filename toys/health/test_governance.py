@@ -121,7 +121,7 @@ class TestTransformations:
         # Should flip all bits, then apply gyration
         expected_after_flip = state ^ governance.FULL_MASK
         intron_pattern = governance.INTRON_BROADCAST_MASKS[0x42]
-        expected_final = expected_after_flip ^ (expected_after_flip & intron_pattern)
+        expected_final = expected_after_flip ^ (expected_after_flip & int(intron_pattern))
 
         assert result == expected_final
 
