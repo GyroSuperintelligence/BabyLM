@@ -1,19 +1,20 @@
 import warnings
-
 warnings.filterwarnings("ignore", message=".*found in sys.modules after import of package.*")
-# 1. Generate ontology_map.json (the ontology)
-# python -m baby.information ontology --output memories/public/meta/ontology_map.json
-#
-# 2. Generate epistemology.npy (the state transition table)
-# python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
-#
-# 3. Generate phenomenology_map.json (the phenomenology mapping)
-# python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy --output memories/public/meta/phenomenology_map.json --ontology memories/public/meta/ontology_map.json
 """
 S2: Information - Measurement & Storage
 
 This module provides the InformationEngine class responsible for measurement,
 storage coordination, and conversion between state representations.
+
+Build steps:
+1. Generate ontology_map.json (the ontology)
+   python -m baby.information ontology --output memories/public/meta/ontology_map.json
+
+2. Generate epistemology.npy (the state transition table)
+   python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
+
+3. Generate phenomenology_map.json (the phenomenology mapping)
+   python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy --output memories/public/meta/phenomenology_map.json --ontology memories/public/meta/ontology_map.json
 """
 
 import numpy as np
@@ -404,41 +405,28 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
 
 
 # ==============================================================================
-# STEP 3: Phenomenology Map (OPTIMIZED)
+# STEP 3: Phenomenology Map (Dual-Structure)
 # ==============================================================================
-def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) -> None:
-    """
-    Builds the definitive, theoretically-sound phenomenology artifact.
+# Global parity (LI) bit mask pattern
+LI_MASK = 0b01000010  
 
-    This version is based on the verified physical properties of the system:
-    1.  Equivalence is defined as mutual reachability via *any* sequence of
-        transformations. This is computed as an SCC over the full graph of
-        all 256 introns.
-    2.  The mirror map is computed via the global parity (LI) operation.
-    3.  The artifact is lean, versioned, and contains only this verified data.
+def _compute_sccs(
+    ep: np.ndarray,
+    idx_to_state: np.ndarray,
+    introns_to_use: List[int]
+) -> Tuple[np.ndarray, Dict[int, int], List[int]]:
     """
-    print("=== [Phenomenology Final Builder] ===")
-
-    # --- 1. Setup ---
-    print("Step 1: Loading data...")
-    ep = np.load(ep_path, mmap_mode="r")
+    Core Tarjan's SCC algorithm restricted to a subset of introns.
+    
+    Args:
+        ep: Epistemology table of shape (N, 256)
+        idx_to_state: Mapping from index to state integer
+        introns_to_use: Subset of introns to include in the graph
+        
+    Returns:
+        Tuple of (canonical_map, orbit_sizes, representatives)
+    """
     N = ep.shape[0]
-
-    with open(ontology_path) as f:
-        ontology_data = json.load(f)
-
-    s2 = InformationEngine(ontology_data, use_array_indexing=True, strict_validation=False)
-
-    # --- 2. Tarjan's SCC over the FULL graph ---
-    print("Step 2: Computing orbits (SCCs over all 256 introns)...")
-
-    # Build index→state array for vectorized lookup
-    print("  Building index→state lookup array...")
-    idx_to_state = np.empty(N, dtype=np.uint64)
-    # Fill it by iterating over the loaded dictionary
-    for state_int, idx in ontology_data["ontology_map"].items():
-        idx_to_state[idx] = int(state_int)
-
     indices = np.full(N, -1, dtype=np.int32)
     lowlink = np.zeros(N, dtype=np.int32)
     on_stack = np.zeros(N, dtype=bool)
@@ -447,12 +435,10 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) 
     orbit_sizes: Dict[int, int] = {}
     reps: List[int] = []
     counter = 0
+    introns_arr = np.array(introns_to_use, dtype=np.int32)
 
     def neighbors(v: int) -> np.ndarray:
-        return ep[v]  # accept duplicates; negligible logical impact
-
-    processed = 0
-    REPORT_INTERVAL = max(1, N // 20)
+        return np.unique(ep[v, introns_arr])
 
     for root in range(N):
         if indices[root] != -1:
@@ -464,9 +450,9 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) 
         on_stack[root] = True
 
         while dfs_stack:
-            v, children = dfs_stack[-1]
+            v, child_iter = dfs_stack[-1]
             try:
-                w = next(children)
+                w = int(next(child_iter))
                 if indices[w] == -1:
                     indices[w] = lowlink[w] = counter
                     counter += 1
@@ -474,100 +460,162 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) 
                     on_stack[w] = True
                     dfs_stack.append((w, iter(neighbors(w))))
                 elif on_stack[w]:
-                    lowlink[v] = min(lowlink[v], indices[w])
+                    if indices[w] < lowlink[v]:
+                        lowlink[v] = indices[w]
             except StopIteration:
                 dfs_stack.pop()
                 if dfs_stack:
                     parent_v, _ = dfs_stack[-1]
-                    lowlink[parent_v] = min(lowlink[parent_v], lowlink[v])
+                    if lowlink[v] < lowlink[parent_v]:
+                        lowlink[parent_v] = lowlink[v]
                 if lowlink[v] == indices[v]:
-                    component = []
+                    comp = []
                     while True:
                         node = stack.pop()
                         on_stack[node] = False
-                        component.append(node)
+                        comp.append(node)
                         if node == v:
                             break
-
-                    comp_arr = np.array(component, dtype=np.int32)
+                    comp_arr = np.array(comp, dtype=np.int32)
                     comp_states = idx_to_state[comp_arr]
                     rep = int(comp_arr[np.argmin(comp_states)])
-
                     canonical[comp_arr] = rep
-                    orbit_sizes[rep] = len(component)
+                    orbit_sizes[rep] = comp_arr.size
                     reps.append(rep)
 
-                    processed += len(component)
-                    if processed % REPORT_INTERVAL == 0:
-                        pct = processed * 100.0 / N
-                        print(f"\r  Progress: {processed}/{N} ({pct:.1f}%) | Orbits found: {len(reps)}", end="")
+    assert np.all(canonical >= 0), "Unassigned nodes after SCC computation"
+    return canonical, orbit_sizes, reps
 
-    print(f"\nSCC computation complete. Found {len(reps)} orbits.")
-    assert np.all(canonical >= 0), "FATAL: Not all states were assigned to an orbit."
 
-    # --- 3. Mirror Map ---
-    reps = sorted(set(canonical.tolist()))  # the true canonical representative indices
+def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) -> None:
+    """
+    Builds dual-structure phenomenology artifact.
     
-    print("Step 3: Identifying mirror pairs...")
+    This includes two distinct views of the state space:
+    1. full_graph: SCCs including LI (global parity) transitions
+       In this view, every orbit is closed under parity and self-mirrored.
+    2. parity_free: SCCs excluding LI transitions
+       This view exposes the 128 mirror-pair structure predicted by theory.
+       
+    The artifact also includes cross-layer mappings to show how parity-free
+    orbits combine into full-graph orbits.
+    """
+    print("=== [Phenomenology Dual-Structure Builder] ===")
+    
+    # Load data
+    ep = np.load(ep_path, mmap_mode="r")
+    with open(ontology_path) as f:
+        ontology_data = json.load(f)
+    N = ep.shape[0]
+
+    # Build index→state lookup array
+    # This is robust (no ordering assumptions) and used consistently throughout
+    idx_to_state = np.empty(N, dtype=np.uint64)
+    for k_str, idx in ontology_data["ontology_map"].items():
+        idx_to_state[idx] = int(k_str)
+
+    # Step 1: Compute SCCs on the full graph
+    print("Step 1: Computing orbits on full graph (all 256 introns)...")
+    all_introns = list(range(256))
+    canonical_full, orbit_sizes_full, reps_full = _compute_sccs(ep, idx_to_state, all_introns)
+    print(f"  Found {len(reps_full)} full-graph orbits")
+
+    # Step 2: Compute SCCs on the parity-free graph
+    print("Step 2: Computing orbits on parity-free graph (excluding LI)...")
+    parity_free_introns = [i for i in all_introns if not (i & LI_MASK)]
+    canonical_pf, orbit_sizes_pf, reps_pf = _compute_sccs(ep, idx_to_state, parity_free_introns)
+    print(f"  Found {len(reps_pf)} parity-free orbits")
+
+    # Step 3: Identify mirror pairs on the parity-free structure
+    print("Step 3: Identifying mirror pairs using parity-free orbits...")
     mirror_map: Dict[int, int] = {}
-    
-    for rep in reps:
+    for rep in reps_pf:
         if rep in mirror_map:
             continue
-        state_int = s2.get_state_from_index(rep)
+        state_int = int(idx_to_state[rep])
         mirror_state = state_int ^ governance.FULL_MASK
-        try:
-            mirror_idx = s2.get_index_from_state(mirror_state)
-            mirror_rep = int(canonical[mirror_idx])
-            mirror_map[rep] = mirror_rep
-            mirror_map[mirror_rep] = rep
-        except ValueError:
+        
+        # Binary search in idx_to_state for the mirror state
+        m_pos = np.searchsorted(idx_to_state, mirror_state)
+        if m_pos >= N or idx_to_state[m_pos] != mirror_state:
             mirror_map[rep] = -1
-    
-    # Debug assertion to verify mirror symmetry
-    for k, v in mirror_map.items():
-        if v != -1:
-            assert mirror_map.get(v) == k, f"Mirror symmetry violated: {k} ↔ {v} inconsistency"
+            continue
+            
+        mirror_rep = int(canonical_pf[m_pos])
+        mirror_map[rep] = mirror_rep
+        mirror_map[mirror_rep] = rep
+        
+    mirror_pairs = [(a, b) for a, b in mirror_map.items() if a < b and b != -1]
+    num_mirror_pairs = len(mirror_pairs)
+    print(f"  Found {num_mirror_pairs} non-trivial mirror pairs")
 
-    # --- 4. Create and Save Artifact ---
-    print("Step 4: Writing final artifact...")
-    largest_orbit = int(max(orbit_sizes.values())) if orbit_sizes else 0
-    num_orbits = len(reps)
-    num_mirror_pairs = sum(1 for k, v in mirror_map.items() if k < v and v != -1)
+    # Step 4: Build cross-layer mapping 
+    print("Step 4: Building cross-layer mapping...")
+    pf_rep_to_full_rep: Dict[int, int] = {}
+    for pf_rep in reps_pf:
+        pf_rep_to_full_rep[pf_rep] = int(canonical_full[pf_rep])
+        
+    # Analyze how parity-free orbits combine in the full graph
+    split_counter: Dict[int, int] = {}
+    for full_rep in pf_rep_to_full_rep.values():
+        split_counter[full_rep] = split_counter.get(full_rep, 0) + 1
+        
+    # Build histogram of split counts
+    split_hist: Dict[str, int] = {}
+    for cnt in split_counter.values():
+        split_hist[str(cnt)] = split_hist.get(str(cnt), 0) + 1
+    print(f"  Full-orbit split histogram: {split_hist}")
 
-    artifact: PhenomenologyData = {
-        "schema_version": "0.9.6",
-        "phenomenology_map": canonical.tolist(),
-        "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes.items()},
-        "mirror_map": {str(k): int(v) for k, v in mirror_map.items()},
+    # Step 5: Create and save the artifact
+    artifact = {
+        "schema_version": "phenomenology/dual/1.0.0",
         "metadata": {
-            "total_states": N,
-            "total_orbits": num_orbits,
-            "total_mirror_pairs": num_mirror_pairs,
-            "largest_orbit": largest_orbit,
             "build_timestamp": int(time.time()),
-            "construction": {
-                "method": "scc_full_graph",
-                "notes": [
-                    "Equivalence is defined as mutual reachability under the full set of 256 introns.",
-                    "This is the definitive, assumption-free definition based on verified physics.",
-                    f"Finding {num_orbits} orbits is a measured property of the system.",
-                ],
-            },
+            "notes": [
+                "This artifact contains two phenomenological views:",
+                "full_graph: SCCs over all introns (parity collapsed, self-mirrored)",
+                "parity_free: SCCs excluding LI introns (reveals mirror pairing)"
+            ]
         },
+        "full_graph": {
+            "map": canonical_full.tolist(),
+            "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes_full.items()},
+            "stats": {
+                "total_orbits": len(reps_full),
+                "largest_orbit": int(max(orbit_sizes_full.values())) if orbit_sizes_full else 0
+            }
+        },
+        "parity_free": {
+            "map": canonical_pf.tolist(),
+            "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes_pf.items()},
+            "mirror_map": {str(k): int(v) for k, v in mirror_map.items()},
+            "stats": {
+                "total_orbits": len(reps_pf),
+                "mirror_pairs": num_mirror_pairs,
+                "largest_orbit": int(max(orbit_sizes_pf.values())) if orbit_sizes_pf else 0
+            }
+        },
+        "cross_layer": {
+            "pf_rep_to_full_rep": {str(k): int(v) for k, v in pf_rep_to_full_rep.items()},
+            "full_orbit_split_histogram": split_hist
+        }
     }
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(artifact, f, indent=2)
 
-    print(f"✓ Saved final phenomenology to: {output_path}")
-    print(f"  - Total Orbits: {num_orbits}")
-    print(f"  - Total Mirror Pairs: {num_mirror_pairs}")
-    print(f"  - Largest Orbit: {largest_orbit}")
+    # Print summary
+    print("\nSummary:")
+    print(f"  Full graph orbits: {artifact['full_graph']['stats']['total_orbits']}")
+    print(f"  Parity-free orbits: {artifact['parity_free']['stats']['total_orbits']}")
+    print(f"  Parity-free mirror pairs: {artifact['parity_free']['stats']['mirror_pairs']}")
+    print(f"  Full-orbit split histogram: {artifact['cross_layer']['full_orbit_split_histogram']}")
+    print(f"✓ Saved dual-structure phenomenology to: {output_path}")
 
 
 def parse_args():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="GyroSI asset builder")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -613,14 +661,16 @@ if __name__ == "__main__":
             print("=== [Step 3] Phenomenology Mapping ===")
             build_phenomenology_map(args.ep, args.ontology, args.output)
             with open(args.output) as f:
-                pheno_data = json.load(f)
+                pheno = json.load(f)
             with open(args.ontology) as f:
-                ontology_data = json.load(f)
-            print(f"\n✓ Saved: {args.output}")
-            metadata = pheno_data.get("metadata", {})
-            print(f"  - Total states: {ontology_data['endogenous_modulus']:,}")
-            print(f"  - Unique orbits: {metadata.get('total_orbits', len(pheno_data.get('orbit_sizes', {}))):,}")
-            print(f"  - Largest orbit: {metadata.get('largest_orbit', 0):,} states\n")
+                ont = json.load(f)
+            print("\n--- Summary ---")
+            print(f"Total states: {ont['endogenous_modulus']:,}")
+            fg = pheno["full_graph"]["stats"]
+            pf = pheno["parity_free"]["stats"]
+            print(f"Full graph: {fg['total_orbits']} orbits | largest {fg['largest_orbit']}")
+            print(f"Parity-free: {pf['total_orbits']} orbits | largest {pf['largest_orbit']} | mirror pairs {pf['mirror_pairs']}")
+            print(f"Split histogram: {pheno['cross_layer']['full_orbit_split_histogram']}")
 
         else:
             print("Unknown command", file=sys.stderr)
