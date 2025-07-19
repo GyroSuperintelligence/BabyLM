@@ -405,10 +405,8 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
 
 
 # ==============================================================================
-# STEP 3: Phenomenology Map (Dual-Structure)
+# STEP 3: Phenomenology Map (Core + Optional Diagnostics)
 # ==============================================================================
-# Global parity (LI) bit mask pattern
-LI_MASK = 0b01000010  
 
 def _compute_sccs(
     ep: np.ndarray,
@@ -487,20 +485,26 @@ def _compute_sccs(
     return canonical, orbit_sizes, reps
 
 
-def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) -> None:
+def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str, 
+                           include_diagnostics: bool = False) -> None:
     """
-    Builds dual-structure phenomenology artifact.
+    Builds the canonical phenomenology map for GyroSI runtime operations.
     
-    This includes two distinct views of the state space:
-    1. full_graph: SCCs including LI (global parity) transitions
-       In this view, every orbit is closed under parity and self-mirrored.
-    2. parity_free: SCCs excluding LI transitions
-       This view exposes the 128 mirror-pair structure predicted by theory.
-       
-    The artifact also includes cross-layer mappings to show how parity-free
-    orbits combine into full-graph orbits.
+    The core phenomenology uses SCCs over all 256 introns, creating 256 parity-closed
+    orbits. This honors the theoretical principle that CS (Common Source) is unobservable
+    and that UNA (global parity/LI) represents the reflexive confinement of light itself.
+    
+    Each orbit is self-mirrored, meaning states and their parity complements belong to
+    the same equivalence class. This preserves the fundamental symmetry while providing
+    the deterministic canonicalization needed for the knowledge store.
+    
+    Args:
+        ep_path: Path to epistemology.npy
+        ontology_path: Path to ontology_map.json  
+        output_path: Path to save phenomenology_map.json
+        include_diagnostics: If True, also compute parity-free analysis for research
     """
-    print("=== [Phenomenology Dual-Structure Builder] ===")
+    print("=== [Phenomenology Core Builder] ===")
     
     # Load data
     ep = np.load(ep_path, mmap_mode="r")
@@ -509,109 +513,105 @@ def build_phenomenology_map(ep_path: str, ontology_path: str, output_path: str) 
     N = ep.shape[0]
 
     # Build index→state lookup array
-    # This is robust (no ordering assumptions) and used consistently throughout
     idx_to_state = np.empty(N, dtype=np.uint64)
     for k_str, idx in ontology_data["ontology_map"].items():
         idx_to_state[idx] = int(k_str)
 
-    # Step 1: Compute SCCs on the full graph
-    print("Step 1: Computing orbits on full graph (all 256 introns)...")
+    # Core: Compute canonical phenomenology (all 256 introns)
+    print("Computing canonical phenomenology (all 256 introns)...")
     all_introns = list(range(256))
-    canonical_full, orbit_sizes_full, reps_full = _compute_sccs(ep, idx_to_state, all_introns)
-    print(f"  Found {len(reps_full)} full-graph orbits")
+    canonical, orbit_sizes, representatives = _compute_sccs(ep, idx_to_state, all_introns)
+    print(f"  Found {len(representatives)} canonical orbits (expected 256)")
 
-    # Step 2: Compute SCCs on the parity-free graph
-    print("Step 2: Computing orbits on parity-free graph (excluding LI)...")
-    parity_free_introns = [i for i in all_introns if not (i & LI_MASK)]
-    canonical_pf, orbit_sizes_pf, reps_pf = _compute_sccs(ep, idx_to_state, parity_free_introns)
-    print(f"  Found {len(reps_pf)} parity-free orbits")
-
-    # Step 3: Identify mirror pairs on the parity-free structure
-    print("Step 3: Identifying mirror pairs using parity-free orbits...")
-    mirror_map: Dict[int, int] = {}
-    for rep in reps_pf:
-        if rep in mirror_map:
-            continue
-        state_int = int(idx_to_state[rep])
-        mirror_state = state_int ^ governance.FULL_MASK
-        
-        # Binary search in idx_to_state for the mirror state
-        m_pos = np.searchsorted(idx_to_state, mirror_state)
-        if m_pos >= N or idx_to_state[m_pos] != mirror_state:
-            mirror_map[rep] = -1
-            continue
-            
-        mirror_rep = int(canonical_pf[m_pos])
-        mirror_map[rep] = mirror_rep
-        mirror_map[mirror_rep] = rep
-        
-    mirror_pairs = [(a, b) for a, b in mirror_map.items() if a < b and b != -1]
-    num_mirror_pairs = len(mirror_pairs)
-    print(f"  Found {num_mirror_pairs} non-trivial mirror pairs")
-
-    # Step 4: Build cross-layer mapping 
-    print("Step 4: Building cross-layer mapping...")
-    pf_rep_to_full_rep: Dict[int, int] = {}
-    for pf_rep in reps_pf:
-        pf_rep_to_full_rep[pf_rep] = int(canonical_full[pf_rep])
-        
-    # Analyze how parity-free orbits combine in the full graph
-    split_counter: Dict[int, int] = {}
-    for full_rep in pf_rep_to_full_rep.values():
-        split_counter[full_rep] = split_counter.get(full_rep, 0) + 1
-        
-    # Build histogram of split counts
-    split_hist: Dict[str, int] = {}
-    for cnt in split_counter.values():
-        split_hist[str(cnt)] = split_hist.get(str(cnt), 0) + 1
-    print(f"  Full-orbit split histogram: {split_hist}")
-
-    # Step 5: Create and save the artifact
+    # Create core artifact
     artifact = {
-        "schema_version": "phenomenology/dual/1.0.0",
+        "schema_version": "phenomenology/core/1.0.0",
+        "phenomenology_map": canonical.tolist(),
+        "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes.items()},
         "metadata": {
+            "total_states": N,
+            "total_orbits": len(representatives),
+            "largest_orbit": int(max(orbit_sizes.values())) if orbit_sizes else 0,
             "build_timestamp": int(time.time()),
-            "notes": [
-                "This artifact contains two phenomenological views:",
-                "full_graph: SCCs over all introns (parity collapsed, self-mirrored)",
-                "parity_free: SCCs excluding LI introns (reveals mirror pairing)"
-            ]
-        },
-        "full_graph": {
-            "map": canonical_full.tolist(),
-            "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes_full.items()},
-            "stats": {
-                "total_orbits": len(reps_full),
-                "largest_orbit": int(max(orbit_sizes_full.values())) if orbit_sizes_full else 0
+            "construction": {
+                "method": "scc_all_introns",
+                "notes": [
+                    "Canonical phenomenology with LI (global parity) included.",
+                    "Each orbit is parity-closed and self-mirrored.",
+                    "This honors the principle that CS (Common Source) is unobservable.",
+                    "UNA (LI) represents reflexive confinement - the 'light' that cannot be stepped outside of."
+                ]
             }
-        },
-        "parity_free": {
-            "map": canonical_pf.tolist(),
-            "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes_pf.items()},
-            "mirror_map": {str(k): int(v) for k, v in mirror_map.items()},
-            "stats": {
-                "total_orbits": len(reps_pf),
-                "mirror_pairs": num_mirror_pairs,
-                "largest_orbit": int(max(orbit_sizes_pf.values())) if orbit_sizes_pf else 0
-            }
-        },
-        "cross_layer": {
-            "pf_rep_to_full_rep": {str(k): int(v) for k, v in pf_rep_to_full_rep.items()},
-            "full_orbit_split_histogram": split_hist
         }
     }
 
+    # Optional: Add diagnostic analysis
+    if include_diagnostics:
+        print("Computing diagnostic analysis (parity-free structure)...")
+        
+        # Global parity (LI) bit mask pattern
+        LI_MASK = 0b01000010
+        parity_free_introns = [i for i in all_introns if not (i & LI_MASK)]
+        canonical_pf, orbit_sizes_pf, reps_pf = _compute_sccs(ep, idx_to_state, parity_free_introns)
+        
+        # Mirror pair analysis on parity-free structure
+        mirror_map: Dict[int, int] = {}
+        for rep in reps_pf:
+            if rep in mirror_map:
+                continue
+            state_int = int(idx_to_state[rep])
+            mirror_state = state_int ^ governance.FULL_MASK
+            
+            m_pos = np.searchsorted(idx_to_state, mirror_state)
+            if m_pos >= N or idx_to_state[m_pos] != mirror_state:
+                mirror_map[rep] = -1
+                continue
+                
+            mirror_rep = int(canonical_pf[m_pos])
+            mirror_map[rep] = mirror_rep
+            mirror_map[mirror_rep] = rep
+            
+        mirror_pairs = [(a, b) for a, b in mirror_map.items() if a < b and b != -1]
+        
+        # Cross-layer mapping analysis
+        pf_to_canonical = {pf_rep: int(canonical[pf_rep]) for pf_rep in reps_pf}
+        split_counter: Dict[int, int] = {}
+        for canonical_rep in pf_to_canonical.values():
+            split_counter[canonical_rep] = split_counter.get(canonical_rep, 0) + 1
+        split_histogram = {}
+        for count in split_counter.values():
+            split_histogram[str(count)] = split_histogram.get(str(count), 0) + 1
+        
+        # Add diagnostics to artifact
+        artifact["_diagnostics"] = {
+            "note": "Research data - not used by runtime engines",
+            "parity_free_analysis": {
+                "total_orbits": len(reps_pf),
+                "mirror_pairs": len(mirror_pairs),
+                "largest_orbit": int(max(orbit_sizes_pf.values())) if orbit_sizes_pf else 0,
+                "canonical_orbit_split_histogram": split_histogram
+            },
+            "theoretical_insights": [
+                f"Removing LI reveals {len(reps_pf)} fine-grained orbits vs {len(representatives)} canonical orbits",
+                f"Found {len(mirror_pairs)} chiral pairs and {len(reps_pf) - 2*len(mirror_pairs)} achiral orbits",
+                "This demonstrates the binding power of global parity (UNA/LI) in the system"
+            ]
+        }
+        
+        print(f"  Diagnostic: {len(reps_pf)} parity-free orbits, {len(mirror_pairs)} mirror pairs")
+
+    # Save artifact
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(artifact, f, indent=2)
 
     # Print summary
-    print("\nSummary:")
-    print(f"  Full graph orbits: {artifact['full_graph']['stats']['total_orbits']}")
-    print(f"  Parity-free orbits: {artifact['parity_free']['stats']['total_orbits']}")
-    print(f"  Parity-free mirror pairs: {artifact['parity_free']['stats']['mirror_pairs']}")
-    print(f"  Full-orbit split histogram: {artifact['cross_layer']['full_orbit_split_histogram']}")
-    print(f"✓ Saved dual-structure phenomenology to: {output_path}")
+    print(f"\n✓ Saved canonical phenomenology to: {output_path}")
+    print(f"  - Canonical orbits: {artifact['metadata']['total_orbits']}")
+    print(f"  - Largest orbit: {artifact['metadata']['largest_orbit']} states")
+    if include_diagnostics:
+        diag = artifact["_diagnostics"]["parity_free_analysis"]
+        print(f"  - Diagnostic: {diag['total_orbits']} parity-free orbits, {diag['mirror_pairs']} mirror pairs")
 
 
 def parse_args():
@@ -633,6 +633,8 @@ def parse_args():
     p_pheno.add_argument("--ep", required=True, help="Path to epistemology.npy")
     p_pheno.add_argument("--output", required=True, help="Path to save phenomenology_map.json")
     p_pheno.add_argument("--ontology", required=True, help="Path to ontology_map.json")
+    p_pheno.add_argument("--diagnostics", action="store_true", 
+                        help="Include parity-free analysis for research (optional)")
 
     return parser.parse_args()
 
@@ -659,18 +661,23 @@ if __name__ == "__main__":
 
         elif args.command == "phenomenology":
             print("=== [Step 3] Phenomenology Mapping ===")
-            build_phenomenology_map(args.ep, args.ontology, args.output)
+            include_diag = getattr(args, 'diagnostics', False)
+            build_phenomenology_map(args.ep, args.ontology, args.output, include_diag)
+            
+            # Print final summary
             with open(args.output) as f:
                 pheno = json.load(f)
             with open(args.ontology) as f:
                 ont = json.load(f)
-            print("\n--- Summary ---")
+                
+            print("\n--- Final Summary ---")
             print(f"Total states: {ont['endogenous_modulus']:,}")
-            fg = pheno["full_graph"]["stats"]
-            pf = pheno["parity_free"]["stats"]
-            print(f"Full graph: {fg['total_orbits']} orbits | largest {fg['largest_orbit']}")
-            print(f"Parity-free: {pf['total_orbits']} orbits | largest {pf['largest_orbit']} | mirror pairs {pf['mirror_pairs']}")
-            print(f"Split histogram: {pheno['cross_layer']['full_orbit_split_histogram']}")
+            print(f"Canonical orbits: {pheno['metadata']['total_orbits']} (parity-closed)")
+            print(f"Largest orbit: {pheno['metadata']['largest_orbit']:,} states")
+            
+            if "_diagnostics" in pheno:
+                diag = pheno["_diagnostics"]["parity_free_analysis"]
+                print(f"Research diagnostic: {diag['total_orbits']} parity-free orbits, {diag['mirror_pairs']} chiral pairs")
 
         else:
             print("Unknown command", file=sys.stderr)
