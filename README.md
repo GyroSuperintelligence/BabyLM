@@ -86,7 +86,7 @@ A byte is not a symbol but a governance mask. Its 8 bits encode one of 256 possi
 Every input byte is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield a dynamic 8-bit instruction. This simulates the expression of intelligence through physical modulation.
 
 **3. From Byte to Operations**
-Each bit of the instruction maps to a specific gyroscopic operation (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is a complete instruction for transforming the system's physical state.
+Each bit of the instruction maps to a consistent gyroscopic transformation, regardless of input/output direction (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is a complete instruction for transforming the system's physical state.
 
 **4. The Evolving Physical State**
 These operations apply to the system's canonical state, a 48-bit integer representing one of **788,986** possible physical configurations. Each input byte acts as a physical force that evolves this state, creating an irreversible, path-dependent history. The intelligence resides in the *trajectory* of this state, not in static data.
@@ -95,7 +95,7 @@ These operations apply to the system's canonical state, a 48-bit integer represe
 The system's new physical state, combined with the instruction that created it, forms a unique context. This context is used to look up a "phenotype"—a learned response, such as a character or action—from the system's memory.
 
 **6. Learning as Physical Integration**
-Learning is not backpropagation. It is the integration of experience into memory via **true gyrogroup coaddition**, a path-dependent algebraic operation. This ensures that the *sequence* of events is structurally encoded into the system's knowledge, mirroring how memories are formed in a lived experience.
+Learning is not backpropagation. It is the integration of experience into memory via **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that the *sequence* of events is structurally encoded into the system's knowledge, mirroring how memories are formed in a lived experience.
 
 ### 🎯 What This Achieves
 
@@ -177,7 +177,8 @@ A "cycle" is one byte in, one internal update, and one byte out.
 
 ## 🔄 Current Status & Expectations
 
-**I am doing a huge refactoring - so nothing works at the present moment**
+**⚠️ Active Refactoring In Progress**
+Core learning logic and operator semantics have been corrected. Until the integration is complete, runtime behavior may be unstable.
 
 **This is experimental research**, not a production language model. Current limitations:
 

@@ -6,17 +6,23 @@ from typing import Protocol, Optional, Dict, Any, Tuple, TypedDict
 
 
 class PhenotypeEntry(TypedDict, total=False):
-    """Structure of a phenotype entry in the knowledge store."""
+    """
+    Structure of a phenotype entry in the knowledge store.
+
+    - context_signature MAY be canonical; if canonicalisation is applied (e.g., via CanonicalView), the original physical context is stored in _original_context.
+    - memory_mask is immutable under decay (decay only affects confidence, not memory_mask).
+    """
 
     phenotype: str
-    memory_mask: int
     confidence: float
-    context_signature: Tuple[int, int]
-    semantic_address: int
+    memory_mask: int
     usage_count: int
     age_counter: int
-    created_at: float
     last_updated: float
+    created_at: float  # Optional timestamp for creation
+    semantic_address: int  # Optional semantic address for context
+    context_signature: Tuple[int, int]
+    _original_context: Optional[Tuple[int, int]]
 
 
 class ManifoldData(TypedDict):
@@ -30,14 +36,14 @@ class ManifoldData(TypedDict):
     build_timestamp: float
 
 
-class PhenomenologyData(TypedDict):
+class PhenomenologyData(TypedDict, total=False):
     """Structure of the phenomenology mapping data."""
 
     schema_version: str
-    phenomenology_map: list[int]
-    orbit_sizes: Dict[str, int]
-    mirror_map: Dict[str, int]
-    metadata: Dict[str, Any]
+    phenomenology_map: list
+    orbit_sizes: dict
+    metadata: dict
+    _diagnostics: Dict[str, Any]
 
 
 class AgentConfig(TypedDict, total=False):
@@ -50,6 +56,8 @@ class AgentConfig(TypedDict, total=False):
     agent_metadata: Optional[Dict[str, Any]]
     max_memory_mb: Optional[int]
     enable_phenomenology_storage: Optional[bool]
+    batch_size: Optional[int]
+    phenomenology_map_path: Optional[str]
 
 
 class PreferencesConfig(TypedDict, total=False):

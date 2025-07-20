@@ -103,8 +103,9 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     # Ensure Python int types for bitwise operations
     state_int = int(state_int)
     intron = int(intron)
+    intron &= 0xFF  # Defensive masking
     # Step 1: Gyro-addition (applying transformational forces) using precomputed mask
-    temp_state = state_int ^ XFORM_MASK[intron & 0xFF]
+    temp_state = state_int ^ int(XFORM_MASK[intron])
 
     # Step 2: Thomas Gyration (path-dependent memory)
     intron_pattern = int(INTRON_BROADCAST_MASKS[intron])
@@ -119,6 +120,7 @@ def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> np.nd
     Vectorised transform for a batch of states (uint64).
     Semantics identical to apply_gyration_and_transform per element.
     """
+    intron &= 0xFF  # Defensive masking
     mask = XFORM_MASK[intron]
     pattern = PATTERN_MASK[intron]
     temp = states ^ mask
@@ -157,43 +159,55 @@ def transcribe_byte(byte: int) -> int:
     return byte ^ GENE_Mic_S
 
 
-def coadd(a: int, b: int) -> int:
+MASK = 0xFF  # 8-bit mask
+
+
+def fold(a: int, b: int) -> int:
     """
-    Performs true gyrogroup coaddition (a ⊞ b) on two 8-bit integers.
+    The Monodromic Fold (⋄), the single, unified learning operator for BU.
+    Formula: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
 
-    The operation is: a ⊞ b = a ⊕ gyr[a, ¬b](b)
-    where gyr[a, b](c) = c ⊕ (a AND b)
+    This operation is the algebraic expression of the BU stage's dual monodromy.
+    It is fundamentally non-associative and non-commutative, preserving the
+    path-dependence required by the Common Source axiom.
 
-    Note:
-        This operation is intentionally non-commutative and non-associative.
-        The order matters (a ⊞ b ≠ b ⊞ a), ensuring sequence is preserved.
+    Its algebraic properties, discovered empirically, are:
+    - Left Identity (CS Emergence):   fold(0, b) = b
+    - Right Absorber (Return to CS):  fold(a, 0) = 0
+    - Self-Annihilation (BU Closure): fold(a, a) = 0
+    """
+    a &= MASK
+    b &= MASK
+    # This is the formula from your successful experiments: a ^ (b ^ (a & ~b))
+    gyration_of_b = b ^ (a & (~b & MASK))
+    return (a ^ gyration_of_b) & MASK
+
+
+def fold_sequence(introns: List[int], start_state: int = 0) -> int:
+    """
+    Performs an ordered reduction of a sequence of introns using the
+    Monodromic Fold. This is the only valid form of batching.
 
     Args:
-        a: First 8-bit integer
-        b: Second 8-bit integer
+        introns: A list of 8-bit intron values.
+        start_state: The initial state to begin the fold from.
 
     Returns:
-        Result of gyrogroup coaddition
-    """
-    not_b = b ^ 0xFF
-    gyration_of_b = b ^ (a & not_b)
-    return a ^ gyration_of_b
-
-
-def batch_introns_coadd_ordered(introns: List[int]) -> int:
-    """
-    Reduces a list of introns into a single representative using ordered
-    coaddition. Preserves path-dependence of learning.
-
-    Args:
-        introns: List of 8-bit intron values
-
-    Returns:
-        Single representative intron from ordered reduction
+        The final state after the entire sequence has been folded.
     """
     if not introns:
-        return 0
-    return reduce(coadd, introns)
+        return start_state
+    # The reduce function correctly applies the fold sequentially:
+    # fold(fold(fold(start, i1), i2), i3)...
+    return reduce(fold, introns, start_state)
+
+
+def dual(x: int) -> int:
+    """
+    The Global Duality Operator (¬), corresponding to the 'Fifth Element'.
+    It reflects a state through the origin, enabling the return path.
+    """
+    return (x ^ 0xFF) & MASK
 
 
 def validate_tensor_consistency() -> bool:

@@ -70,7 +70,7 @@ class IntelligenceEngine:
         else:
             self.gene_mac_m_int = origin_int
         self.cycle_count = 0
-
+        self._microstep_count = 0  # Track internal cooling/autonomic steps
         # Extension points
         self.post_cycle_hooks: List[CycleHookFunction] = []
 
@@ -103,8 +103,10 @@ class IntelligenceEngine:
         Returns:
             Transcribed intron instruction
         """
+        input_byte &= 0xFF  # Defensive masking
         # S1: Transcribe input through holographic topology
         intron = governance.transcribe_byte(input_byte)
+        intron &= 0xFF  # Defensive masking (optional, for symmetry)
 
         # S1: Apply gyroscopic transformation to physical state
         if self.use_epistemology:
@@ -113,6 +115,11 @@ class IntelligenceEngine:
         else:
             self.gene_mac_m_int = governance.apply_gyration_and_transform(self.gene_mac_m_int, intron)
             self._sync_index_from_state_int()
+
+        # State integrity assertion
+        assert (
+            self.gene_mac_m_int if not self.use_epistemology else self.s2.get_state_from_index(self.current_state_index)
+        ) < (1 << 48)
 
         self.cycle_count += 1
 
@@ -124,69 +131,73 @@ class IntelligenceEngine:
         return intron
 
     def process_ingress(self, last_intron: int) -> int:
-        """
-        Process Intelligence Ingress: Learn and respond.
-
-        This is the "inward" phase where the system integrates experience
-        and generates intelligent response based on accumulated knowledge.
-
-        Args:
-            last_intron: Intron from the previous egress phase
-
-        Returns:
-            Output byte representing intelligent response
-        """
+        last_intron &= 0xFF  # Defensive masking
         # S3: Get semantic meaning of current state + context
         # state_index is physical index; canonicalisation (if enabled) is applied at storage layer (CanonicalView)
         if self.use_epistemology:
             state_index = self.current_state_index
         else:
             state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
+        # Ingress: complete monodromic loop by folding with the same intron used for addressing.
+        # This causes memory_mask to collapse (x → 0), expressing closure—not accumulation.
+        # Phenotype metadata tracks recurrence; output is drawn from the stored value, not from the mask.
         phenotype_entry = self.operator.get_phenotype(state_index, last_intron)
 
-        # S3: Learn through gyrogroup coaddition
+        # S3: Learn through Monodromic Fold
         self.operator.learn(phenotype_entry, last_intron)
 
         # Execute post-cycle hooks for monitoring/maintenance
         for hook in self.post_cycle_hooks:
             hook(self, phenotype_entry, last_intron)
 
+        # Store original phenotype_entry for output
+        output_phenotype_entry = phenotype_entry
+
         # Algedonic decision at start (must run before output)
         θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
         if θ > self._θ_high:
             self._pain_streak += 1
             cooling_intron = self._cool_introns[self.cycle_count % len(self._cool_introns)]
-            last_intron = cooling_intron
-
-            # Immediately apply a stabilising micro-step (egress + learn)
-            self.process_egress(cooling_intron)
+            saved = self.cycle_count
+            self.process_egress(cooling_intron)  # does all the usual work
+            self.cycle_count = saved  # restore the external-cycle count
+            self._microstep_count += 1  # track internal steps separately
+            # State integrity assertion after cooling micro-step
+            assert (
+                self.gene_mac_m_int
+                if not self.use_epistemology
+                else self.s2.get_state_from_index(self.current_state_index)
+            ) < (1 << 48)
             if self.use_epistemology:
-                state_index = self.current_state_index
+                state_index_cool = self.current_state_index
             else:
-                state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
-            phenotype_entry = self.operator.get_phenotype(state_index, cooling_intron)
-            self.operator.learn(phenotype_entry, cooling_intron)
-
+                state_index_cool = self.s2.get_index_from_state(self.gene_mac_m_int)
+            cool_entry = self.operator.get_phenotype(state_index_cool, cooling_intron)
+            self.operator.learn(cool_entry, cooling_intron)
             if self._pain_streak > 256 and self._autonomic_cycles:
                 for intr in self._autonomic_cycles[self.cycle_count % len(self._autonomic_cycles)]:
+                    saved = self.cycle_count
                     self.process_egress(intr)
-                    self.operator.learn(
-                        self.operator.get_phenotype(
-                            (
-                                self.current_state_index
-                                if self.use_epistemology
-                                else self.s2.get_index_from_state(self.gene_mac_m_int)
-                            ),
-                            intr,
-                        ),
-                        intr,
-                    )
+                    self.cycle_count = saved
+                    self._microstep_count += 1
+                    # State integrity assertion after autonomic cycle micro-step
+                    assert (
+                        self.gene_mac_m_int
+                        if not self.use_epistemology
+                        else self.s2.get_state_from_index(self.current_state_index)
+                    ) < (1 << 48)
+                    if self.use_epistemology:
+                        si_aut = self.current_state_index
+                    else:
+                        si_aut = self.s2.get_index_from_state(self.gene_mac_m_int)
+                    aut_entry = self.operator.get_phenotype(si_aut, intr)
+                    self.operator.learn(aut_entry, intr)
                 self._pain_streak = 0
         elif θ < self._θ_low:
             self._pain_streak = 0
 
-        # Generate response from phenotype
-        phenotype = phenotype_entry.get("phenotype")
+        # Generate response from original phenotype_entry (not cooling intron)
+        phenotype = output_phenotype_entry.get("phenotype")
         if isinstance(phenotype, str) and phenotype:
             return ord(phenotype[0])
         elif isinstance(phenotype, str):
@@ -223,11 +234,11 @@ class IntelligenceEngine:
 
     def batch_learn(self, data: bytes) -> None:
         """
-        Learn from a batch of data using streaming gyrogroup coaddition.
+        Learn from a batch of data using streaming Monodromic Fold.
 
         This method allows efficient batch learning while preserving the
-        path-dependent nature of the coaddition operation. Uses O(1) memory
-        by streaming the coaddition instead of collecting all introns.
+        path-dependent nature of the Fold operation. Uses O(1) memory
+        by streaming the Fold instead of collecting all introns.
 
         Args:
             data: Batch of bytes to learn from
@@ -235,12 +246,12 @@ class IntelligenceEngine:
         if not data:
             return
 
-        # Streaming coaddition: O(1) memory instead of O(N)
+        # Streaming Fold: O(1) memory instead of O(N)
         acc = 0
         for byte in data:
             # Use the optimized process_egress method (STT-aware)
             intron = self.process_egress(byte)
-            acc = governance.coadd(acc, intron)
+            acc = governance.fold(acc, intron)
             # self.cycle_count is incremented in process_egress
 
         # Learn from the final accumulated intron
@@ -262,12 +273,14 @@ class IntelligenceEngine:
         """
         self._sync_state_fields_from_index()
         angular_divergence = self.s2.measure_state_divergence(self.gene_mac_m_int)
-
+        tensor_index = (
+            self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
+        )
         return {
             "agent_id": self.agent_id,
             "cycle_count": self.cycle_count,
             "state_integer": self.gene_mac_m_int,
-            "tensor_index": self.s2.get_index_from_state(self.gene_mac_m_int),
+            "tensor_index": tensor_index,
             "angular_divergence_radians": float(angular_divergence),
             "angular_divergence_degrees": float(angular_divergence * 180 / 3.14159),
             "active_hooks": len(self.post_cycle_hooks),
@@ -328,7 +341,7 @@ class GyroSI:
 
     def ingest(self, data: bytes) -> None:
         """
-        Learn from a batch of data using ordered gyrogroup coaddition.
+        Learn from a batch of data using ordered Monodromic Fold.
 
         This is the primary learning interface. Data is processed as a batch
         with the final state determining the learning context.
@@ -427,6 +440,8 @@ class GyroSI:
         # Create base store
         public_knowledge_path = self.config.get("public_knowledge_path")
         batch_size = self.config.get("batch_size", 100)
+        if batch_size is None:
+            batch_size = 100
         if public_knowledge_path is not None:
             # Multi-agent setup with public/private knowledge
             private_path = self.config.get("private_knowledge_path")
@@ -443,16 +458,17 @@ class GyroSI:
                 knowledge_path = "memories/knowledge.pkl.gz"
             base_store = OrbitStore(knowledge_path, write_threshold=batch_size)
 
-        # CanonicalView: enable if flag is True, or autodetect if None and file exists
-        phenomenology_map_path = self.config.get("phenomenology_map_path")
-        if phenomenology_map_path is None:
-            phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
+            # CanonicalView: enable if flag is True, or autodetect if None and file exists
+            phenomenology_map_path = self.config.get("phenomenology_map_path")
+            if phenomenology_map_path is None:
+                phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
         if enable_phenomenology is not False:
             if enable_phenomenology or (enable_phenomenology is None and os.path.exists(phenomenology_map_path)):
                 if os.path.exists(phenomenology_map_path):
                     return CanonicalView(base_store, phenomenology_map_path)
                 else:
                     print(f"Warning: phenomenology map not found at {phenomenology_map_path}")
+                    pass
 
         return base_store
 
@@ -506,16 +522,14 @@ class AgentPool:
         self.preferences = preferences or {}
         max_agents = self.preferences.get("max_agents_in_memory", 1000)
         self.eviction_policy = self.preferences.get("agent_eviction_policy", "lru")
-
+        self.agent_access_times: Dict[str, float] = {}  # Always initialize
         # Initialize agent storage based on eviction policy
         if self.eviction_policy == "lru":
             self.agents = LRUAgentCache(max_agents)
         else:
             # Simple dict with manual eviction
             self.agents: Dict[str, GyroSI] = {}
-            self.agent_access_times: Dict[str, float] = {}
             self.max_agents = max_agents
-
         self._lock = RLock()
 
     def get_or_create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> GyroSI:
@@ -581,7 +595,7 @@ class AgentPool:
             if agent_id in self.agents:
                 self.agents[agent_id].close()
                 del self.agents[agent_id]
-                if agent_id in self.agent_access_times:
+                if self.eviction_policy != "lru" and agent_id in self.agent_access_times:
                     del self.agent_access_times[agent_id]
                 return True
             return False
@@ -597,7 +611,8 @@ class AgentPool:
             for agent in self.agents.values():
                 agent.close()
             self.agents.clear()
-            self.agent_access_times.clear()
+            if self.eviction_policy != "lru":
+                self.agent_access_times.clear()
 
     def _maybe_evict_agent(self) -> None:
         """Evict agent if at capacity (non-LRU policies)."""

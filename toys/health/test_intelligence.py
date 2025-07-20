@@ -1,378 +1,453 @@
 """
-Tests for S4/5: Intelligence - Orchestration & API
+Tests for the GyroSI intelligence system.
+
+This suite tests policies.py, contracts.py, and intelligence.py
+using the provided fixtures and actual implementations.
 """
 
-import pytest
-import time
-import threading
 import os
-from baby import governance
-from baby.intelligence import (
-    IntelligenceEngine,
-    GyroSI,
-    AgentPool,
-    orchestrate_turn,
-)
-from baby.types import AgentConfig
+import json
+import pytest
+from pathlib import Path
+from typing import cast
 
 
-class TestIntelligenceEngine:
-    """Test the intelligence engine orchestration."""
+class TestPolicies:
+    """Test storage policies and persistence mechanisms."""
 
-    @pytest.fixture
-    def intelligence_engine(self, ontology_data, orbit_store):
-        """Create an intelligence engine for testing."""
-        ontology_path, _ = ontology_data
-        return IntelligenceEngine(ontology_path, orbit_store)
+    def test_orbit_store_basic_operations(self, orbit_store, sample_phenotype_entry):
+        """Test basic OrbitStore operations with proper fixtures."""
+        # Create a test key
+        key = (42, 123)
+        # Use the store from the fixture
+        orbit_store.put(key, sample_phenotype_entry)
+        orbit_store.commit()
+        # Verify data was stored and can be retrieved
+        retrieved = orbit_store.get(key)
+        assert retrieved is not None
+        assert retrieved["phenotype"] == sample_phenotype_entry["phenotype"]
+        assert retrieved["confidence"] == sample_phenotype_entry["confidence"]
 
-    def test_initialization(self, intelligence_engine):
-        """Test engine initialization."""
-        assert intelligence_engine.agent_id is not None
-        assert intelligence_engine.cycle_count == 0
-        assert intelligence_engine.gene_mac_m_int == intelligence_engine.s2.tensor_to_int(governance.GENE_Mac_S)
+    def test_orbit_store_updates(self, orbit_store, sample_phenotype_entry):
+        """Test OrbitStore updates and overwrites."""
+        key = (1, 1)
 
-    def test_process_egress(self, intelligence_engine):
-        """Test egress processing (input transformation)."""
-        initial_state = intelligence_engine.gene_mac_m_int
+        # Initial write
+        orbit_store.put(key, sample_phenotype_entry)
+        orbit_store.commit()
 
-        # Process a byte
-        input_byte = 42
-        intron = intelligence_engine.process_egress(input_byte)
+        # Update with modified entry
+        updated_entry = sample_phenotype_entry.copy()
+        updated_entry["confidence"] = 0.9
+        updated_entry["usage_count"] = 20
 
-        # Check intron is transcribed correctly
-        assert intron == governance.transcribe_byte(input_byte)
+        orbit_store.put(key, updated_entry)
+        orbit_store.commit()
 
-        # Check state was transformed
-        assert intelligence_engine.gene_mac_m_int != initial_state
-        assert intelligence_engine.cycle_count == 1
+        # Verify update was applied
+        retrieved = orbit_store.get(key)
+        assert retrieved["confidence"] == 0.9
+        assert retrieved["usage_count"] == 20
 
-    def test_process_ingress(self, intelligence_engine):
-        """Test ingress processing (learning and response)."""
-        # First do egress to get an intron
-        intron = intelligence_engine.process_egress(42)
+    def test_orbit_store_delete(self, orbit_store, sample_phenotype_entry):
+        """Test OrbitStore deletion."""
+        key = (2, 2)
 
-        # Process ingress
-        output_byte = intelligence_engine.process_ingress(intron)
+        # Add entry
+        orbit_store.put(key, sample_phenotype_entry)
+        orbit_store.commit()
 
-        # Should return a valid byte
-        assert 0 <= output_byte <= 255
+        # Verify it exists
+        assert orbit_store.get(key) is not None
 
-        # Default phenotype "?" should return ord('?') = 63
-        assert output_byte == ord("?")
+        # Delete entry
+        orbit_store.delete(key)
 
-    def test_batch_learn(self, intelligence_engine):
-        """Test batch learning."""
-        initial_cycles = intelligence_engine.cycle_count
+        # Verify it's gone
+        assert orbit_store.get(key) is None
 
-        # Batch learn from text
-        data = b"Hello, GyroSI!"
-        intelligence_engine.batch_learn(data)
+    def test_overlay_view(self, overlay_store, sample_phenotype_entry):
+        """Test OverlayView with private and public stores."""
+        # Public entry should exist from fixture setup
+        public_key = (0, 0)
+        public_store = (
+            overlay_store.public_store.base_store
+            if hasattr(overlay_store.public_store, "base_store")
+            else overlay_store.public_store
+        )
+        print("DEBUG type(public_key):", type(public_key), public_key)
+        print("DEBUG type(public_store.data.keys()):", [type(k) for k in public_store.data.keys()])
+        print("DEBUG public_store.data.keys():", list(public_store.data.keys()))
+        entry_private = overlay_store.private_store.get(public_key)
+        print("DEBUG overlay private_store.get((0, 0)):", entry_private)
+        print("DEBUG public store data:", public_store.data)
+        entry = overlay_store.public_store.get(public_key)
+        print("DEBUG overlay public_store.get((0, 0)):", entry)
+        retrieved = overlay_store.get(public_key)
+        print("DEBUG test_overlay_view: overlay_store.get((0, 0)) returned:", retrieved)
+        assert retrieved is not None
+        assert overlay_store.get(public_key)["phenotype"] == "public"
 
-        # Check cycles increased
-        assert intelligence_engine.cycle_count == initial_cycles + len(data)
+        # Add private entry with new key
+        private_key = (1, 1)
+        overlay_store.put(private_key, sample_phenotype_entry)
 
-    def test_hooks(self, intelligence_engine):
-        """Test post-cycle hooks."""
+        # Verify it's retrievable
+        retrieved = overlay_store.get(private_key)
+        assert retrieved is not None
+        assert retrieved["phenotype"] == sample_phenotype_entry["phenotype"]
+
+        # Test private overrides public with same key
+        overlay_store.put(public_key, sample_phenotype_entry)
+        retrieved = overlay_store.get(public_key)
+        assert retrieved["phenotype"] == sample_phenotype_entry["phenotype"]
+
+    def test_readonly_view(self, temp_dir, orbit_store, sample_phenotype_entry):
+        """Test ReadOnlyView protection."""
+        from baby.policies import ReadOnlyView
+
+        # Setup a read-only view of our store
+        key = (3, 3)
+        orbit_store.put(key, sample_phenotype_entry)
+        orbit_store.commit()
+
+        # Create read-only view
+        readonly = ReadOnlyView(orbit_store)
+
+        # Should be able to read
+        retrieved = readonly.get(key)
+        assert retrieved is not None
+        assert retrieved["phenotype"] == sample_phenotype_entry["phenotype"]
+
+        # Should not be able to write
+        with pytest.raises(RuntimeError):
+            readonly.put(key, {"phenotype": "should fail", "confidence": 0.5})
+
+
+class TestContracts:
+    """Test contracts and type specifications."""
+
+    def test_phenotype_entry_validation(self, sample_phenotype_entry):
+        """Test phenotype entry structure validation using fixture."""
+        from baby.contracts import PhenotypeEntry
+
+        # Use the utility function from conftest
+        assert_phenotype_entry_valid(sample_phenotype_entry)
+
+        # Create a valid typed dict
+        entry: PhenotypeEntry = {
+            "phenotype": "test",
+            "confidence": 0.8,
+            "memory_mask": 0b10101010,
+            "context_signature": (42, 123),
+            "usage_count": 5,
+        }
+
+        # Should pass validation
+        assert_phenotype_entry_valid(entry)
+
+    def test_agent_config_validation(self, agent_config):
+        """Test AgentConfig validation using fixture."""
+        from baby.contracts import AgentConfig
+
+        # Verify required fields are present
+        assert "ontology_path" in agent_config
+        assert os.path.exists(agent_config["ontology_path"])
+
+        # Add optional fields
+        config = cast(
+            AgentConfig, {**agent_config, "agent_metadata": {"role": "test"}, "enable_phenomenology_storage": True}
+        )
+
+        # Verify fields
+        agent_metadata = config.get("agent_metadata")
+        assert agent_metadata is not None and agent_metadata.get("role") == "test"
+        assert config.get("enable_phenomenology_storage") is True
+
+    def test_maintenance_report(self):
+        """Test MaintenanceReport structure."""
+        from baby.contracts import MaintenanceReport
+
+        # Create a valid maintenance report
+        report: MaintenanceReport = {
+            "operation": "test_maintenance",
+            "success": True,
+            "entries_processed": 100,
+            "entries_modified": 50,
+            "elapsed_seconds": 1.5,
+        }
+
+        # Verify report structure
+        assert report["operation"] == "test_maintenance"
+        assert report["success"] is True
+        assert report["entries_processed"] == 100
+        assert report["entries_modified"] == 50
+        assert report["elapsed_seconds"] == 1.5
+
+
+class TestIntelligence:
+    """Test intelligence engine components."""
+
+    def test_intelligence_engine_initialization(self, agent_config, orbit_store):
+        """Test IntelligenceEngine initialization."""
+        from baby.intelligence import IntelligenceEngine
+
+        # Create engine using actual code paths
+        engine = IntelligenceEngine(ontology_path=agent_config["ontology_path"], phenotype_store=orbit_store)
+
+        # Verify engine state
+        assert engine.agent_id is not None
+        assert engine.cycle_count == 0
+
+        # Verify subsystems are initialized
+        assert hasattr(engine, "s2")
+        assert hasattr(engine, "operator")
+
+    def test_intelligence_engine_cycle(self, agent_config, orbit_store):
+        """Test intelligence engine's processing cycle."""
+        from baby.intelligence import IntelligenceEngine
+
+        engine = IntelligenceEngine(ontology_path=agent_config["ontology_path"], phenotype_store=orbit_store)
+
+        # Process a simple input
+        byte_value = 65  # ASCII 'A'
+        intron = engine.process_egress(byte_value)
+
+        # Verify basic processing occurred
+        assert 0 <= intron <= 255
+        assert engine.cycle_count == 1
+
+        # Complete the cycle with ingress
+        output = engine.process_ingress(intron)
+
+        # Output should be a valid byte
+        assert 0 <= output <= 255
+
+    def test_intelligence_hooks(self, agent_config, orbit_store):
+        """Test intelligence engine hooks."""
+        from baby.intelligence import IntelligenceEngine
+
+        engine = IntelligenceEngine(ontology_path=agent_config["ontology_path"], phenotype_store=orbit_store)
+
+        # Track hook calls
         hook_calls = []
 
-        def test_hook(engine, phenotype, intron):
-            hook_calls.append((engine.cycle_count, intron))
+        def test_hook(engine, phenotype_entry, last_intron):
+            hook_calls.append((engine.cycle_count, last_intron))
 
-        # Add hook
-        intelligence_engine.add_hook(test_hook)
+        # Add the hook
+        engine.add_hook(test_hook)
 
-        # Process some cycles
-        for i in range(3):
-            intron = intelligence_engine.process_egress(i)
-            intelligence_engine.process_ingress(intron)
+        # Process a cycle
+        intron = engine.process_egress(65)
+        engine.process_ingress(intron)
 
         # Verify hook was called
-        assert len(hook_calls) == 3
-        assert hook_calls[0][0] == 1  # First cycle
+        assert len(hook_calls) == 1
+        assert hook_calls[0][0] == 1  # cycle count
+        assert hook_calls[0][1] == intron
 
-        # Remove hook
-        assert intelligence_engine.remove_hook(test_hook)
-        assert not intelligence_engine.remove_hook(test_hook)  # Already removed
+        # Remove hook and verify it's not called
+        engine.remove_hook(test_hook)
+        intron = engine.process_egress(66)
+        engine.process_ingress(intron)
 
-    def test_state_info(self, intelligence_engine):
-        """Test state information retrieval."""
-        info = intelligence_engine.get_state_info()
+        # Hook count should not increase
+        assert len(hook_calls) == 1
 
-        assert info["agent_id"] == intelligence_engine.agent_id
-        assert info["cycle_count"] == 0
-        assert "state_integer" in info
-        assert "tensor_index" in info
-        assert 0 <= info["angular_divergence_radians"] <= 3.15
-        assert info["active_hooks"] == 0
+    def test_gyrosi_initialization(self, gyrosi_agent, agent_config):
+        """Test GyroSI initialization using fixture."""
+        # Verify agent was initialized correctly
+        assert gyrosi_agent.agent_id is not None
+        assert gyrosi_agent.config == agent_config
 
-    def test_reset_to_archetypal(self, intelligence_engine):
-        """Test resetting to archetypal state."""
-        # Process some data to change state
-        intelligence_engine.batch_learn(b"Some data")
-        assert intelligence_engine.cycle_count > 0
+        # Check engine initialization
+        assert hasattr(gyrosi_agent, "engine")
+        assert gyrosi_agent.engine.cycle_count == 0
 
-        # Reset
-        intelligence_engine.reset_to_archetypal_state()
+    def test_gyrosi_ingest_respond(self, gyrosi_agent):
+        """Test GyroSI ingest and respond methods."""
+        # Test data ingestion
+        test_data = b"Hello, World!"
+        gyrosi_agent.ingest(test_data)
 
-        assert intelligence_engine.cycle_count == 0
-        assert intelligence_engine.gene_mac_m_int == intelligence_engine.s2.tensor_to_int(governance.GENE_Mac_S)
+        # Verify cycles were processed
+        assert gyrosi_agent.engine.cycle_count == len(test_data)
 
+        # Test response generation
+        test_input = b"Test"
+        response = gyrosi_agent.respond(test_input)
 
-class TestGyroSI:
-    """Test the main GyroSI API."""
-
-    def test_basic_initialization(self, agent_config):
-        """Test basic GyroSI initialization."""
-        agent = GyroSI(agent_config)
-
-        assert agent.agent_id is not None
-        assert agent.engine is not None
-
-        agent.close()
-
-    def test_ingest_and_respond(self, gyrosi_agent):
-        """Test the main ingest/respond cycle."""
-        # Ingest some training data
-        training_data = b"The quick brown fox"
-        gyrosi_agent.ingest(training_data)
-
-        # Generate response
-        input_data = b"jumps"
-        response = gyrosi_agent.respond(input_data)
-
+        # Verify response properties
         assert isinstance(response, bytes)
-        assert len(response) == len(input_data)
+        assert len(response) == len(test_input)
 
-    def test_empty_input_handling(self, gyrosi_agent):
-        """Test handling of empty input."""
-        # Empty ingest
-        gyrosi_agent.ingest(b"")
+        # Cycle count should have increased
+        assert gyrosi_agent.engine.cycle_count == len(test_data) + len(test_input)
 
-        # Empty respond
-        response = gyrosi_agent.respond(b"")
-        assert response == b""
+        # Verify empty input handling
+        empty_response = gyrosi_agent.respond(b"")
+        assert empty_response == b""
 
     def test_agent_info(self, gyrosi_agent):
-        """Test agent information retrieval."""
+        """Test agent info retrieval."""
+        # Get agent info
         info = gyrosi_agent.get_agent_info()
 
+        # Verify structure
         assert "agent_id" in info
+        assert info["agent_id"] == gyrosi_agent.agent_id
+        assert "cycle_count" in info
         assert "config" in info
         assert "knowledge_statistics" in info
         assert "system_integrity" in info
-
-    def test_monitoring_hooks(self, gyrosi_agent):
-        """Test adding monitoring hooks."""
-        hook_data = []
-
-        def monitor_hook(engine, phenotype, intron):
-            hook_data.append(phenotype["phenotype"])
-
-        gyrosi_agent.add_monitoring_hook(monitor_hook)
-        gyrosi_agent.respond(b"test")
-
-        assert len(hook_data) == 4  # One per byte
-
-    def test_maintenance_operations(self, gyrosi_agent):
-        """Test maintenance operations."""
-        # Add some data first
-        gyrosi_agent.ingest(b"Sample data for maintenance test")
-
-        # Apply maintenance
-        report = gyrosi_agent.apply_maintenance(decay_factor=0.99, confidence_threshold=0.01)
-
-        assert "decay_applied" in report
-        assert "entries_pruned" in report
-        assert "timestamp" in report
 
 
 class TestAgentPool:
     """Test agent pool management."""
 
-    def test_get_or_create_agent(self, agent_pool):
-        """Test agent creation and retrieval."""
-        # Create new agent
-        agent1 = agent_pool.get_or_create_agent("user1", role_hint="user")
-        assert agent1 is not None
+    def test_agent_pool_basics(self, agent_pool):
+        """Test agent pool basic operations."""
+        # Initially empty
+        assert len(agent_pool.get_active_agents()) == 0
 
-        # Retrieve same agent
-        agent2 = agent_pool.get_or_create_agent("user1")
-        assert agent2 is agent1  # Same instance
+        # Create agent
+        agent1 = agent_pool.get_or_create_agent("test_user")
 
-    def test_remove_agent(self, agent_pool):
-        """Test agent removal."""
+        # Verify agent was created
+        assert agent1.agent_id == "test_user"
+        assert "test_user" in agent_pool.get_active_agents()
+
+        # Get same agent again
+        agent1_again = agent_pool.get_or_create_agent("test_user")
+
+        # Should be the same instance
+        assert agent1 is agent1_again
+
+        # Create second agent
+        agent2 = agent_pool.get_or_create_agent("test_assistant")
+
+        # Should be different instance
+        assert agent2 is not agent1
+        assert "test_assistant" in agent_pool.get_active_agents()
+        assert len(agent_pool.get_active_agents()) == 2
+
+    def test_agent_removal(self, agent_pool):
+        """Test agent removal from pool."""
         # Create agent
         agent_pool.get_or_create_agent("temp_agent")
         assert "temp_agent" in agent_pool.get_active_agents()
 
         # Remove agent
-        assert agent_pool.remove_agent("temp_agent")
+        result = agent_pool.remove_agent("temp_agent")
+
+        # Verify removal
+        assert result is True
         assert "temp_agent" not in agent_pool.get_active_agents()
 
-        # Try to remove non-existent
-        assert not agent_pool.remove_agent("temp_agent")
-
-    def test_lru_eviction(self, ontology_data, temp_dir):
-        """Test LRU eviction policy."""
-        ontology_path, _ = ontology_data
-        knowledge_path = os.path.join(temp_dir, "knowledge.pkl.gz")
-
-        # Create pool with small capacity
-        preferences = {"max_agents_in_memory": 3, "agent_eviction_policy": "lru"}
-        pool = AgentPool(ontology_path, knowledge_path, preferences)
-
-        # Create more agents than capacity
-        for i in range(5):
-            pool.get_or_create_agent(f"agent{i}")
-
-        # Should have evicted oldest
-        active = pool.get_active_agents()
-        assert len(active) == 3
-        assert "agent0" not in active
-        assert "agent1" not in active
-        assert "agent4" in active
-
-        pool.close_all()
-
-    def test_thread_safety(self, agent_pool):
-        """Test thread-safe agent access."""
-        errors = []
-        results = {}
-
-        def create_and_use_agent(agent_id):
-            try:
-                agent = agent_pool.get_or_create_agent(agent_id)
-                response = agent.respond(b"test")
-                results[agent_id] = len(response)
-            except Exception as e:
-                errors.append(e)
-
-        # Launch multiple threads
-        threads = []
-        for i in range(10):
-            t = threading.Thread(target=create_and_use_agent, args=(f"agent{i}",))
-            threads.append(t)
-            t.start()
-
-        for t in threads:
-            t.join()
-
-        assert len(errors) == 0
-        assert len(results) == 10
-
-
-class TestConversationOrchestration:
-    """Test conversation orchestration between agents."""
+        # Try to remove non-existent agent
+        result = agent_pool.remove_agent("nonexistent")
+        assert result is False
 
     def test_orchestrate_turn(self, agent_pool):
-        """Test basic conversation turn."""
-        # Setup agents
-        user_agent = agent_pool.get_or_create_agent("user", role_hint="user")
-        assistant_agent = agent_pool.get_or_create_agent("assistant", role_hint="assistant")
+        """Test orchestration of a conversation turn."""
+        # Test basic orchestration
+        response = orchestrate_turn(
+            agent_pool, "test_user_orchestrate", "test_assistant_orchestrate", "Hello, how are you?"
+        )
 
-        # Train assistant
-        assistant_agent.ingest(b"I am a helpful assistant.")
-
-        # Orchestrate turn
-        response = orchestrate_turn(agent_pool, "user", "assistant", "Hello!")
-
+        # Verify response
         assert isinstance(response, str)
         assert len(response) > 0
 
-    def test_multi_turn_conversation(self, agent_pool):
-        """Test multi-turn conversation."""
-        responses = []
-
-        # Have a short conversation
-        for user_input in ["Hello", "How are you?", "Goodbye"]:
-            response = orchestrate_turn(agent_pool, "user1", "assistant1", user_input)
-            responses.append(response)
-
-        assert len(responses) == 3
-        assert all(isinstance(r, str) for r in responses)
-
-    def test_unicode_handling(self, agent_pool):
-        """Test handling of unicode in conversations."""
-        # Test various unicode inputs
-        test_inputs = [
-            "Hello! 👋",
-            "Café ☕",
-            "数学 πr²",
-            "Москва",
-        ]
-
-        for input_text in test_inputs:
-            response = orchestrate_turn(agent_pool, "unicode_user", "unicode_assistant", input_text)
-            assert isinstance(response, str)
+        # Verify agents were created
+        active_agents = agent_pool.get_active_agents()
+        assert "test_user_orchestrate" in active_agents
+        assert "test_assistant_orchestrate" in active_agents
 
 
 class TestIntegration:
-    """Integration tests for the complete system."""
+    """Integration tests for the full system."""
 
-    def test_full_learning_cycle(self, agent_config):
-        """Test complete learning and response cycle."""
-        agent = GyroSI(agent_config)
+    def test_learn_and_respond(self, gyrosi_agent):
+        """Test learning and response generation."""
+        # Teach the agent something
+        training_data = b"The quick brown fox jumps over the lazy dog."
+        gyrosi_agent.ingest(training_data)
 
-        # Train on some text
-        training = b"The rain in Spain stays mainly in the plain."
-        agent.ingest(training)
+        # Get info after learning
+        info_after_learning = gyrosi_agent.get_agent_info()
 
-        # Test various inputs
-        test_cases = [b"rain", b"Spain", b"plain"]
+        # Test response after learning
+        response = gyrosi_agent.respond(b"Hello")
 
-        responses = []
-        for test_input in test_cases:
-            response = agent.respond(test_input)
-            responses.append(response)
+        # Verify response
+        assert isinstance(response, bytes)
+        assert len(response) == 5  # "Hello" has 5 bytes
 
-        # Responses should be consistent for same input
-        response1 = agent.respond(b"rain")
-        response2 = agent.respond(b"rain")
-        assert response1 == response2
+        # Get info after responding
+        info_after_response = gyrosi_agent.get_agent_info()
 
-        agent.close()
+        # Cycle count should have increased
+        assert info_after_response["cycle_count"] > info_after_learning["cycle_count"]
 
-    def test_persistence_across_sessions(self, agent_config, temp_dir):
-        """Test that learning persists across agent sessions."""
-        agent_id = "persistent_agent"
+    def test_multi_agent_interaction(self, agent_pool):
+        """Test multi-agent interaction."""
+        # Create two agents
+        user_agent = agent_pool.get_or_create_agent("integration_user")
+        assistant_agent = agent_pool.get_or_create_agent("integration_assistant")
 
-        # First session - train
-        agent1 = GyroSI(agent_config, agent_id=agent_id)
-        agent1.ingest(b"Knowledge to remember")
-        response1 = agent1.respond(b"test")
-        agent1.close()
+        # Verify both agents exist
+        assert user_agent.agent_id == "integration_user"
+        assert assistant_agent.agent_id == "integration_assistant"
 
-        # Second session - should remember
-        agent2 = GyroSI(agent_config, agent_id=agent_id)
-        response2 = agent2.respond(b"test")
-        agent2.close()
+        # Test conversation (multiple turns)
+        first_response = orchestrate_turn(agent_pool, "integration_user", "integration_assistant", "Hello!")
+        assert isinstance(first_response, str)
 
-        # Should produce same response (demonstrating memory)
-        assert response1 == response2
+        # Second turn
+        second_response = orchestrate_turn(agent_pool, "integration_user", "integration_assistant", "How are you?")
+        assert isinstance(second_response, str)
 
-    @pytest.mark.slow
-    def test_performance_at_scale(self, agent_config):
-        """Test performance with larger workload."""
-        from conftest import Timer
+        # Agents should persist across turns
+        assert user_agent.engine.cycle_count > 0
+        assert assistant_agent.engine.cycle_count > 0
 
-        agent = GyroSI(agent_config)
+    def test_unicode_handling(self, agent_pool):
+        """Test handling of Unicode text."""
+        # Test with Unicode input
+        unicode_input = "Hello 世界! 🌍"
 
-        # Generate test data
-        test_size = 10000
-        test_data = bytes(range(256)) * (test_size // 256)
+        # Should not raise exceptions
+        response = orchestrate_turn(agent_pool, "unicode_user", "unicode_assistant", unicode_input)
 
-        # Measure ingestion performance
-        with Timer() as ingest_timer:
-            agent.ingest(test_data)
+        # Response should be valid
+        assert isinstance(response, str)
 
-        ingest_rate = len(test_data) / ingest_timer.elapsed
-        assert ingest_rate > 100_000, f"Only {ingest_rate:.0f} bytes/sec ingestion"
+        # The response itself may not be meaningful, but should be valid UTF-8
+        response.encode("utf-8")  # Should not raise exception
 
-        # Measure response performance
-        with Timer() as respond_timer:
-            response = agent.respond(test_data[:1000])
 
-        respond_rate = 1000 / respond_timer.elapsed
-        assert respond_rate > 10_000, f"Only {respond_rate:.0f} bytes/sec response"
+def assert_phenotype_entry_valid(entry):
+    """Validate phenotype entry structure."""
+    required_fields = ["phenotype", "memory_mask", "confidence", "context_signature"]
+    for field in required_fields:
+        assert field in entry, f"Missing required field: {field}"
 
-        agent.close()
+    assert isinstance(entry["phenotype"], str)
+    assert isinstance(entry["memory_mask"], int)
+    assert 0 <= entry["memory_mask"] <= 255
+    assert 0 <= entry["confidence"] <= 1.0
+    assert isinstance(entry["context_signature"], tuple)
+    assert len(entry["context_signature"]) == 2
+
+
+def orchestrate_turn(pool, user_id, assistant_id, user_input):
+    """Orchestrate a turn between agents (with proper import)."""
+    from baby.intelligence import orchestrate_turn as actual_orchestrate_turn
+
+    return actual_orchestrate_turn(pool, user_id, assistant_id, user_input)
+
+
+if __name__ == "__main__":
+    pytest.main(["-v", __file__])

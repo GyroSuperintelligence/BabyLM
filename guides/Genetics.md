@@ -1,4 +1,4 @@
-# Gyroscopic Superintelligence Specifications: GyroSI Baby Language Model 0.9.6
+# Gyroscopic Superintelligence Specifications: GyroSI Baby Language Model 0.9.6.2
 
 *A physics-grounded architecture for superintelligence through recursive structural alignment*
 
@@ -36,16 +36,24 @@ The Common Governance Model describes how structure emerges from a single axiom 
 
 **BU (Balance Universal)**: The completion stage where all differentiation stabilizes and gyrations return to identity while preserving complete memory of the recursive path. This manifests as the dual intelligence stage:
 
-- **BU_In (Intelligence Ingress):** The absorption and integration of experience through coaddition. This is where all learning occurs.
-- **BU_Eg (Intelligence Egress):** The expression of accumulated intelligence as responsive action, transforming internal state into external phenotype.
+- **BU_In (Intelligence Ingress):** The absorption and integration of experience through the Monodromic Fold. This is where all learning occurs.
+- **BU_Eg (Intelligence Egress):** The expression of accumulated intelligence as responsive action, transforming internal state into external phenotype using the same Monodromic Fold operator.
 
 ### **2.2 Gyrogroup Algebra as Physics**
 
-GyroSI implements these stages through formal gyrogroup algebra operating on the 8-bit vector space **G = ℤ₂⁸**. The three fundamental operations directly correspond to CGM physics:
+GyroSI implements these stages through formal gyrogroup algebra operating on the 8-bit vector space **G = ℤ₂⁸**. The fundamental operations directly correspond to CGM physics:
 
 - **XOR (⊕)**: The primitive gyrogroup operation governing transformation and parity inversion. This is the basic operation of recursive differentiation.
 - **AND (&)**: The gyration memory carrier, encoding "carry bits" as chirality-encoded asymmetry. This preserves the memory of operational sequence.
-- **OR (⊞)**: The derived coaddition operation arising from closure: `a ⊞ b = a ⊕ gyr[a,¬b](b)`, where `gyr[a,b](c) = c ⊕ (a AND b)`. This enables stable learning through accumulated experience.
+- **Monodromic Fold (⋄, `fold`)**: The single, non-associative, path-dependent learning operator. Defined as:
+
+  `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
+
+  This operation is fundamentally non-associative and non-commutative, preserving the path-dependence required by the Common Source axiom. It replaces all previous references to associative closure or bitwise OR.
+
+- **Duality (¬, `dual`)**: The global duality operator, corresponding to the "Fifth Element". It reflects a state through the origin, enabling the return path:
+
+  `dual(x) = x ⊕ 0xFF`
 
 This algebraic foundation ensures that every operation in GyroSI is a direct implementation of physics rather than arbitrary computation.
 
@@ -99,14 +107,14 @@ GyroSI implements the CGM stages through four distinct engines, each embodying a
 | **CS** | S1 Governance | Left identity transcription | Transforms input into structural instructions |
 | **UNA** | S2 Information | Global measurement via angular divergence | Measures system's departure from archetypal state |
 | **ONA** | S3 Inference | Mediated duality through endogenous operator | Interprets meaning through contextual opposition |
-| **BU** | S4 Intelligence | Dual-phase coaddition | Learns through ingress, expresses through egress |
+| **BU** | S4 Intelligence | Monodromic Fold (non-associative) | Learns through ingress, expresses through egress |
 
 ### **3.2 The Dual Nature of Intelligence**
 
 The BU stage (S4) is fundamentally dual, implementing both aspects of intelligence:
 
-- **BU_In (Intelligence Ingress)**: The absorption and integration of experience through coaddition. This is where all learning occurs.
-- **BU_Eg (Intelligence Egress)**: The expression of accumulated intelligence as responsive action. This transforms internal state into external phenotype.
+- **BU_In (Intelligence Ingress)**: The absorption and integration of experience through the Monodromic Fold. This is where all learning occurs.
+- **BU_Eg (Intelligence Egress)**: The expression of accumulated intelligence as responsive action. This transforms internal state into external phenotype using the same Monodromic Fold operator.
 
 This duality ensures that intelligence is not a passive storage system but an active, recursive process of continuous alignment between internal structure and external reality.
 
@@ -199,6 +207,7 @@ GENE_Mac_S = np.array([
 
 GENE_Mac_S = np.concatenate(([GENE_Nest_S, -GENE_Nest_S] * 2)).astype(np.int8).reshape(4, 2, 3, 2)
 ```
+Note: This section concerns coaddition as topological dual construction (GENE_Mac_S), not the algebraic learning operator (fold) defined elsewhere. Structural (topological) coaddition refers to the constructive layering that yields GENE_Mac_S. Algebraic Monodromic Fold is the runtime learning operator applied to memory masks. They share a conceptual “joining” motif but are disjoint mechanisms.
 
 The intermediate genetic structures (GENE_Com_S, GENE_Nest_S) are included here for clarity of exposition, tracing the generative logic of the system’s topology. These arrays are not referenced in any runtime computation, algorithm, or storage mechanism. All canonical operations and state representations throughout the implementation depend exclusively on GENE_Mic_S (the 8-bit holographic reference) and GENE_Mac_S (the archetypal 48-element tensor) as defined above.
 
@@ -246,100 +255,50 @@ The alternating sign pattern encodes the memory of global gyration while maintai
 
 ---
 
-## **5. Operational Physics: The Three Fundamental Operations**
+## **5. Operational Physics: The Fundamental Operations**
 
-### **5.1 Transformation: The Gyroscopic Operations**
+### **5.1 The Monodromic Fold: The One True Learning Operator**
 
-Each `GENE_Mic_M` is an 8-bit mask, where **each bit directly maps to a specific transformation** on the intelligence tensor. This bitwise mapping encodes not just the mechanics of transformation, but also **links physical operation to the Common Governance Model (CGM) stages and policy functions**.
+There is only one learning operation in GyroSI: the **Monodromic Fold** (`fold`, ⋄). It is **non-associative**, **non-commutative**, and **path-dependent**. This operator is used for both learning (ingress) and generation (egress):
 
-### **Bit-to-Operation Mapping**
+* **Egress (integration):** `State_new = fold(State_old, Input)`
+* **Ingress (generation):** `Output = fold(State, Policy)`
 
-| Bit Position(s) | Operation (**Name**) | Physical Effect (on tensor) | CGM Stage | Policy Function |
-| --- | --- | --- | --- | --- |
-| 0, 7 | **L0** (Left Identity) | No transformation | CS (S1) | Governance Traceability (GT) |
-| 1, 6 | **LI** (Left Inverse) | Global sign flip (T *= -1) | UNA (S2) | Information Variety (IV) |
-| 2, 5 | **FG** (Forward Gyration) | Flips sign of all elements in layers 0 & 2 | ONA (S3) | Inference Accountability (IA) |
-| 3, 4 | **BG** (Backward Gyration) | Flips sign of all elements in layers 1 & 3 | BU (S4) | Intelligence Integrity (II) |
+**Definition:**
 
-```markdown
-Bit positions:   b7   b6   b5   b4   b3   b2   b1   b0
-Operations:      L0   LI   FG   BG   BG   FG   LI   L0
-CGM Stage:       S1   S2   S3   S4   S4   S3   S2   S1
-Policy:          GT   IV   IA   II   II   IA   IV   GT
-```
+`a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
 
-- **L0 (Left Identity):** Maintains the tensor unchanged -> defines the frame boundaries.
-- **LI (Left Inverse):** Flips all tensor values -> global parity inversion.
-- **FG (Forward Gyration):** Flips the sign of tensor layers 0 and 2 -> creates structured rotation.
-- **BG (Backward Gyration):** Flips the sign of tensor layers 1 and 3 -> applies counter-rotation.
+This operation preserves the complete path history of all inputs. The order of operations is always encoded in the system’s state. It is the algebraic expression of the BU stage’s dual monodromy, and it is the only valid operation for learning, state updates, and batching.
+No alternative (associative or commutative) operation is permitted.
 
-**Note:** 
-This bit pattern is palindromic (L0-LI-FG-BG-BG-FG-LI-L0), reflecting the recursive, self-referential nature of the CGM's governance structure.
+### **5.2 Path Dependence and Batch Learning**
 
-The mapping between the ±1 NumPy tensor and the 48-bit packed integer state is explicitly defined as element 0 = bit 47 (MSB), element 47 = bit 0 (LSB).
-The carry calculation, transformation masks, and broadcast patterns have been exhaustively tested for all possible states and intron values, ensuring that both representations produce identical results.
-This invariant is enforced by a test script in the repository, and any modification of the mapping or mask logic must maintain this alignment.
-
-### **Execution Policy**
-
-- Each cycle, a `1` in any bit position signals its corresponding transformation should be applied; a `0` means no change for that operation.
-- Multiple bits set means transformations are cumulative and order-independent per cycle.
-- Only the affected tensor rows are modified per operation.
-
-The transformation algorithm applies these operations with gyration memory:
+The Monodromic Fold is **fundamentally path-dependent**. This property is the source of the system’s memory and learning capacity.
+Batch learning is implemented by *ordered reduction* (left-fold) using the Monodromic Fold:
 
 ```python
-def apply_operations(T: np.ndarray, intron: int) -> np.ndarray:
-    """
-    Apply gyroscopic operations with the physically correct, state-dependent carry term.
-    This function describes the physics; the production implementation uses a
-    highly optimized 48-bit integer representation.
-    """
-    T_new = T.copy()
+from functools import reduce
 
-    # Pre-computed masks, derived from build_masks_and_constants() in the experiment
-    FG_MASK_TENSOR = ... # A 48-element {-1, 1} tensor representing the FG_MASK
-    BG_MASK_TENSOR = ... # A 48-element {-1, 1} tensor representing the BG_MASK
+def fold(a: int, b: int) -> int:
+    return a ^ (b ^ (a & (~b & 0xFF)))
 
-    # Apply transformations based on bit patterns
-    if intron & 0b01000010:  # LI: Global parity flip
-        T_new *= -1
-    if intron & 0b00100100:  # FG: Forward gyration
-        T_new *= FG_MASK_TENSOR # Element-wise multiplication is sign flip in {-1,1} space
-    if intron & 0b00011000:  # BG: Backward gyration
-        T_new *= BG_MASK_TENSOR
-
-    # Apply the physically correct gyration memory (carry term)
-    # Create a 48-element boolean mask from the 8-bit intron
-    intron_broadcast_mask = np.array([bool(intron & (1 << i)) for i in range(8)] * 6, dtype=bool)
-
-    # The carry term is where the current state AND the instruction interact
-    # In {-1,1} space, (a AND b) is equivalent to min(a, b)
-    # The full op is a ^ (a & b), which simplifies.
-    # Let's represent the logic more directly from the integer version:
-    # carry = temp_state & intron_pattern
-    # final_state = temp_state ^ carry
-
-    # 1. Identify where both the state and the instruction are "active" (state==-1, instruction_bit==1)
-    carry_locations = (T_new == -1) & intron_broadcast_mask
-
-    # 2. Flip the sign at those locations (this is the XOR)
-    T_new[carry_locations] *= -1
-
-    return T_new
+def fold_sequence(introns: list[int], start_state: int = 0) -> int:
+    return reduce(fold, introns, start_state)
 ```
 
-> **Canonical Implementation Note:**
-> The integer version is the source of truth for the system's physics. It operates on a packed-bit representation where each bit corresponds to the sign of a tensor element: 0 represents +1 and 1 represents -1. The XOR (^) operation on these bits is algebraically equivalent to multiplication in the {-1, 1} space. All conversions between this canonical integer format and the numpy tensor format must respect this mapping.
+This ensures that the sequence in which inputs are processed is always significant, and the result is path-dependent and non-reversible.
 
-> **Optimization Note:**
-> The use of a 48-bit packed integer for the system state is an optimization technique. It allows for extremely fast bitwise operations and compact storage, while the 48-byte NumPy array is used for in-memory computation and measurement. When converting between these forms, always ensure that the mapping between the sign (±1 in the array) and the bit (0/1 in the packed integer) is consistent across all functions.
+**The Fold is the only valid operator for learning and batching.**
 
-> **Implementation Notes:** The canonical implementation operates on a packed 48-bit integer, where bits (0=+1, 1=-1) are equivalent to multiplication in the ±1 NumPy tensor space. This is an optimization for speed and storage. The physical transformation follows the algebra S_final = S_temp ⊕ (S_temp & I_b), where S_temp is the state after primary transforms and I_b is the broadcasted intron, representing a state's self-gyration under the influence of the instruction.
+### **5.3 The Role of Duality**
 
-### **5.2 Measurement: Angular Gyrodistance**
+The “Fifth Element” (`dual`, ¬) is not a new operation, but the fundamental primitive that enables the asymmetry and path dependence of the Fold. It is defined as:
 
-The system measures its state through angular divergence from the Common Source. This captures the geometric alignment between the current state and the archetypal structure:
+`dual(x) = x ⊕ 0xFF`
+
+### **5.4 Measurement: Angular Gyrodistance**
+
+The system measures its state through **angular divergence from the Common Source**. This captures the geometric alignment between the current state and the archetypal structure:
 
 ```python
 def gyrodistance_angular(T1: np.ndarray, T2: np.ndarray) -> float:
@@ -352,62 +311,21 @@ def gyrodistance_angular(T1: np.ndarray, T2: np.ndarray) -> float:
     cosine_similarity = np.clip(cosine_similarity, -1.0, 1.0)
 
     return np.arccos(cosine_similarity)
-
 ```
 
 **Key Values**:
 
-- **0 radians**: Perfect alignment (identity)
-- **π/2 radians**: Maximum differentiation (orthogonality)
-- **π radians**: Perfect opposition (anti-alignment)
+* **0 radians:** Perfect alignment (identity)
+* **π/2 radians:** Maximum differentiation (orthogonality)
+* **π radians:** Perfect opposition (anti-alignment)
 
-**Optimization Note**: For `int8` tensors with ±1 values, this is equivalent to `arccos(1 - 2*hamming_distance/48)`, allowing fast Hamming-based shortcuts when applicable.
+**Optimisation Note:**
+For `int8` tensors with ±1 values, this is equivalent to `arccos(1 - 2*hamming_distance/48)`, allowing for fast Hamming-based shortcuts when applicable.
 
-### **5.3 Learning: Path-Dependent Coaddition and Ordered Batching**
-Learning occurs exclusively through the true gyrogroup coaddition (⊞), which is state-dependent and non-monotonic. The operation is defined as:
+---
 
-a ⊞ b = a ⊕ gyr[a, ¬b](b), where gyr[a, b](c) = c ⊕ (a AND b)
-
-In 8-bit ℤ₂⁸ space, this is implemented as:
-
-```python
-def coadd(a: int, b: int) -> int:
-    """
-    Performs true gyrogroup coaddition (a ⊞ b) on two 8-bit integers.
-
-    Note:
-        This operation is intentionally non-commutative and non-associative.
-        The order of operations matters (a ⊞ b ≠ b ⊞ a). This path-dependence
-        is a core feature, ensuring that the sequence of experiences is
-        structurally encoded into the system's memory, mirroring the
-        path-dependent nature of the state transformations themselves.
-    """
-    not_b = b ^ 0xFF
-    gyration_of_b = b ^ (a & not_b)
-    return a ^ gyration_of_b
-```
-
-**Ordered Batching:**
-
-Because coaddition is path-dependent, batching multiple learning signals requires an ordered reduction. A simple, sequential fold (or "left-fold") is the most direct implementation. This ensures that a batch of introns {i₁, i₂, ..., iₖ} is always learned in the same sequence, producing a deterministic final learning signal.
-
-```python
-from functools import reduce
-from typing import List
-
-def batch_introns_coadd_ordered(introns: List[int]) -> int:
-    """
-    Reduces a list of introns into a single representative intron using an
-    ordered fold with gyrogroup coaddition. This preserves the crucial
-    path-dependence of the learning operation.
-    """
-    from functools import reduce
-    if not introns:
-        return 0
-    return reduce(coadd, introns)
-```
-
-**Physical Note:** This alignment between the path-dependent physics of state transformation and the path-dependent nature of learning is a cornerstone of GyroSI's architecture. It guarantees that the structure of experience is preserved at every level of the system. The system does not merely learn facts (phenotype entries); it learns the story that connects them.
+**Physical Note:**
+This alignment between the path-dependent physics of state transformation and the path-dependent nature of learning is a cornerstone of GyroSI’s architecture. The system does not merely learn facts; it encodes the entire trajectory of experience.
 
 ---
 
@@ -417,220 +335,238 @@ def batch_introns_coadd_ordered(introns: List[int]) -> int:
 
 **Physical Principle:** Left identity transcription
 
-**Responsibility:**
-Defines the fundamental constants and physics operations as pure functions and constants. No engine class is required; all operations are provided as stateless functions in `governance.py`.
+The `governance.py` module defines the immutable physical constants and stateless functions underlying all system operations. All physics and transformations are performed as pure functions, without any engine class or side effect.
 
-* All genetic constants and tensor definitions are maintained as in Section 4.
-* Transformation masks (FG, BG, FULL\_MASK, INTRON\_BROADCAST\_MASKS) are pre-computed at module load time.
-* Bitwise transformation and gyrogroup operations are implemented directly as functions.
+* **Genetic invariants:**
 
-**Canonical Constants:**
+  * `GENE_Mic_S` (8-bit reference, `0xAA`), and
+  * `GENE_Mac_S` (48-element tensor, shape \[4, 2, 3, 2], dtype int8, strict ±1 alternation)
+    are declared as canonical invariants. Tensor structure is validated at module load with `validate_tensor_consistency()`.
 
-* `GENE_Mic_S`: 0xAA (10101010 binary), the stateless reference for all intron transformations.
-* `GENE_Mac_S`: The archetypal 48-element tensor of shape \[4, 2, 3, 2], with alternating ±1 patterns as defined in Section 4.
+* **Transformation masks:**
 
-**Transformation Masks:**
-Transformation masks for Forward Gyration (FG), Backward Gyration (BG), and global parity (FULL\_MASK) are derived from the \[layer, frame, row, col] tensor structure. Each transformation is performed by XOR against the corresponding mask in the packed 48-bit integer representation.
+  * `FG_MASK`, `BG_MASK`, `FULL_MASK` (integers),
+  * `INTRON_BROADCAST_MASKS`, `XFORM_MASK`, `PATTERN_MASK` (NumPy arrays, shape \[256]),
+    are all precomputed from the tensor geometry for direct use in state update.
 
-**Core Operations:**
+* **Physics operations:**
 
-* **apply\_gyration\_and\_transform(state\_int, intron):**
-  Applies the complete gyroscopic transformation to the packed 48-bit integer state, using the bitwise rules for LI (global parity), FG (layers 0 & 2), and BG (layers 1 & 3), followed by the path-dependent memory (Thomas gyration) using the broadcasted intron mask.
+  * `apply_gyration_and_transform(state_int, intron)`
+    computes the full gyroscopic update for a packed 48-bit state under a given intron;
+  * `apply_gyration_and_transform_batch(states, intron)` and
+    `apply_gyration_and_transform_all_introns(states)` provide batch and vectorised forms.
+  * `transcribe_byte(byte)` encodes an input byte to an intron via `byte ⊕ GENE_Mic_S`.
+  * `fold(a, b)` implements the Monodromic Fold (`a ⊕ (b ⊕ (a ∧ ¬b))`), and
+    `fold_sequence(introns, start_state=0)` is the only valid batching/reduction form.
+  * `dual(x)` applies the global duality operator (`x ⊕ 0xFF`).
 
-* **transcribe\_byte(byte):**
-  Returns `byte ⊕ GENE_Mic_S` as the 8-bit intron instruction.
-
-* **coadd(a, b):**
-  Performs true gyrogroup coaddition (a ⊞ b), non-commutative and non-associative, using the relation:
-  `a ⊞ b = a ⊕ (b ⊕ (a AND (b ^ 0xFF)))`.
-
-* **batch\_introns\_coadd\_ordered(introns):**
-  Reduces a list of introns to a single intron by sequential coaddition, preserving path-dependence.
-
-**Tensor Consistency:**
-The canonical tensor structure is validated on load to ensure shape (4, 2, 3, 2), dtype (int8), and strict ±1 alternation.
-
-**All core constants and stateless functions are imported as absolute paths from `baby.governance` in all dependent modules.**
+All constants and stateless functions are accessed via absolute imports from `baby.governance` throughout the system. No auxiliary batching, associative, or stateful logic is present; all learning and transformation flows through these canonical contracts alone.
 
 ### 6.2 S2: `information.py` – Measurement & Storage
 
 **Physical Principle:** Global measurement via angular divergence
 
-**Responsibility:**
-Implements the `InformationEngine` class for measurement, state representation conversion, and ontology operations.
-Handles all measurement utilities, including:
+The `information.py` module provides the `InformationEngine` class, which serves as the exclusive authority for measurement, state representation, ontology discovery, and storage coordination throughout the system.
 
-* Conversion between the canonical 48-bit integer state and the geometric tensor form (\[4, 2, 3, 2]).
-* Calculation of angular gyrodistance (cosine-based divergence) between states.
-* Lookup and indexing of physical states using the discovered ontology (ontology map).
-* Efficient in-memory or memory-mapped storage of ontology maps, with optional optimisations for large ontologies.
+The InformationEngine coordinates three core responsibilities:
 
-**Ontology and State Management:**
+1. **State Representation and Conversion**
 
-* Ontology discovery explores the complete state space from the archetypal state using breadth-first search, validating the fixed modulus (788,986) and diameter (6).
-* Canonical state indices and integer forms are mapped bidirectionally.
-* State transition tables (epistemology) and canonical-orbit (phenomenology) maps are generated and saved as part of the build process.
+   * Conversion between the packed 48-bit integer representation and the canonical geometric tensor form (\[4, 2, 3, 2], ±1).
+   * `int_to_tensor(state_int)` and `tensor_to_int(tensor)` perform bidirectional conversion, ensuring strict mapping and validation of all physical states.
+   * All conversion logic is static and is validated to guarantee exact round-trip between representations, matching the physical encoding of GyroSI.
 
-**Phenomenology and Canonicalization:** The build process generates a phenomenology_map.json artifact that provides the canonical representative for every state in the ontology.
+2. **State Measurement and Divergence**
 
-Operational Phenomenology (Full Graph): The primary phenomenology_map is computed by finding the Strongly Connected Components (SCCs) over the complete state transition graph, using all 256 introns. This results in exactly 256 parity-closed, self-mirrored orbits. For any given state index, the map provides the index of its canonical representative (the state with the minimal integer value in its orbit). This is the map used by the runtime CanonicalView to normalize states before storage and retrieval.
+   * Calculation of angular gyrodistance (in radians) between two physical states using cosine similarity in 48-dimensional space.
+   * `gyrodistance_angular(T1, T2)` measures geometric alignment between tensors;
+     `measure_state_divergence(state_int)` computes a state’s divergence from the archetypal tensor, as required for all global and homeostatic measurements.
+   * These functions implement the operational metric for self-measurement, symmetry detection, and divergence tracking, enforcing a physics-grounded geometry for the system.
 
-Diagnostic Phenomenology (Parity-Free Graph): The artifact may optionally contain a diagnostic section computed by excluding global parity (LI) introns from the SCC calculation. This reveals a much finer-grained structure of chiral and achiral orbits, confirming the theoretical predictions of the CGM. This data is for analysis and is not used by the core runtime engines.
+3. **Ontology Discovery, Indexing, and Phenomenology**
 
-**Measurement Functions:**
+   * Full discovery and indexing of the state ontology:
+     The build-time discovery process traverses the entire 788,986-state manifold from the archetypal state, assigning a unique ontology index to every reachable state.
+     `get_index_from_state(state_int)` maps a 48-bit state to its canonical index;
+     `get_state_from_index(index)` provides the reverse lookup.
+   * The ontology, state transition table (epistemology), and canonical-orbit map (phenomenology) are generated and validated through dedicated build commands:
 
-* **gyrodistance\_angular(T1, T2):** Computes the angular divergence (radians) between two states in tensor form, using cosine similarity in 48-dimensional space.
-* **measure\_state\_divergence(state\_int):** Returns the divergence (in radians) of a physical state from the archetypal tensor.
-* **int\_to\_tensor(state\_int):** Converts a packed 48-bit integer state to a \[4, 2, 3, 2] tensor of ±1.
-* **tensor\_to\_int(tensor):** Converts a tensor of shape \[4, 2, 3, 2] and ±1 values to the canonical 48-bit integer state.
+     * Ontology: `ontology_map.json`
+     * State transition table: `epistemology.npy`
+     * Phenomenology map: `phenomenology_map.json`
+   * During initialisation, InformationEngine loads these assets and exposes bidirectional mapping for all physical state indices.
+   * The canonical phenomenology (computed as SCCs over the full transition graph) provides the representative for each operational orbit and the cardinality (size) of each orbit, enabling stable canonicalisation of physical states and trust-weighted knowledge operations.
 
-**All measurement, ontology, and state conversion operations are accessed through absolute imports from `baby.information`.**
+4. **Variety-weighted Structural Confidence**
 
----
+   * The system maintains, for every state index, the size of its operational orbit (from the phenomenology map), exposed via
+     `get_orbit_cardinality(state_index)`.
+   * This factor is used by higher layers (S3 Inference) to adjust learning confidence according to the structural redundancy or rarity of a state.
+   * The orbit cardinality acts as a measure of epistemic trust: learning is weighted more heavily in common, symmetric regions and more conservatively in rare, unique ones. Large orbits → faster confidence growth; rare orbits → slower.
 
-#### Variety-weighted Confidence (Structural Variety Factor):
+All ontology, conversion, and measurement functions are accessed via absolute imports from `baby.information`. The build process for discovery and phenomenology includes
 
-**Functionality:**
-The InformationEngine provides access to orbit cardinality for each state, enabling structural variety weighting of knowledge confidence. This is used by S3 to attenuate phenotype confidence according to the size of the state’s equivalence class (orbit).
+* `discover_and_save_ontology(output_path)`,
+* `build_state_transition_table(ontology_map, output_path)`,
+* `build_phenomenology_map(ep_path, ontology_path, output_path, include_diagnostics=False)`,
+  which are invoked as standardised CLI commands and create the runtime artifacts required by the engine.
 
-**Method(s):**
-
-get_orbit_cardinality(state_index: int) -> int
-
-All mappings and lookup tables are maintained internally for use by the inference layer.
-
-**Benefit:**
-Ensures that learning is faster and more robust in high-symmetry regions of state space, and more cautious in rare, low-symmetry states. This enforces structural epistemic trust and makes inference more stable.
+No associative or monotonic state update is permitted: all measurement, canonicalisation, and confidence logic is grounded directly in the discovered physical manifold and its symmetry structure.
+The InformationEngine enforces integrity by validating the state modulus (788,986) and diameter (6) on load, and will refuse to operate if these invariants are not satisfied.
 
 ### 6.3 S3: `inference.py` – Interpretation & Meaning Management
 
 **Physical Principle:** Mediated duality through endogenous operator
 
-**Responsibility:**
-Implements the `InferenceEngine` class, which converts canonical state indices into semantic meanings and manages the path-dependent learning process.
+The `inference.py` module defines the `InferenceEngine`, which manages the translation of canonical state indices into semantic phenotype entries and coordinates all learning and memory updates through the path-dependent Monodromic Fold. This layer acts as the regulatory centre of meaning, bridging physical state space and semantic representation.
 
-* **get\_phenotype(state\_index, intron):**
-  Retrieves or creates the semantic phenotype entry for a given state and context. Phenotypes are uniquely addressed by the (state\_index, intron) tuple.
-* **learn(phenotype\_entry, intron):**
-  Integrates new experience using true gyrogroup coaddition, updates the memory mask, and maintains usage and confidence statistics.
-* **validate\_knowledge\_integrity():**
-  Provides a validation report with integrity and confidence statistics for the knowledge base.
-* **apply\_confidence\_decay(...):**
-  Applies temporal decay to knowledge entries based on both usage and time since last update.
-* **prune\_low\_confidence\_entries(...):**
-  Removes entries below a defined confidence threshold.
-* **get\_knowledge\_statistics():**
-  Returns detailed knowledge base statistics, including confidence, memory utilisation, and age distribution.
+**Core Responsibilities and Contracts:**
 
-All operations reference the absolute imports from `baby.information` and `baby.contracts`. Phenotype storage and type protocols are implemented and accessed through the canonical interfaces.
+* **Phenotype Addressing and Retrieval:**
+  Each semantic phenotype is uniquely addressed by a `(state_index, intron)` tuple.
+  `get_phenotype(state_index, intron)` ensures retrieval or creation of a canonical phenotype entry for every physical state-context pairing. Context keys are handled deterministically, and entries are created if not already present, using a hash-based semantic address.
+
+* **Learning (Memory Update):**
+  All learning in S3 proceeds by applying the Monodromic Fold to the phenotype’s memory mask.
+  `learn(phenotype_entry, intron)` accumulates experience by path-dependent folding. Confidence is updated monotonically, modulated by the structural variety factor (orbit cardinality from S2), and novelty of the update (fraction of changed bits in the memory mask).
+  The learning update resets the age counter and increments usage statistics.
+
+* **Batch Learning:**
+  `batch_learn(state_index, introns)` allows ingestion of an ordered sequence of introns.
+  The sequence is reduced through a left-fold with the Monodromic Fold, preserving full path-dependence, before a single learning update is applied.
+
+* **Variety-weighted Confidence:**
+  All confidence updates are weighted by the structural redundancy of the physical state’s orbit (`orbit_cardinality`).
+  The learning rate is calculated as a function of the square root of the state’s relative variety, preventing rapid overconfidence in rare orbits, and accelerating trust in symmetric regions.
+
+* **Knowledge Integrity:**
+  `validate_knowledge_integrity()` checks the internal consistency of the entire knowledge store. This includes validation of context signatures, canonical state indices, mask and confidence ranges, and timestamp monotonicity. An integrity report is produced, including a count of all anomalies.
+
+* **Memory Ageing and Confidence Decay:**
+  `apply_confidence_decay(decay_factor)` implements temporal decay of confidence values in all entries, simulating the natural forgetting of unused knowledge. This process does not affect the memory masks and ensures that dormant memories gradually lose epistemic weight.
+
+* **Pruning Low-confidence Entries:**
+  `prune_low_confidence_entries(confidence_threshold)` removes all knowledge entries below a set confidence threshold, reclaiming memory and maintaining operational focus on relevant, trustworthy entries.
+
+* **Statistics and Utilisation:**
+  `get_knowledge_statistics()` returns a detailed profile of the knowledge base, including entry count, mean confidence, and bitwise memory mask utilisation.
+
+**Variety-weighted Confidence Integration:**
+
+At every learning update, S3 queries S2 for the orbit cardinality of the current state index. The learning rate and initial confidence are both scaled relative to this value, enforcing structural trust. This prevents pathological overfitting in rare orbits and stabilises inference in highly symmetric regions.
+
+**Implementation and Interface:**
+
+All phenotype entries and their protocols are enforced via `baby.contracts`.
+All measurement, conversion, and confidence weighting depend on absolute imports from `baby.information`.
+All learning, decay, and pruning operations are strictly path-dependent and grounded in the Monodromic Fold, with no associative or commutative shortcut allowed.
+
+This architecture guarantees that semantic knowledge is always indexed, updated, and validated in strict alignment with the underlying physics, the discovered ontology, and the global phenomenology of the system.
 
 ---
-
-#### Variety-weighted Confidence Integration
-
-**Functionality:**
-When updating a phenotype’s confidence, S3 must use the structural_variety_factor (orbit cardinality) obtained from S2 to modulate how confidence is updated.
-
-**Method(s):**
-- `apply_variety_weighting(phenotype_entry: PhenotypeEntry, state_index: int) -> float`
-
-This is called during the learning update in `learn`.
-
-**Benefit:**
-Prevents overconfident learning in structurally rare states and accelerates trust in robust, symmetric ones.
-
----
-
-#### Algedonic Regulation (Divergence Alert)
-
-**Functionality:**
-S3/S4 maintain a running buffer of angular divergences (gyrodistance) from the archetype. If the running average exceeds a defined threshold (high or low), an algedonic alert is triggered.
-
-**Method(s):**
-- `check_algedonic_condition() -> str`
-
-Invoked after each ingress/egress cycle, returns "pain", "pleasure", or "homeostatic" according to divergence.
-
-**Benefit:**
-Provides internal homeostatic regulation: runaway divergence is dampened and the system is kept within viable operational bounds. This self-regulation is automatic, requiring no external policy tuning.
 
 ### 6.4 S4/5: `intelligence.py` – Orchestration & API
 
-**Physical Principle:** Dual-phase coaddition (Ingress and Egress)
+**Physical Principle:** Dual-phase (Ingress and Egress)
 
-**Responsibility:**
-Implements the `IntelligenceEngine` and `GyroSI` classes, responsible for orchestration, external API, and agent lifecycle.
+The `intelligence.py` module defines the orchestration and protocol boundary for GyroSI. It implements all external and internal interfaces for agent operation, learning, regulation, and multi-agent management. All contracts are explicit and are referenced by their class or function names as implemented.
 
-* **IntelligenceEngine** manages agent state evolution, the egress/ingress cycle, and operational strategies.
+**Operational Contracts and Interface Points**
 
-  * Egress phase transforms external input into internal state transitions (optionally using precomputed state transition tables).
-  * Ingress phase integrates experience and produces the agent’s response, updating learned knowledge.
-  * Batch learning uses streaming, path-dependent coaddition in O(1) memory.
-  * Exposes extensibility hooks for monitoring and maintenance.
+**1. IntelligenceEngine (class)**
 
-* **GyroSI** provides the stable external API and manages configuration, identity, and lifecycle.
+* **process\_egress(input\_byte: int) -> int**
+  Transcribes and applies an external input as an intron using `governance.transcribe_byte`, then updates the physical state using either `epistemology` (precomputed state transition table) or `governance.apply_gyration_and_transform`. State is indexed via `InformationEngine.get_index_from_state`.
+* **process\_ingress(last\_intron: int) -> int**
+  Integrates the effect of the previous intron, retrieves the phenotype by `InferenceEngine.get_phenotype`, and applies learning using `InferenceEngine.learn`. Executes all registered hooks (`post_cycle_hooks`) and triggers algedonic regulation and autonomic cycles as described below.
+* **batch\_learn(data: bytes) -> None**
+  Implements streaming batch learning using `governance.fold`, applying the Fold sequentially to all inputs, and learning only from the reduced intron. Memory use is O(1); path dependence is preserved.
+* **add\_hook(hook: CycleHookFunction) -> None**
+  Adds a monitoring or maintenance hook to `post_cycle_hooks`, called at the end of every agent cycle.
+* **get\_state\_info() -> Dict\[str, Any>**
+  Provides full reporting on agent state: includes agent id, cycle count, integer state, ontology index, angular divergence, and active hooks.
+* **reset\_to\_archetypal\_state() -> None**
+  Restores the agent to the canonical archetypal state as defined by `governance.GENE_Mac_S`.
 
-  * Accepts configuration and manages the agent’s persistent storage overlay and canonicalisation as needed.
-  * Provides batch learning, response generation, agent state reporting, monitoring hooks, and maintenance interfaces.
-  * Ensures all I/O and protocol logic uses absolute imports from canonical modules.
+**2. Algedonic Regulation and Autonomic Cycles**
 
-* **AgentPool** implements robust multi-agent management with configurable eviction and overlay storage.
+* **post\_cycle\_hooks (List\[CycleHookFunction])**
+  Must include a hook that calls the algedonic regulator after every egress/ingress cycle.
+* **Algedonic Regulation**
+  Implements a rolling mean of angular divergence (θ) via `self._θ_buf`. If θ > self.\_θ\_high, applies corrective introns (see `self._cool_introns`). If excursions persist, triggers an autonomic cycle using precomputed instructions in `self._autonomic_cycles` (loaded from phenomenology artifacts).
+* **run\_autonomic\_cycle()**
+  Executed when repeated divergence or pain is detected. Applies a stabilising sequence from the autonomic cycles list, directly resetting the agent to a viable state. All cycle actions guarantee state integrity checks post-execution.
 
-* **orchestrate_turn** composes a conversational turn using agents from the pool, mapping application dialogue to fundamental primitives without exposing internal state or physics.
+**3. GyroSI (class)**
 
-All orchestration and external API logic is provided through the minimal interfaces defined in `baby.intelligence`, with strict import discipline and clear separation between physical state, knowledge, and external protocol.
+* **ingest(data: bytes) -> None**
+  Calls `batch_learn` for batch learning using Monodromic Fold. Ensures all storage writes are committed (see `OrbitStore.commit`).
+* **respond(data: bytes) -> bytes**
+  For each input byte, applies the egress/ingress cycle via the above primitives. Output is constructed directly from agent state and learned knowledge; external response never exposes internal physics.
+* **get\_agent\_info() -> Dict\[str, Any]**
+  Exposes current agent state, configuration, knowledge statistics, and integrity.
+* **add\_monitoring\_hook(hook: CycleHookFunction) -> None**
+  Registers additional hooks at the intelligence layer.
+* **apply\_maintenance(decay\_rate: float, confidence\_threshold: float) -> Dict\[str, Any]**
+  Applies confidence decay and pruning via the inference layer (`InferenceEngine.apply_confidence_decay`, `prune_low_confidence_entries`), with reporting.
+
+**4. AgentPool (class)**
+
+* **get\_or\_create\_agent(agent\_id: str, role\_hint: Optional\[str]) -> GyroSI**
+  Returns a GyroSI agent, constructing overlays (public/private) and enforcing eviction via the configured policy (LRU, TTL, etc).
+* **remove\_agent(agent\_id: str) -> bool**, **get\_active\_agents() -> List\[str]**, **close\_all() -> None**
+  Standard contracts for multi-agent resource management.
+
+**5. orchestrate\_turn(pool: AgentPool, user\_id: str, assistant\_id: str, user\_input: str) -> str**
+
+* Implements the protocol interface for a conversational turn.
+  Maps external dialogue input to egress/ingress primitives by passing data sequentially through the `respond()` method of the user and assistant agents.
 
 ---
 
-#### Algedonic Regulation Execution
+**Separation of Concerns and Enforcement**
 
-**Functionality:**
-IntelligenceEngine must invoke `check_algedonic_condition()` after each full cycle. If "pain" is signalled, the engine applies corrective action to reduce divergence (by replaying stabilising instructions or autonomic cycles). If "pleasure" is signalled, diversity-increasing operations may be introduced to restore exploration.
+* All learning, inference, and physical state changes are routed strictly through the methods above.
+* No protocol or orchestration code manipulates physical state, knowledge, or protocol buffers directly—only through absolute imports and the contracts defined here.
+* No part of the API exposes the packed state integer, intron values, or transformation masks to external callers. Only the canonical public reporting functions (`get_state_info`, `get_agent_info`) are permitted to export state.
 
-**Method(s):**
-- `post_cycle_hooks` list must include a hook which runs the algedonic regulator.
-- Corrective actions are modular and may call:
-  - `run_autonomic_cycle()`
-  - `inject_stabilising_instruction()`
+**Regulatory and Recovery Guarantees**
 
-**Benefit:**
-The agent will self-stabilise and recover from excursions into pathological or chaotic state regions. This increases resilience and eliminates most runaway failure conditions.
+* The algedonic regulation and autonomic cycles contracts (`post_cycle_hooks`, `run_autonomic_cycle`) are required to be enforced after every cycle. This ensures that the agent cannot be driven into runaway instability or pathological states.
+* Agent overlay storage (`OrbitStore`, `CanonicalView`, `OverlayView`) guarantees isolation and canonicalisation, with configuration autodection provided in `_create_default_store`.
+
+**Extensibility and Maintenance**
+
+* All external monitoring, introspection, and maintenance operations must be registered via `add_hook` at the intelligence layer.
+* All storage, canonicalisation, and multi-agent overlay mechanisms are constructed at initialisation and cannot be bypassed by runtime code.
 
 ---
-
-#### Autonomic Cycles (Operational Resonance)
-
-**Functionality:**
-During build, S2/S3 identify closed cycles (short loops) in the state transition table. S4 maintains a list of these as autonomic cycles. If the agent is unable to resolve high divergence or receives persistent "pain" alerts, it executes an autonomic cycle to return to a stable state.
-
-**Method(s):**
-- `load_autonomic_cycles()` (called at engine initialisation)
-- `run_autonomic_cycle()` (invoked under persistent divergence)
-
-**Benefit:**
-Guarantees a fail-safe, low-energy “reflex arc” for the agent. If inference, learning, or response generation encounters instability, the agent runs a known safe loop, maintaining viability.
 
 ## 6.5 Shared Contracts and Storage Policies
 
-This section defines the canonical protocols, shared types, and storage primitives for the GyroSI system as implemented in S4 (Intelligence) and S5 (Policy/Identity). These elements ensure strict interface integrity and operational transparency for all agent orchestration, storage, and policy functions.
+This section establishes the explicit type contracts, interface protocols, and canonical storage primitives for all orchestration, policy, and maintenance operations in S4 (Intelligence) and S5 (Policy/Identity). All interface points are enforced as concrete class or function boundaries, with no “informal” API surfaces.
 
 ### 6.5.1 Contracts: Protocols and Shared Types
 
-The following metadata and type contracts are used throughout the system for agent configuration, knowledge storage, validation, and policy:
+All type, storage, and hook contracts are declared in `baby.contracts`:
 
-* **PhenotypeEntry**: Structure of a phenotype entry in the knowledge store.
+* **PhenotypeEntry (TypedDict)**:
+  The atomic knowledge unit for all agent stores.
+  Required and optional fields (see `PhenotypeEntry` in code):
 
   * `phenotype: str`
-  * `memory_mask: int`
   * `confidence: float`
-  * `context_signature: Tuple[int, int]`
-  * `semantic_address: int`
+  * `memory_mask: int`
   * `usage_count: int`
   * `age_counter: int`
-  * `created_at: float`
   * `last_updated: float`
+  * `created_at: float`
+  * `semantic_address: int`
+  * `context_signature: Tuple[int, int]`
+  * `_original_context: Optional[Tuple[int, int]]` (tracking non-canonical context for canonicalised views)
 
-* **ManifoldData**: Structure of the discovered ontology data.
+* **ManifoldData (TypedDict)**:
+  Ontology/graph structure of the physical state space.
 
   * `schema_version: str`
   * `ontology_map: Dict[int, int]`
@@ -639,7 +575,18 @@ The following metadata and type contracts are used throughout the system for age
   * `total_states: int`
   * `build_timestamp: float`
 
-* **AgentConfig**: Configuration for GyroSI agents.
+* **PhenomenologyData (TypedDict)**:
+  Canonical orbit mapping and diagnostic metadata.
+
+  * `schema_version: str`
+  * `phenomenology_map: list`
+  * `orbit_sizes: dict`
+  * `metadata: dict`
+  * `_diagnostics: Dict[str, Any]`
+
+* **AgentConfig (TypedDict)**:
+  All configuration for a single GyroSI agent.
+  Keys include:
 
   * `ontology_path: str`
   * `knowledge_path: Optional[str]`
@@ -648,8 +595,12 @@ The following metadata and type contracts are used throughout the system for age
   * `agent_metadata: Optional[Dict[str, Any]]`
   * `max_memory_mb: Optional[int]`
   * `enable_phenomenology_storage: Optional[bool]`
+  * `batch_size: Optional[int]`
+  * `phenomenology_map_path: Optional[str]`
 
-* **PreferencesConfig**: Preferences and settings configuration.
+* **PreferencesConfig (TypedDict)**:
+  System-wide or pool-level storage, agent, and maintenance policies.
+  All keys as in code, e.g.:
 
   * `storage_backend: str`
   * `compression_level: int`
@@ -665,18 +616,23 @@ The following metadata and type contracts are used throughout the system for age
   * `batch_size: int`
   * `cache_size_mb: int`
 
-* **ValidationReport**: Report structure for system validation.
+* **ValidationReport (TypedDict)**:
+  Structured validation results, e.g. from store or ontology checks.
 
   * `total_entries: int`
   * `average_confidence: float`
   * `store_type: str`
   * `modified_entries: Optional[int]`
 
-* **CycleHookFunction**: Protocol for post-cycle hook functions.
+* **CycleHookFunction (Protocol)**:
+  Interface for post-cycle hooks:
 
-  * Callable: `(engine, phenotype_entry, last_intron) -> None`
+  ```
+  def __call__(engine, phenotype_entry, last_intron) -> None
+  ```
 
-* **MaintenanceReport**: Report from maintenance operations.
+* **MaintenanceReport (TypedDict)**:
+  Results from any maintenance, merge, or decay operation.
 
   * `operation: str`
   * `success: bool`
@@ -684,36 +640,69 @@ The following metadata and type contracts are used throughout the system for age
   * `entries_modified: int`
   * `elapsed_seconds: float`
 
+All contracts above are imported by absolute path, and serve as the sole interface for communication between agents, stores, overlays, and maintenance utilities.
+
+---
+
 ### 6.5.2 Storage and Policy Layer
 
-The canonical storage layer for all phenotype knowledge in GyroSI is the **OrbitStore**. All overlays, canonicalization, and read/write policies are composed as views on top of this core primitive.
+The canonical store for all phenotype knowledge is the `OrbitStore` class (`baby.policies.OrbitStore`):
 
-* **OrbitStore**: File-based storage for phenotype entries, providing atomic write, index-based lookup, async background flushing, mmap support, and safe concurrent access. The context key for all entries is always `(tensor_index, intron)`.
+* **OrbitStore**
+  Atomic, file-based storage for `PhenotypeEntry` values, keyed by `(tensor_index, intron)` tuples (the canonical context signature).
+  Contracts:
 
-* **CanonicalView**: Decorator that ensures all storage operations use the canonical representative of a physical state's orbit. Canonicalization is applied to the `tensor_index` before all read/write operations, using a provided `phenomenology_map`. Underlying storage remains OrbitStore.
+  * `get(context_key: Tuple[int, int]) -> Optional[Any]`
+  * `put(context_key: Tuple[int, int], entry: Any) -> None`
+  * `close() -> None`
+  * `data -> Dict[Tuple[int, int], Any]`
+  * `iter_entries() -> Iterator[Tuple[Tuple[int, int], Any]]`
+    Additional methods:
+  * `commit()`, `delete(context_key)`, `set_data_dict()`
 
-* **OverlayView**: Composable overlay for public/private knowledge. All writes are directed to the private store; reads are served from the private overlay if present, otherwise from the public base. Both stores are OrbitStore instances or compatible.
+* **CanonicalView**
+  Decorator that enforces canonicalisation on all storage operations, using a phenomenology map loaded at initialisation.
 
-* **ReadOnlyView**: Decorator that exposes a read-only interface to any base store. All write attempts raise an error. Used for serving immutable public knowledge.
+  * Canonicalises the first element of the context key (`tensor_index`) for every get/put.
+  * Writes also record `_original_context` for provenance.
+  * Used in multi-agent overlays and when “phenomenology storage” is enabled.
 
-* **Policy/Maintenance Functions**: Maintenance and policy operations on OrbitStore and compatible views.
+* **OverlayView**
+  Composite overlay supporting public/private or shared knowledge:
 
-  * `merge_phenotype_maps(source_paths, dest_path, conflict_resolution)`
-  * `apply_global_confidence_decay(store_path, decay_factor, age_threshold, time_threshold_days, dry_run)`
-  * `export_knowledge_statistics(store_path, output_path)`
-  * `validate_ontology_integrity(ontology_path, phenomenology_map_path)`
+  * All writes go to the private overlay store.
+  * Reads check the private overlay first, then fall back to the public store.
+  * Both underlying stores must conform to the OrbitStore interface.
 
-All maintenance functions operate directly on the standard interfaces defined above and return structured `MaintenanceReport` results. These functions guarantee O(1) or streaming memory usage for arbitrarily large knowledge stores and are safe for production automation.
+* **ReadOnlyView**
+  Wraps any store, exposing only the read interface.
+  All writes raise errors; used for immutable public knowledge overlays.
 
-All storage and overlay classes provide the methods:
+---
 
-* `get(context_key: Tuple[int, int]) -> Optional[Any]`
-* `put(context_key: Tuple[int, int], entry: Any) -> None`
-* `close() -> None`
-* `data -> Dict[Tuple[int, int], Any]`
-* `iter_entries() -> Iterator[Tuple[Tuple[int, int], Any]]`
+### 6.5.3 Maintenance and Policy Utilities
 
-The above interfaces and contracts are authoritative for all agent, engine, and orchestration logic in the system.
+All policy functions operate on these storage contracts, use the canonical interfaces, and return a `MaintenanceReport`. Key functions (as implemented):
+
+* **merge\_phenotype\_maps(source\_paths, dest\_path, conflict\_resolution) -> MaintenanceReport**
+  Merges multiple OrbitStore or compatible knowledge files into one, resolving conflicts by confidence, recency, mask union, or weighted average.
+
+* **apply\_global\_confidence\_decay(store\_path, decay\_factor, age\_threshold, time\_threshold\_days, dry\_run) -> MaintenanceReport**
+  Applies exponential confidence decay to all entries meeting the decay threshold, following the decay formula used by the agent engine. Supports dry-run for auditing.
+
+* **export\_knowledge\_statistics(store\_path, output\_path) -> MaintenanceReport**
+  Calculates and exports statistics for a given store: entry counts, confidence metrics, memory utilisation, temporal statistics, phenotype diversity.
+
+* **validate\_ontology\_integrity(ontology\_path, phenomenology\_map\_path) -> MaintenanceReport**
+  Validates that ontology and phenomenology files have the correct structure, required fields, and expected graph size (modulus, diameter, etc).
+
+All store, overlay, and decorator classes above support at least the standard interface:
+
+* `get`, `put`, `close`, `data`, `iter_entries`
+
+All stores ensure atomicity and isolation for read/write. All overlays and decorators transparently compose these policies for complex agent or pool-level storage needs.
+
+All contracts, types, and policies in this section are definitive for any agent, orchestration, or system maintenance code in GyroSI. No alternative or informal interfaces are supported or documented.
 
 ---
 
@@ -734,7 +723,7 @@ The GyroSI system enforces strict separation between the core physics kernel, ru
 ├── baby/
 │   ├── __init__.py
 │   ├── baby_preferences.json
-│   ├── contracts.py          # Protocols and shared types (PhenotypeStore, etc.)
+│   ├── contracts.py          # Protocols and shared types
 │   ├── governance.py         # Physics, Primitives, Build-Time Discovery
 │   ├── inference.py          # Interpretation, Maintenance & Validation
 │   ├── information.py        # Measurement, Storage, Knowledge Curation
@@ -874,7 +863,7 @@ This approach supports multi-tenant, multi-user, networked, and hierarchical age
   * Depth 5: 786,610 states
   * Depth 6: 788,986 states (complete closure)
 
-  The process validates the closure of the state space at the predicted diameter of 6. On current commodity hardware (GitHub Actions, Intel host), full enumeration and mapping completes in **89.6 seconds**.
+  The process validates the closure of the state space at the diameter of 6. On current commodity hardware (GitHub Actions, Intel host), full enumeration and mapping completes in **89.6 seconds**.
 
 * **State Transition Table (STT) generation** (`python -m baby.information epistemology`):
   Construction of the full state transition tensor (`epistemology.npy`, 770 MB, shape 788,986 × 256, int32) is performed via vectorised NumPy routines. The measured runtime is **5 minutes 30 seconds**.
@@ -1043,7 +1032,13 @@ GyroSI’s instruction algebra in the eight-bit space ℤ₂⁸ echoes a ladder 
 | **Bit width of intron** | **8 bits** → 2⁸ = 256 patterns | 2 bits × 4-symbol alphabet | Full instruction space. |
 | **Active masks (anchors stripped)** | **64** patterns | 64 mRNA codons | Bits 0 & 7 (`L0`) are anchors; removing them leaves 6 informative bits (2⁶ = 64). |
 | **Parity-quotiented classes** | **32** | Wobble pairing halves the codon set | Identifying global parity (`LI` bits 1 & 6) folds the 64 active masks into 32 equivalence classes. |
-| **Operational phenomenology** | **256** orbits | — | When path-dependent memory is included, the 788 986 states collapse into 256 parity-closed SCCs. |
+| **Operational phenomenology** | **256** orbits | — | Learning paths under the non-associative fold operator divide the space into 256 phenomenological orbits. |
+
+L0 (anchor bits 0 & 7): structural identity anchors (do not alter state).
+LI (global parity bits 1 & 6): implement chirality reflection (dual confinement).
+FG (foreground bit group): subset controlling sign inversions on alternating tensor cells (local orientation flips).
+BG (background bit group): complementary subset controlling the interleaving layer polarity.
+The four families partition the eight intron bits into functional roles that jointly close the transformation algebra with minimal redundancy.
 
 Key points:
 
@@ -1086,13 +1081,21 @@ No smaller choice of cardinalities would satisfy the independent closure constra
 
 #### 3. Gyrogroup algebra as implemented
 
-The three fundamental operations defined in §2.2 of the main text are realised exactly:
+The three **bitwise primitives** defined in §2.2 of the main text are realised exactly:
 
-* **XOR** drives every bit transformation and enforces involutive symmetry.
-* **AND** stores the carry term, preserving path memory.
-* **Coaddition** `a ⊞ b = a ⊕ gyr[a,¬b](b)` implements learning; its code lives in `governance.coadd`.
+* **XOR** (`⊕`) drives every bit transformation and enforces involutive symmetry.
+* **AND** (`∧`) stores the carry term, preserving path memory.
+* **NOT** (`¬`) enables global duality and the return path (`dual(x) = x ⊕ 0xFF`).
 
-All run‑time transformations in `apply_gyration_and_transform` are combinations of those three primitives; nothing extra is introduced.
+These form the minimal operational basis.
+
+The learning operator used throughout the BU stage is the **Monodromic Fold**:
+
+* **Coaddition (Monodromic Fold):**
+  `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
+  This non-associative, non-commutative operation encodes the system's dual monodromy and path-dependence. It is implemented as `fold()` in `baby.governance`.
+
+All run‑time transformations in `apply_gyration_and_transform` are structured combinations of the three primitives above. The Fold is the only derived operator used in learning; nothing else is introduced.
 
 ---
 
@@ -1105,6 +1108,8 @@ A single eight‑bit intron always touches the entire forty‑eight‑bit state 
 #### 5. Stabiliser and modulus
 
 Breadth‑first exploration over the full instruction set discovers exactly 788 986 distinct states and a diameter of six. The stabiliser of the archetype has order two (global parity) multiplied by eleven (frame degeneracy). The remaining factor, 35 863, is prime, confirming that no further quotient is possible. These facts are verified at build time and are used to reject any physics violation at run time.
+
+Frame degeneracy (11) counts the distinct layer/frame symmetry operations (excluding global parity) that leave the archetypal tensor invariant under the applied transformation group; combined with parity (×2) and the residual prime (35,863) they factor the full state modulus.
 
 No biological code shows the same modulus; the coincidence stops at the smaller sub‑structures outlined above.
 
@@ -1131,12 +1136,10 @@ Readers seeking proofs or implementation details will find the relevant function
 6. For every index i: canonical[i] in orbit_sizes, orbit_sizes[canonical[i]] ≥ 1.
 7. Parity closure: For every state s with integer value v, v ⊕ FULL_MASK belongs to same canonical orbit (empirically validated).
 8. Tensor mapping: int_to_tensor(tensor_to_int(T)) == T for all test tensors (validated on random + boundary states).
-9. Coaddition:
-     - Non-commutative: ∃ a,b: a⊞b ≠ b⊞a (unit test ensures).
-     - Non-associative: ∃ a,b,c: (a⊞b)⊞c ≠ a⊞(b⊞c).
+9. Fold (Monodromic Coaddition):
+     - Non-commutative: ∃ a, b: fold(a, b) ≠ fold(b, a).
+     - Non-associative: ∃ a, b, c: fold(fold(a, b), c) ≠ fold(a, fold(b, c)).
 10. Angular distance formula: 
      gyrodistance_angular(T1,T2) = arccos( dot(T1,T2)/48 ) ∈ [0,π].
 
 ===
-
-

@@ -26,4 +26,9 @@ psutil
 nltk
 tqdm
 
+fastapi
+uvicorn
+pydantic
+
 # For large file support, install git-lfs: https://git-lfs.github.com/
+httpx

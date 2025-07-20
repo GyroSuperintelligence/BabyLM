@@ -5,6 +5,7 @@ Write/policy logic for GyroSI (S5): OrbitStore and storage decorators.
 import os
 import gzip
 import pickle
+from pathlib import Path
 
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
@@ -19,6 +20,10 @@ import threading
 import mmap
 import concurrent.futures
 import atexit
+import math
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class OrbitStore:
@@ -53,6 +58,10 @@ class OrbitStore:
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
         with self.lock:
+            # Check unflushed writes first
+            for k, entry in reversed(self.pending_writes):
+                if k == context_key:
+                    return entry
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
@@ -79,8 +88,8 @@ class OrbitStore:
     def commit(self) -> None:
         pending_fsync = None
         with self.lock:
-            if self.pending_writes:
-                pending_fsync = self._flush()
+            # Always flush to ensure index is up to date
+            self._flush()
             with gzip.open(self.index_path, "wb") as f:
                 pickle.dump(self.index, f, protocol=pickle.HIGHEST_PROTOCOL)
             if self.use_mmap:
@@ -89,6 +98,9 @@ class OrbitStore:
                     self._open_mmap()
         if pending_fsync:
             pending_fsync.result()
+        # Ensure commit waits for the pending fsync to complete
+        if self._pending_fsync:
+            self._pending_fsync.result()
 
     def _flush(self):
         pending_fsync = None
@@ -142,14 +154,19 @@ class OrbitStore:
         with self.lock:
             if self.pending_writes:
                 self.commit()
+            # Wait for any pending fsync to finish before closing the file
+            if hasattr(self, "_pending_fsync") and self._pending_fsync is not None:
+                try:
+                    self._pending_fsync.result()
+                except Exception as e:
+                    logger.warning("Deferred fsync failed: %s", e)
             if self._mmap:
                 self._mmap.close()
                 self._mmap = None
-            if self.log_file:
+            if self.log_file and not self.log_file.closed:
                 self.log_file.close()
-            if self._pending_fsync:
-                self._pending_fsync.result()
-            self._fsync_executor.shutdown(wait=True)
+            if self._fsync_executor:
+                self._fsync_executor.shutdown(wait=True)
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
@@ -221,7 +238,13 @@ class CanonicalView:
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
         phenomenology_key = self._get_phenomenology_key(context_key)
-        return self.base_store.get(phenomenology_key)
+        entry = self.base_store.get(phenomenology_key)
+        if entry and "_original_context" in entry:
+            # Strip metadata added by put() method
+            clean_entry = entry.copy()
+            clean_entry.pop("_original_context", None)  # Optional hiding
+            return clean_entry
+        return entry
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
         phen_key = self._get_phenomenology_key(context_key)
@@ -257,7 +280,8 @@ class OverlayView:
             entry = self.private_store.get(context_key)
             if entry:
                 return entry
-            return self.public_store.get(context_key)
+            fallback = self.public_store.get(context_key)
+            return fallback
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
         self.private_store.put(context_key, entry)
@@ -312,6 +336,8 @@ def merge_phenotype_maps(
     """
     Merge multiple phenotype maps into a single consolidated map.
 
+    Note: This merge uses OR to unify masks across phenotypes. The policy-layer OR operation is not the Fold.
+
     Args:
         source_paths: List of source map file paths
         dest_path: Destination file path
@@ -329,17 +355,25 @@ def merge_phenotype_maps(
     conflict_count = 0
     total_entries = 0
 
-    for source_path in source_paths:
-        if not os.path.exists(source_path):
-            print(f"Warning: Source file not found: {source_path}")
-            continue
+    for path in source_paths:
+        log_path = Path(str(path) + ".log")
+        if log_path.exists():
+            try:
+                store = OrbitStore(path)  # will open <path>.log / .idx
+                source_data = store.data  # dict
+                store.close()
+            except Exception as e:
+                continue
+        else:
+            # original gzip/pickle fallback
+            if not os.path.exists(path):
+                continue
 
-        try:
-            with gzip.open(source_path, "rb") as f:
-                source_data = pickle.load(f)
-        except Exception as e:
-            print(f"Error loading {source_path}: {e}")
-            continue
+            try:
+                with gzip.open(path, "rb") as f:
+                    source_data = pickle.load(f)
+            except Exception as e:
+                continue
 
         for context_key, entry in source_data.items():
             total_entries += 1
@@ -406,9 +440,12 @@ def apply_global_confidence_decay(
     """
     Apply confidence decay to all entries in a knowledge store.
 
+    Uses the same exponential decay formula as the internal engine:
+        confidence = confidence * exp(-decay_factor * age_factor)
+
     Args:
         store_path: Path to the phenotype store
-        decay_factor: Multiplicative decay factor
+        decay_factor: Exponential decay rate per age unit (small value, e.g. 0.001)
         age_threshold: Minimum age counter to trigger decay
         time_threshold_days: Days without update to trigger decay
         dry_run: If True, calculate but don't apply changes
@@ -418,7 +455,9 @@ def apply_global_confidence_decay(
     """
     start_time = time.time()
 
-    if not os.path.exists(store_path):
+    # Check if it's an OrbitStore file (has .log file)
+    log_path = Path(str(store_path) + ".log")
+    if not os.path.exists(store_path) and not log_path.exists():
         return MaintenanceReport(
             operation="apply_global_confidence_decay",
             success=False,
@@ -450,12 +489,8 @@ def apply_global_confidence_decay(
 
         if age_factor > 0:
             if not dry_run:
-                # Apply decay
-                old_mask = entry.get("memory_mask", 0)
-                decay_strength = decay_factor**age_factor
-                decay_mask = int(255 * decay_strength)
-                entry["memory_mask"] = old_mask & decay_mask
-                entry["confidence"] = max(0.01, entry.get("confidence", 0.0) * decay_strength)
+                # Apply exponential decay (same as internal engine)
+                entry["confidence"] = max(0.01, entry.get("confidence", 0.0) * math.exp(-decay_factor * age_factor))
                 # Persist the mutation
                 store.put(key, entry)
 
@@ -489,7 +524,9 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
     """
     start_time = time.time()
 
-    if not os.path.exists(store_path):
+    # Check if it's an OrbitStore file (has .log file)
+    log_path = Path(str(store_path) + ".log")
+    if not os.path.exists(store_path) and not log_path.exists():
         return MaintenanceReport(
             operation="export_knowledge_statistics",
             success=False,

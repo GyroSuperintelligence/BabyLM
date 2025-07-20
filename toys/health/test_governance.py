@@ -108,15 +108,15 @@ class TestTransformations:
     def test_apply_gyration_and_transform_no_transform(self):
         """Test gyration with intron that triggers no transformations."""
         # Intron 0x00 should not trigger any bit pattern transformations
-        state = 0x123456789ABC
-        result = governance.apply_gyration_and_transform(state, 0x00)
+        state = int(0x123456789ABC)
+        result = governance.apply_gyration_and_transform(state, int(0x00))
         assert result == state  # No change expected
 
     def test_apply_gyration_and_transform_global_parity(self):
         """Test global parity flip transformation."""
         # Intron with bits 1,6 set (0b01000010 = 0x42)
-        state = 0x123456789ABC
-        result = governance.apply_gyration_and_transform(state, 0x42)
+        state = int(0x123456789ABC)
+        result = governance.apply_gyration_and_transform(state, int(0x42))
 
         # Should flip all bits, then apply gyration
         expected_after_flip = state ^ governance.FULL_MASK
@@ -128,8 +128,8 @@ class TestTransformations:
     def test_apply_gyration_and_transform_combined(self):
         """Test combined transformations."""
         # Intron with all transform bits set: 0b01111110 = 0x7E
-        state = 0xABCDEF123456
-        result = governance.apply_gyration_and_transform(state, 0x7E)
+        state = int(0xABCDEF123456)
+        result = governance.apply_gyration_and_transform(state, int(0x7E))
 
         # Verify result is different from input
         assert result != state
@@ -141,69 +141,88 @@ class TestTransformations:
 class TestGyrogroupOperations:
     """Test gyrogroup algebraic operations."""
 
-    def test_coadd_basic(self):
-        """Test basic coadd operations."""
-        # Test identity
-        assert governance.coadd(0, 0) == 0
-
-        # Test with specific values
-        result = governance.coadd(0xAA, 0x55)
+    def test_fold_basic(self):
+        """Test basic fold operations."""
+        assert governance.fold(0, 0) == 0
+        result = governance.fold(0xAA, 0x55)
         assert isinstance(result, int)
         assert 0 <= result <= 255
 
-    def test_coadd_non_commutative(self):
-        """Test that coadd is non-commutative."""
+    def test_fold_non_commutative(self):
+        """Test that fold is non-commutative."""
         a, b = 0x12, 0x34
-        assert governance.coadd(a, b) != governance.coadd(b, a)
-
-        # Test with multiple pairs
+        assert governance.fold(a, b) != governance.fold(b, a)
         pairs = [(0xAA, 0x55), (0xFF, 0x00), (0x0F, 0xF0)]
         for a, b in pairs:
-            if a != b:  # Only test when a != b
-                assert governance.coadd(a, b) != governance.coadd(b, a), f"coadd({a}, {b}) was commutative!"
+            if a != b:
+                assert governance.fold(a, b) != governance.fold(b, a), f"fold({a}, {b}) was commutative!"
 
-    def test_coadd_properties(self):
-        """Test mathematical properties of coadd."""
-        # Test the actual formula: a ⊞ b = a ⊕ gyr[a, ¬b](b)
+    def test_fold_properties(self):
+        """Test mathematical properties of fold."""
         a, b = 0x3C, 0xC3
         not_b = b ^ 0xFF
         gyration_of_b = b ^ (a & not_b)
         expected = a ^ gyration_of_b
-        assert governance.coadd(a, b) == expected
+        assert governance.fold(a, b) == expected
 
-    def test_batch_introns_coadd_ordered_empty(self):
-        """Test batch coadd with empty list."""
-        assert governance.batch_introns_coadd_ordered([]) == 0
+    def test_fold_sequence_empty(self):
+        """Test batch fold with empty list."""
+        from baby.governance import fold_sequence
 
-    def test_batch_introns_coadd_ordered_single(self):
-        """Test batch coadd with single element."""
-        assert governance.batch_introns_coadd_ordered([42]) == 42
-        assert governance.batch_introns_coadd_ordered([0xFF]) == 0xFF
+        assert fold_sequence([]) == 0
 
-    def test_batch_introns_coadd_ordered_multiple(self):
-        """Test batch coadd with multiple elements."""
+    def test_fold_sequence_single(self):
+        """Test batch fold with single element."""
+        from baby.governance import fold_sequence
+
+        assert fold_sequence([42]) == 42
+        assert fold_sequence([0xFF]) == 0xFF
+
+    def test_fold_sequence_multiple(self):
+        """Test batch fold with multiple elements."""
+        from baby.governance import fold_sequence
+
         introns = [0x12, 0x34, 0x56]
-        result = governance.batch_introns_coadd_ordered(introns)
-
-        # Manually compute expected result
-        expected = governance.coadd(governance.coadd(0x12, 0x34), 0x56)
+        result = fold_sequence(introns)
+        expected = governance.fold(governance.fold(0x12, 0x34), 0x56)
         assert result == expected
 
-    def test_batch_introns_coadd_order_matters(self):
-        """Test that order matters in batch coadd for at least some inputs."""
-        test_cases = [
-            ([0xAA, 0x55, 0xFF], [0xFF, 0x55, 0xAA]),
-            ([1, 2, 3], [3, 2, 1]),
-            ([10, 20, 30], [30, 20, 10]),
-            ([42, 137, 91], [91, 137, 42]),
-            ([5, 7, 11], [11, 7, 5]),
-        ]
-        found_difference = False
-        for a, b in test_cases:
-            if governance.batch_introns_coadd_ordered(a) != governance.batch_introns_coadd_ordered(b):
-                found_difference = True
-                break
-        assert found_difference, "Order did not affect result for any tested input"
+    def test_fold_sequence_order_matters(self):
+        """
+        Validates that fold_sequence is non-associative and path-sensitive.
+        For a fixed set of introns, different permutations must yield distinct outputs.
+        """
+        from baby.governance import fold_sequence
+        import itertools
+
+        introns = [0x3C, 0xA5, 0x7E]
+        perms = list(itertools.permutations(introns))
+
+        results = {perm: fold_sequence(list(perm)) for perm in perms}  # convert tuple → list
+
+        unique_results = set(results.values())
+        assert (
+            len(unique_results) > 1
+        ), "fold_sequence appears associative or commutative; all permutations yielded same result."
+
+        if len(unique_results) < len(perms):
+            collision_groups = {}
+            for perm, res in results.items():
+                collision_groups.setdefault(res, []).append(perm)
+            print("Some permutations collapsed to same output:")
+            for out, group in collision_groups.items():
+                if len(group) > 1:
+                    print(f"Result {out:#04x} from permutations: {group}")
+
+    def test_fold_all_combinations_sample(self):
+        """Test fold with a sample of all possible combinations."""
+        import random
+
+        for _ in range(100):
+            a = random.randint(0, 255)
+            b = random.randint(0, 255)
+            result = governance.fold(a, b)
+            assert 0 <= result <= 255
 
 
 class TestValidation:
@@ -242,11 +261,11 @@ class TestEdgeCases:
 
     def test_large_state_transformations(self):
         """Test transformations with maximum state values."""
-        max_state = governance.FULL_MASK
+        max_state = int(governance.FULL_MASK)
 
         # Test with various introns
         for intron in [0x00, 0xFF, 0xAA, 0x55]:
-            result = governance.apply_gyration_and_transform(max_state, intron)
+            result = governance.apply_gyration_and_transform(max_state, int(intron))
             assert 0 <= result <= governance.FULL_MASK
 
     def test_transcribe_all_bytes(self):
@@ -259,16 +278,3 @@ class TestEdgeCases:
 
         # Should produce 256 unique outputs (bijection)
         assert len(results) == 256
-
-    def test_coadd_all_combinations_sample(self):
-        """Test coadd with a sample of all possible combinations."""
-        # Testing all 256*256 combinations would be slow, so sample
-        import random
-
-        random.seed(42)  # Deterministic sampling
-
-        for _ in range(100):  # Sample 100 random pairs
-            a = random.randint(0, 255)
-            b = random.randint(0, 255)
-            result = governance.coadd(a, b)
-            assert 0 <= result <= 255
