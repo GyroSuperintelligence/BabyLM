@@ -38,31 +38,34 @@ try:
     import ujson as json  # type: ignore[import]
 except ImportError:
     import json  # type: ignore
+
     print("Error: Required modules not found. Ensure you are in the correct environment.")
     sys.exit(1)
+
 
 def load_maps(ontology_path: str, epistemology_path: str) -> tuple:
     """Loads the necessary map files."""
     print("Loading authoritative maps...")
     if not os.path.exists(ontology_path) or not os.path.exists(epistemology_path):
         raise FileNotFoundError("Ensure ontology_map.json and epistemology.npy are present.")
-    
-    with open(ontology_path, 'r') as f:
+
+    with open(ontology_path, "r") as f:
         ontology_data = json.load(f)
-    
-    ep = np.load(epistemology_path, mmap_mode='r')
-    
+
+    ep = np.load(epistemology_path, mmap_mode="r")
+
     print(f"  Ontology states: {ontology_data['endogenous_modulus']:,}")
     print(f"  Epistemology shape: {ep.shape}")
     print("...maps loaded.\n")
     return ontology_data, ep
+
 
 def run_experiment(ep: np.ndarray, num_samples: int = 10000) -> dict:
     """
     Performs the main experiment to measure physical non-associativity.
     """
     print(f"Running experiment with {num_samples:,} random samples...")
-    
+
     N = ep.shape[0]
     non_associative_count = 0
     witnesses = []
@@ -80,49 +83,54 @@ def run_experiment(ep: np.ndarray, num_samples: int = 10000) -> dict:
         # 3. Compute the Right-Associated Path: S → (i1 ⋄ i2)
         i_combined = fold(i1, i2)
         s_final_R_idx = ep[s_initial_idx, i_combined]
-        
+
         # 4. Compare the final physical states
         if s_final_L_idx != s_final_R_idx:
             non_associative_count += 1
-            if len(witnesses) < 5: # Store a few examples
-                witnesses.append({
-                    "initial_state_idx": s_initial_idx,
-                    "introns": (i1, i2),
-                    "path_L_final_idx": int(s_final_L_idx),
-                    "path_R_final_idx": int(s_final_R_idx),
-                    "i_combined": i_combined
-                })
+            if len(witnesses) < 5:  # Store a few examples
+                witnesses.append(
+                    {
+                        "initial_state_idx": s_initial_idx,
+                        "introns": (i1, i2),
+                        "path_L_final_idx": int(s_final_L_idx),
+                        "path_R_final_idx": int(s_final_R_idx),
+                        "i_combined": i_combined,
+                    }
+                )
 
     return {
         "num_samples": num_samples,
         "non_associative_count": non_associative_count,
         "associative_count": num_samples - non_associative_count,
         "non_associativity_ratio": non_associative_count / num_samples,
-        "witnesses": witnesses
+        "witnesses": witnesses,
     }
+
 
 def report_results(results: dict):
     """Prints a formatted report of the experimental findings."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("    EXPERIMENTAL RESULTS: PHYSICAL NON-ASSOCIATIVITY")
-    print("="*60)
+    print("=" * 60)
 
-    ratio = results['non_associativity_ratio']
+    ratio = results["non_associativity_ratio"]
     print(f"\nTotal Samples Tested: {results['num_samples']:,}")
     print(f"  - Non-Associative Events: {results['non_associative_count']:,}")
     print(f"  -   Associative Events: {results['associative_count']:,}")
     print(f"\nMeasured Physical Non-Associativity: {ratio:.2%}")
 
     print("\nSample Witnesses (cases where path grouping mattered):")
-    for i, witness in enumerate(results['witnesses']):
-        i1, i2 = witness['introns']
+    for i, witness in enumerate(results["witnesses"]):
+        i1, i2 = witness["introns"]
         print(f"  Witness {i+1}:")
         print(f"    - Initial State Index: {witness['initial_state_idx']}")
         print(f"    - Introns: (0x{i1:02x}, 0x{i2:02x})")
         print(f"    - Path ((S→i1)→i2) leads to State Index: {witness['path_L_final_idx']}")
-        print(f"    - Path (S→(i1⋄i2)) leads to State Index: {witness['path_R_final_idx']} (using i_combined=0x{witness['i_combined']:02x})")
-    
-    print("\n" + "="*25 + " CONCLUSION " + "="*25)
+        print(
+            f"    - Path (S→(i1⋄i2)) leads to State Index: {witness['path_R_final_idx']} (using i_combined=0x{witness['i_combined']:02x})"
+        )
+
+    print("\n" + "=" * 25 + " CONCLUSION " + "=" * 25)
     if ratio > 0.85:
         print("The system demonstrates strong physical non-associativity. The grouping of")
         print("operations fundamentally alters the final physical state, confirming that")
@@ -135,6 +143,7 @@ def report_results(results: dict):
         print("The system shows weak physical non-associativity. The underlying physics")
         print("is more associative than predicted by the learning algebra. This suggests")
         print("a more complex relationship between the intron algebra and the state manifold.")
+
 
 def main():
     """Main execution function."""
@@ -150,6 +159,7 @@ def main():
         print("Please ensure you have run the build scripts for the ontology and epistemology maps.")
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}")
+
 
 if __name__ == "__main__":
     main()

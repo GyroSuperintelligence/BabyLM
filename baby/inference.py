@@ -166,8 +166,11 @@ class InferenceEngine:
         phenotype_entry["exon_mask"] = new_mask
         sig = compute_governance_signature(new_mask)
         phenotype_entry["governance_signature"] = {
-            "neutral": sig[0], "li": sig[1],
-            "fg": sig[2], "bg": sig[3], "dyn": sig[4]
+            "neutral": sig[0],
+            "li": sig[1],
+            "fg": sig[2],
+            "bg": sig[3],
+            "dyn": sig[4],
         }
         phenotype_entry["confidence"] = new_confidence
         phenotype_entry["usage_count"] = phenotype_entry.get("usage_count", 0) + 1
@@ -348,10 +351,7 @@ class InferenceEngine:
             "phenotype": phenotype,
             "exon_mask": init_mask,  # Initial mask is the intron
             "confidence": confidence,
-            "governance_signature": {
-                "neutral": sig[0], "li": sig[1],
-                "fg": sig[2], "bg": sig[3], "dyn": sig[4]
-            },
+            "governance_signature": {"neutral": sig[0], "li": sig[1], "fg": sig[2], "bg": sig[3], "dyn": sig[4]},
             "context_signature": context_key,
             "usage_count": 0,
             "created_at": current_time,

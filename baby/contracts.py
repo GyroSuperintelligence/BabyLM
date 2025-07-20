@@ -6,11 +6,12 @@ from typing import Protocol, Optional, Dict, Any, Tuple, TypedDict
 
 
 class GovernanceSignature(TypedDict):
-    neutral: int   # 0‑6
-    li: int        # 0‑2
-    fg: int        # 0‑2
-    bg: int        # 0‑2
-    dyn: int       # 0‑6
+    neutral: int  # 0‑6
+    li: int  # 0‑2
+    fg: int  # 0‑2
+    bg: int  # 0‑2
+    dyn: int  # 0‑6
+
 
 class PhenotypeEntry(TypedDict, total=False):
     """
@@ -26,9 +27,9 @@ class PhenotypeEntry(TypedDict, total=False):
     usage_count: int
     last_updated: float
     created_at: float  # Optional timestamp for creation
-    governance_signature: GovernanceSignature   # <-- new, immutable
+    governance_signature: GovernanceSignature  # <-- new, immutable
     context_signature: Tuple[int, int]
-    _original_context: Optional[Tuple[int,int]]
+    _original_context: Optional[Tuple[int, int]]
 
 
 class ManifoldData(TypedDict):

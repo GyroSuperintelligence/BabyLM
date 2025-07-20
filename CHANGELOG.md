@@ -52,9 +52,14 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 * Prepared a plan to empirically test physical path dependence using your actual state transition maps.
 * Confirms that associativity violations are not algebraic artifacts, but grounded in state evolution.
 
+**8. Genetics**
+* Introduced Exons and Refined our Genetics assosiations.
+* Changed our Phenotype's metadata contracts.
+* Refined our Semantic Framework.
+
 **8. Pytest Corrections & Results**
 
-* Passed all 115 tests
+* Passed all 132 tests
 
 ---
 

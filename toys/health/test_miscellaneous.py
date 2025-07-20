@@ -577,6 +577,7 @@ class TestArchitecture:
 
 # --- 1. Governance physics tests ---
 
+
 class TestGovernancePhysics:
     def test_compute_governance_signature_zero(self):
         sig = compute_governance_signature(0x00)
@@ -604,7 +605,9 @@ class TestGovernancePhysics:
     def test_transform_identity(self):
         assert apply_gyration_and_transform(0, 0) == 0
 
+
 # --- 2. Fold operator tests ---
+
 
 class TestFoldOperator:
     @pytest.mark.parametrize("x", [0, 1, 5, 42, 255])
@@ -615,7 +618,9 @@ class TestFoldOperator:
     def test_self_annihilation(self, x):
         assert fold(x, x) == 0
 
+
 # --- 3. InferenceEngine phenotype creation tests ---
+
 
 class TestInferenceEnginePhenotypeCreation:
     @pytest.fixture
@@ -625,8 +630,10 @@ class TestInferenceEnginePhenotypeCreation:
             def __init__(self):
                 self.endogenous_modulus = 1
                 self.orbit_cardinality = {0: 1}
+
             def get_state_from_index(self, idx):
                 return 0
+
         s2 = MinimalS2()
         return InferenceEngine(s2, orbit_store)
 
