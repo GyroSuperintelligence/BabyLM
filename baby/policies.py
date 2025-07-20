@@ -389,7 +389,7 @@ def merge_phenotype_maps(
                         merged_data[context_key] = entry.copy()
 
                 elif conflict_resolution == "OR_masks":
-                    existing["memory_mask"] |= entry.get("memory_mask", 0)
+                    existing["exon_mask"] |= entry.get("exon_mask", 0)
                     existing["usage_count"] += entry.get("usage_count", 0)
                     existing["confidence"] = max(existing.get("confidence", 0), entry.get("confidence", 0))
                     existing["last_updated"] = max(existing.get("last_updated", 0), entry.get("last_updated", 0))
@@ -407,7 +407,7 @@ def merge_phenotype_maps(
                     existing["confidence"] = (
                         existing.get("confidence", 0) * w1 + entry.get("confidence", 0) * w2
                     ) / total_weight
-                    existing["memory_mask"] |= entry.get("memory_mask", 0)
+                    existing["exon_mask"] |= entry.get("exon_mask", 0)
                     existing["usage_count"] = total_weight
                     existing["last_updated"] = max(existing.get("last_updated", 0), entry.get("last_updated", 0))
 
@@ -474,18 +474,14 @@ def apply_global_confidence_decay(
     for key, entry in store.iter_entries():
         processed_count += 1
 
-        age_counter = entry.get("age_counter", 0)
         last_updated = entry.get("last_updated", current_time)
 
         # Calculate aging factors
         time_since_update = current_time - last_updated
         days_since_update = time_since_update / (24 * 3600)
 
-        # Use maximum of the two aging factors
-        age_factor = max(
-            age_counter - age_threshold if age_counter > age_threshold else 0,
-            days_since_update - time_threshold_days if days_since_update > time_threshold_days else 0,
-        )
+        # Use only the time-based aging factor
+        age_factor = days_since_update - time_threshold_days if days_since_update > time_threshold_days else 0
 
         if age_factor > 0:
             if not dry_run:
@@ -544,13 +540,12 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
     else:
         # Calculate comprehensive statistics
         confidences = [e.get("confidence", 0.0) for e in entries]
-        memory_masks = [e.get("memory_mask", 0) for e in entries]
-        age_counters = [e.get("age_counter", 0) for e in entries]
+        exon_masks = [e.get("exon_mask", 0) for e in entries]
         usage_counts = [e.get("usage_count", 0) for e in entries]
 
         # Memory utilization
-        total_bits = sum(bin(mask).count("1") for mask in memory_masks)
-        max_possible_bits = len(memory_masks) * 8
+        total_bits = sum(bin(mask).count("1") for mask in exon_masks)
+        max_possible_bits = len(exon_masks) * 8
         memory_utilization = total_bits / max_possible_bits if max_possible_bits > 0 else 0
 
         # Temporal analysis
@@ -588,7 +583,6 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
                 "max_usage": max(usage_counts) if usage_counts else 0,
             },
             "age": {
-                "average_age_counter": sum(age_counters) / len(age_counters),
                 "average_days_since_update": sum(ages_days) / len(ages_days),
                 "oldest_entry_days": max(ages_days) if ages_days else 0,
             },

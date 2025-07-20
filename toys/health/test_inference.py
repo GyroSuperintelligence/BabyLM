@@ -63,11 +63,10 @@ class TestPhenotypeRetrieval:
 
         # Verify the entry was created with correct values
         assert entry["phenotype"] == f"P[{state_index}:{intron}]"
-        assert entry["memory_mask"] == intron
+        assert entry["exon_mask"] == intron
         assert entry["context_signature"] == (state_index, intron)
         assert 0 < entry["confidence"] < 1.0  # Should be variety-weighted
         assert entry["usage_count"] == 0
-        assert entry["age_counter"] == 0
 
         # Validate the entry
         assert_phenotype_entry_valid(entry)
@@ -88,11 +87,9 @@ class TestPhenotypeRetrieval:
         retrieved = inference_engine.get_phenotype(state_index, intron)
         for key in [
             "phenotype",
-            "memory_mask",
+            "exon_mask",
             "context_signature",
-            "semantic_address",
             "usage_count",
-            "age_counter",
             "confidence",
         ]:
             assert retrieved[key] == existing[key]
@@ -104,7 +101,7 @@ class TestPhenotypeRetrieval:
 
         entry = inference_engine.get_phenotype(state_index, intron)
         assert entry["context_signature"] == (state_index, intron & 0xFF)
-        assert entry["memory_mask"] == intron & 0xFF
+        assert entry["exon_mask"] == intron & 0xFF
 
     def test_get_phenotype_validates_state_index(self, inference_engine):
         """Test that state_index is validated."""
@@ -134,10 +131,9 @@ class TestLearningFunctionality:
         inference_engine.learn(entry, intron2)
 
         # Verify mask and confidence changed
-        assert entry["memory_mask"] == fold(intron1, intron2) & 0xFF
+        assert entry["exon_mask"] == fold(intron1, intron2) & 0xFF
         assert entry["confidence"] > old_confidence
         assert entry["usage_count"] == 1
-        assert entry["age_counter"] == 0
 
     def test_learn_no_change(self, inference_engine):
         """Test learning with the same intron (no change)."""
@@ -157,7 +153,7 @@ class TestLearningFunctionality:
         refreshed = inference_engine.store.get((state_index, intron))
         # The mask should be fold(intron, intron) & 0xFF
         expected_mask = fold(intron, intron) & 0xFF
-        assert refreshed["memory_mask"] == expected_mask
+        assert refreshed["exon_mask"] == expected_mask
         assert refreshed["confidence"] != old_confidence  # Should update
         assert refreshed["usage_count"] == old_usage_count + 1
 
@@ -174,7 +170,7 @@ class TestLearningFunctionality:
         # The mask should be fold(intron, intron) & 0xFF
         expected_mask = fold(intron, intron) & 0xFF
         assert refreshed["context_signature"] == (state_index, intron)
-        assert refreshed["memory_mask"] == expected_mask
+        assert refreshed["exon_mask"] == expected_mask
         assert refreshed["usage_count"] == 1  # Should increment usage_count
 
     def test_batch_learn_empty(self, inference_engine):
@@ -194,7 +190,7 @@ class TestLearningFunctionality:
         # The mask should be fold(intron, intron) & 0xFF
         expected_mask = fold(intron, intron) & 0xFF
         assert refreshed["context_signature"] == (state_index, intron)
-        assert refreshed["memory_mask"] == expected_mask
+        assert refreshed["exon_mask"] == expected_mask
 
     def test_batch_learn_multiple(self, inference_engine, generate_test_introns):
         """Test batch learning with multiple introns."""
@@ -213,7 +209,7 @@ class TestLearningFunctionality:
         # The final memory mask inside the entry will be fold(expected_mask, expected_mask) & 0xFF
         final_mask = fold(expected_mask, expected_mask) & 0xFF
         assert refreshed["context_signature"] == (state_index, expected_mask)
-        assert refreshed["memory_mask"] == final_mask
+        assert refreshed["exon_mask"] == final_mask
         assert refreshed["usage_count"] == 1
 
 
@@ -225,18 +221,15 @@ class TestDefaultPhenotypeCreation:
         state_index = 90
         intron = 240
         context_key = (state_index, intron)
-        semantic_address = 12345
 
         # Create default phenotype
-        entry = inference_engine._create_default_phenotype(context_key, semantic_address)
+        entry = inference_engine._create_default_phenotype(context_key)
 
         # Verify all fields
         assert entry["phenotype"] == f"P[{state_index}:{intron}]"
-        assert entry["memory_mask"] == intron
+        assert entry["exon_mask"] == intron
         assert entry["context_signature"] == context_key
-        assert entry["semantic_address"] == semantic_address
         assert entry["usage_count"] == 0
-        assert entry["age_counter"] == 0
         assert entry["created_at"] == mock_time.current
         assert entry["last_updated"] == mock_time.current
 
@@ -285,7 +278,6 @@ class TestKnowledgeIntegrityAndMaintenance:
         for i, entry in enumerate(entries):
             refreshed = inference_engine.store.get((i, i))
             assert refreshed["confidence"] < original_confidences[i]
-            assert refreshed["age_counter"] == 1
 
     def test_prune_low_confidence_entries(self, inference_engine):
         """Test pruning low confidence entries."""

@@ -13,7 +13,7 @@ from typing import Dict, Any, Tuple, Iterable, Optional
 
 from baby.contracts import PhenotypeEntry, ValidationReport
 from baby.information import InformationEngine
-from baby.governance import fold, fold_sequence
+from baby.governance import fold, fold_sequence, compute_governance_signature
 
 
 class InferenceEngine:
@@ -75,8 +75,7 @@ class InferenceEngine:
 
         if not phenotype_entry:
             # Create new phenotype entry for unknown context
-            semantic_address = self._compute_semantic_address(context_key)
-            phenotype_entry = self._create_default_phenotype(context_key, semantic_address)
+            phenotype_entry = self._create_default_phenotype(context_key)
             self.store.put(context_key, phenotype_entry)
 
         return phenotype_entry
@@ -86,9 +85,9 @@ class InferenceEngine:
         Retrieve or create a phenotype entry and apply the Monodromic Fold.
 
         Learning is path-dependent and non-associative: fold(x, x) = 0 ensures
-        memory_mask toggles (x ↔ 0) rather than accumulating state. This is
+        exon_mask toggles (x ↔ 0) rather than accumulating state. This is
         intentional for Agnostic learning. Long-term structure is stored in
-        metadata (confidence, usage_count, etc.), not in memory_mask.
+        metadata (confidence, usage_count, etc.), not in exon_mask.
 
         Args:
             state_index: Canonical index of the physical state
@@ -146,7 +145,7 @@ class InferenceEngine:
         # Canonical index assertion
         assert 0 <= state_index < self.endogenous_modulus
         # Get old mask and ensure it's clamped
-        old_mask = phenotype_entry.get("memory_mask", 0) & 0xFF
+        old_mask = phenotype_entry.get("exon_mask", 0) & 0xFF
         # Use Monodromic Fold and clamp result
         new_mask = fold(old_mask, intron) & 0xFF
         # Early return if no change (optimization)
@@ -164,10 +163,14 @@ class InferenceEngine:
         assert 0 <= new_mask <= 255
         assert 0 <= new_confidence <= 1
         # Update the entry
-        phenotype_entry["memory_mask"] = new_mask
+        phenotype_entry["exon_mask"] = new_mask
+        sig = compute_governance_signature(new_mask)
+        phenotype_entry["governance_signature"] = {
+            "neutral": sig[0], "li": sig[1],
+            "fg": sig[2], "bg": sig[3], "dyn": sig[4]
+        }
         phenotype_entry["confidence"] = new_confidence
         phenotype_entry["usage_count"] = phenotype_entry.get("usage_count", 0) + 1
-        phenotype_entry["age_counter"] = 0  # Reset age counter on novelty
         phenotype_entry["last_updated"] = time.time()
         # Write to the correct key
         self.store.put(context_key, phenotype_entry)
@@ -205,7 +208,7 @@ class InferenceEngine:
                     anomaly_count += 1
 
                 # Memory mask in valid range
-                mask = entry.get("memory_mask", 0)
+                mask = entry.get("exon_mask", 0)
                 if not (0 <= mask <= 255):
                     anomaly_count += 1
 
@@ -254,9 +257,6 @@ class InferenceEngine:
         modified_count = 0
 
         for key, entry in getattr(self.store, "iter_entries", lambda: self.store.data.items())():
-            # Increment age counter for all entries
-            entry["age_counter"] = entry.get("age_counter", 0) + 1
-
             # Apply simple exponential decay to confidence only
             new_conf = max(0.01, entry.get("confidence", 0.1) * math.exp(-decay_factor))
             assert 0 <= new_conf <= 1.0
@@ -327,13 +327,12 @@ class InferenceEngine:
         hash_int = int.from_bytes(hash_digest[:8], "big") & ((1 << 64) - 1)
         return hash_int % self.endogenous_modulus
 
-    def _create_default_phenotype(self, context_key: Tuple[int, int], semantic_address: int) -> PhenotypeEntry:
+    def _create_default_phenotype(self, context_key: Tuple[int, int]) -> PhenotypeEntry:
         """
         Create default phenotype entry for unknown context.
 
         Args:
             context_key: (tensor_index, intron) tuple
-            semantic_address: Computed semantic address
 
         Returns:
             Initialized phenotype entry
@@ -343,16 +342,20 @@ class InferenceEngine:
         v = self.s2.orbit_cardinality[state_index]
         confidence = (1 / 6) * math.sqrt(v / self._v_max)
         phenotype = f"P[{state_index}:{intron}]"
+        init_mask = intron & 0xFF
+        sig = compute_governance_signature(init_mask)
         return {
             "phenotype": phenotype,
-            "memory_mask": intron & 0xFF,  # Initial mask is the intron
+            "exon_mask": init_mask,  # Initial mask is the intron
             "confidence": confidence,
+            "governance_signature": {
+                "neutral": sig[0], "li": sig[1],
+                "fg": sig[2], "bg": sig[3], "dyn": sig[4]
+            },
             "context_signature": context_key,
             "usage_count": 0,
-            "age_counter": 0,
             "created_at": current_time,
             "last_updated": current_time,
-            "semantic_address": semantic_address,
         }
 
     def get_knowledge_statistics(self) -> Dict[str, Any]:
@@ -371,11 +374,11 @@ class InferenceEngine:
             return {"total_entries": 0, "average_confidence": 0.0, "memory_utilization": 0.0}
 
         confidences = [e.get("confidence", 0.0) for e in entries]
-        memory_masks = [e.get("memory_mask", 0) for e in entries]
+        exon_masks = [e.get("exon_mask", 0) for e in entries]
 
         # Calculate memory utilization (average bits set in masks)
-        total_bits = sum(bin(mask).count("1") for mask in memory_masks)
-        max_possible_bits = len(memory_masks) * 8  # 8 bits per mask
+        total_bits = sum(bin(mask).count("1") for mask in exon_masks)
+        max_possible_bits = len(exon_masks) * 8  # 8 bits per mask
         memory_utilization = total_bits / max_possible_bits if max_possible_bits > 0 else 0
 
         return {

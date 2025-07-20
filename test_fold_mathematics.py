@@ -1,292 +1,155 @@
 #!/usr/bin/env python3
 """
-Comprehensive test of the fold operation mathematical properties.
+A Definitive Experiment to Measure the Physical Non-Associativity of GyroSI.
 
-This test validates:
-1. Non-commutativity: a ⊞ b ≠ b ⊞ a (for most cases)
-2. Non-associativity: (a ⊞ b) ⊞ c ≠ a ⊞ (b ⊞ c) (for most cases)
-3. Path dependence: Different orderings of the same multiset produce different results
-4. Edge cases and special properties
+This script directly tests the core physical axiom of the Common Governance Model:
+that the order of operations (path) is preserved in the physical state of the
+system. It moves beyond testing the 8-bit intron algebra and measures the actual
+state transitions encoded in the epistemology map.
+
+Hypothesis:
+    For a given state S and a sequence of introns {i1, i2, ...}, the final
+    physical state depends on the grouping of the introns. Specifically, the
+    path ((S → i1) → i2) will lead to a different physical state than the
+    path (S → (i1 ⋄ i2)), where '⋄' is the Monodromic Fold.
+
+Methodology:
+1.  Load the complete, authoritative epistemology and ontology maps.
+2.  Sample thousands of random initial states and random intron triplets.
+3.  For each sample, compute two distinct physical paths:
+    a) Left-Associated Path: Apply introns sequentially to the state.
+       S_final_L = apply(apply(S_initial, i1), i2)
+    b) Right-Associated Path: Pre-compute the fold of the last two introns,
+       then apply the sequence. i_combined = fold(i1, i2).
+       S_final_R = apply(S_initial, i_combined)
+4.  Compare the final state indices. A mismatch is a "witness" to physical
+    non-associativity.
+5.  Report the statistical prevalence of this phenomenon.
 """
-
 import sys
 import os
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from baby.governance import fold, fold_sequence
-from itertools import permutations
+import numpy as np
 import random
+from tqdm import tqdm
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+try:
+    from baby.governance import fold
+    import ujson as json  # type: ignore[import]
+except ImportError:
+    import json  # type: ignore
+    print("Error: Required modules not found. Ensure you are in the correct environment.")
+    sys.exit(1)
 
-def test_commutativity():
-    """Test that fold is non-commutative for various pairs."""
-    print("=== Testing Commutativity ===")
+def load_maps(ontology_path: str, epistemology_path: str) -> tuple:
+    """Loads the necessary map files."""
+    print("Loading authoritative maps...")
+    if not os.path.exists(ontology_path) or not os.path.exists(epistemology_path):
+        raise FileNotFoundError("Ensure ontology_map.json and epistemology.npy are present.")
+    
+    with open(ontology_path, 'r') as f:
+        ontology_data = json.load(f)
+    
+    ep = np.load(epistemology_path, mmap_mode='r')
+    
+    print(f"  Ontology states: {ontology_data['endogenous_modulus']:,}")
+    print(f"  Epistemology shape: {ep.shape}")
+    print("...maps loaded.\n")
+    return ontology_data, ep
 
-    test_pairs = [
-        (0x35, 0xE2),
-        (0x01, 0x02),
-        (0xAA, 0xBB),
-        (0x10, 0x20),
-        (0xFF, 0x00),
-        (0x55, 0xAA),
-        (0x12, 0x34),
-        (0xAB, 0xCD),
-    ]
+def run_experiment(ep: np.ndarray, num_samples: int = 10000) -> dict:
+    """
+    Performs the main experiment to measure physical non-associativity.
+    """
+    print(f"Running experiment with {num_samples:,} random samples...")
+    
+    N = ep.shape[0]
+    non_associative_count = 0
+    witnesses = []
 
-    commutative_count = 0
-    total_count = 0
+    for _ in tqdm(range(num_samples), desc="Measuring Path Divergence"):
+        # 1. Select a random initial state and two random introns
+        s_initial_idx = random.randrange(N)
+        i1 = random.randrange(256)
+        i2 = random.randrange(256)
 
-    for a, b in test_pairs:
-        result_ab = fold(a, b)
-        result_ba = fold(b, a)
-        is_commutative = result_ab == result_ba
-        commutative_count += is_commutative
-        total_count += 1
+        # 2. Compute the Left-Associated Path: (S → i1) → i2
+        s_intermediate_idx = ep[s_initial_idx, i1]
+        s_final_L_idx = ep[s_intermediate_idx, i2]
 
-        print(f"fold({hex(a)}, {hex(b)}) = {hex(result_ab)}")
-        print(f"fold({hex(b)}, {hex(a)}) = {hex(result_ba)}")
-        print(f"Commutative: {is_commutative}")
-        print()
+        # 3. Compute the Right-Associated Path: S → (i1 ⋄ i2)
+        i_combined = fold(i1, i2)
+        s_final_R_idx = ep[s_initial_idx, i_combined]
+        
+        # 4. Compare the final physical states
+        if s_final_L_idx != s_final_R_idx:
+            non_associative_count += 1
+            if len(witnesses) < 5: # Store a few examples
+                witnesses.append({
+                    "initial_state_idx": s_initial_idx,
+                    "introns": (i1, i2),
+                    "path_L_final_idx": int(s_final_L_idx),
+                    "path_R_final_idx": int(s_final_R_idx),
+                    "i_combined": i_combined
+                })
 
-    print(f"Commutative pairs: {commutative_count}/{total_count} ({commutative_count/total_count*100:.1f}%)")
-    print(
-        f"Non-commutative pairs: {total_count-commutative_count}/{total_count} ({(total_count-commutative_count)/total_count*100:.1f}%)"
-    )
-    print()
+    return {
+        "num_samples": num_samples,
+        "non_associative_count": non_associative_count,
+        "associative_count": num_samples - non_associative_count,
+        "non_associativity_ratio": non_associative_count / num_samples,
+        "witnesses": witnesses
+    }
 
-    return commutative_count, total_count
+def report_results(results: dict):
+    """Prints a formatted report of the experimental findings."""
+    print("\n" + "="*60)
+    print("    EXPERIMENTAL RESULTS: PHYSICAL NON-ASSOCIATIVITY")
+    print("="*60)
 
+    ratio = results['non_associativity_ratio']
+    print(f"\nTotal Samples Tested: {results['num_samples']:,}")
+    print(f"  - Non-Associative Events: {results['non_associative_count']:,}")
+    print(f"  -   Associative Events: {results['associative_count']:,}")
+    print(f"\nMeasured Physical Non-Associativity: {ratio:.2%}")
 
-def test_associativity():
-    """Test that fold is non-associative for various triplets."""
-    print("=== Testing Associativity ===")
-
-    test_triplets = [
-        (0x35, 0xE2, 0x57),
-        (0x01, 0x02, 0x03),
-        (0xAA, 0xBB, 0xCC),
-        (0x10, 0x20, 0x30),
-        (0xFF, 0x00, 0x55),
-        (0x12, 0x34, 0x56),
-        (0xAB, 0xCD, 0xEF),
-        (0x11, 0x22, 0x33),
-    ]
-
-    associative_count = 0
-    total_count = 0
-
-    for a, b, c in test_triplets:
-        result_left = fold(fold(a, b), c)
-        result_right = fold(a, fold(b, c))
-        is_associative = result_left == result_right
-        associative_count += is_associative
-        total_count += 1
-
-        print(f"({hex(a)} ⊞ {hex(b)}) ⊞ {hex(c)} = {hex(result_left)}")
-        print(f"{hex(a)} ⊞ ({hex(b)} ⊞ {hex(c)}) = {hex(result_right)}")
-        print(f"Associative: {is_associative}")
-        print()
-
-    print(f"Associative triplets: {associative_count}/{total_count} ({associative_count/total_count*100:.1f}%)")
-    print(
-        f"Non-associative triplets: {total_count-associative_count}/{total_count} ({(total_count-associative_count)/total_count*100:.1f}%)"
-    )
-    print()
-
-    return associative_count, total_count
-
-
-def test_path_dependence():
-    """Test that different orderings of the same multiset produce different results."""
-    print("=== Testing Path Dependence ===")
-
-    test_sequences = [
-        [0x35, 0xE2, 0x57],
-        [0x01, 0x02, 0x03],
-        [0xAA, 0xBB, 0xCC],
-        [0x10, 0x20, 0x30],
-        [0xFF, 0x00, 0x55],
-        [0x12, 0x34, 0x56],
-        [0xAB, 0xCD, 0xEF],
-        [0x11, 0x22, 0x33],
-    ]
-
-    path_dependent_count = 0
-    total_count = 0
-
-    for seq in test_sequences:
-        print(f"Testing sequence: {[hex(x) for x in seq]}")
-
-        # Generate all permutations
-        perms = list(permutations(seq))
-        results = []
-
-        for perm in perms:
-            result = fold_sequence(list(perm))
-            results.append(result)
-            print(f"  {[hex(x) for x in perm]} -> {hex(result)}")
-
-        # Check if all results are unique
-        unique_results = len(set(results))
-        is_path_dependent = unique_results > 1
-        path_dependent_count += is_path_dependent
-        total_count += 1
-
-        print(f"  Unique results: {unique_results}/{len(results)}")
-        print(f"  Path dependent: {is_path_dependent}")
-        print()
-
-    print(
-        f"Path dependent sequences: {path_dependent_count}/{total_count} ({path_dependent_count/total_count*100:.1f}%)"
-    )
-    print(
-        f"Path independent sequences: {total_count-path_dependent_count}/{total_count} ({(total_count-path_dependent_count)/total_count*100:.1f}%)"
-    )
-    print()
-
-    return path_dependent_count, total_count
-
-
-def test_special_properties():
-    """Test special properties and edge cases."""
-    print("=== Testing Special Properties ===")
-
-    # Test identity element (if any)
-    print("Testing for identity element:")
-    for i in range(256):
-        if fold(i, 0) == i and fold(0, i) == i:
-            print(f"  0x00 might be identity for 0x{i:02X}")
-        if fold(i, 0xFF) == i and fold(0xFF, i) == i:
-            print(f"  0xFF might be identity for 0x{i:02X}")
-
-    # Test self-inverse elements
-    print("\nTesting for self-inverse elements:")
-    for i in range(256):
-        if fold(i, i) == 0:
-            print(f"  0x{i:02X} is self-inverse (0x{i:02X} ⊞ 0x{i:02X} = 0x00)")
-
-    # Test absorption elements
-    print("\nTesting for absorption elements:")
-    for i in range(256):
-        if fold(i, 0) == 0:
-            print(f"  0x00 absorbs 0x{i:02X}")
-        if fold(0, i) == 0:
-            print(f"  0x{i:02X} is absorbed by 0x00")
-
-    print()
-
-
-def test_random_properties():
-    """Test properties with random values."""
-    print("=== Testing Random Properties ===")
-
-    random.seed(42)  # For reproducible results
-
-    # Test commutativity with random pairs
-    commutative_random = 0
-    total_random = 1000
-
-    for _ in range(total_random):
-        a = random.randint(0, 255)
-        b = random.randint(0, 255)
-        if fold(a, b) == fold(b, a):
-            commutative_random += 1
-
-    print(f"Random commutativity: {commutative_random}/{total_random} ({commutative_random/total_random*100:.1f}%)")
-
-    # Test associativity with random triplets
-    associative_random = 0
-    total_random = 1000
-
-    for _ in range(total_random):
-        a = random.randint(0, 255)
-        b = random.randint(0, 255)
-        c = random.randint(0, 255)
-        if fold(fold(a, b), c) == fold(a, fold(b, c)):
-            associative_random += 1
-
-    print(f"Random associativity: {associative_random}/{total_random} ({associative_random/total_random*100:.1f}%)")
-    print()
-
-
-def test_original_problem_case():
-    """Test the specific case that caused the original test failure."""
-    print("=== Testing Original Problem Case ===")
-
-    seq_a = [0x35, 0xE2, 0x57]
-    seq_b = list(reversed(seq_a))
-
-    print(f"Original sequence: {[hex(x) for x in seq_a]}")
-    print(f"Reversed sequence: {[hex(x) for x in seq_b]}")
-
-    result_a = fold_sequence(seq_a)
-    result_b = fold_sequence(seq_b)
-
-    print(f"Original result: {hex(result_a)}")
-    print(f"Reversed result: {hex(result_b)}")
-    print(f"Same result: {result_a == result_b}")
-
-    # Show step-by-step calculation
-    print("\nStep-by-step calculation for original:")
-    result = seq_a[0]
-    print(f"  Start: {hex(result)}")
-    for i in range(1, len(seq_a)):
-        old_result = result
-        result = fold(result, seq_a[i])
-        print(f"  fold({hex(old_result)}, {hex(seq_a[i])}) = {hex(result)}")
-
-    print("\nStep-by-step calculation for reversed:")
-    result = seq_b[0]
-    print(f"  Start: {hex(result)}")
-    for i in range(1, len(seq_b)):
-        old_result = result
-        result = fold(result, seq_b[i])
-        print(f"  fold({hex(old_result)}, {hex(seq_b[i])}) = {hex(result)}")
-
-    print()
-
+    print("\nSample Witnesses (cases where path grouping mattered):")
+    for i, witness in enumerate(results['witnesses']):
+        i1, i2 = witness['introns']
+        print(f"  Witness {i+1}:")
+        print(f"    - Initial State Index: {witness['initial_state_idx']}")
+        print(f"    - Introns: (0x{i1:02x}, 0x{i2:02x})")
+        print(f"    - Path ((S→i1)→i2) leads to State Index: {witness['path_L_final_idx']}")
+        print(f"    - Path (S→(i1⋄i2)) leads to State Index: {witness['path_R_final_idx']} (using i_combined=0x{witness['i_combined']:02x})")
+    
+    print("\n" + "="*25 + " CONCLUSION " + "="*25)
+    if ratio > 0.85:
+        print("The system demonstrates strong physical non-associativity. The grouping of")
+        print("operations fundamentally alters the final physical state, confirming that")
+        print("path-dependence is a core law of the system's physics, not just its")
+        print("learning algebra. The Common Source axiom is physically upheld.")
+    elif ratio > 0.1:
+        print("The system exhibits significant physical non-associativity. While not")
+        print("universal, the path of experience frequently alters the physical outcome.")
+    else:
+        print("The system shows weak physical non-associativity. The underlying physics")
+        print("is more associative than predicted by the learning algebra. This suggests")
+        print("a more complex relationship between the intron algebra and the state manifold.")
 
 def main():
-    """Run all tests."""
-    print("Comprehensive Test of Fold Operation Mathematical Properties")
-    print("=" * 60)
-    print()
+    """Main execution function."""
+    ontology_path = "memories/public/meta/ontology_map.json"
+    epistemology_path = "memories/public/meta/epistemology.npy"
 
-    # Run all tests
-    commutative_count, total_commutative = test_commutativity()
-    associative_count, total_associative = test_associativity()
-    path_dependent_count, total_path_dependent = test_path_dependence()
-    test_special_properties()
-    test_random_properties()
-    test_original_problem_case()
-
-    # Summary
-    print("=== SUMMARY ===")
-    print(f"Non-commutative pairs: {(total_commutative-commutative_count)/total_commutative*100:.1f}%")
-    print(f"Non-associative triplets: {(total_associative-associative_count)/total_associative*100:.1f}%")
-    print(f"Path dependent sequences: {path_dependent_count/total_path_dependent*100:.1f}%")
-    print()
-
-    print("The fold operation demonstrates:")
-    if commutative_count < total_commutative:
-        print("✓ Non-commutativity (order matters for most pairs)")
-    else:
-        print("✗ Commutativity (unexpected)")
-
-    if associative_count < total_associative:
-        print("✓ Non-associativity (grouping matters for most triplets)")
-    else:
-        print("✗ Associativity (unexpected)")
-
-    if path_dependent_count > 0:
-        print("✓ Path dependence (sequence order affects final result)")
-    else:
-        print("✗ No path dependence (unexpected)")
-
-    print()
-    print("Test completed successfully!")
-
+    try:
+        ontology_data, ep_table = load_maps(ontology_path, epistemology_path)
+        results = run_experiment(ep_table)
+        report_results(results)
+    except FileNotFoundError as e:
+        print(f"\nERROR: {e}")
+        print("Please ensure you have run the build scripts for the ontology and epistemology maps.")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}")
 
 if __name__ == "__main__":
     main()

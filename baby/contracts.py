@@ -5,24 +5,30 @@ Shared contracts (protocols and type definitions) for the GyroSI S4 system.
 from typing import Protocol, Optional, Dict, Any, Tuple, TypedDict
 
 
+class GovernanceSignature(TypedDict):
+    neutral: int   # 0‑6
+    li: int        # 0‑2
+    fg: int        # 0‑2
+    bg: int        # 0‑2
+    dyn: int       # 0‑6
+
 class PhenotypeEntry(TypedDict, total=False):
     """
     Structure of a phenotype entry in the knowledge store.
 
     - context_signature MAY be canonical; if canonicalisation is applied (e.g., via CanonicalView), the original physical context is stored in _original_context.
-    - memory_mask is immutable under decay (decay only affects confidence, not memory_mask).
+    - exon_mask is immutable under decay (decay only affects confidence, not exon_mask).
     """
 
     phenotype: str
     confidence: float
-    memory_mask: int
+    exon_mask: int
     usage_count: int
-    age_counter: int
     last_updated: float
     created_at: float  # Optional timestamp for creation
-    semantic_address: int  # Optional semantic address for context
+    governance_signature: GovernanceSignature   # <-- new, immutable
     context_signature: Tuple[int, int]
-    _original_context: Optional[Tuple[int, int]]
+    _original_context: Optional[Tuple[int,int]]
 
 
 class ManifoldData(TypedDict):

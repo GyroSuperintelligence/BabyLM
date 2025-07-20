@@ -139,7 +139,7 @@ class IntelligenceEngine:
         else:
             state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
         # Ingress: complete monodromic loop by folding with the same intron used for addressing.
-        # This causes memory_mask to collapse (x → 0), expressing closure—not accumulation.
+        # This causes exon_mask to collapse (x → 0), expressing closure—not accumulation.
         # Phenotype metadata tracks recurrence; output is drawn from the stored value, not from the mask.
         phenotype_entry = self.operator.get_phenotype(state_index, last_intron)
 

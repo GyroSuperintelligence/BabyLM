@@ -143,12 +143,10 @@ def sample_phenotype_entry():
     """Create a sample phenotype entry for testing."""
     return {
         "phenotype": "A",
-        "memory_mask": 0b10101010,
+        "exon_mask": 0b10101010,
         "confidence": 0.75,
         "context_signature": (100, 42),
-        "semantic_address": 12345,
         "usage_count": 10,
-        "age_counter": 5,
         "created_at": 1234567890.0,
         "last_updated": 1234567890.0,
     }
@@ -194,12 +192,12 @@ def generate_test_bytes(text: str) -> bytes:
 
 
 def assert_phenotype_entry_valid(entry: Dict[str, Any]):
-    required_fields = ["phenotype", "memory_mask", "confidence", "context_signature", "usage_count"]
+    required_fields = ["phenotype", "exon_mask", "confidence", "context_signature", "usage_count"]
     for field in required_fields:
         assert field in entry, f"Missing required field: {field}"
     assert isinstance(entry["phenotype"], str)
-    assert isinstance(entry["memory_mask"], int)
-    assert 0 <= entry["memory_mask"] <= 255
+    assert isinstance(entry["exon_mask"], int)
+    assert 0 <= entry["exon_mask"] <= 255
     assert 0 <= entry["confidence"] <= 1.0
     assert isinstance(entry["context_signature"], tuple)
     assert len(entry["context_signature"]) == 2

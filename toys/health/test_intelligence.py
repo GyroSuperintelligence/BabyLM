@@ -138,7 +138,7 @@ class TestContracts:
         entry: PhenotypeEntry = {
             "phenotype": "test",
             "confidence": 0.8,
-            "memory_mask": 0b10101010,
+            "exon_mask": 0b10101010,
             "context_signature": (42, 123),
             "usage_count": 5,
         }
@@ -430,13 +430,13 @@ class TestIntegration:
 
 def assert_phenotype_entry_valid(entry):
     """Validate phenotype entry structure."""
-    required_fields = ["phenotype", "memory_mask", "confidence", "context_signature"]
+    required_fields = ["phenotype", "exon_mask", "confidence", "context_signature"]
     for field in required_fields:
         assert field in entry, f"Missing required field: {field}"
 
     assert isinstance(entry["phenotype"], str)
-    assert isinstance(entry["memory_mask"], int)
-    assert 0 <= entry["memory_mask"] <= 255
+    assert isinstance(entry["exon_mask"], int)
+    assert 0 <= entry["exon_mask"] <= 255
     assert 0 <= entry["confidence"] <= 1.0
     assert isinstance(entry["context_signature"], tuple)
     assert len(entry["context_signature"]) == 2

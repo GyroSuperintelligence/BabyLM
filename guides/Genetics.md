@@ -59,7 +59,7 @@ This algebraic foundation ensures that every operation in GyroSI is a direct imp
 
 ### **2.3 The Holographic Principle**
 
-GyroSI embodies the principle that each part contains information about the whole. A single input byte acts as a holographic quantum of spacetime topology, encoding complete transformation instructions that modify the system's internal state according to topological physics; a 48‑element tensor, 48 bytes in RAM, packed to 6 bytes when stored. This holographic property ensures that the system can achieve substantial compression while preserving essential structural relationships.
+GyroSI embodies the principle that each part contains information about the whole. A single input byte acts as a holographic quantum of spacetime topology, encoding complete transformation instructions that modify the system's internal state according to topological physics; a 48‑element tensor, 48 bytes in RAM, packed to 6 bytes when stored. This holographic property ensures that the system can achieve substantial compression while preserving essential structural relationships.
 
 > Note: The system's internal state can be represented in two equivalent ways:
 > - As a 48-element NumPy tensor (each element ±1, stored as int8), which occupies 48 bytes in memory.
@@ -175,6 +175,9 @@ GENE_Com_S = np.array([
     [-1, 1]
 ], dtype=np.int8)  # Shape: [3, 2]
 
+- Three rows: spatial axes (X, Y, Z)
+- Two columns: dual nature of rotation
+
 # Alternatively, generated as:
 GENE_Com_S = np.tile(np.array([-1, 1], dtype=np.int8), (3, 1))
 ```
@@ -207,9 +210,9 @@ GENE_Mac_S = np.array([
 
 GENE_Mac_S = np.concatenate(([GENE_Nest_S, -GENE_Nest_S] * 2)).astype(np.int8).reshape(4, 2, 3, 2)
 ```
-Note: This section concerns coaddition as topological dual construction (GENE_Mac_S), not the algebraic learning operator (fold) defined elsewhere. Structural (topological) coaddition refers to the constructive layering that yields GENE_Mac_S. Algebraic Monodromic Fold is the runtime learning operator applied to memory masks. They share a conceptual “joining” motif but are disjoint mechanisms.
+Note: This section concerns coaddition as topological dual construction (GENE_Mac_S), not the algebraic learning operator (fold) defined elsewhere. Structural (topological) coaddition refers to the constructive layering that yields GENE_Mac_S. Algebraic Monodromic Fold is the runtime learning operator applied to memory masks. They share a conceptual "joining" motif but are disjoint mechanisms.
 
-The intermediate genetic structures (GENE_Com_S, GENE_Nest_S) are included here for clarity of exposition, tracing the generative logic of the system’s topology. These arrays are not referenced in any runtime computation, algorithm, or storage mechanism. All canonical operations and state representations throughout the implementation depend exclusively on GENE_Mic_S (the 8-bit holographic reference) and GENE_Mac_S (the archetypal 48-element tensor) as defined above.
+The intermediate genetic structures (GENE_Com_S, GENE_Nest_S) are included here for clarity of exposition, tracing the generative logic of the system's topology. These arrays are not referenced in any runtime computation, algorithm, or storage mechanism. All canonical operations and state representations throughout the implementation depend exclusively on GENE_Mic_S (the 8-bit holographic reference) and GENE_Mac_S (the archetypal 48-element tensor) as defined above.
 
 ### 4.2 The Genes
 
@@ -268,12 +271,12 @@ There is only one learning operation in GyroSI: the **Monodromic Fold** (`fold`,
 
 `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
 
-This operation preserves the complete path history of all inputs. The order of operations is always encoded in the system’s state. It is the algebraic expression of the BU stage’s dual monodromy, and it is the only valid operation for learning, state updates, and batching.
+This operation preserves the complete path history of all inputs. The order of operations is always encoded in the system's state. It is the algebraic expression of the BU stage's dual monodromy, and it is the only valid operation for learning, state updates, and batching.
 No alternative (associative or commutative) operation is permitted.
 
 ### **5.2 Path Dependence and Batch Learning**
 
-The Monodromic Fold is **fundamentally path-dependent**. This property is the source of the system’s memory and learning capacity.
+The Monodromic Fold is **fundamentally path-dependent**. This property is the source of the system's memory and learning capacity.
 Batch learning is implemented by *ordered reduction* (left-fold) using the Monodromic Fold:
 
 ```python
@@ -292,7 +295,7 @@ This ensures that the sequence in which inputs are processed is always significa
 
 ### **5.3 The Role of Duality**
 
-The “Fifth Element” (`dual`, ¬) is not a new operation, but the fundamental primitive that enables the asymmetry and path dependence of the Fold. It is defined as:
+The "Fifth Element" (`dual`, ¬) is not a new operation, but the fundamental primitive that enables the asymmetry and path dependence of the Fold. It is defined as:
 
 `dual(x) = x ⊕ 0xFF`
 
@@ -325,7 +328,7 @@ For `int8` tensors with ±1 values, this is equivalent to `arccos(1 - 2*hamming_
 ---
 
 **Physical Note:**
-This alignment between the path-dependent physics of state transformation and the path-dependent nature of learning is a cornerstone of GyroSI’s architecture. The system does not merely learn facts; it encodes the entire trajectory of experience.
+This alignment between the path-dependent physics of state transformation and the path-dependent nature of learning is a cornerstone of GyroSI's architecture. The system does not merely learn facts; it encodes the entire trajectory of experience.
 
 ---
 
@@ -348,6 +351,28 @@ The `governance.py` module defines the immutable physical constants and stateles
   * `FG_MASK`, `BG_MASK`, `FULL_MASK` (integers),
   * `INTRON_BROADCAST_MASKS`, `XFORM_MASK`, `PATTERN_MASK` (NumPy arrays, shape \[256]),
     are all precomputed from the tensor geometry for direct use in state update.
+
+* **Anatomical Exon Masks:**
+
+In addition to the 48‑bit broadcast masks on whole‑state tensors, we define four **exon masks** over the 8‑bit `exon_mask` to compute the immutable governance signature of each phenotype:
+
+- `EXON_LI_MASK = 0b01000010` — the two LI (parity/reflection) bits
+- `EXON_FG_MASK = 0b00100100` — the two FG (forward gyration) bits
+- `EXON_BG_MASK = 0b00011000` — the two BG (backward gyration) bits
+- `EXON_DYNAMIC_MASK = EXON_LI_MASK | EXON_FG_MASK | EXON_BG_MASK` — all six dynamic bits
+
+These exon masks are used by the function
+
+```python
+compute_governance_signature(mask: int) -> tuple[int,int,int,int,int]
+
+```
+
+which returns the 5‑tuple
+
+`(neutral_reserve, li_bits, fg_bits, bg_bits, dynamic_population)`
+
+that we store immutably on every `PhenotypeEntry` as its **governance_signature**.
 
 * **Physics operations:**
 
@@ -380,7 +405,7 @@ The InformationEngine coordinates three core responsibilities:
 
    * Calculation of angular gyrodistance (in radians) between two physical states using cosine similarity in 48-dimensional space.
    * `gyrodistance_angular(T1, T2)` measures geometric alignment between tensors;
-     `measure_state_divergence(state_int)` computes a state’s divergence from the archetypal tensor, as required for all global and homeostatic measurements.
+     `measure_state_divergence(state_int)` computes a state's divergence from the archetypal tensor, as required for all global and homeostatic measurements.
    * These functions implement the operational metric for self-measurement, symmetry detection, and divergence tracking, enforcing a physics-grounded geometry for the system.
 
 3. **Ontology Discovery, Indexing, and Phenomenology**
@@ -425,19 +450,35 @@ The `inference.py` module defines the `InferenceEngine`, which manages the trans
 * **Phenotype Addressing and Retrieval:**
   Each semantic phenotype is uniquely addressed by a `(state_index, intron)` tuple.
   `get_phenotype(state_index, intron)` ensures retrieval or creation of a canonical phenotype entry for every physical state-context pairing. Context keys are handled deterministically, and entries are created if not already present, using a hash-based semantic address.
+  Each newly‑created PhenotypeEntry now carries an immutable
+
+  ```python
+  governance_signature: GovernanceSignature
+
+  ```
+
+  computed from its initial 8‑bit `exon_mask`.  This signature is then used by policies (decay, pruning, monitoring) without ever altering the entry's physical residue.
 
 * **Learning (Memory Update):**
-  All learning in S3 proceeds by applying the Monodromic Fold to the phenotype’s memory mask.
+  All learning in S3 proceeds by applying the Monodromic Fold to the phenotype's memory mask.
   `learn(phenotype_entry, intron)` accumulates experience by path-dependent folding. Confidence is updated monotonically, modulated by the structural variety factor (orbit cardinality from S2), and novelty of the update (fraction of changed bits in the memory mask).
   The learning update resets the age counter and increments usage statistics.
+
+  Immediately after the Monodromic Fold yields a new exon_mask, the engine calls
+
+  ```python
+  sig = compute_governance_signature(new_mask)
+  ```
+
+  and stores that 5‑tuple in the entry's `governance_signature` field.  Because `compute_governance_signature` always returns a valid tuple, there is no conditional failure case.
 
 * **Batch Learning:**
   `batch_learn(state_index, introns)` allows ingestion of an ordered sequence of introns.
   The sequence is reduced through a left-fold with the Monodromic Fold, preserving full path-dependence, before a single learning update is applied.
 
 * **Variety-weighted Confidence:**
-  All confidence updates are weighted by the structural redundancy of the physical state’s orbit (`orbit_cardinality`).
-  The learning rate is calculated as a function of the square root of the state’s relative variety, preventing rapid overconfidence in rare orbits, and accelerating trust in symmetric regions.
+  All confidence updates are weighted by the structural redundancy of the physical state's orbit (`orbit_cardinality`).
+  The learning rate is calculated as a function of the square root of the state's relative variety, preventing rapid overconfidence in rare orbits, and accelerating trust in symmetric regions.
 
 * **Knowledge Integrity:**
   `validate_knowledge_integrity()` checks the internal consistency of the entire knowledge store. This includes validation of context signatures, canonical state indices, mask and confidence ranges, and timestamp monotonicity. An integrity report is produced, including a count of all anomalies.
@@ -544,7 +585,7 @@ The `intelligence.py` module defines the orchestration and protocol boundary for
 
 ## 6.5 Shared Contracts and Storage Policies
 
-This section establishes the explicit type contracts, interface protocols, and canonical storage primitives for all orchestration, policy, and maintenance operations in S4 (Intelligence) and S5 (Policy/Identity). All interface points are enforced as concrete class or function boundaries, with no “informal” API surfaces.
+This section establishes the explicit type contracts, interface protocols, and canonical storage primitives for all orchestration, policy, and maintenance operations in S4 (Intelligence) and S5 (Policy/Identity). All interface points are enforced as concrete class or function boundaries, with no "informal" API surfaces.
 
 ### 6.5.1 Contracts: Protocols and Shared Types
 
@@ -556,12 +597,11 @@ All type, storage, and hook contracts are declared in `baby.contracts`:
 
   * `phenotype: str`
   * `confidence: float`
-  * `memory_mask: int`
+  * `exon_mask: int`
   * `usage_count: int`
-  * `age_counter: int`
   * `last_updated: float`
   * `created_at: float`
-  * `semantic_address: int`
+  * `governance_signature: GovernanceSignature` — the computed, immutable signature of the 8‑bit exon_mask, used for all governance policies.
   * `context_signature: Tuple[int, int]`
   * `_original_context: Optional[Tuple[int, int]]` (tracking non-canonical context for canonicalised views)
 
@@ -665,7 +705,7 @@ The canonical store for all phenotype knowledge is the `OrbitStore` class (`baby
 
   * Canonicalises the first element of the context key (`tensor_index`) for every get/put.
   * Writes also record `_original_context` for provenance.
-  * Used in multi-agent overlays and when “phenomenology storage” is enabled.
+  * Used in multi-agent overlays and when "phenomenology storage" is enabled.
 
 * **OverlayView**
   Composite overlay supporting public/private or shared knowledge:
@@ -760,7 +800,7 @@ The GyroSI system enforces strict separation between the core physics kernel, ru
 
 ### 7.2 Memory Architecture
 
-The `memories/` directory contains the system’s persistent state.
+The `memories/` directory contains the system's persistent state.
 
 **Knowledge Storage:**
 
@@ -781,7 +821,7 @@ This architecture maintains a strict separation between learned knowledge, raw c
 
 8.1 The Compositional API Pattern
 
-GyroSI’s integration model is compositional. All agent orchestration and interaction is implemented by composing the canonical primitives provided in `baby.intelligence`, `baby.contracts`, and `baby.policies`.
+GyroSI's integration model is compositional. All agent orchestration and interaction is implemented by composing the canonical primitives provided in `baby.intelligence`, `baby.contracts`, and `baby.policies`.
 
 **Agent Pool Management:**
 Applications manage a pool of active agents with automatic eviction, overlay storage, and policy control. The pool ensures clean lifecycle and concurrency discipline for all agents.
@@ -948,122 +988,185 @@ On modern workstation hardware, dozens of GyroSI agents may be operated concurre
 
 ---
 
-### 9.4  Pragmatic capacity & device‑level throughput (revised)
+### 9.4  Pragmatic capacity & device‑level throughput (revised)
 
-#### 1 How many facts fit?
+#### 1 How many facts fit?
 
-`OrbitStore` keeps one `(state, context) → offset` mapping per fact.
-On disk the entry serialises to \~25 B; in memory the Python objects occupy roughly 3–4× that.
-The table below therefore assumes **90 B per fact (phenotype entry)** resident.
+`OrbitStore` keeps one `(state, context) → offset` mapping per fact.
+On disk the entry serialises to \~25 B; in memory the Python objects occupy roughly 3–4× that.
+The table below therefore assumes **90 B per fact (phenotype entry)** resident.
 
 | Device (free RAM for GyroSI)             | Facts held in RAM |
 | ---------------------------------------- | ----------------- |
-| **Arduino Uno (16 KB)**                  | \~180 (demo only) |
-| **MacBook Air 2015, 8 GB → ≈ 4 GB free** | **≈ 45 million**  |
-| **MacBook M4, 16 GB → ≈ 12 GB free**     | **≈ 130 million** |
-| **Server, 256 GB → ≈ 220 GB free**       | **≈ 2.4 billion** |
+| **Arduino Uno (16 KB)**                  | \~180 (demo only) |
+| **MacBook Air 2015, 8 GB → ≈ 4 GB free** | **≈ 45 million**  |
+| **MacBook M4, 16 GB → ≈ 12 GB free**     | **≈ 130 million** |
+| **Server, 256 GB → ≈ 220 GB free**       | **≈ 2.4 billion** |
 
-A modern laptop therefore keeps the entirety of WordNet (≈ 150 k facts (phenotype entries)) and the English Wikipedia title & abstract graph (≈ 40 M facts (phenotype entries)) comfortably in RAM.
+A modern laptop therefore keeps the entirety of WordNet (≈ 150 k facts (phenotype entries)) and the English Wikipedia title & abstract graph (≈ 40 M facts (phenotype entries)) comfortably in RAM.
 
-#### 2 Throughput you can picture
+#### 2 Throughput you can picture
 
 A *cycle* = read one byte → internal update → emit one byte.
 With the state‑transition table (STT) memory‑mapped this bottlenecks on pure Python overhead.
 
 | Hardware                             | Cores used | Cycles per second | Characters per second (≈ cycles) |
 | ------------------------------------ | ---------- | ----------------- | -------------------------------- |
-| **MacBook Air 2015** (2 physical)    | 1          | \~0.7 M           | \~0.7 M                          |
-|                                      | 2          | \~1.4 M           | \~1.4 M                          |
-| **MacBook M4** (8 performance cores) | 8          | \~7–8 M           | \~7–8 M                          |
-| **EPYC 32‑core server**              | 32         | \~25 M            | \~25 M                           |
+| **MacBook Air 2015** (2 physical)    | 1          | \~0.7 M           | \~0.7 M                          |
+|                                      | 2          | \~1.4 M           | \~1.4 M                          |
+| **MacBook M4** (8 performance cores) | 8          | \~7–8 M           | \~7–8 M                          |
+| **EPYC 32‑core server**              | 32         | \~25 M            | \~25 M                           |
 
-Rounded rule‑of‑thumb: **\~1 million characters · s⁻¹ · core** on 2024‑era silicon, about one‑third of that on a 2015 dual‑core laptop.
+Rounded rule‑of‑thumb: **\~1 million characters · s⁻¹ · core** on 2024‑era silicon, about one‑third of that on a 2015 dual‑core laptop.
 
-#### 3 How long to ingest familiar corpora?
+#### 3 How long to ingest familiar corpora?
 
-Assuming 1 char ≈ 1 byte, and using the per‑core rate above:
+Assuming 1 char ≈ 1 byte, and using the per‑core rate above:
 
 | Corpus                          | Size    | 1 core      | 8 cores    | 32 cores  |
 | ------------------------------- | ------- | ----------- | ---------- | --------- |
-| WordNet glosses                 | 30 MB   | < 1 min     | “blink”    | “blink”   |
-| English Wikipedia\*             | 90 GB   | \~1 day     | \~3 h      | **< 1 h** |
-| Filtered public‑web dump (1 PB) | 10^6 GB | \~3.5 years | \~5 months | \~5 weeks |
+| WordNet glosses                 | 30 MB   | < 1 min     | "blink"    | "blink"   |
+| English Wikipedia*             | 90 GB   | \~1 day     | \~3 h      | **< 1 h** |
+| Filtered public‑web dump (1 PB) | 10^6 GB | \~3.5 years | \~5 months | \~5 weeks |
 
-\* plain‑text revision of the 2025 EN wiki dump.
+* plain‑text revision of the 2025 EN wiki dump.
 
-#### 4 Context length in day‑to‑day terms
+#### 4 Context length in day‑to‑day terms
 
 GyroSI has no fixed token window.
-What matters is how many distinct `(state, context)` pairs the index can keep:
+What matters is how many distinct `(state, context)` pairs the index can keep:
 
-* 8 GB laptop → **tens of millions** of separate contexts.
-* Look‑up latency stays < 2 µs so long as the active slice fits in last‑level cache (≈ 10 M contexts on current hardware).
+* 8 GB laptop → **tens of millions** of separate contexts.
+* Look‑up latency stays < 2 µs so long as the active slice fits in last‑level cache (≈ 10 M contexts on current hardware).
 
-#### 5 Edge devices
+#### 5 Edge devices
 
-* **Arduino‑class MCUs**: no room for the 770 MB STT, fall back to bit‑wise physics; expect hundreds of cycles · s⁻¹.
-* **Raspberry Pi 5 (8 GB)**: maps the STT, reaches \~400 k cycles · s⁻¹; fine for home‑lab projects with tens of millions of contexts.
+* **Arduino‑class MCUs**: no room for the 770 MB STT, fall back to bit‑wise physics; expect hundreds of cycles · s⁻¹.
+* **Raspberry Pi 5 (8 GB)**: maps the STT, reaches \~400 k cycles · s⁻¹; fine for home‑lab projects with tens of millions of contexts.
 
-#### 6 Write load
+#### 6 Write load
 
-One flush every 100 updates appends ≤ 3 KB; a laptop continuously learning Wikipedia writes **< 5 MB min⁻¹**, far under SSD endurance limits.
-
----
-
-### Appendix – Theoretical Correspondences
-
-This appendix records the essential bridges between GyroSI’s formal physics and several established conceptual frames. It is deliberately brief: anything already explained in the main text is only referenced here.
+One flush every 100 updates appends ≤ 3 KB; a laptop continuously learning Wikipedia writes **< 5 MB min⁻¹**, far under SSD endurance limits.
 
 ---
 
-Below is a precise, up-to-date wording for the “Genetic-code analogies” appendix that keeps the 64 / 32 narrative, clarifies how those counts relate to the newly-measured 256 operational orbits, and avoids hand-waving numbers such as “~195 000” unless you explicitly include the diagnostic layer.
+# Appendix – Theoretical Correspondences
+
+This appendix records the essential bridges between GyroSI's formal physics and several established conceptual frames. It is deliberately brief: anything already explained in the main text is only referenced here.
 
 ---
 
-### 1  Genetics
+## A.1. Genetics in GyroSI
 
-GyroSI’s instruction algebra in the eight-bit space ℤ₂⁸ echoes a ladder of small cardinalities familiar from molecular genetics.  No claim is made that the two domains share the same state count or evolutionary origin; the correspondence is purely structural.
+GyroSI’s instruction algebra in the eight-bit space ℤ₂⁸ reflects a series of small, closed structures that resemble those in molecular genetics. The analogy is structural, not biological. No claim is made regarding evolutionary origin or sequence homology.
 
-| GyroSI level | Cardinality | Biology analogy | Comment |
-|--------------|-------------|-----------------|---------|
-| **Intron action families** | **4** (`L0`, `LI`, `FG`, `BG`) | Four nucleotides | Minimal set that closes the algebra. |
-| **Tensor axes per slice** | **3** | Three codon positions | Each axis modulates a different DoF. |
-| **Sign polarities** | **2** ( ±1 ) | Two DNA strands | Fundamental chirality. |
-| **Bit width of intron** | **8 bits** → 2⁸ = 256 patterns | 2 bits × 4-symbol alphabet | Full instruction space. |
-| **Active masks (anchors stripped)** | **64** patterns | 64 mRNA codons | Bits 0 & 7 (`L0`) are anchors; removing them leaves 6 informative bits (2⁶ = 64). |
-| **Parity-quotiented classes** | **32** | Wobble pairing halves the codon set | Identifying global parity (`LI` bits 1 & 6) folds the 64 active masks into 32 equivalence classes. |
-| **Operational phenomenology** | **256** orbits | — | Learning paths under the non-associative fold operator divide the space into 256 phenomenological orbits. |
+## A.1.1. Structural Correspondences
 
-L0 (anchor bits 0 & 7): structural identity anchors (do not alter state).
-LI (global parity bits 1 & 6): implement chirality reflection (dual confinement).
-FG (foreground bit group): subset controlling sign inversions on alternating tensor cells (local orientation flips).
-BG (background bit group): complementary subset controlling the interleaving layer polarity.
-The four families partition the eight intron bits into functional roles that jointly close the transformation algebra with minimal redundancy.
+The table below aligns the main computational layers of GyroSI with their biological counterparts. It follows the informational path from raw DNA structure to functional expression.
 
-Key points:
+| Layer                         | Cardinality    | Biological Analogue                  | GyroSI Equivalent                        |
+| ----------------------------- | -------------- | ------------------------------------ | ---------------------------------------- |
+| **Bit families**              | 4              | DNA base symbols (A, T, C, G)        | `L0`, `LI`, `FG`, `BG` bit groups        |
+| **Tensor axes**               | 3              | Codon triplet positions              | Tensor row selectors (X, Y, Z)           |
+| **Sign polarities**           | 2              | DNA strand directions                | ±1 sign modes in `GENE_Mac_S`            |
+| **Intron instruction space**  | 256            | All codon combinations (pre-spliced) | 8-bit `intron` values                    |
+| **Active instruction masks**  | 64             | Spliced codons in mRNA               | `intron & EXON_DYNAMIC_MASK`             |
+| **Parity-quotiented classes** | 32             | Wobble-paired codons                 | Classes after folding LI parity          |
+| **Holographic gene**          | 48 bits        | Genomic DNA as spatial encoding      | `INTRON_BROADCAST_MASKS[i]`              |
+| **Exon**                      | 1 (per stream) | Mature spliced exon                  | Final `exon_mask` after folding          |
+| **Expressed phenotype**       | 5-tuple        | Protein                              | Output of `compute_governance_signature` |
+| **Phenomenological orbits**   | 256            | Regulatory expression programs       | SCC orbits in state-space graph          |
+| **Full state space**          | 788,986        | Complete cellular configuration set  | Reachable configurations of GyroSI       |
 
-*  **Anchors vs. Physics:**  
-  Bits 0 and 7 (`L0`) never alter the state; they act only as identity anchors.  Stripping them reveals the **64** distinct “active” masks that actually drive transformations.
+## A.1.2. Expression Pipeline
 
-*  **Global parity (`LI`) as confinement:**  
-  The `LI` bits (1 & 6) implement the universal chirality flip.  Quotienting by this symmetry folds the 64 masks into **32** classes—precisely mirroring how wobble pairing halves the biological codon table.
+GyroSI models the expression process through a layered pipeline, transforming raw intronic inputs into a minimal, functional phenotype.
 
-*  **Why 256 operational orbits, not 64 / 32:**  
-  Once the state-dependent carry term is included, each nominal intron mask can steer the system along many memory-laden paths.  The full SCC analysis shows that these paths organise the 788 986 states into **256** parity-closed phenomenological orbits—one basin of mutual reachability for each eight-bit instruction pattern.  Thus the 64/32 counts live at the **mask-algebra** layer, while 256 lives at the **full physics + memory** layer.  Both ladders are valid; they simply sit at different depths of the model.
+### Intron Stream → Splicing → Exon → Protein
 
-The large orbit count (788 986) and its measured diameter (6) belong purely to GyroSI’s internal physics and have no biological counterpart; the analogy stops at the level of small-number structures.
+**Intron**
+An 8-bit input representing a regulatory instruction. Introns are path-dependent and transitory. They are not retained after expression but shape the trajectory of folding.
+
+**Splicing**
+The `fold_sequence([...])` function performs a non-associative reduction over a stream of introns, collapsing them into a single 8-bit residue. This simulates the cumulative, order-sensitive logic of molecular splicing.
+
+**Exon (`exon_mask`)**
+The stable 8-bit result of folding. This value encodes the final memory state, carrying the condensed expression of the entire intronic history. Bit families (`LI`, `FG`, `BG`, `L0`) persist structurally and define the mask’s functional signature.
+
+**Protein (`governance_signature`)**
+A 5-tuple derived from the exon mask. It quantifies the expressed content:
+`(neutral reserve, LI bits, FG bits, BG bits, total active bits)`.
+This compact footprint defines all downstream physical behaviour and governs interpretive logic.
+
+**Holographic Projection**
+Each intron also maps to a fixed 48-bit spatial pattern (`INTRON_BROADCAST_MASKS[i]`), which defines how that instruction acts within the tensor. These projections are stable and immutable; they form the architectural substrate for all transformations.
+
+## A.1.3. Bit Families and Functional Continuity
+
+The eight bits in each instruction are grouped into four fixed families. These families serve consistent structural roles in both introns and exons, though their operational function changes across the expression pipeline.
+
+* **L0 (bits 0 and 7)**
+  Structural anchors. They do not affect transformation but define identity and frame invariance. Retained across all stages.
+
+* **LI (bits 1 and 6)**
+  Chirality operators.
+  In introns: they direct global parity reflection during folding.
+  In exons: they report the parity-retaining content of the expressed state (UNA signature).
+
+* **FG (bits 2 and 5)**
+  Foreground modifiers.
+  In introns: trigger local tensor inversions.
+  In exons: represent expressed ONA-like (active) flips.
+
+* **BG (bits 3 and 4)**
+  Background modifiers.
+  In introns: modulate background polarity interleaving.
+  In exons: reflect the BU-like balance in the retained state.
+
+The bit families remain present throughout and are never redefined. They express different roles depending on whether they operate on input instructions or express final results.
+
+## A.1.4. Hierarchy of Interpretation
+
+Understanding GyroSI requires attention to three distinct levels of structure:
+
+* The **mask algebra**:
+  64 active masks (excluding anchors), forming 32 equivalence classes under LI parity.
+
+* The **phenomenological layer**:
+  256 distinct orbits of transformation in state space, each defined by mutual reachability under folding dynamics.
+
+* The **spatial encoding layer**:
+  48-bit broadcast masks that define how each instruction is applied within the tensor structure. These act as static DNA templates.
+
+#### A.1.5. Stabiliser and modulus
+
+Breadth‑first exploration over the full instruction set discovers exactly 788 986 distinct states and a diameter of six. The stabiliser of the archetype has order two (global parity) multiplied by eleven (frame degeneracy). The remaining factor, 35 863, is prime, confirming that no further quotient is possible. These facts are verified at build time and are used to reject any physics violation at run time.
+
+Frame degeneracy (11) counts the distinct layer/frame symmetry operations (excluding global parity) that leave the archetypal tensor invariant under the applied transformation group; combined with parity (×2) and the residual prime (35,863) they factor the full state modulus.
+
+No biological code shows the same modulus; the coincidence stops at the smaller sub‑structures outlined above.
+
+## A.1.6. Optional Diagnostic Decomposition
+
+A variant of the SCC analysis excludes LI reflection symmetry. This results in \~195,000 parity-free orbits. Approximately 21,456 of these appear in chiral pairs; the rest are self-symmetric. This decomposition is not part of operational logic but is retained for research purposes in the `_diagnostics` section of the phenomenology archive.
+
+> GyroSI captures the path from raw regulatory instruction to compact functional signature. Introns are the process. Exons are the result. The governance signature is what remains; a minimal footprint, physically interpretable, and ontologically stable.
 
 ---
 
-#### “~195 000 parity-free orbits”
+#### A.2. Further correspondences
 
-If you include the optional diagnostic SCC pass that **excludes `LI` introns**, the canonical 256 orbits split into 194 698 finer “parity-free” islands.  About 21 456 of those appear in chiral mirror pairs; the rest (≈ 152 k) are achiral self-mirrors.  This finer decomposition is **research metadata only** and has been moved to the `_diagnostics` section of the phenomenology artifact; it is not part of the operational ladder above.
+Other mappings noted in the main text are retained without restatement:
 
----
+* The angular sequence π/2, π/4, π/4, 0 for CS → UNA → ONA → BU.
+* The packed‑integer versus tensor dual representation.
+* The role of the endogenous modulus as a hard physical constant.
 
-#### 2. The structural number ladder
+Readers seeking proofs or implementation details will find the relevant functions in `baby.governance`, `baby.information`, and `baby.inference`.
 
-GyroSI’s constants are locked by algebraic closure, not convenience:
+## A.2.1. The structural number ladder
+
+GyroSI's constants are locked by algebraic closure, not convenience:
 
 3 rows enable chirality.
 4 layers bind the recursive depth.
@@ -1077,9 +1180,24 @@ GyroSI’s constants are locked by algebraic closure, not convenience:
 
 No smaller choice of cardinalities would satisfy the independent closure constraints identified in the physics.
 
----
+## A.2.2. Core Invariants (Build‑Time Assertions)
 
-#### 3. Gyrogroup algebra as implemented
+1. Ontology modulus: |States| = 788,986 (assert exact).
+2. Archetypal eccentricity ≤ 6; no path > 6 verified in sampled BFS; (optionally) full diameter = 6.
+3. Phenomenology (canonical): length(phenomenology_map) = 788,986; values ∈ [0, 788,985].
+4. Each orbit representative r satisfies: 
+     r = min{ state_int(s) | canonical[s] = r } (48-bit integer order).
+5. Sum of orbit_sizes.values() = 788,986.
+6. For every index i: canonical[i] in orbit_sizes, orbit_sizes[canonical[i]] ≥ 1.
+7. Parity closure: For every state s with integer value v, v ⊕ FULL_MASK belongs to same canonical orbit (empirically validated).
+8. Tensor mapping: int_to_tensor(tensor_to_int(T)) == T for all test tensors (validated on random + boundary states).
+9. Fold (Monodromic Coaddition):
+     - Non-commutative: ∃ a, b: fold(a, b) ≠ fold(b, a).
+     - Non-associative: ∃ a, b, c: fold(fold(a, b), c) ≠ fold(a, fold(b, c)).
+10. Angular distance formula: 
+     gyrodistance_angular(T1,T2) = arccos( dot(T1,T2)/48 ) ∈ [0,π].
+
+## A.2.3. Gyrogroup algebra as implemented
 
 The three **bitwise primitives** defined in §2.2 of the main text are realised exactly:
 
@@ -1097,49 +1215,8 @@ The learning operator used throughout the BU stage is the **Monodromic Fold**:
 
 All run‑time transformations in `apply_gyration_and_transform` are structured combinations of the three primitives above. The Fold is the only derived operator used in learning; nothing else is introduced.
 
----
-
-#### 4. Holographic principle in practice
+## A.2.4. Holographic principle in practice
 
 A single eight‑bit intron always touches the entire forty‑eight‑bit state through four complementary twelve‑bit masks. Conversely, any state can be reached in at most six introns. This bidirectional property embodies the holographic claim that every part encodes the whole. The code paths involved are `transcribe_byte`, `apply_gyration_and_transform`, and the breadth‑first discovery routine that proves the six‑step closure.
-
----
-
-#### 5. Stabiliser and modulus
-
-Breadth‑first exploration over the full instruction set discovers exactly 788 986 distinct states and a diameter of six. The stabiliser of the archetype has order two (global parity) multiplied by eleven (frame degeneracy). The remaining factor, 35 863, is prime, confirming that no further quotient is possible. These facts are verified at build time and are used to reject any physics violation at run time.
-
-Frame degeneracy (11) counts the distinct layer/frame symmetry operations (excluding global parity) that leave the archetypal tensor invariant under the applied transformation group; combined with parity (×2) and the residual prime (35,863) they factor the full state modulus.
-
-No biological code shows the same modulus; the coincidence stops at the smaller sub‑structures outlined above.
-
----
-
-#### 6. Further correspondences
-
-Other mappings noted in the main text are retained without restatement:
-
-* The angular sequence π/2, π/4, π/4, 0 for CS → UNA → ONA → BU.
-* The packed‑integer versus tensor dual representation.
-* The role of the endogenous modulus as a hard physical constant.
-
-Readers seeking proofs or implementation details will find the relevant functions in `baby.governance`, `baby.information`, and `baby.inference`.
-
-#### 7. Core Invariants (Build‑Time Assertions)
-
-1. Ontology modulus: |States| = 788,986 (assert exact).
-2. Archetypal eccentricity ≤ 6; no path > 6 verified in sampled BFS; (optionally) full diameter = 6.
-3. Phenomenology (canonical): length(phenomenology_map) = 788,986; values ∈ [0, 788,985].
-4. Each orbit representative r satisfies: 
-     r = min{ state_int(s) | canonical[s] = r } (48-bit integer order).
-5. Sum of orbit_sizes.values() = 788,986.
-6. For every index i: canonical[i] in orbit_sizes, orbit_sizes[canonical[i]] ≥ 1.
-7. Parity closure: For every state s with integer value v, v ⊕ FULL_MASK belongs to same canonical orbit (empirically validated).
-8. Tensor mapping: int_to_tensor(tensor_to_int(T)) == T for all test tensors (validated on random + boundary states).
-9. Fold (Monodromic Coaddition):
-     - Non-commutative: ∃ a, b: fold(a, b) ≠ fold(b, a).
-     - Non-associative: ∃ a, b, c: fold(fold(a, b), c) ≠ fold(a, fold(b, c)).
-10. Angular distance formula: 
-     gyrodistance_angular(T1,T2) = arccos( dot(T1,T2)/48 ) ∈ [0,π].
 
 ===

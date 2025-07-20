@@ -26,8 +26,22 @@ from typing import List, Tuple, Dict, Any, Optional
 
 import pytest
 
-from baby.governance import fold, transcribe_byte
+import math
 import random
+from baby.governance import (
+    compute_governance_signature,
+    EXON_LI_MASK,
+    EXON_FG_MASK,
+    EXON_BG_MASK,
+    EXON_DYNAMIC_MASK,
+    INTRON_BROADCAST_MASKS,
+    FULL_MASK,
+    apply_gyration_and_transform,
+    fold,
+    transcribe_byte,
+)
+from baby.inference import InferenceEngine
+from baby.contracts import PhenotypeEntry
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +227,12 @@ class TestStorageViews:
         assert rep_idx is not None, "rep_idx must not be None"
         canonical_key = (rep_idx, intron)
         fetched = view.get(canonical_key)
-        assert fetched == payload
+        # Check that context_signature is canonical and _original_context is not present
+        assert fetched["context_signature"] == canonical_key
+        assert "_original_context" not in fetched
+        # Check that all payload fields are present and correct
+        for k, v in payload.items():
+            assert fetched[k] == v
         # Ensure underlying store uses canonical key only
         assert canonical_key in base_store.data
         assert key_original not in base_store.data
@@ -382,14 +401,16 @@ class TestInferenceAndMaintenance:
         Surface test for global decay utility (non-engine path).
         """
         from baby.policies import OrbitStore, apply_global_confidence_decay
+        import time
 
         store_path = os.path.join(temp_dir, "global_decay.pkl.gz")
         st = OrbitStore(store_path, write_threshold=1)
-        # Add a few entries with age_counters
+        # Add a few entries with last_updated set to 1 day ago
+        old_time = time.time() - 86400  # 1 day ago
         for i in range(3):
             st.put(
                 (10 + i, 0),
-                {"phenotype": f"P{i}", "confidence": 0.9, "age_counter": 200, "context_signature": (10 + i, 0)},
+                {"phenotype": f"P{i}", "confidence": 0.9, "context_signature": (10 + i, 0), "last_updated": old_time},
             )
         st.commit()
         st.close()
@@ -552,6 +573,79 @@ class TestArchitecture:
         assert closure_size == 256
         print("\nConclusion: The 5-element basis successfully generates all 256 introns.")
         print("The learning algebra is a direct emergent property of the system's physics and duality.\n")
+
+
+# --- 1. Governance physics tests ---
+
+class TestGovernancePhysics:
+    def test_compute_governance_signature_zero(self):
+        sig = compute_governance_signature(0x00)
+        assert sig == (6, 0, 0, 0, 0)
+
+    def test_compute_governance_signature_full(self):
+        sig = compute_governance_signature(0xFF)
+        assert sig == (0, 2, 2, 2, 6)
+
+    def test_exon_masks_defined(self):
+        assert EXON_DYNAMIC_MASK == (EXON_LI_MASK | EXON_FG_MASK | EXON_BG_MASK)
+        assert hex(EXON_LI_MASK) == "0x42"
+        assert hex(EXON_FG_MASK) == "0x24"
+        assert hex(EXON_BG_MASK) == "0x18"
+
+    def test_intron_broadcast_masks_length_and_content(self):
+        assert INTRON_BROADCAST_MASKS.shape == (256,)
+        assert INTRON_BROADCAST_MASKS[0] == 0
+        expected = sum(1 << (8 * j) for j in range(6))
+        assert INTRON_BROADCAST_MASKS[1] == expected
+
+    def test_full_mask_constant(self):
+        assert FULL_MASK == (1 << 48) - 1
+
+    def test_transform_identity(self):
+        assert apply_gyration_and_transform(0, 0) == 0
+
+# --- 2. Fold operator tests ---
+
+class TestFoldOperator:
+    @pytest.mark.parametrize("x", [0, 1, 5, 42, 255])
+    def test_left_identity(self, x):
+        assert fold(0, x) == (x & 0xFF)
+
+    @pytest.mark.parametrize("x", [0, 1, 5, 42, 255])
+    def test_self_annihilation(self, x):
+        assert fold(x, x) == 0
+
+# --- 3. InferenceEngine phenotype creation tests ---
+
+class TestInferenceEnginePhenotypeCreation:
+    @pytest.fixture
+    def engine(self, orbit_store):
+        # Use the real orbit_store fixture for safe, isolated storage
+        class MinimalS2:
+            def __init__(self):
+                self.endogenous_modulus = 1
+                self.orbit_cardinality = {0: 1}
+            def get_state_from_index(self, idx):
+                return 0
+        s2 = MinimalS2()
+        return InferenceEngine(s2, orbit_store)
+
+    @pytest.mark.parametrize("intron", [0, EXON_LI_MASK, 0xFF])
+    def test_create_default_phenotype_governance_signature(self, engine, intron):
+        context_key = (0, intron)
+        entry = engine._create_default_phenotype(context_key)
+        sig = compute_governance_signature(intron)
+        expected = {
+            "neutral": sig[0],
+            "li": sig[1],
+            "fg": sig[2],
+            "bg": sig[3],
+            "dyn": sig[4],
+        }
+        assert "governance_signature" in entry
+        assert entry["governance_signature"] == expected
+        assert entry["phenotype"] == f"P[0:{intron}]"
+        assert entry["exon_mask"] == (intron & 0xFF)
 
 
 if __name__ == "__main__":

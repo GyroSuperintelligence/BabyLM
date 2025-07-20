@@ -30,6 +30,39 @@ GENE_Mac_S = np.array(
 )
 
 
+# These masks operate on the expressed exon_mask (i.e., exons)
+EXON_LI_MASK = 0b01000010   # UNA   bits (Parity / Reflection)
+EXON_FG_MASK = 0b00100100   # ONA   bits (Forward Gyration)
+EXON_BG_MASK = 0b00011000   # BU‑Eg bits (Backward Gyration)
+EXON_DYNAMIC_MASK = EXON_LI_MASK | EXON_FG_MASK | EXON_BG_MASK  # All active bits
+
+EXON_BROADCAST_MASKS = {
+    "li": EXON_LI_MASK,
+    "fg": EXON_FG_MASK,
+    "bg": EXON_BG_MASK,
+    "dynamic": EXON_DYNAMIC_MASK
+}
+
+def compute_governance_signature(mask: int) -> tuple[int,int,int,int,int]:
+    """
+    Returns an immutable 5‑tuple:
+
+      (neutral_reserve, li_bits, fg_bits, bg_bits, dynamic_population)
+
+    – neutral_reserve : 6 − (# set dynamic bits)
+    – li_bits         : # set bits in LI group   (0‑2)
+    – fg_bits         : # set bits in FG group   (0‑2)
+    – bg_bits         : # set bits in BG group   (0‑2)
+    – dynamic_population = li_bits + fg_bits + bg_bits  (0‑6)
+    """
+    m  = mask & 0xFF
+    li = (m & EXON_LI_MASK).bit_count()
+    fg = (m & EXON_FG_MASK).bit_count()
+    bg = (m & EXON_BG_MASK).bit_count()
+    dyn = li + fg + bg
+    return (6 - dyn, li, fg, bg, dyn)
+
+
 def build_masks_and_constants() -> Tuple[int, int, int, List[int]]:
     """Pre-computes transformation masks based on layer-based physics.
 
