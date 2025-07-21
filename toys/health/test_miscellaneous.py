@@ -628,26 +628,17 @@ class TestFoldOperator:
 
 class TestInferenceEnginePhenotypeCreation:
     @pytest.fixture
-    def engine(self, orbit_store: "OrbitStore") -> InferenceEngine:
-        # Use the real orbit_store fixture for safe, isolated storage
-        class MinimalS2:
-            def __init__(self) -> None:
-                self.endogenous_modulus = 1
-                self.orbit_cardinality = {0: 1}
-
-            def get_state_from_index(self, idx: int) -> int:
-                return 0
-
-        # InformationEngine expects ontology_data, not an S2-like object
-        dummy_ontology_data = {
-            "ontology_map": {0: 0},
-            "endogenous_modulus": 1,
-            "ontology_diameter": 1,
-        }
-        return InferenceEngine(InformationEngine(dummy_ontology_data), orbit_store)
+    def engine(self, real_ontology, real_orbit_store):
+        import json
+        ontology_path, phenomenology_path, _ = real_ontology
+        with open(ontology_path) as f:
+            ontology_data = json.load(f)
+        ontology_data["phenomap_path"] = phenomenology_path
+        info_engine = InformationEngine(ontology_data, use_array_indexing=False)
+        return InferenceEngine(info_engine, real_orbit_store)
 
     @pytest.mark.parametrize("intron", [0, EXON_LI_MASK, 0xFF])
-    def test_create_default_phenotype_governance_signature(self, engine: InferenceEngine, intron: int) -> None:
+    def test_create_default_phenotype_governance_signature(self, engine, intron):
         context_key = (0, intron)
         entry = engine._create_default_phenotype(context_key)
         sig = compute_governance_signature(intron)
