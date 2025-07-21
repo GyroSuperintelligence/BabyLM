@@ -107,24 +107,23 @@ def explore_ontology(start_state_int: int) -> None:
     print(f"{'Depth':>5} | {'New States':>12} | {'Total States':>14} | {'Time (s)':>10}")
     print("-" * 68)
 
-    depth = 0
     while frontier:
         t_start = time.perf_counter()
         newly_discovered = []
-        depth += 1
+        current_depth = int(min(state_depth[s] for s in frontier))
         for current_state in frontier:
             for intron in range(256):
                 next_state = apply_gyration_and_transform(current_state, intron)
                 if next_state not in discovered:
                     discovered.add(next_state)
-                    state_depth[next_state] = depth
+                    state_depth[next_state] = current_depth + 1
                     newly_discovered.append(next_state)
         t_end = time.perf_counter()
         depth_time = t_end - t_start
         total_time += depth_time
 
         new_states_count = len(newly_discovered)
-        print(f"{depth:>5} | {new_states_count:>12,} | {len(discovered):>14,} | {depth_time:>9.3f}")
+        print(f"{current_depth + 1:>5} | {new_states_count:>12,} | {len(discovered):>14,} | {depth_time:>9.3f}")
 
         if new_states_count == 0:
             break
@@ -132,7 +131,7 @@ def explore_ontology(start_state_int: int) -> None:
         frontier = deque(newly_discovered)
 
     print("-" * 68)
-    max_depth = max(state_depth.values())
+    max_depth = max(state_depth.values()) if state_depth else 0
     print(f"Closure reached. Max minimal path length to any state: {max_depth}")
     print(f"Exploration finished. Total states found: {len(discovered):,}")
     print(f"Total time elapsed: {total_time:.3f}s")

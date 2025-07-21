@@ -110,7 +110,7 @@ class HFGenerateResponse(BaseModel):
 
 
 @app.get("/v1/models")
-def list_models():
+def list_models() -> dict:
     """Return a single ‘model’ so OpenAI clients are satisfied."""
     return {
         "data": [
@@ -129,7 +129,7 @@ async def chat_completions(
     payload: OAChatRequest,
     request: Request,
     x_user_id: str | None = Header(default=None, convert_underscores=False),
-):
+) -> OAChatResponse:
     """
     Minimal implementation of the OpenAI /v1/chat/completions endpoint.
 
@@ -148,7 +148,6 @@ async def chat_completions(
     # Get or create the three agents                        ──────────
     system_agent = agent_pool.get_or_create_agent(system_id)
     assistant_agent = agent_pool.get_or_create_agent(assistant_id)
-    user_agent = agent_pool.get_or_create_agent(user_id)
 
     # --------------------------------------------------------------
     # 1. Handle system messages (bootstrap once per assistant reset)
@@ -198,7 +197,7 @@ async def chat_completions(
 
 
 @app.post("/generate", response_model=HFGenerateResponse)
-async def hf_generate(payload: HFGenerateRequest, request: Request):
+async def hf_generate(payload: HFGenerateRequest, request: Request) -> HFGenerateResponse:
     user_id = f"hf-{hash(request.client.host) if request.client else 'anon'}"
     assistant_id = "gyro-assistant"
     reply = orchestrate_turn(agent_pool, user_id, assistant_id, payload.inputs)

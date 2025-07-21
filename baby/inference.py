@@ -9,7 +9,7 @@ the learning process through Monodromic Fold.
 import time
 import hashlib
 import math
-from typing import Dict, Any, Tuple, Iterable, Optional
+from typing import Dict, Any, Tuple, Iterable, Optional, cast
 
 from baby.contracts import PhenotypeEntry, ValidationReport
 from baby.information import InformationEngine
@@ -78,7 +78,7 @@ class InferenceEngine:
             phenotype_entry = self._create_default_phenotype(context_key)
             self.store.put(context_key, phenotype_entry)
 
-        return phenotype_entry
+        return cast(PhenotypeEntry, phenotype_entry)
 
     def learn_by_key(self, state_index: int, intron: int) -> PhenotypeEntry:
         """
@@ -146,10 +146,17 @@ class InferenceEngine:
         assert 0 <= state_index < self.endogenous_modulus
         # Get old mask and ensure it's clamped
         old_mask = phenotype_entry.get("exon_mask", 0) & 0xFF
+
+        # Always increment usage count for any learn attempt
+        phenotype_entry["usage_count"] = phenotype_entry.get("usage_count", 0) + 1
+        phenotype_entry["last_updated"] = time.time()
+
         # Use Monodromic Fold and clamp result
         new_mask = fold(old_mask, intron) & 0xFF
         # Early return if no change (optimization)
         if new_mask == old_mask:
+            # Still need to persist the updated usage_count/timestamp
+            self.store.put(context_key, phenotype_entry)
             return phenotype_entry
         # Calculate novelty as fraction of bits that flipped
         novelty = bin(old_mask ^ new_mask).count("1") / 8.0
@@ -173,8 +180,6 @@ class InferenceEngine:
             "dyn": sig[4],
         }
         phenotype_entry["confidence"] = new_confidence
-        phenotype_entry["usage_count"] = phenotype_entry.get("usage_count", 0) + 1
-        phenotype_entry["last_updated"] = time.time()
         # Write to the correct key
         self.store.put(context_key, phenotype_entry)
         return phenotype_entry
@@ -328,7 +333,7 @@ class InferenceEngine:
 
         # Map to endogenous modulus with explicit bit handling
         hash_int = int.from_bytes(hash_digest[:8], "big") & ((1 << 64) - 1)
-        return hash_int % self.endogenous_modulus
+        return int(hash_int % self.endogenous_modulus)
 
     def _create_default_phenotype(self, context_key: Tuple[int, int]) -> PhenotypeEntry:
         """
@@ -356,6 +361,7 @@ class InferenceEngine:
             "usage_count": 0,
             "created_at": current_time,
             "last_updated": current_time,
+            "_original_context": None,
         }
 
     def get_knowledge_statistics(self) -> Dict[str, Any]:

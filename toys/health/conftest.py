@@ -1,23 +1,19 @@
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 """
 Shared pytest fixtures and configuration for GyroSI test suite.
 """
 
-import os
-import shutil
-import tempfile
 import pytest
 from pathlib import Path
-from typing import Dict, Any
+from typing import Generator, Optional, Callable, List, Any, Dict, cast
+import shutil
 
-# Add the baby module to the Python path
-# NOTE: This is for test discovery convenience. For packaging or CI, prefer 'pip install -e .' to avoid sys.path hacks.
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
+from baby.policies import OrbitStore, OverlayView, ReadOnlyView
 from baby.intelligence import GyroSI, AgentPool, LRUAgentCache
 from baby.contracts import AgentConfig, PreferencesConfig
-from baby.policies import OrbitStore, OverlayView, ReadOnlyView
 
 # Use the main stateless data files for all tests
 MAIN_MEMORIES_META = Path(__file__).parent.parent.parent / "memories" / "public" / "meta"
@@ -30,7 +26,7 @@ BASE_TEMP_DIR = Path(__file__).parent / "memories"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_test_environment():
+def setup_test_environment() -> Generator[None, None, None]:
     """Setup and teardown test environment."""
     BASE_TEMP_DIR.mkdir(exist_ok=True)
     yield
@@ -39,7 +35,7 @@ def setup_test_environment():
 
 
 @pytest.fixture
-def temp_dir():
+def temp_dir() -> Generator[str, None, None]:
     """Create a unique temporary directory for each test. Safe for parallel test runs."""
     test_dir = BASE_TEMP_DIR / f"test_{os.getpid()}_{id(object())}"
     test_dir.mkdir(parents=True, exist_ok=True)
@@ -48,7 +44,7 @@ def temp_dir():
 
 
 @pytest.fixture(scope="module")
-def real_ontology():
+def real_ontology() -> tuple[str, str, str]:
     """
     Fixture returning paths to the real ontology and phenomenology files, for integration tests.
     """
@@ -56,7 +52,7 @@ def real_ontology():
 
 
 @pytest.fixture
-def orbit_store(temp_dir):
+def orbit_store(temp_dir: str) -> Generator[OrbitStore, None, None]:
     """Create an OrbitStore instance (empty) in a test directory."""
     store_path = os.path.join(temp_dir, "knowledge.pkl.gz")
     store = OrbitStore(store_path)
@@ -65,7 +61,7 @@ def orbit_store(temp_dir):
 
 
 @pytest.fixture
-def overlay_store(temp_dir):
+def overlay_store(temp_dir: str) -> Generator[OverlayView, None, None]:
     """
     Provide an OverlayView composed of a read-only public store and a writable private store.
     Public store points to a main (or shared) store, private store is in temp_dir.
@@ -89,7 +85,7 @@ def overlay_store(temp_dir):
 
 
 @pytest.fixture
-def real_orbit_store(temp_dir):
+def real_orbit_store(temp_dir: str) -> Generator[OrbitStore, None, None]:
     """
     Provides a real OrbitStore using the main ontology and phenomenology, but stores all data in temp_dir.
     Use this fixture in tests that want to test the real OrbitStore logic without polluting the main memories folder.
@@ -101,7 +97,7 @@ def real_orbit_store(temp_dir):
 
 
 @pytest.fixture
-def agent_config(temp_dir) -> AgentConfig:
+def agent_config(temp_dir: str) -> AgentConfig:
     """Create a test agent configuration, always using the real ontology."""
     return {
         "ontology_path": ONTOLOGY_PATH,
@@ -111,7 +107,7 @@ def agent_config(temp_dir) -> AgentConfig:
 
 
 @pytest.fixture
-def gyrosi_agent(agent_config):
+def gyrosi_agent(agent_config: AgentConfig) -> Generator[GyroSI, None, None]:
     """Create a GyroSI agent instance."""
     agent = GyroSI(agent_config)
     yield agent
@@ -119,7 +115,7 @@ def gyrosi_agent(agent_config):
 
 
 @pytest.fixture
-def agent_pool(temp_dir):
+def agent_pool(temp_dir: str) -> Generator[AgentPool, None, None]:
     """Create an agent pool using the real ontology, with all agent data isolated to temp_dir."""
     public_knowledge = os.path.join(temp_dir, "public_knowledge.pkl.gz")
     os.makedirs(os.path.dirname(public_knowledge), exist_ok=True)
@@ -129,7 +125,7 @@ def agent_pool(temp_dir):
     import time  # Only import time if needed
 
     class TestAgentPool(AgentPool):
-        def get_or_create_agent(self, agent_id: str, role_hint: str = None) -> GyroSI:
+        def get_or_create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> GyroSI:
             with self._lock:
                 if self.eviction_policy == "ttl":
                     self.agent_access_times[agent_id] = time.time()
@@ -147,7 +143,9 @@ def agent_pool(temp_dir):
                         "ontology_path": self.ontology_path,
                         "public_knowledge_path": self.base_knowledge_path,
                         "private_knowledge_path": private_path,
-                        "enable_phenomenology_storage": self.preferences.get("enable_phenomenology_storage", False),
+                        "enable_phenomenology_storage": bool(
+                            self.preferences.get("enable_phenomenology_storage", False)
+                        ),
                     }
                     if role_hint:
                         config["agent_metadata"] = {"role_hint": role_hint}
@@ -180,7 +178,7 @@ def preferences_config() -> PreferencesConfig:
 
 
 @pytest.fixture
-def sample_phenotype_entry():
+def sample_phenotype_entry() -> dict[str, Any]:
     """Create a sample phenotype entry for testing."""
     return {
         "phenotype": "A",
@@ -193,35 +191,53 @@ def sample_phenotype_entry():
     }
 
 
+class TimeController:
+    """Context manager for timing code blocks in tests."""
+
+    def __init__(self) -> None:
+        self.elapsed: float = 0.0
+
+    def __enter__(self) -> "TimeController":
+        import time
+
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        import time
+
+        self.elapsed = time.perf_counter() - self.start
+
+
 @pytest.fixture
-def mock_time(monkeypatch):
+def mock_time(monkeypatch: pytest.MonkeyPatch) -> GyroSI:
     """Mock time.time() for deterministic tests."""
     current_time = [1234567890.0]
 
-    def mock_time_func():
+    def mock_time_func() -> float:
         return current_time[0]
 
-    def advance_time(seconds):
+    def advance_time(seconds: float) -> None:
         current_time[0] += seconds
 
     monkeypatch.setattr("time.time", mock_time_func)
 
-    class TimeController:
-        def advance(self, seconds):
+    class _TimeController(TimeController):
+        def advance(self, seconds: float) -> None:
             advance_time(seconds)
 
         @property
-        def current(self):
+        def current(self) -> float:
             return current_time[0]
 
-    return TimeController()
+    return cast(GyroSI, _TimeController())
 
 
 @pytest.fixture
-def generate_test_introns():
+def generate_test_introns() -> Callable[[int, int], List[int]]:
     import random
 
-    def _gen(count: int, seed: int = 42):
+    def _gen(count: int, seed: int = 42) -> list[int]:
         random.seed(seed)
         return [random.randint(0, 255) for _ in range(count)]
 
@@ -232,7 +248,7 @@ def generate_test_bytes(text: str) -> bytes:
     return text.encode("utf-8")
 
 
-def assert_phenotype_entry_valid(entry: Dict[str, Any]):
+def assert_phenotype_entry_valid(entry: Dict[str, Any]) -> None:
     required_fields = ["phenotype", "exon_mask", "confidence", "context_signature", "usage_count"]
     for field in required_fields:
         assert field in entry, f"Missing required field: {field}"
@@ -244,7 +260,7 @@ def assert_phenotype_entry_valid(entry: Dict[str, Any]):
     assert len(entry["context_signature"]) == 2
 
 
-def assert_ontology_valid(ontology_data: Dict[str, Any]):
+def assert_ontology_valid(ontology_data: Dict[str, Any]) -> None:
     assert ontology_data["endogenous_modulus"] == 788_986
     assert ontology_data["ontology_diameter"] == 6
     assert "ontology_map" in ontology_data
@@ -254,16 +270,16 @@ def assert_ontology_valid(ontology_data: Dict[str, Any]):
 class Timer:
     """Context manager for timing code blocks in tests."""
 
-    def __init__(self):
-        self.elapsed = 0
+    def __init__(self) -> None:
+        self.elapsed: float = 0.0
 
-    def __enter__(self):
+    def __enter__(self) -> "Timer":
         import time
 
         self.start = time.perf_counter()
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         import time
 
         self.elapsed = time.perf_counter() - self.start

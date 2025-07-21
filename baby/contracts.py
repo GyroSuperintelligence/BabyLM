@@ -13,7 +13,7 @@ class GovernanceSignature(TypedDict):
     dyn: int  # 0‑6
 
 
-class PhenotypeEntry(TypedDict, total=False):
+class PhenotypeEntry(TypedDict):
     """
     Structure of a phenotype entry in the knowledge store.
 
@@ -29,8 +29,8 @@ class PhenotypeEntry(TypedDict, total=False):
     exon_mask: int
     usage_count: int
     last_updated: float
-    created_at: float  # Optional timestamp for creation
-    governance_signature: GovernanceSignature  # <-- new, immutable
+    created_at: float
+    governance_signature: GovernanceSignature
     context_signature: Tuple[int, int]
     _original_context: Optional[Tuple[int, int]]
 

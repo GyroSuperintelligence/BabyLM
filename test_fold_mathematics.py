@@ -35,15 +35,13 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
     from baby.governance import fold
-    import ujson as json  # type: ignore[import]
+    import ujson as json
 except ImportError:
-    import json  # type: ignore
-
     print("Error: Required modules not found. Ensure you are in the correct environment.")
     sys.exit(1)
 
 
-def load_maps(ontology_path: str, epistemology_path: str) -> tuple:
+def load_maps(ontology_path: str, epistemology_path: str) -> tuple[dict, np.ndarray]:
     """Loads the necessary map files."""
     print("Loading authoritative maps...")
     if not os.path.exists(ontology_path) or not os.path.exists(epistemology_path):
@@ -60,7 +58,7 @@ def load_maps(ontology_path: str, epistemology_path: str) -> tuple:
     return ontology_data, ep
 
 
-def run_experiment(ep: np.ndarray, num_samples: int = 10000) -> dict:
+def run_experiment(ep: np.ndarray, num_samples: int = 10000) -> dict[str, int | float | list]:
     """
     Performs the main experiment to measure physical non-associativity.
     """
@@ -68,7 +66,7 @@ def run_experiment(ep: np.ndarray, num_samples: int = 10000) -> dict:
 
     N = ep.shape[0]
     non_associative_count = 0
-    witnesses = []
+    witnesses: list[dict[str, int | tuple[int, int]]] = []
 
     for _ in tqdm(range(num_samples), desc="Measuring Path Divergence"):
         # 1. Select a random initial state and two random introns
@@ -107,7 +105,7 @@ def run_experiment(ep: np.ndarray, num_samples: int = 10000) -> dict:
     }
 
 
-def report_results(results: dict):
+def report_results(results: dict) -> None:
     """Prints a formatted report of the experimental findings."""
     print("\n" + "=" * 60)
     print("    EXPERIMENTAL RESULTS: PHYSICAL NON-ASSOCIATIVITY")
@@ -126,9 +124,11 @@ def report_results(results: dict):
         print(f"    - Initial State Index: {witness['initial_state_idx']}")
         print(f"    - Introns: (0x{i1:02x}, 0x{i2:02x})")
         print(f"    - Path ((S→i1)→i2) leads to State Index: {witness['path_L_final_idx']}")
-        print(
-            f"    - Path (S→(i1⋄i2)) leads to State Index: {witness['path_R_final_idx']} (using i_combined=0x{witness['i_combined']:02x})"
+        path_r_info = (
+            f"    - Path (S→(i1⋄i2)) leads to State Index: {witness['path_R_final_idx']} "
+            f"(using i_combined=0x{witness['i_combined']:02x})"
         )
+        print(path_r_info)
 
     print("\n" + "=" * 25 + " CONCLUSION " + "=" * 25)
     if ratio > 0.85:
@@ -145,7 +145,7 @@ def report_results(results: dict):
         print("a more complex relationship between the intron algebra and the state manifold.")
 
 
-def main():
+def main() -> None:
     """Main execution function."""
     ontology_path = "memories/public/meta/ontology_map.json"
     epistemology_path = "memories/public/meta/epistemology.npy"

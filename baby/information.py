@@ -4,7 +4,7 @@ import argparse
 import time
 import os
 import sys
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, cast
 
 from baby import governance
 
@@ -32,9 +32,9 @@ Build steps:
 
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
-    import ujson as json  # type: ignore[import]
+    import ujson as json
 except ImportError:
-    import json  # type: ignore
+    import json
 
 
 class InformationEngine:
@@ -48,6 +48,11 @@ class InformationEngine:
     as numpy arrays for better memory/cache performance.
     """
 
+    ontology_map: Optional[Dict[int, int]]
+    inverse_ontology_map: Optional[Dict[int, int]]
+    _keys: Optional[np.ndarray]
+    _inverse: Optional[np.ndarray]
+
     def __init__(
         self,
         ontology_data: Dict[str, Any],
@@ -59,15 +64,18 @@ class InformationEngine:
             use_array_indexing = ontology_data["endogenous_modulus"] > 100_000
         self.use_array_indexing = use_array_indexing
         self.ontology_map = ontology_data["ontology_map"]
-        keys = list(self.ontology_map.keys())
-        if keys and isinstance(keys[0], str):
-            self.ontology_map = {int(k): v for k, v in self.ontology_map.items()}
+        if self.ontology_map is not None:
+            keys = list(self.ontology_map.keys())
+            if keys and isinstance(keys[0], str):
+                self.ontology_map = {int(k): v for k, v in self.ontology_map.items()}
         self.endogenous_modulus = ontology_data["endogenous_modulus"]
         self.ontology_diameter = ontology_data["ontology_diameter"]
 
         if use_array_indexing:
             # Note: This assumes ontology indices were assigned in sorted order of state integers
             # If ontology was generated differently, this implicitly redefines indices via sorted position
+            if self.ontology_map is None:
+                raise RuntimeError("Ontology map must be provided.")
             keys_arr = np.array(sorted(self.ontology_map.keys()), dtype=np.uint64)
             self._keys = keys_arr
             self._inverse = keys_arr  # index -> state_int
@@ -77,7 +85,10 @@ class InformationEngine:
         else:
             self._keys = None
             self._inverse = None
-            self.inverse_ontology_map = {v: k for k, v in self.ontology_map.items()}
+            if self.ontology_map is not None:
+                self.inverse_ontology_map = {v: k for k, v in self.ontology_map.items()}
+            else:
+                self.inverse_ontology_map = None
 
         # Validate expected constants (allow override for testing)
         if strict_validation:
@@ -172,7 +183,7 @@ class InformationEngine:
             return state_int
 
     @staticmethod
-    def int_to_tensor(state_int: int) -> np.ndarray:
+    def int_to_tensor(state_int: int) -> "np.ndarray[np.int8, Any]":
         """
         Converts a canonical 48-bit integer state to geometric tensor.
 
@@ -257,7 +268,7 @@ class InformationEngine:
         cosine_similarity = np.dot(T1_flat, T2_flat) / T1_flat.size
         cosine_similarity = np.clip(cosine_similarity, -1.0, 1.0)
 
-        return np.arccos(cosine_similarity)
+        return float(np.arccos(cosine_similarity))
 
     def measure_state_divergence(self, state_int: int) -> float:
         """
@@ -283,10 +294,10 @@ class ProgressReporter:
     def __init__(self, desc: str):
         self.desc = desc
         self.start_time = time.time()
-        self.last_update = 0
+        self.last_update = 0.0
         self.first_update = True
 
-    def update(self, current: int, total: Optional[int] = None, extra: str = ""):
+    def update(self, current: int, total: Optional[int] = None, extra: str = "") -> None:
         now = time.time()
         # Always show first update immediately
         if not self.first_update and now - self.last_update < 0.1 and (total is None or current != total):
@@ -307,7 +318,7 @@ class ProgressReporter:
         print(msg + " " * 20, end="", flush=True)
         self.last_update = now
 
-    def done(self):
+    def done(self) -> None:
         elapsed = time.time() - self.start_time
         print(f"\r{self.desc}: Done in {elapsed:.1f}s" + " " * 50)
 
@@ -323,7 +334,7 @@ def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
     discovered = {origin_int}
     current_level = [origin_int]
     depth = 0
-    layer_sizes = []  # Track number of new states at each BFS depth
+    layer_sizes: List[int] = []  # Track number of new states at each BFS depth
 
     while current_level:
         next_level_set = set()
@@ -379,7 +390,7 @@ def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
 # ==============================================================================
 # STEP 2: Epistemology Table
 # ==============================================================================
-def build_state_transition_table(ontology_map: Dict[int, int], output_path: str):
+def build_state_transition_table(ontology_map: Dict[int, int], output_path: str) -> None:
     """Builds the N×256 state transition table with validation."""
     progress = ProgressReporter("Building epistemology")
 
@@ -438,8 +449,8 @@ def _compute_sccs(
     counter = 0
     introns_arr = np.array(introns_to_use, dtype=np.int32)
 
-    def neighbors(v: int) -> np.ndarray:
-        return np.unique(ep[v, introns_arr])
+    def neighbors(v: int) -> "np.ndarray[np.int32, Any]":
+        return cast("np.ndarray[np.int32, Any]", np.unique(ep[v, introns_arr]).astype(np.int32))
 
     for root in range(N):
         if indices[root] != -1:
@@ -528,7 +539,7 @@ def build_phenomenology_map(
     print(f"  Found {len(representatives)} canonical orbits (expected 256)")
 
     # Create core artifact
-    artifact = {
+    artifact: Dict[str, Any] = {
         "schema_version": "phenomenology/core/1.0.0",
         "phenomenology_map": canonical.tolist(),
         "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes.items()},
@@ -582,7 +593,7 @@ def build_phenomenology_map(
         split_counter: Dict[int, int] = {}
         for canonical_rep in pf_to_canonical.values():
             split_counter[canonical_rep] = split_counter.get(canonical_rep, 0) + 1
-        split_histogram = {}
+        split_histogram: Dict[str, int] = {}
         for count in split_counter.values():
             split_histogram[str(count)] = split_histogram.get(str(count), 0) + 1
 
@@ -618,7 +629,7 @@ def build_phenomenology_map(
         print(f"  - Diagnostic: {diag['total_orbits']} parity-free orbits, {diag['mirror_pairs']} mirror pairs")
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="GyroSI asset builder")
     subparsers = parser.add_subparsers(dest="command", required=True)

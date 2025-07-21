@@ -7,7 +7,6 @@ the physical laws of the GyroSI system.
 
 import pytest
 import numpy as np
-from typing import List
 
 from baby import governance
 
@@ -15,13 +14,13 @@ from baby import governance
 class TestConstants:
     """Test the fundamental constants of the system."""
 
-    def test_gene_mic_s_value(self):
+    def test_gene_mic_s_value(self) -> None:
         """Test that GENE_Mic_S has the correct binary pattern."""
         assert governance.GENE_Mic_S == 0xAA
         assert governance.GENE_Mic_S == 0b10101010
         assert governance.GENE_Mic_S == 170
 
-    def test_gene_mac_s_structure(self):
+    def test_gene_mac_s_structure(self) -> None:
         """Test the structure and properties of GENE_Mac_S tensor."""
         tensor = governance.GENE_Mac_S
 
@@ -55,7 +54,7 @@ class TestConstants:
 class TestMaskGeneration:
     """Test mask generation and pre-computed masks."""
 
-    def test_build_masks_and_constants(self):
+    def test_build_masks_and_constants(self) -> None:
         """Test that build_masks_and_constants generates correct masks."""
         fg, bg, full, intron_masks = governance.build_masks_and_constants()
 
@@ -78,7 +77,7 @@ class TestMaskGeneration:
         expected_aa = 0xAAAAAAAAAAAA  # 0xAA repeated 6 times
         assert intron_masks[0xAA] == expected_aa
 
-    def test_precomputed_masks(self):
+    def test_precomputed_masks(self) -> None:
         """Test that module-level masks are correctly initialized."""
         assert governance.FULL_MASK == (1 << 48) - 1
         assert isinstance(governance.FG_MASK, int)
@@ -89,7 +88,7 @@ class TestMaskGeneration:
 class TestTransformations:
     """Test the physics transformation functions."""
 
-    def test_transcribe_byte(self):
+    def test_transcribe_byte(self) -> None:
         """Test byte transcription through XOR."""
         # Test identity property
         assert governance.transcribe_byte(0) == 0xAA
@@ -105,14 +104,14 @@ class TestTransformations:
         assert governance.transcribe_byte(0xFF) == 0x55  # 11111111 XOR 10101010 = 01010101
         assert governance.transcribe_byte(0x00) == 0xAA  # 00000000 XOR 10101010 = 10101010
 
-    def test_apply_gyration_and_transform_no_transform(self):
+    def test_apply_gyration_and_transform_no_transform(self) -> None:
         """Test gyration with intron that triggers no transformations."""
         # Intron 0x00 should not trigger any bit pattern transformations
         state = int(0x123456789ABC)
         result = governance.apply_gyration_and_transform(state, int(0x00))
         assert result == state  # No change expected
 
-    def test_apply_gyration_and_transform_global_parity(self):
+    def test_apply_gyration_and_transform_global_parity(self) -> None:
         """Test global parity flip transformation."""
         # Intron with bits 1,6 set (0b01000010 = 0x42)
         state = int(0x123456789ABC)
@@ -125,7 +124,7 @@ class TestTransformations:
 
         assert result == expected_final
 
-    def test_apply_gyration_and_transform_combined(self):
+    def test_apply_gyration_and_transform_combined(self) -> None:
         """Test combined transformations."""
         # Intron with all transform bits set: 0b01111110 = 0x7E
         state = int(0xABCDEF123456)
@@ -141,14 +140,14 @@ class TestTransformations:
 class TestGyrogroupOperations:
     """Test gyrogroup algebraic operations."""
 
-    def test_fold_basic(self):
+    def test_fold_basic(self) -> None:
         """Test basic fold operations."""
         assert governance.fold(0, 0) == 0
         result = governance.fold(0xAA, 0x55)
         assert isinstance(result, int)
         assert 0 <= result <= 255
 
-    def test_fold_non_commutative(self):
+    def test_fold_non_commutative(self) -> None:
         """Test that fold is non-commutative."""
         a, b = 0x12, 0x34
         assert governance.fold(a, b) != governance.fold(b, a)
@@ -157,7 +156,7 @@ class TestGyrogroupOperations:
             if a != b:
                 assert governance.fold(a, b) != governance.fold(b, a), f"fold({a}, {b}) was commutative!"
 
-    def test_fold_properties(self):
+    def test_fold_properties(self) -> None:
         """Test mathematical properties of fold."""
         a, b = 0x3C, 0xC3
         not_b = b ^ 0xFF
@@ -165,20 +164,20 @@ class TestGyrogroupOperations:
         expected = a ^ gyration_of_b
         assert governance.fold(a, b) == expected
 
-    def test_fold_sequence_empty(self):
+    def test_fold_sequence_empty(self) -> None:
         """Test batch fold with empty list."""
         from baby.governance import fold_sequence
 
         assert fold_sequence([]) == 0
 
-    def test_fold_sequence_single(self):
+    def test_fold_sequence_single(self) -> None:
         """Test batch fold with single element."""
         from baby.governance import fold_sequence
 
         assert fold_sequence([42]) == 42
         assert fold_sequence([0xFF]) == 0xFF
 
-    def test_fold_sequence_multiple(self):
+    def test_fold_sequence_multiple(self) -> None:
         """Test batch fold with multiple elements."""
         from baby.governance import fold_sequence
 
@@ -187,7 +186,7 @@ class TestGyrogroupOperations:
         expected = governance.fold(governance.fold(0x12, 0x34), 0x56)
         assert result == expected
 
-    def test_fold_sequence_order_matters(self):
+    def test_fold_sequence_order_matters(self) -> None:
         """
         Validates that fold_sequence is non-associative and path-sensitive.
         For a fixed set of introns, different permutations must yield distinct outputs.
@@ -206,7 +205,7 @@ class TestGyrogroupOperations:
         ), "fold_sequence appears associative or commutative; all permutations yielded same result."
 
         if len(unique_results) < len(perms):
-            collision_groups = {}
+            collision_groups: dict[int, list[tuple[int, ...]]] = {}
             for perm, res in results.items():
                 collision_groups.setdefault(res, []).append(perm)
             print("Some permutations collapsed to same output:")
@@ -214,7 +213,7 @@ class TestGyrogroupOperations:
                 if len(group) > 1:
                     print(f"Result {out:#04x} from permutations: {group}")
 
-    def test_fold_all_combinations_sample(self):
+    def test_fold_all_combinations_sample(self) -> None:
         """Test fold with a sample of all possible combinations."""
         import random
 
@@ -228,11 +227,11 @@ class TestGyrogroupOperations:
 class TestValidation:
     """Test validation functions."""
 
-    def test_validate_tensor_consistency(self):
+    def test_validate_tensor_consistency(self) -> None:
         """Test that the tensor validation passes for the correct tensor."""
         assert governance.validate_tensor_consistency() is True
 
-    def test_validate_tensor_consistency_mock_failure(self, monkeypatch):
+    def test_validate_tensor_consistency_mock_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test tensor validation with invalid tensors."""
         # Test wrong shape
         wrong_shape = np.ones((3, 2, 3, 2), dtype=np.int8)
@@ -259,7 +258,7 @@ class TestValidation:
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
-    def test_large_state_transformations(self):
+    def test_large_state_transformations(self) -> None:
         """Test transformations with maximum state values."""
         max_state = int(governance.FULL_MASK)
 
@@ -268,7 +267,7 @@ class TestEdgeCases:
             result = governance.apply_gyration_and_transform(max_state, int(intron))
             assert 0 <= result <= governance.FULL_MASK
 
-    def test_transcribe_all_bytes(self):
+    def test_transcribe_all_bytes(self) -> None:
         """Test transcribe_byte for all possible input values."""
         results = set()
         for byte in range(256):

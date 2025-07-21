@@ -6,18 +6,12 @@ import os
 import gzip
 import pickle
 from pathlib import Path
-
-# Try to use ujson for speed, fall back to standard json if unavailable
-try:
-    import ujson as json  # type: ignore[import]
-except ImportError:
-    import json  # type: ignore
+import json
 import time
-from typing import List, Optional, Dict, Tuple, Any
-
-from baby.contracts import MaintenanceReport
-import threading
+from typing import List, Optional, Dict, Tuple, Any, Iterator, cast
 import mmap
+import threading
+from baby.contracts import MaintenanceReport
 import concurrent.futures
 import math
 import logging
@@ -36,9 +30,9 @@ class OrbitStore:
         self.use_mmap = use_mmap
         self.lock = threading.RLock()
         self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
-        self.log_file = None
+        self.log_file: Optional[Any] = None
         self.pending_writes: list[tuple[tuple[int, int], Any]] = []
-        self._mmap = None
+        self._mmap: Optional[mmap.mmap] = None
         self._mmap_size = 0
         self._load_index()
         self.log_file = open(self.log_path, "ab")
@@ -48,12 +42,16 @@ class OrbitStore:
         self._fsync_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._pending_fsync: Optional[concurrent.futures.Future] = None
 
-    def _open_mmap(self):
+    def _open_mmap(self) -> None:
         if self._mmap:
             self._mmap.close()
         with open(self.log_path, "rb") as f:
-            self._mmap = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            self._mmap_size = os.path.getsize(self.log_path)
+            if os.path.getsize(self.log_path) > 0:
+                self._mmap = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            else:
+                self._mmap = None
+            if self._mmap:
+                self._mmap_size = self._mmap.size()
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
         with self.lock:
@@ -101,7 +99,7 @@ class OrbitStore:
         if self._pending_fsync:
             self._pending_fsync.result()
 
-    def _flush(self):
+    def _flush(self) -> Optional[concurrent.futures.Future]:
         pending_fsync = None
         if not self.log_file or not self.pending_writes:
             return None
@@ -169,7 +167,7 @@ class OrbitStore:
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
-        entries = {}
+        entries: Dict[Tuple[int, int], Any] = {}
         if not os.path.exists(self.log_path):
             return entries
         with open(self.log_path, "rb") as f:
@@ -195,7 +193,7 @@ class OrbitStore:
                 self.put(k, v)
             self._flush()
 
-    def iter_entries(self):
+    def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
         """
         Yields (key, entry) pairs for only the latest entry for each key, using self.index.
         Mutating the entry requires calling store.put(key, entry) to persist.
@@ -259,7 +257,7 @@ class CanonicalView:
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
-        return self.base_store.data
+        return cast(Dict[Tuple[int, int], Any], self.base_store.data)
 
     def _load_index(self) -> None:
         if hasattr(self.base_store, "_load_index"):
@@ -295,9 +293,9 @@ class OverlayView:
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
-        combined = self.public_store.data.copy()
-        combined.update(self.private_store.data)
-        return combined
+        combined_data = self.public_store.data.copy()
+        combined_data.update(self.private_store.data)
+        return cast(Dict[Tuple[int, int], Any], combined_data)
 
     def _load_index(self) -> None:
         if hasattr(self.private_store, "_load_index"):
@@ -322,7 +320,7 @@ class ReadOnlyView:
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
-        return self.base_store.data
+        return cast(Dict[Tuple[int, int], Any], self.base_store.data)
 
     def _load_index(self) -> None:
         if hasattr(self.base_store, "_load_index"):
@@ -535,7 +533,7 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
     store.close()
 
     if not entries:
-        stats = {"total_entries": 0, "generated_at": time.time()}
+        stats_data: Dict[str, Any] = {"total_entries": 0, "generated_at": time.time()}
     else:
         # Calculate comprehensive statistics
         confidences = [e.get("confidence", 0.0) for e in entries]
@@ -556,40 +554,40 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
             ages_days.append(age_days)
 
         # Phenotype diversity
-        phenotypes = {}
+        phenotypes: Dict[str, int] = {}
         for entry in entries:
             phenotype = entry.get("phenotype", "?")
             phenotypes[phenotype] = phenotypes.get(phenotype, 0) + 1
 
-        stats = {
+        stats_data = {
             "total_entries": len(entries),
             "confidence": {
-                "average": sum(confidences) / len(confidences),
-                "median": sorted(confidences)[len(confidences) // 2],
-                "min": min(confidences),
-                "max": max(confidences),
+                "average": float(sum(confidences) / len(confidences)) if confidences else 0.0,
+                "median": float(sorted(confidences)[len(confidences) // 2]) if confidences else 0.0,
+                "min": float(min(confidences)) if confidences else 0.0,
+                "max": float(max(confidences)) if confidences else 0.0,
                 "high_confidence_count": sum(1 for c in confidences if c > 0.8),
                 "low_confidence_count": sum(1 for c in confidences if c < 0.2),
             },
             "memory": {
-                "utilization": memory_utilization,
+                "utilization": float(memory_utilization),
                 "total_bits_set": total_bits,
-                "average_bits_per_entry": total_bits / len(entries),
+                "average_bits_per_entry": float(total_bits / len(entries)) if entries else 0.0,
             },
             "usage": {
                 "total_usage": sum(usage_counts),
-                "average_usage": sum(usage_counts) / len(usage_counts),
+                "average_usage": float(sum(usage_counts) / len(usage_counts)) if usage_counts else 0.0,
                 "max_usage": max(usage_counts) if usage_counts else 0,
             },
             "age": {
-                "average_days_since_update": sum(ages_days) / len(ages_days),
-                "oldest_entry_days": max(ages_days) if ages_days else 0,
+                "average_days_since_update": float(sum(ages_days) / len(ages_days)) if ages_days else 0.0,
+                "oldest_entry_days": float(max(ages_days)) if ages_days else 0.0,
             },
             "phenotype_diversity": {
                 "unique_phenotypes": len(phenotypes),
                 "top_phenotypes": sorted(phenotypes.items(), key=lambda x: x[1], reverse=True)[:10],
             },
-            "generated_at": time.time(),
+            "generated_at": float(time.time()),
             "store_path": store_path,
         }
 
@@ -597,7 +595,7 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
         # ujson does not support indent argument
-        json.dump(stats, f)
+        json.dump(stats_data, f)
 
     elapsed = time.time() - start_time
 

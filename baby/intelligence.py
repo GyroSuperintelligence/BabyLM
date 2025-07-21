@@ -5,25 +5,31 @@ This module provides the IntelligenceEngine and GyroSI classes responsible for
 orchestrating the complete system and providing the external API.
 """
 
-# Try to use ujson for speed, fall back to standard json if unavailable
-try:
-    import ujson as json  # type: ignore[import]
-except ImportError:
-    import json  # type: ignore
-import uuid
-import os
 import time
-from typing import Dict, Any, Optional, List, cast
+from typing import Dict, Any, Optional, List, cast, TypedDict
 from collections import OrderedDict
 from threading import RLock
 from collections import deque
 import numpy as np
+import json
+import uuid
+import os
 
 from baby import governance
 from baby.information import InformationEngine
 from baby.inference import InferenceEngine
 from baby.contracts import CycleHookFunction, AgentConfig, PreferencesConfig
 from baby.policies import OrbitStore, CanonicalView, OverlayView, ReadOnlyView
+
+
+class StateInfo(TypedDict):
+    agent_id: str
+    cycle_count: int
+    state_integer: int
+    tensor_index: int
+    angular_divergence_radians: float
+    angular_divergence_degrees: float
+    active_hooks: int
 
 
 class IntelligenceEngine:
@@ -44,12 +50,14 @@ class IntelligenceEngine:
             agent_id: Unique identifier for this agent instance
         """
         # Initialize subsystem engines
-        self.s2 = InformationEngine(self._load_ontology(ontology_path))
-        self.operator = InferenceEngine(self.s2, phenotype_store)
+        self.s2: InformationEngine = InformationEngine(self._load_ontology(ontology_path))
+        self.operator: InferenceEngine = InferenceEngine(self.s2, phenotype_store)
 
         # Agent state
-        self.agent_id = agent_id or str(uuid.uuid4())
-        self.use_epistemology = False
+        self.agent_id: str = agent_id or str(uuid.uuid4())
+        self.use_epistemology: bool = False
+        self.current_state_index: int
+        self.gene_mac_m_int: int
         epistemology_path = ontology_path.replace("ontology_map.json", "epistemology.npy")
         if os.path.exists(epistemology_path):
             try:
@@ -64,32 +72,33 @@ class IntelligenceEngine:
                     f"Error: {e}. Falling back to dynamic physics."
                 )
 
-        origin_int = self.s2.tensor_to_int(governance.GENE_Mac_S)
+        origin_int: int = self.s2.tensor_to_int(governance.GENE_Mac_S)
         if self.use_epistemology:
             self.current_state_index = self.s2.get_index_from_state(origin_int)
             self.gene_mac_m_int = origin_int  # Ensure always defined
         else:
             self.gene_mac_m_int = origin_int
-        self.cycle_count = 0
-        self._microstep_count = 0  # Track internal cooling/autonomic steps
+            self.current_state_index = 0  # Default if not using epistemology
+        self.cycle_count: int = 0
+        self._microstep_count: int = 0  # Track internal cooling/autonomic steps
         # Extension points
         self.post_cycle_hooks: List[CycleHookFunction] = []
 
         # Algedonic regulation and autonomic cycles
-        self._θ_buf = deque(maxlen=128)
-        self._θ_high = 0.9  # radians
-        self._θ_low = 0.3
-        self._cool_introns = (0b01000010,)
+        self._θ_buf: deque = deque(maxlen=128)
+        self._θ_high: float = 0.9  # radians
+        self._θ_low: float = 0.3
+        self._cool_introns: tuple[int, ...] = (0b01000010,)
         phenomap = ontology_path.replace("ontology_map.json", "phenomenology_map.json")
         try:
             with open(phenomap) as f:
                 pheno_data = json.load(f)
-                self._autonomic_cycles = pheno_data.get("autonomic_cycles", [])
-                self._autonomic_cycles_curated = pheno_data.get("autonomic_cycles_curated", {})
+                self._autonomic_cycles: list[Any] = pheno_data.get("autonomic_cycles", [])
+                self._autonomic_cycles_curated: dict[str, Any] = pheno_data.get("autonomic_cycles_curated", {})
         except Exception:
             self._autonomic_cycles = []
             self._autonomic_cycles_curated = {}
-        self._pain_streak = 0
+        self._pain_streak: int = 0
 
     def process_egress(self, input_byte: int) -> int:
         """
@@ -265,7 +274,7 @@ class IntelligenceEngine:
             phenotype_entry = self.operator.get_phenotype(state_index, acc)
             self.operator.learn(phenotype_entry, acc)
 
-    def get_state_info(self) -> Dict[str, Any]:
+    def get_state_info(self) -> StateInfo:
         """
         Get comprehensive information about current agent state.
 
@@ -277,15 +286,23 @@ class IntelligenceEngine:
         tensor_index = (
             self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
         )
-        return {
-            "agent_id": self.agent_id,
-            "cycle_count": self.cycle_count,
-            "state_integer": self.gene_mac_m_int,
-            "tensor_index": tensor_index,
-            "angular_divergence_radians": float(angular_divergence),
-            "angular_divergence_degrees": float(angular_divergence * 180 / 3.14159),
-            "active_hooks": len(self.post_cycle_hooks),
+        agent_id: str = self.agent_id
+        cycle_count: int = self.cycle_count
+        state_integer: int = self.gene_mac_m_int
+        tensor_index_val: int = tensor_index
+        angular_divergence_radians: float = float(angular_divergence)
+        angular_divergence_degrees: float = float(angular_divergence * 180 / 3.14159)
+        active_hooks: int = len(self.post_cycle_hooks)
+        info: StateInfo = {
+            "agent_id": agent_id,
+            "cycle_count": cycle_count,
+            "state_integer": state_integer,
+            "tensor_index": tensor_index_val,
+            "angular_divergence_radians": angular_divergence_radians,
+            "angular_divergence_degrees": angular_divergence_degrees,
+            "active_hooks": active_hooks,
         }
+        return info
 
     def reset_to_archetypal_state(self) -> None:
         """Reset agent to the archetypal state (GENE_Mac_S)."""
@@ -297,13 +314,13 @@ class IntelligenceEngine:
         """Loads the ontology data from a JSON file as ManifoldData."""
         with open(ontology_path, "r") as f:
             data = json.load(f)
-        return data  # type: ignore
+        return data
 
-    def _sync_state_fields_from_index(self):
+    def _sync_state_fields_from_index(self) -> None:
         if self.use_epistemology:
             self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
 
-    def _sync_index_from_state_int(self):
+    def _sync_index_from_state_int(self) -> None:
         if self.use_epistemology:
             self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
 
@@ -354,7 +371,7 @@ class GyroSI:
         # Ensure pending writes are flushed
         store = self.engine.operator.store
         if isinstance(store, OrbitStore):
-            cast(OrbitStore, store).commit()
+            store.commit()
         # Removed automatic close()
 
     def respond(self, data: bytes) -> bytes:
@@ -386,7 +403,7 @@ class GyroSI:
         # Ensure pending writes are flushed
         store = self.engine.operator.store
         if isinstance(store, OrbitStore):
-            cast(OrbitStore, store).commit()
+            store.commit()
         # Removed automatic close()
         return bytes(response)
 
@@ -443,7 +460,7 @@ class GyroSI:
         batch_size = self.config.get("batch_size", 100)
         if batch_size is None:
             batch_size = 100
-        phenomenology_map_path = None  # Ensure always defined
+        phenomenology_map_path: Optional[str] = None  # Ensure always defined
         if public_knowledge_path is not None:
             # Multi-agent setup with public/private knowledge
             private_path = self.config.get("private_knowledge_path")
@@ -452,7 +469,7 @@ class GyroSI:
             # Multi-agent overlay using decorators
             public_store = ReadOnlyView(OrbitStore(public_knowledge_path, write_threshold=batch_size))
             private_store = OrbitStore(private_path, write_threshold=batch_size)
-            base_store = OverlayView(public_store, private_store)
+            base_store: Any = OverlayView(public_store, private_store)
             phenomenology_map_path = self.config.get("phenomenology_map_path")
         else:
             # Single-agent setup
@@ -480,19 +497,19 @@ class GyroSI:
 class LRUAgentCache(OrderedDict):
     """LRU cache for agent instances with size limit."""
 
-    def __init__(self, max_size: int, *args, **kwargs):
+    def __init__(self, max_size: int, *args: Any, **kwargs: Any):
         self.max_size = max_size
         super().__init__(*args, **kwargs)
         self._lock = RLock()
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Any) -> Any:
         with self._lock:
             # Move to end on access
             value = super().__getitem__(key)
             self.move_to_end(key)
             return value
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: Any, value: Any) -> None:
         with self._lock:
             if key in self:
                 # Update existing
@@ -528,15 +545,16 @@ class AgentPool:
         self.eviction_policy = self.preferences.get("agent_eviction_policy", "lru")
         self.agent_access_times: Dict[str, float] = {}  # Always initialize
         # Initialize agent storage based on eviction policy
+        self.agents: Any
         if self.eviction_policy == "lru":
             self.agents = LRUAgentCache(max_agents)
         else:
             # Simple dict with manual eviction
-            self.agents: Dict[str, GyroSI] = {}
+            self.agents = {}
             self.max_agents = max_agents
         self._lock = RLock()
 
-    def get_or_create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> GyroSI:
+    def get_or_create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
         """
         Retrieve existing agent or create new one.
 
@@ -574,7 +592,7 @@ class AgentPool:
                     "ontology_path": self.ontology_path,
                     "public_knowledge_path": self.base_knowledge_path,
                     "private_knowledge_path": private_path,
-                    "enable_phenomenology_storage": self.preferences.get("enable_phenomenology_storage", False),
+                    "enable_phenomenology_storage": bool(self.preferences.get("enable_phenomenology_storage", False)),
                 }
 
                 # Add role hint to metadata if provided
@@ -583,7 +601,7 @@ class AgentPool:
 
                 self.agents[agent_id] = GyroSI(config=config, agent_id=agent_id, phenotype_store=store)
 
-            return self.agents[agent_id]
+            return cast(GyroSI, self.agents[agent_id])
 
     def remove_agent(self, agent_id: str) -> bool:
         """

@@ -13,15 +13,11 @@ import pytest
 import numpy as np
 import json
 import os
-import time
-import tempfile
-from pathlib import Path
-from typing import Dict, Any
 import random
-import sys  # Added for use in TestMaps
+from typing import Generator, Any
 
 # Import the modules under test
-from baby.information import InformationEngine, ProgressReporter
+from baby.information import InformationEngine
 from baby import governance
 
 
@@ -37,7 +33,7 @@ NUM_DISTANCE_TESTS = 200  # For angular distance tests
 
 
 @pytest.fixture(scope="module")
-def real_maps(real_ontology):
+def real_maps(real_ontology: tuple[str, str, str]) -> dict[str, Any]:
     """Load the real ontology, epistemology, and phenomenology maps once per module."""
     ontology_path, phenomenology_path, epistemology_path = real_ontology
 
@@ -68,7 +64,7 @@ def real_maps(real_ontology):
 
 
 @pytest.fixture
-def sample_states(real_maps):
+def sample_states(real_maps: dict[str, Any]) -> list[int]:
     """Generate a consistent set of sample states for testing."""
     ontology_map = real_maps["ontology_data"]["ontology_map"]
     state_ints = list(ontology_map.keys())
@@ -86,7 +82,7 @@ def sample_states(real_maps):
 
 
 @pytest.fixture
-def information_engine_standard(real_maps):
+def information_engine_standard(real_maps: dict[str, Any]) -> Generator[InformationEngine, None, None]:
     """Create a standard InformationEngine instance (non-memmap)."""
     ontology_data = real_maps["ontology_data"].copy()
     ontology_data["phenomap_path"] = real_maps["phenomenology_path"]
@@ -95,7 +91,7 @@ def information_engine_standard(real_maps):
 
 
 @pytest.fixture
-def information_engine_memmap(real_maps):
+def information_engine_memmap(real_maps: dict[str, Any]) -> Generator[InformationEngine, None, None]:
     """Create a memory-mapped InformationEngine instance."""
     ontology_data = real_maps["ontology_data"].copy()
     ontology_data["phenomap_path"] = real_maps["phenomenology_path"]
@@ -109,7 +105,7 @@ def information_engine_memmap(real_maps):
 class TestInformationEngineInitialization:
     """Test various initialization scenarios for InformationEngine."""
 
-    def test_standard_initialization(self, real_maps):
+    def test_standard_initialization(self, real_maps: dict[str, Any]) -> None:
         """Test standard initialization without memmap."""
         ontology_data = real_maps["ontology_data"]
         engine = InformationEngine(ontology_data, use_array_indexing=False)
@@ -122,7 +118,7 @@ class TestInformationEngineInitialization:
         assert engine._keys is None
         assert engine._inverse is None
 
-    def test_memmap_initialization(self, real_maps):
+    def test_memmap_initialization(self, real_maps: dict[str, Any]) -> None:
         """Test memory-mapped initialization."""
         ontology_data = real_maps["ontology_data"]
         engine = InformationEngine(ontology_data, use_array_indexing=True)
@@ -135,14 +131,14 @@ class TestInformationEngineInitialization:
         assert isinstance(engine._keys, np.ndarray)
         assert engine.inverse_ontology_map is None  # Should be freed
 
-    def test_auto_memmap_detection(self, real_maps):
+    def test_auto_memmap_detection(self, real_maps: dict[str, Any]) -> None:
         """Test automatic memmap detection for large ontologies."""
         ontology_data = real_maps["ontology_data"]
         # Should auto-enable memmap for large ontology
         engine = InformationEngine(ontology_data, use_array_indexing=None)
         assert engine.use_array_indexing is True
 
-    def test_string_key_conversion(self, real_maps):
+    def test_string_key_conversion(self, real_maps: dict[str, Any]) -> None:
         """Test that string keys in ontology_map are converted to integers."""
         ontology_data = real_maps["ontology_data"].copy()
         # Ensure we have string keys
@@ -155,7 +151,7 @@ class TestInformationEngineInitialization:
             for key in engine.ontology_map.keys():
                 assert isinstance(key, int)
 
-    def test_orbit_cardinality_loading(self, real_maps):
+    def test_orbit_cardinality_loading(self, real_maps: dict[str, Any]) -> None:
         """Test that orbit cardinality is loaded correctly."""
         ontology_data = real_maps["ontology_data"].copy()
         ontology_data["phenomap_path"] = real_maps["phenomenology_path"]
@@ -167,7 +163,7 @@ class TestInformationEngineInitialization:
         assert len(engine.orbit_cardinality) == 788_986
         assert engine.orbit_cardinality.dtype == np.uint32
 
-    def test_validation_errors(self, real_maps):
+    def test_validation_errors(self, real_maps: dict[str, Any]) -> None:
         """Test that initialization fails with invalid constants."""
         ontology_data = real_maps["ontology_data"].copy()
 
@@ -186,7 +182,7 @@ class TestInformationEngineInitialization:
 class TestStateTensorConversions:
     """Test static methods for converting between state integers and tensors."""
 
-    def test_int_to_tensor_shape_and_type(self):
+    def test_int_to_tensor_shape_and_type(self) -> None:
         """Test that int_to_tensor produces correct shape and type."""
         state_int = 0x123456789ABC  # 48-bit integer
         tensor = InformationEngine.int_to_tensor(state_int)
@@ -195,7 +191,7 @@ class TestStateTensorConversions:
         assert tensor.dtype == np.int8
         assert np.all(np.isin(tensor, [-1, 1]))
 
-    def test_tensor_to_int_shape_validation(self):
+    def test_tensor_to_int_shape_validation(self) -> None:
         """Test that tensor_to_int works with correct tensor shape."""
         tensor = np.random.choice([-1, 1], size=(4, 2, 3, 2)).astype(np.int8)
         result = InformationEngine.tensor_to_int(tensor)
@@ -203,7 +199,7 @@ class TestStateTensorConversions:
         assert isinstance(result, int)
         assert 0 <= result < (1 << 48)
 
-    def test_round_trip_conversion_consistency(self):
+    def test_round_trip_conversion_consistency(self) -> None:
         """Test that int->tensor->int conversions are consistent."""
         # Test with multiple random 48-bit integers
         for _ in range(NUM_TENSOR_TESTS):
@@ -215,7 +211,7 @@ class TestStateTensorConversions:
 
             assert recovered_int == original_int, f"Round-trip failed: {original_int} -> {recovered_int}"
 
-    def test_bit_mapping_correctness(self):
+    def test_bit_mapping_correctness(self) -> None:
         """Test that bit mapping follows the specified convention."""
         # Test with known patterns
         state_int = 0  # All bits 0 -> all +1
@@ -237,7 +233,7 @@ class TestStateTensorConversions:
             assert flat[expected_pos] == -1  # 1 bit -> -1
             assert np.sum(flat == -1) == 1  # Only one -1
 
-    def test_archetypal_tensor_conversion(self):
+    def test_archetypal_tensor_conversion(self) -> None:
         """Test conversion of the archetypal tensor GENE_Mac_S."""
         archetypal_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
         recovered_tensor = InformationEngine.int_to_tensor(archetypal_int)
@@ -248,7 +244,9 @@ class TestStateTensorConversions:
 class TestStateIndexMapping:
     """Test state-to-index and index-to-state conversions."""
 
-    def test_get_index_from_state_standard(self, information_engine_standard, sample_states):
+    def test_get_index_from_state_standard(
+        self, information_engine_standard: InformationEngine, sample_states: list[int]
+    ) -> None:
         """Test state-to-index mapping with standard engine."""
         engine = information_engine_standard
 
@@ -257,7 +255,9 @@ class TestStateIndexMapping:
             assert isinstance(index, int)
             assert 0 <= index < 788_986
 
-    def test_get_index_from_state_memmap(self, information_engine_memmap, sample_states):
+    def test_get_index_from_state_memmap(
+        self, information_engine_memmap: InformationEngine, sample_states: list[int]
+    ) -> None:
         """Test state-to-index mapping with memmap engine."""
         engine = information_engine_memmap
 
@@ -266,7 +266,7 @@ class TestStateIndexMapping:
             assert isinstance(index, int)
             assert 0 <= index < 788_986
 
-    def test_get_state_from_index_standard(self, information_engine_standard):
+    def test_get_state_from_index_standard(self, information_engine_standard: InformationEngine) -> None:
         """Test index-to-state mapping with standard engine."""
         engine = information_engine_standard
 
@@ -276,7 +276,7 @@ class TestStateIndexMapping:
             state_int = engine.get_state_from_index(index)
             assert isinstance(state_int, int)
 
-    def test_get_state_from_index_memmap(self, information_engine_memmap):
+    def test_get_state_from_index_memmap(self, information_engine_memmap: InformationEngine) -> None:
         """Test index-to-state mapping with memmap engine."""
         engine = information_engine_memmap
 
@@ -286,7 +286,9 @@ class TestStateIndexMapping:
             state_int = engine.get_state_from_index(index)
             assert isinstance(state_int, int)
 
-    def test_round_trip_state_index_consistency(self, information_engine_standard, sample_states):
+    def test_round_trip_state_index_consistency(
+        self, information_engine_standard: InformationEngine, sample_states: list[int]
+    ) -> None:
         """Test that state->index->state round trips are consistent."""
         engine = information_engine_standard
 
@@ -295,7 +297,7 @@ class TestStateIndexMapping:
             recovered_state = engine.get_state_from_index(index)
             assert recovered_state == state_int
 
-    def test_memmap_vs_standard_consistency(self, real_maps, sample_states):
+    def test_memmap_vs_standard_consistency(self, real_maps: dict[str, Any], sample_states: list[int]) -> None:
         """Test that memmap and standard engines give same results."""
         ontology_data = real_maps["ontology_data"].copy()
         ontology_data["phenomap_path"] = real_maps["phenomenology_path"]
@@ -316,7 +318,7 @@ class TestStateIndexMapping:
 class TestGeometricMeasurements:
     """Test angular distance and state divergence measurements."""
 
-    def test_gyrodistance_angular_properties(self, information_engine_standard):
+    def test_gyrodistance_angular_properties(self, information_engine_standard: InformationEngine) -> None:
         """Test mathematical properties of angular gyrodistance."""
         # Generate test tensors
         T1 = np.random.choice([-1, 1], size=(4, 2, 3, 2)).astype(np.int8)
@@ -342,7 +344,7 @@ class TestGeometricMeasurements:
         d23 = information_engine_standard.gyrodistance_angular(T2, T3)
         assert d13 <= d12 + d23 + 1e-10, "Triangle inequality should hold"
 
-    def test_gyrodistance_extreme_cases(self, information_engine_standard):
+    def test_gyrodistance_extreme_cases(self, information_engine_standard: InformationEngine) -> None:
         """Test angular distance for extreme cases."""
         # Identical tensors
         T1 = np.ones((4, 2, 3, 2), dtype=np.int8)
@@ -356,7 +358,9 @@ class TestGeometricMeasurements:
         distance = information_engine_standard.gyrodistance_angular(T1, T2)
         assert np.isclose(distance, np.pi)
 
-    def test_measure_state_divergence(self, information_engine_standard, sample_states):
+    def test_measure_state_divergence(
+        self, information_engine_standard: InformationEngine, sample_states: list[int]
+    ) -> None:
         """Test state divergence measurement from archetypal state."""
         engine = information_engine_standard
 
@@ -375,7 +379,9 @@ class TestGeometricMeasurements:
 class TestInformationEngineIntegrity:
     """Test InformationEngine against real physics and maps."""
 
-    def test_epistemology_table_consistency(self, real_maps, information_engine_standard, sample_states):
+    def test_epistemology_table_consistency(
+        self, real_maps: dict[str, Any], information_engine_standard: InformationEngine, sample_states: list[int]
+    ) -> None:
         """Test that InformationEngine mapping is consistent with epistemology table."""
         engine = information_engine_standard
         ep_table = real_maps["epistemology_table"]
@@ -399,24 +405,21 @@ class TestInformationEngineIntegrity:
                     next_state_index == table_next_index
                 ), f"Mismatch: physics gives {next_state_index}, table gives {table_next_index}"
 
-    def test_phenomenology_orbit_consistency(self, real_maps, information_engine_standard):
+    def test_phenomenology_orbit_consistency(
+        self, real_maps: dict[str, Any], information_engine_standard: InformationEngine
+    ) -> None:
         """Test that orbit cardinality data is consistent."""
         engine = information_engine_standard
         pheno_data = real_maps["phenomenology_data"]
 
         if "orbit_sizes" in pheno_data and hasattr(engine, "orbit_cardinality"):
-            orbit_sizes = {int(k): v for k, v in pheno_data["orbit_sizes"].items()}
+            {int(k): v for k, v in pheno_data["orbit_sizes"].items()}
 
             # Check that total sizes match
-            total_from_orbits = sum(orbit_sizes.values())
-            total_from_cardinality = np.sum(engine.orbit_cardinality)
-
-            # Note: orbit_cardinality might have different structure
-            # We mainly check that it's reasonable
             assert len(engine.orbit_cardinality) == 788_986
             assert np.all(engine.orbit_cardinality >= 1)
 
-    def test_archetypal_state_in_ontology(self, information_engine_standard):
+    def test_archetypal_state_in_ontology(self, information_engine_standard: InformationEngine) -> None:
         """Test that the archetypal state is properly indexed."""
         engine = information_engine_standard
         archetypal_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
@@ -434,7 +437,7 @@ class TestInformationEngineIntegrity:
 class TestErrorHandling:
     """Test proper error handling and edge cases."""
 
-    def test_invalid_state_lookup_standard(self, information_engine_standard):
+    def test_invalid_state_lookup_standard(self, information_engine_standard: InformationEngine) -> None:
         """Test error handling for invalid states in standard engine."""
         engine = information_engine_standard
 
@@ -443,7 +446,7 @@ class TestErrorHandling:
         with pytest.raises(ValueError, match="not found in discovered ontology"):
             engine.get_index_from_state(invalid_state)
 
-    def test_invalid_state_lookup_memmap(self, information_engine_memmap):
+    def test_invalid_state_lookup_memmap(self, information_engine_memmap: InformationEngine) -> None:
         """Test error handling for invalid states in memmap engine."""
         engine = information_engine_memmap
 
@@ -451,7 +454,7 @@ class TestErrorHandling:
         with pytest.raises(ValueError, match="not found in discovered ontology"):
             engine.get_index_from_state(invalid_state)
 
-    def test_invalid_index_lookup_standard(self, information_engine_standard):
+    def test_invalid_index_lookup_standard(self, information_engine_standard: InformationEngine) -> None:
         """Test error handling for invalid indices in standard engine."""
         engine = information_engine_standard
 
@@ -461,7 +464,7 @@ class TestErrorHandling:
         with pytest.raises(ValueError, match="Invalid index"):
             engine.get_state_from_index(788_986)  # Out of bounds
 
-    def test_invalid_index_lookup_memmap(self, information_engine_memmap):
+    def test_invalid_index_lookup_memmap(self, information_engine_memmap: InformationEngine) -> None:
         """Test error handling for invalid indices in memmap engine."""
         engine = information_engine_memmap
 
@@ -471,7 +474,7 @@ class TestErrorHandling:
         with pytest.raises(ValueError, match="Index .* out of bounds"):
             engine.get_state_from_index(788_986)  # Out of bounds
 
-    def test_uninitialized_memmap_arrays(self, real_maps):
+    def test_uninitialized_memmap_arrays(self, real_maps: dict[str, Any]) -> None:
         """Test error handling when memmap arrays are not properly initialized."""
         ontology_data = real_maps["ontology_data"]
         engine = InformationEngine(ontology_data, use_array_indexing=True)
@@ -491,7 +494,7 @@ class TestErrorHandling:
 class TestMemoryEfficiency:
     """Test memory usage and efficiency considerations."""
 
-    def test_memmap_vs_standard_memory_usage(self, real_maps):
+    def test_memmap_vs_standard_memory_usage(self, real_maps: dict[str, Any]) -> None:
         """Compare memory characteristics of memmap vs standard engines."""
         ontology_data = real_maps["ontology_data"].copy()
         ontology_data["phenomap_path"] = real_maps["phenomenology_path"]
@@ -509,7 +512,9 @@ class TestMemoryEfficiency:
         assert engine_mem._keys is not None
         assert isinstance(engine_mem._keys, np.ndarray)
 
-    def test_large_batch_operations(self, information_engine_memmap, sample_states):
+    def test_large_batch_operations(
+        self, information_engine_memmap: InformationEngine, sample_states: list[int]
+    ) -> None:
         """Test that the engine can handle larger batch operations efficiently."""
         engine = information_engine_memmap
 
@@ -543,7 +548,7 @@ class TestMemoryEfficiency:
 
 
 class TestMaps:
-    def test_representative_is_min_state(self, real_maps):
+    def test_representative_is_min_state(self, real_maps: dict[str, Any]) -> None:
         pheno = real_maps["phenomenology_data"]
         ontology_map = real_maps["ontology_data"]["ontology_map"]
         if isinstance(next(iter(ontology_map)), str):
@@ -563,17 +568,19 @@ class TestMaps:
             states = idx_to_state[members]
             assert idx_to_state[rep] == states.min(), "Representative not minimal in its basin"
 
-    def test_int_to_tensor_out_of_range(self):
+    def test_int_to_tensor_out_of_range(self) -> None:
         with pytest.raises(ValueError):
             InformationEngine.int_to_tensor(1 << 48)
 
-    def test_tensor_to_int_shape_error(self):
+    def test_tensor_to_int_shape_error(self) -> None:
         bad = np.ones((4, 2, 3, 3), dtype=np.int8)
         with pytest.raises(ValueError):
             InformationEngine.tensor_to_int(bad)
 
     # A. Robust invalid state test
-    def test_invalid_state_lookup_standard_robust(self, information_engine_standard, real_maps):
+    def test_invalid_state_lookup_standard_robust(
+        self, information_engine_standard: InformationEngine, real_maps: dict[str, Any]
+    ) -> None:
         engine = information_engine_standard
         ontology_map = real_maps["ontology_data"]["ontology_map"]
         if isinstance(next(iter(ontology_map)), str):
@@ -586,7 +593,7 @@ class TestMaps:
             engine.get_index_from_state(candidate)
 
     # B. Representative minimality (randomized)
-    def test_representative_is_min_state_random(self, real_maps):
+    def test_representative_is_min_state_random(self, real_maps: dict[str, Any]) -> None:
         pheno = real_maps["phenomenology_data"]
         ontology_map = real_maps["ontology_data"]["ontology_map"]
         if isinstance(next(iter(ontology_map)), str):
@@ -606,7 +613,9 @@ class TestMaps:
             assert idx_to_state[rep] == states.min()
 
     # C. Orbit cardinality consistency
-    def test_orbit_cardinality_matches_sizes(self, real_maps, information_engine_standard):
+    def test_orbit_cardinality_matches_sizes(
+        self, real_maps: dict[str, Any], information_engine_standard: InformationEngine
+    ) -> None:
         pheno = real_maps["phenomenology_data"]
         orbit_sizes = {int(k): v for k, v in pheno["orbit_sizes"].items()}
         canonical = np.array(pheno["phenomenology_map"], dtype=np.int32)
@@ -616,13 +625,18 @@ class TestMaps:
         sample_idx = rng.choice(len(canonical), size=200, replace=False)
         for idx in sample_idx:
             rep = int(canonical[idx])
-            assert orbit_sizes[rep] >= 1
+            # Check orbit sizes
+            assert len(orbit_sizes) == 256
+            assert max(orbit_sizes.values()) if orbit_sizes else 0 > 1
+
+            # Check total size
+            assert sum(orbit_sizes.values()) == 788_986
             # Direct comparison if available
             if hasattr(engine, "orbit_cardinality"):
                 assert engine.orbit_cardinality[idx] == orbit_sizes[rep]
 
     # D. Parity closure test
-    def test_parity_closure(self, real_maps):
+    def test_parity_closure(self, real_maps: dict[str, Any]) -> None:
         pheno = real_maps["phenomenology_data"]
         canonical = np.array(pheno["phenomenology_map"], dtype=np.int32)
         ontology_map = real_maps["ontology_data"]["ontology_map"]
@@ -645,7 +659,7 @@ class TestMaps:
                 continue
 
     # E. Angle vs Hamming relation
-    def test_angle_matches_hamming(self, real_maps):
+    def test_angle_matches_hamming(self, real_maps: dict[str, Any]) -> None:
         # Create a dummy InformationEngine instance for the test
         ontology_data = real_maps["ontology_data"].copy()
         ontology_data["phenomap_path"] = real_maps["phenomenology_path"]

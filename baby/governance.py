@@ -8,7 +8,7 @@ all operations are stateless functions.
 
 import numpy as np
 from functools import reduce
-from typing import List, Tuple
+from typing import List, Tuple, Any, cast
 
 
 # Core genetic constants - Section 4.1 & 4.2
@@ -86,19 +86,19 @@ def build_masks_and_constants() -> Tuple[int, int, int, List[int]]:
     FULL_MASK = (1 << 48) - 1
 
     # Create broadcast patterns for each possible intron
-    INTRON_BROADCAST_MASKS = []
+    intron_broadcast_masks_list: List[int] = []
     for i in range(256):
         mask = 0
         for j in range(6):
             mask |= i << (8 * j)
-        INTRON_BROADCAST_MASKS.append(mask)
+        intron_broadcast_masks_list.append(mask)
 
-    return FG, BG, FULL_MASK, INTRON_BROADCAST_MASKS
+    return FG, BG, FULL_MASK, intron_broadcast_masks_list
 
 
 # Pre-compute the masks at module load time
-FG_MASK, BG_MASK, FULL_MASK, INTRON_BROADCAST_MASKS = build_masks_and_constants()
-INTRON_BROADCAST_MASKS = np.array(INTRON_BROADCAST_MASKS, dtype=np.uint64)
+FG_MASK, BG_MASK, FULL_MASK, INTRON_BROADCAST_MASKS_LIST = build_masks_and_constants()
+INTRON_BROADCAST_MASKS: np.ndarray = np.array(INTRON_BROADCAST_MASKS_LIST, dtype=np.uint64)
 
 # Precompute transformation masks for all 256 introns
 XFORM_MASK = np.empty(256, dtype=np.uint64)
@@ -144,7 +144,7 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     return final_state
 
 
-def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> np.ndarray:
+def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> "np.ndarray[np.uint64, Any]":
     """
     Vectorised transform for a batch of states (uint64).
     Semantics identical to apply_gyration_and_transform per element.
@@ -153,24 +153,27 @@ def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> np.nd
     mask = XFORM_MASK[intron]
     pattern = PATTERN_MASK[intron]
     temp = states ^ mask
-    return temp ^ (temp & pattern)
+    return cast("np.ndarray[np.uint64, Any]", (temp ^ (temp & pattern)).astype(np.uint64))
 
 
-def apply_gyration_and_transform_all_introns(states: np.ndarray) -> np.ndarray:
+def apply_gyration_and_transform_all_introns(states: np.ndarray) -> "np.ndarray[np.uint64, Any]":
     """
     Returns an array shape (states.size, 256) of successor states.
     Memory-heavy; prefer intron loop for large batches.
     """
-    temp = states[:, None] ^ XFORM_MASK[None, :]
-    return temp ^ (temp & PATTERN_MASK[None, :])
+    temp = states[:, np.newaxis] ^ XFORM_MASK[np.newaxis, :]
+    return cast("np.ndarray[np.uint64, Any]", (temp ^ (temp & PATTERN_MASK[np.newaxis, :])).astype(np.uint64))
 
 
 # Optional: test helper for equivalence (not run by default)
-def _test_vector_equivalence():
+def _test_vector_equivalence() -> None:
     rng = np.random.default_rng(0)
     sample_states = rng.integers(0, 1 << 48, size=4096, dtype=np.uint64)
     for intron in range(256):
-        scalar = np.array([apply_gyration_and_transform(int(s), intron) for s in sample_states], dtype=np.uint64)
+        scalar = np.array(
+            [apply_gyration_and_transform(int(s), intron) for s in sample_states],
+            dtype=np.uint64,
+        )
         batch = apply_gyration_and_transform_batch(sample_states, intron)
         assert np.array_equal(scalar, batch)
 

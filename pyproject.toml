@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gyrosi-baby-lm"
 version = "0.9.5"
-description = "GyroSI Baby LM - A physics-based language model implementing the Common Governance Model"
+description = "GyroSI Baby LM - Gyroscopic Superintelligence Language Model"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "GyroSI Team"},
+    {name = "Basil Korompilias"},
 ]
-keywords = ["language-model", "cgm", "superintelligence", "tensor-operations"]
+keywords = ["language-model", "superintelligence"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -25,7 +25,6 @@ classifiers = [
 
 dependencies = [
     "numpy>=1.24.0,<2.0.0",
-    "cryptography>=41.0.0,<42.0.0",
 ]
 
 [project.optional-dependencies]

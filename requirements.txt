@@ -1,34 +1,35 @@
 # Requires Python 3.10 for full compatibility on Intel Mac
 
-# Core dependencies
-numpy>=1.24.0,<2.0.0
-scipy>=1.10.0  # Required for Numba linear algebra operations
-cryptography>=41.0.0,<42.0.0
-rich
-emoji>=2.0.0
-orjson
-numba>=0.58.0  # Optional: provides 3x speedup for batch processing
+# Core
+numpy
 ujson
 
-# Testing dependencies
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-mock>=3.11.0
+#Extra
+emoji
+nltk
 
-# Development dependencies (optional, uncomment if needed)
+# Protocols
+fastapi
+uvicorn
+pydantic
+
+# Files (For large file support, install git-lfs)
+httpx
+
+# Development dependencies
+pytest
 black>=23.7.0
 flake8>=6.1.0
 mypy>=1.5.0
 isort>=5.12.0
 questionary
 psutil
-
-nltk
 tqdm
 
-fastapi
-uvicorn
-pydantic
+# Type stubs for development
+types-tqdm
+types-json
 
-# For large file support, install git-lfs: https://git-lfs.github.com/
-httpx
+
+
+

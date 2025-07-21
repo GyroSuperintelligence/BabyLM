@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 """
 Explore the structure of the 5-element basis for fold algebra.
 """
 
-import sys
-import os
 from collections import defaultdict
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from baby.governance import fold, transcribe_byte
 
 
-def analyze_basis_structure():
+def analyze_basis_structure() -> None:
     """Analyze how the 5-element basis generates the algebra."""
 
     # The complete basis
@@ -81,7 +81,7 @@ def analyze_basis_structure():
         print(f"{name}: ancestor of {descendants} elements ({descendants/256*100:.1f}%)")
 
 
-def is_ancestor(potential_ancestor, element, parent_map):
+def is_ancestor(potential_ancestor: int, element: int, parent_map: dict[int, int]) -> bool:
     """Check if potential_ancestor is in the generation path of element."""
     current = element
     seen = set()
@@ -93,7 +93,7 @@ def is_ancestor(potential_ancestor, element, parent_map):
     return False
 
 
-def test_necessity():
+def test_necessity() -> None:
     """Test if each element of the 5-element basis is necessary."""
     physical_masks = {
         "L0": 0b10000001,
@@ -128,14 +128,15 @@ def test_necessity():
                         known.add(r)
                         queue.append(r)
 
-        print(f"Without 0x{remove:02x}: generates {len(known)} elements")
-        if len(known) < 256:
-            print(f"  → NECESSARY (missing {256 - len(known)} elements)")
+        closure_size = len(known)
+        print(f"Without 0x{remove:02x}: generates {closure_size} elements")
+        if closure_size < 256:
+            print(f"  → NECESSARY (missing {256 - closure_size} elements)")
         else:
-            print(f"  → REDUNDANT")
+            print("  → REDUNDANT")
 
 
-def main():
+def main() -> None:
     print("ANALYSIS OF THE 5-ELEMENT BASIS")
     print("=" * 70)
 

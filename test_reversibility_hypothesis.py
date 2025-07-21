@@ -2,7 +2,7 @@
 
 import numpy as np
 import time
-from typing import Set
+from typing import Tuple, Dict, Any
 
 # --- Configuration ---
 # You can adjust this, but 10,000 is a good balance of speed and rigor.
@@ -13,7 +13,7 @@ MAGIC_16_INTRONS = {0, 24, 36, 60, 66, 90, 102, 126, 170, 194, 206, 218, 234, 23
 # --- Core Physics (Copied directly from baby/governance.py for standalone testing) ---
 
 
-def build_masks_and_constants():
+def build_masks_and_constants() -> Tuple[int, np.ndarray, np.ndarray]:
     """Pre-computes transformation masks based on layer-based physics."""
     FG, BG = 0, 0
     for layer in range(4):
@@ -50,24 +50,24 @@ def build_masks_and_constants():
 FULL_MASK, XFORM_MASK, PATTERN_MASK = build_masks_and_constants()
 
 
-def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> np.ndarray:
+def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> "np.ndarray[np.uint64, Any]":
     """Vectorised transform for a batch of states (uint64)."""
     mask = XFORM_MASK[intron]
     pattern = PATTERN_MASK[intron]
     temp = states ^ mask
-    return temp ^ (temp & pattern)
+    return (temp ^ (temp & pattern)).astype(np.uint64)
 
 
 # --- Test Logic ---
 
 
-def run_reversibility_test(sample_size: int) -> dict:
+def run_reversibility_test(sample_size: int) -> Dict[str, Any]:
     """
     Tests the self-inverse property F_i(F_i(s)) == s for all 256 introns.
 
     Returns a dictionary with detailed results.
     """
-    print(f"--- Running Reversibility Test ---")
+    print("--- Running Reversibility Test ---")
     print(f"Generating a random sample of {sample_size} 48-bit states...")
 
     # Generate a random sample of 48-bit states as uint64
@@ -108,7 +108,7 @@ def run_reversibility_test(sample_size: int) -> dict:
     }
 
 
-def print_report(results: dict):
+def print_report(results: dict) -> None:
     """Prints a clear, human-readable report of the test results."""
 
     print("\n\n--- Reversibility Test Report ---")
