@@ -6,14 +6,14 @@ converting physical state indices into semantic meanings and managing
 the learning process through Monodromic Fold.
 """
 
-import time
 import hashlib
 import math
-from typing import Dict, Any, Tuple, Iterable, Optional, cast
+import time
+from typing import Any, Dict, Iterable, Optional, Tuple, cast
 
 from baby.contracts import PhenotypeEntry, ValidationReport
+from baby.governance import compute_governance_signature, fold, fold_sequence
 from baby.information import InformationEngine
-from baby.governance import fold, fold_sequence, compute_governance_signature
 
 
 class InferenceEngine:

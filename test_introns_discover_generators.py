@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 """
@@ -8,6 +8,7 @@ Explore the structure of the 5-element basis for fold algebra.
 """
 
 from collections import defaultdict
+
 from baby.governance import fold, transcribe_byte
 
 

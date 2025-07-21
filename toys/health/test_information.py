@@ -9,17 +9,18 @@ have been removed for speed and maintainability. For deep graph validation or
 property checks, run a dedicated script or notebook manually.
 """
 
-import pytest
-import numpy as np
 import json
 import os
 import random
-from typing import Generator, Any
+from typing import Any, Generator
+
+import numpy as np
+import pytest
+
+from baby import governance
 
 # Import the modules under test
 from baby.information import InformationEngine
-from baby import governance
-
 
 # --- Test Configuration ---
 

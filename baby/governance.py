@@ -6,10 +6,10 @@ the physical laws of the GyroSI system. No engine class is needed here;
 all operations are stateless functions.
 """
 
-import numpy as np
 from functools import reduce
-from typing import List, Tuple, Any, cast
+from typing import Any, List, Tuple, cast
 
+import numpy as np
 
 # Core genetic constants - Section 4.1 & 4.2
 GENE_Mic_S = 0xAA  # 10101010 binary, stateless constant

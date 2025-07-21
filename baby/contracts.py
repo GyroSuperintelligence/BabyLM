@@ -2,7 +2,7 @@
 Shared contracts (protocols and type definitions) for the GyroSI S4 system.
 """
 
-from typing import Protocol, Optional, Dict, Any, Tuple, TypedDict
+from typing import Any, Dict, Optional, Protocol, Tuple, TypedDict
 
 
 class GovernanceSignature(TypedDict):
@@ -68,6 +68,8 @@ class AgentConfig(TypedDict, total=False):
     enable_phenomenology_storage: Optional[bool]
     batch_size: Optional[int]
     phenomenology_map_path: Optional[str]
+    tokenizer_name: Optional[str]      # e.g. "bert-base-uncased"
+    tokenizer_mode: Optional[str]      # "input" | "io" | None
 
 
 class PreferencesConfig(TypedDict, total=False):

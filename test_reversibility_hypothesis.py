@@ -1,8 +1,9 @@
 # test_reversibility_hypothesis.py
 
-import numpy as np
 import time
-from typing import Tuple, Dict, Any
+from typing import Any, Dict, Tuple
+
+import numpy as np
 
 # --- Configuration ---
 # You can adjust this, but 10,000 is a good balance of speed and rigor.

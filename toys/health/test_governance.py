@@ -5,8 +5,8 @@ Tests the fundamental constants and pure functions that define
 the physical laws of the GyroSI system.
 """
 
-import pytest
 import numpy as np
+import pytest
 
 from baby import governance
 
@@ -191,8 +191,9 @@ class TestGyrogroupOperations:
         Validates that fold_sequence is non-associative and path-sensitive.
         For a fixed set of introns, different permutations must yield distinct outputs.
         """
-        from baby.governance import fold_sequence
         import itertools
+
+        from baby.governance import fold_sequence
 
         introns = [0x3C, 0xA5, 0x7E]
         perms = list(itertools.permutations(introns))

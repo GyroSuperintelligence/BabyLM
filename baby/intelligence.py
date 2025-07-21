@@ -5,21 +5,21 @@ This module provides the IntelligenceEngine and GyroSI classes responsible for
 orchestrating the complete system and providing the external API.
 """
 
-import time
-from typing import Dict, Any, Optional, List, cast, TypedDict
-from collections import OrderedDict
-from threading import RLock
-from collections import deque
-import numpy as np
 import json
-import uuid
 import os
+import time
+import uuid
+from collections import OrderedDict, deque
+from threading import RLock
+from typing import Any, Dict, List, Optional, TypedDict, cast
+
+import numpy as np
 
 from baby import governance
-from baby.information import InformationEngine
+from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig
 from baby.inference import InferenceEngine
-from baby.contracts import CycleHookFunction, AgentConfig, PreferencesConfig
-from baby.policies import OrbitStore, CanonicalView, OverlayView, ReadOnlyView
+from baby.information import InformationEngine
+from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
 
 
 class StateInfo(TypedDict):
@@ -671,7 +671,7 @@ class AgentPool:
             self.remove_agent(agent_id)
 
 
-def orchestrate_turn(pool: AgentPool, user_id: str, assistant_id: str, user_input: str) -> str:
+def orchestrate_turn(pool: AgentPool, user_id: str, assistant_id: str, user_input: str, tokenizer: Optional[str] = None) -> str:
     """
     Orchestrate a single conversational turn between agents.
 
@@ -680,6 +680,7 @@ def orchestrate_turn(pool: AgentPool, user_id: str, assistant_id: str, user_inpu
         user_id: User agent identifier
         assistant_id: Assistant agent identifier
         user_input: User's input text
+        tokenizer: Optional tokenizer name (e.g. "bert-base-uncased")
 
     Returns:
         Assistant's response text
@@ -688,15 +689,28 @@ def orchestrate_turn(pool: AgentPool, user_id: str, assistant_id: str, user_inpu
     user_agent = pool.get_or_create_agent(user_id, role_hint="user")
     assistant_agent = pool.get_or_create_agent(assistant_id, role_hint="assistant")
 
+    # Encode input
+    if tokenizer:
+        from toys.communication import tokenizer as tok
+        in_bytes = tok.encode(user_input, tokenizer)
+    else:
+        in_bytes = user_input.encode("utf-8")
+
     # User agent processes input, creating stimulus
-    stimulus = user_agent.respond(user_input.encode("utf-8"))
+    stimulus = user_agent.respond(in_bytes)
 
     # Assistant responds to stimulus
     response = assistant_agent.respond(stimulus)
 
-    # Decode response, handling potential encoding issues
-    try:
-        return response.decode("utf-8")
-    except UnicodeDecodeError:
-        # Fallback for non-UTF8 responses
-        return response.decode("utf-8", errors="replace")
+    # Decode response
+    if tokenizer:
+        try:
+            return response.decode("utf-8")
+        except UnicodeDecodeError:
+            from toys.communication import tokenizer as tok
+            return tok.decode(response, tokenizer)
+    else:
+        try:
+            return response.decode("utf-8")
+        except UnicodeDecodeError:
+            return response.decode("utf-8", errors="replace")

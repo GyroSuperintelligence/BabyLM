@@ -1,35 +1,37 @@
 # Requires Python 3.10 for full compatibility on Intel Mac
 
-# Core
-numpy
-ujson
+# Core dependencies
+numpy>=1.23.0
+ujson>=5.7.0
 
-#Extra
-emoji
-nltk
+# Extra features
+emoji>=2.8.0
+nltk>=3.8.1
 
-# Protocols
-fastapi
-uvicorn
-pydantic
+# Protocols / API
+fastapi>=0.100.0
+pydantic>=1.10.0
+uvicorn>=0.23.0
 
-# Files (For large file support, install git-lfs)
-httpx
+# File handling
+httpx>=0.24.0
 
-# Development dependencies
-pytest
+# Language processing
+tokenizers>=0.15.0
+transformers>=4.30.0
+
+# Development dependencies (install with `pip install -r requirements.txt --extra-index-url` or use a dev requirements file)
 black>=23.7.0
 flake8>=6.1.0
-mypy>=1.5.0
 isort>=5.12.0
-questionary
-psutil
-tqdm
+mypy>=1.5.0
+psutil>=5.9.0
+pytest>=7.4.0
+questionary>=2.0.1
+tqdm>=4.66.0
 
 # Type stubs for development
-types-tqdm
-types-json
-
-
+types-tqdm>=4.66.0
+types-ujson>=5.10.0
 
 

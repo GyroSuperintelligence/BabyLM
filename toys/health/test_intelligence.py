@@ -6,12 +6,14 @@ using the provided fixtures and actual implementations.
 """
 
 import os
-import pytest
 from pathlib import Path
 from typing import cast
-from baby.policies import OrbitStore, OverlayView
-from baby.intelligence import GyroSI, AgentPool
+
+import pytest
+
 from baby.contracts import PhenotypeEntry
+from baby.intelligence import AgentPool, GyroSI
+from baby.policies import OrbitStore, OverlayView
 
 
 class TestPolicies:

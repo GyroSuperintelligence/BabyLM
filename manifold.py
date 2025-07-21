@@ -9,6 +9,7 @@ original tensor-based model.
 """
 import time
 from collections import deque
+
 import numpy as np
 
 # ───────────────────────────────────────────────────────────────────

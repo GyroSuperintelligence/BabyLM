@@ -26,16 +26,18 @@ Methodology:
     non-associativity.
 5.  Report the statistical prevalence of this phenomenon.
 """
-import sys
 import os
-import numpy as np
 import random
+import sys
+
+import numpy as np
 from tqdm import tqdm
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 try:
-    from baby.governance import fold
     import ujson as json
+
+    from baby.governance import fold
 except ImportError:
     print("Error: Required modules not found. Ensure you are in the correct environment.")
     sys.exit(1)

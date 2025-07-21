@@ -2,16 +2,16 @@
 Tests for the inference module functionality.
 """
 
-import pytest
 import math
+from typing import Any, Dict, cast
 from unittest.mock import MagicMock
-import numpy as np
-from typing import Any, Dict
 
-from baby.inference import InferenceEngine
+import numpy as np
+import pytest
+
 from baby.governance import fold
+from baby.inference import InferenceEngine
 from toys.health.conftest import assert_phenotype_entry_valid
-from typing import cast
 
 
 def fold_sequence(introns: list[int]) -> int:

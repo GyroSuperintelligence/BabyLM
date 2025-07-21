@@ -18,32 +18,31 @@ All tests are lightweight and avoid large loops (old hardware friendly).
 
 from __future__ import annotations
 
-import os
 import json
+import os
+import random
 from pathlib import Path
-from typing import Dict, Any, Optional, cast
+from typing import Any, Dict, Optional, cast
 
 import pytest
+from fastapi.testclient import TestClient
 
-import random
 from baby.governance import (
-    compute_governance_signature,
-    EXON_LI_MASK,
-    EXON_FG_MASK,
     EXON_BG_MASK,
     EXON_DYNAMIC_MASK,
-    INTRON_BROADCAST_MASKS,
+    EXON_FG_MASK,
+    EXON_LI_MASK,
     FULL_MASK,
+    INTRON_BROADCAST_MASKS,
     apply_gyration_and_transform,
+    compute_governance_signature,
     fold,
     transcribe_byte,
 )
 from baby.inference import InferenceEngine
-from baby.intelligence import AgentPool, GyroSI
-from baby.policies import OverlayView, OrbitStore
 from baby.information import InformationEngine
-from fastapi.testclient import TestClient
-
+from baby.intelligence import AgentPool, GyroSI
+from baby.policies import OrbitStore, OverlayView
 
 # ---------------------------------------------------------------------------
 # Local helper
@@ -214,7 +213,7 @@ class TestStorageViews:
         if target_idx is None:
             pytest.skip("No non-trivial canonical pair found.")
 
-        from baby.policies import OrbitStore, CanonicalView
+        from baby.policies import CanonicalView, OrbitStore
 
         store_path = os.path.join(temp_dir, "canon.pkl.gz")
         base_store = OrbitStore(store_path, write_threshold=1)
@@ -277,8 +276,8 @@ class TestInferenceAndMaintenance:
             pytest.skip("Ontology missing.")
 
         ont = _load_json(ontology_path)
-        from baby.information import InformationEngine
         from baby.inference import InferenceEngine
+        from baby.information import InformationEngine
         from baby.policies import OrbitStore
 
         info = InformationEngine(ont)
@@ -333,8 +332,8 @@ class TestInferenceAndMaintenance:
         """
         ontology_path, _, _ = real_ontology
         ont = _load_json(ontology_path)
-        from baby.information import InformationEngine
         from baby.inference import InferenceEngine
+        from baby.information import InformationEngine
         from baby.policies import OrbitStore
 
         path = os.path.join(temp_dir, "maint.pkl.gz")
@@ -404,8 +403,9 @@ class TestInferenceAndMaintenance:
         """
         Surface test for global decay utility (non-engine path).
         """
-        from baby.policies import OrbitStore, apply_global_confidence_decay
         import time
+
+        from baby.policies import OrbitStore, apply_global_confidence_decay
 
         store_path = os.path.join(temp_dir, "global_decay.pkl.gz")
         st = OrbitStore(store_path, write_threshold=1)

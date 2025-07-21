@@ -1,19 +1,20 @@
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 """
 Shared pytest fixtures and configuration for GyroSI test suite.
 """
 
-import pytest
-from pathlib import Path
-from typing import Generator, Optional, Callable, List, Any, Dict, cast
 import shutil
+from pathlib import Path
+from typing import Any, Callable, Dict, Generator, List, Optional, cast
 
-from baby.policies import OrbitStore, OverlayView, ReadOnlyView
-from baby.intelligence import GyroSI, AgentPool, LRUAgentCache
+import pytest
+
 from baby.contracts import AgentConfig, PreferencesConfig
+from baby.intelligence import AgentPool, GyroSI, LRUAgentCache
+from baby.policies import OrbitStore, OverlayView, ReadOnlyView
 
 # Use the main stateless data files for all tests
 MAIN_MEMORIES_META = Path(__file__).parent.parent.parent / "memories" / "public" / "meta"

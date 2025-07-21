@@ -2,19 +2,20 @@
 Write/policy logic for GyroSI (S5): OrbitStore and storage decorators.
 """
 
-import os
-import gzip
-import pickle
-from pathlib import Path
-import json
-import time
-from typing import List, Optional, Dict, Tuple, Any, Iterator, cast
-import mmap
-import threading
-from baby.contracts import MaintenanceReport
 import concurrent.futures
-import math
+import gzip
+import json
 import logging
+import math
+import mmap
+import os
+import pickle
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional, Tuple, cast
+
+from baby.contracts import MaintenanceReport
 
 logger = logging.getLogger(__name__)
 
