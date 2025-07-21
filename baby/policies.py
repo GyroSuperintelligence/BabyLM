@@ -19,7 +19,6 @@ from baby.contracts import MaintenanceReport
 import threading
 import mmap
 import concurrent.futures
-import atexit
 import math
 import logging
 
@@ -362,7 +361,7 @@ def merge_phenotype_maps(
                 store = OrbitStore(path)  # will open <path>.log / .idx
                 source_data = store.data  # dict
                 store.close()
-            except Exception as e:
+            except Exception:
                 continue
         else:
             # original gzip/pickle fallback
@@ -372,7 +371,7 @@ def merge_phenotype_maps(
             try:
                 with gzip.open(path, "rb") as f:
                     source_data = pickle.load(f)
-            except Exception as e:
+            except Exception:
                 continue
 
         for context_key, entry in source_data.items():

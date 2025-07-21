@@ -1,4 +1,12 @@
 import warnings
+import numpy as np
+import argparse
+import time
+import os
+import sys
+from typing import Dict, Any, List, Tuple, Optional
+
+from baby import governance
 
 warnings.filterwarnings("ignore", message=".*found in sys.modules after import of package.*")
 """
@@ -12,27 +20,21 @@ Build steps:
    python -m baby.information ontology --output memories/public/meta/ontology_map.json
 
 2. Generate epistemology.npy (the state transition table)
-   python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json --output memories/public/meta/epistemology.npy
+   python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json \\
+       --output memories/public/meta/epistemology.npy
 
 3. Generate phenomenology_map.json (the phenomenology mapping)
-   python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy --output memories/public/meta/phenomenology_map.json --ontology memories/public/meta/ontology_map.json
+   python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy \\
+       --output memories/public/meta/phenomenology_map.json \\
+       --ontology memories/public/meta/ontology_map.json
 """
 
-import numpy as np
-import argparse
-import time
-import os
-import sys
-from typing import Dict, Any, List, Tuple, Set, Optional
 
 # Try to use ujson for speed, fall back to standard json if unavailable
 try:
     import ujson as json  # type: ignore[import]
 except ImportError:
     import json  # type: ignore
-
-from baby import governance
-from baby.contracts import PhenomenologyData
 
 
 class InformationEngine:
@@ -42,7 +44,8 @@ class InformationEngine:
     Sole authority for measurement and conversion between state representations.
     Provides the sensory apparatus through angular gyrodistance measurement.
 
-    If use_array_indexing is True, ontology_map and inverse_ontology_map are stored as numpy arrays for better memory/cache performance.
+    If use_array_indexing is True, ontology_map and inverse_ontology_map are stored
+    as numpy arrays for better memory/cache performance.
     """
 
     def __init__(
@@ -680,7 +683,8 @@ if __name__ == "__main__":
             if "_diagnostics" in pheno:
                 diag = pheno["_diagnostics"]["parity_free_analysis"]
                 print(
-                    f"Research diagnostic: {diag['total_orbits']} parity-free orbits, {diag['mirror_pairs']} chiral pairs"
+                    f"Research diagnostic: {diag['total_orbits']} parity-free orbits, "
+                    f"{diag['mirror_pairs']} chiral pairs"
                 )
 
         else:

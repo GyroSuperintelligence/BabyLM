@@ -57,10 +57,11 @@ class IntelligenceEngine:
 
                 self.epistemology = np.load(epistemology_path, mmap_mode="r")
                 self.use_epistemology = True
-                print("INFO: State Transition Table (STT) loaded. Using optimized state transitions.")
+                print("INFO: State Transition Table (STT) loaded. " "Using optimized state transitions.")
             except Exception as e:
                 print(
-                    f"WARNING: Could not load STT from {epistemology_path}. Error: {e}. Falling back to dynamic physics."
+                    f"WARNING: Could not load STT from {epistemology_path}. "
+                    f"Error: {e}. Falling back to dynamic physics."
                 )
 
         origin_int = self.s2.tensor_to_int(governance.GENE_Mac_S)
@@ -442,6 +443,7 @@ class GyroSI:
         batch_size = self.config.get("batch_size", 100)
         if batch_size is None:
             batch_size = 100
+        phenomenology_map_path = None  # Ensure always defined
         if public_knowledge_path is not None:
             # Multi-agent setup with public/private knowledge
             private_path = self.config.get("private_knowledge_path")
@@ -451,6 +453,7 @@ class GyroSI:
             public_store = ReadOnlyView(OrbitStore(public_knowledge_path, write_threshold=batch_size))
             private_store = OrbitStore(private_path, write_threshold=batch_size)
             base_store = OverlayView(public_store, private_store)
+            phenomenology_map_path = self.config.get("phenomenology_map_path")
         else:
             # Single-agent setup
             knowledge_path = self.config.get("knowledge_path")
@@ -460,8 +463,9 @@ class GyroSI:
 
             # CanonicalView: enable if flag is True, or autodetect if None and file exists
             phenomenology_map_path = self.config.get("phenomenology_map_path")
-            if phenomenology_map_path is None:
-                phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
+        # Ensure phenomenology_map_path is always a str before use
+        if phenomenology_map_path is None:
+            phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
         if enable_phenomenology is not False:
             if enable_phenomenology or (enable_phenomenology is None and os.path.exists(phenomenology_map_path)):
                 if os.path.exists(phenomenology_map_path):

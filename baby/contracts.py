@@ -17,8 +17,11 @@ class PhenotypeEntry(TypedDict, total=False):
     """
     Structure of a phenotype entry in the knowledge store.
 
-    - context_signature MAY be canonical; if canonicalisation is applied (e.g., via CanonicalView), the original physical context is stored in _original_context.
-    - exon_mask is immutable under decay (decay only affects confidence, not exon_mask).
+    - context_signature MAY be canonical; if canonicalisation is applied (e.g.,
+      via CanonicalView), the original physical context is stored in
+      _original_context.
+    - exon_mask is immutable under decay (decay only affects confidence, not
+      exon_mask).
     """
 
     phenotype: str

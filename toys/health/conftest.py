@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from baby.intelligence import GyroSI, AgentPool
+from baby.intelligence import GyroSI, AgentPool, LRUAgentCache
 from baby.contracts import AgentConfig, PreferencesConfig
 from baby.policies import OrbitStore, OverlayView, ReadOnlyView
 
@@ -89,6 +89,18 @@ def overlay_store(temp_dir):
 
 
 @pytest.fixture
+def real_orbit_store(temp_dir):
+    """
+    Provides a real OrbitStore using the main ontology and phenomenology, but stores all data in temp_dir.
+    Use this fixture in tests that want to test the real OrbitStore logic without polluting the main memories folder.
+    """
+    store_path = os.path.join(temp_dir, "real_knowledge.pkl.gz")
+    store = OrbitStore(store_path)
+    yield store
+    store.close()
+
+
+@pytest.fixture
 def agent_config(temp_dir) -> AgentConfig:
     """Create a test agent configuration, always using the real ontology."""
     return {
@@ -108,12 +120,41 @@ def gyrosi_agent(agent_config):
 
 @pytest.fixture
 def agent_pool(temp_dir):
-    """Create an agent pool using the real ontology."""
+    """Create an agent pool using the real ontology, with all agent data isolated to temp_dir."""
     public_knowledge = os.path.join(temp_dir, "public_knowledge.pkl.gz")
     os.makedirs(os.path.dirname(public_knowledge), exist_ok=True)
     store = OrbitStore(public_knowledge)
     store.close()
-    pool = AgentPool(ONTOLOGY_PATH, public_knowledge)
+
+    import time  # Only import time if needed
+
+    class TestAgentPool(AgentPool):
+        def get_or_create_agent(self, agent_id: str, role_hint: str = None) -> GyroSI:
+            with self._lock:
+                if self.eviction_policy == "ttl":
+                    self.agent_access_times[agent_id] = time.time()
+                    self._evict_expired_agents()
+                if agent_id not in self.agents:
+                    if not isinstance(self.agents, LRUAgentCache):
+                        self._maybe_evict_agent()
+                    # Use a private knowledge path inside temp_dir
+                    private_path = os.path.join(temp_dir, f"agents/{agent_id}/knowledge.pkl.gz")
+                    os.makedirs(os.path.dirname(private_path), exist_ok=True)
+                    public_store = ReadOnlyView(OrbitStore(self.base_knowledge_path, write_threshold=100))
+                    private_store = OrbitStore(private_path, write_threshold=100)
+                    store = OverlayView(public_store, private_store)
+                    config: AgentConfig = {
+                        "ontology_path": self.ontology_path,
+                        "public_knowledge_path": self.base_knowledge_path,
+                        "private_knowledge_path": private_path,
+                        "enable_phenomenology_storage": self.preferences.get("enable_phenomenology_storage", False),
+                    }
+                    if role_hint:
+                        config["agent_metadata"] = {"role_hint": role_hint}
+                    self.agents[agent_id] = GyroSI(config=config, agent_id=agent_id, phenotype_store=store)
+                return self.agents[agent_id]
+
+    pool = TestAgentPool(ONTOLOGY_PATH, public_knowledge)
     yield pool
     pool.close_all()
 
