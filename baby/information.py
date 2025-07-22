@@ -78,6 +78,12 @@ class InformationEngine:
             if self.ontology_map is None:
                 raise RuntimeError("Ontology map must be provided.")
             keys_arr = np.array(sorted(self.ontology_map.keys()), dtype=np.uint64)
+            # Assert that the mapping is index == sorted position (array mode assumption)
+            sorted_map = self.ontology_map
+            assert all(v == i for i, v in enumerate(sorted_map.values())), (
+                "Ontology map indices must match sorted order for array mode. "
+                "If this fails, store a real inverse array instead."
+            )
             self._keys = keys_arr
             self._inverse = keys_arr  # index -> state_int
             # Free memory: drop the original mapping in array mode
@@ -123,6 +129,13 @@ class InformationEngine:
             else:
                 # Fallback: keep all ones
                 pass
+
+        # Cache the archetypal state as an int
+        self._origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
+        # Precompute acos LUT for 0..48 bits
+        self._acos_lut = np.arccos(1 - 2 * np.arange(49) / 48.0).astype(np.float32)
+        # Debug/env switch for fallback
+        self._use_fast_divergence = os.environ.get("BABYLM_USE_FAST_DIVERGENCE", "1") != "0"
 
     def get_index_from_state(self, state_int: int) -> int:
         """
@@ -271,6 +284,13 @@ class InformationEngine:
 
         return float(np.arccos(cosine_similarity))
 
+    def _angular_divergence_fast(self, state_int: int) -> float:
+        """
+        Fast angular divergence using XOR+bit_count and LUT.
+        """
+        h = (state_int ^ self._origin_int).bit_count()
+        return float(self._acos_lut[h])
+
     def measure_state_divergence(self, state_int: int) -> float:
         """
         Measure angular divergence from the archetypal tensor state (GENE_Mac_S).
@@ -281,8 +301,11 @@ class InformationEngine:
         Returns:
             Angular divergence in radians
         """
-        current_tensor = self.int_to_tensor(state_int)
-        return self.gyrodistance_angular(current_tensor, governance.GENE_Mac_S)
+        if getattr(self, '_use_fast_divergence', True):
+            return self._angular_divergence_fast(state_int)
+        else:
+            current_tensor = self.int_to_tensor(state_int)
+            return self.gyrodistance_angular(current_tensor, governance.GENE_Mac_S)
 
     def get_orbit_cardinality(self, state_index: int) -> int:
         return int(self.orbit_cardinality[state_index])
@@ -406,14 +429,15 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
     for chunk_start in range(0, N, CHUNK_SIZE):
         chunk_end = min(chunk_start + CHUNK_SIZE, N)
         chunk_states = states[chunk_start:chunk_end]
-        for intron in range(256):
-            next_states = governance.apply_gyration_and_transform_batch(chunk_states, intron)
-            idxs = np.searchsorted(states, next_states)
-            # Debug check: ensure all next_states are in the ontology
-            if __debug__:
-                if idxs.max() >= states.size or not np.array_equal(states[idxs], next_states):
-                    raise RuntimeError("Transition produced unknown state.")
-            ep[chunk_start:chunk_end, intron] = idxs
+        # Vectorized: apply all introns at once
+        next_states_all = governance.apply_gyration_and_transform_all_introns(chunk_states)
+        # next_states_all shape: (chunk_len, 256)
+        idxs = np.searchsorted(states, next_states_all, side='left')
+        # Debug check: ensure all next_states are in the ontology
+        if __debug__:
+            if idxs.max() >= states.size or not np.all(states[idxs] == next_states_all):
+                raise RuntimeError("Transition produced unknown state.")
+        ep[chunk_start:chunk_end, :] = idxs
         progress.update(chunk_end, N)
 
     ep.flush()
@@ -430,14 +454,7 @@ def _compute_sccs(
 ) -> Tuple[np.ndarray, Dict[int, int], List[int]]:
     """
     Core Tarjan's SCC algorithm restricted to a subset of introns.
-
-    Args:
-        ep: Epistemology table of shape (N, 256)
-        idx_to_state: Mapping from index to state integer
-        introns_to_use: Subset of introns to include in the graph
-
-    Returns:
-        Tuple of (canonical_map, orbit_sizes, representatives)
+    Optimized: neighbors() does not np.unique, just returns ep[v, introns_arr].
     """
     N = ep.shape[0]
     indices = np.full(N, -1, dtype=np.int32)
@@ -451,7 +468,8 @@ def _compute_sccs(
     introns_arr = np.array(introns_to_use, dtype=np.int32)
 
     def neighbors(v: int) -> "np.ndarray[np.int32, Any]":
-        return cast("np.ndarray[np.int32, Any]", np.unique(ep[v, introns_arr]).astype(np.int32))
+        # No np.unique, just return all neighbors (duplicates are fine)
+        return ep[v, introns_arr]
 
     for root in range(N):
         if indices[root] != -1:
@@ -465,16 +483,16 @@ def _compute_sccs(
         while dfs_stack:
             v, child_iter = dfs_stack[-1]
             try:
-                w = int(next(child_iter))
-                if indices[w] == -1:
+                while True:
+                    w = int(next(child_iter))
+                    if indices[w] != -1:
+                        continue  # Skip already-visited
                     indices[w] = lowlink[w] = counter
                     counter += 1
                     stack.append(w)
                     on_stack[w] = True
                     dfs_stack.append((w, iter(neighbors(w))))
-                elif on_stack[w]:
-                    if indices[w] < lowlink[v]:
-                        lowlink[v] = indices[w]
+                    break
             except StopIteration:
                 dfs_stack.pop()
                 if dfs_stack:

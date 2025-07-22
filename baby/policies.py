@@ -10,6 +10,7 @@ import math
 import mmap
 import os
 import pickle
+import msgpack
 import threading
 import time
 from pathlib import Path
@@ -18,6 +19,30 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, cast
 from baby.contracts import MaintenanceReport
 
 logger = logging.getLogger(__name__)
+
+# Singleton cache for phenomenology maps by path
+_phenomenology_map_cache = {}
+_phenomenology_map_lock = threading.Lock()
+
+def load_phenomenology_map(phenomenology_map_path: str):
+    """Load and cache the phenomenology map from disk, shared between all CanonicalViews."""
+    with _phenomenology_map_lock:
+        if phenomenology_map_path in _phenomenology_map_cache:
+            return _phenomenology_map_cache[phenomenology_map_path]
+        with open(phenomenology_map_path, "r") as f:
+            loaded = json.load(f)
+            if isinstance(loaded, list):
+                raw_map = loaded
+            elif isinstance(loaded, dict) and "phenomenology_map" in loaded:
+                raw_map = loaded["phenomenology_map"]
+            else:
+                raise ValueError("Unrecognized phenomenology map format")
+            if isinstance(raw_map, list):
+                phen_map = {i: rep for i, rep in enumerate(raw_map)}
+            else:
+                phen_map = {int(k): int(v) for k, v in raw_map.items()}
+            _phenomenology_map_cache[phenomenology_map_path] = phen_map
+            return phen_map
 
 
 class OrbitStore:
@@ -32,7 +57,7 @@ class OrbitStore:
         self.lock = threading.RLock()
         self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
         self.log_file: Optional[Any] = None
-        self.pending_writes: list[tuple[tuple[int, int], Any]] = []
+        self.pending_writes: Dict[Tuple[int, int], Any] = {}
         self._mmap: Optional[mmap.mmap] = None
         self._mmap_size = 0
         self._load_index()
@@ -42,6 +67,8 @@ class OrbitStore:
         self._flush_count = 0
         self._fsync_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._pending_fsync: Optional[concurrent.futures.Future] = None
+        self._last_fsync = 0.0
+        self._fsync_interval = 0.05  # 50ms or configurable
 
     def _open_mmap(self) -> None:
         if self._mmap:
@@ -57,9 +84,8 @@ class OrbitStore:
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
         with self.lock:
             # Check unflushed writes first
-            for k, entry in reversed(self.pending_writes):
-                if k == context_key:
-                    return entry
+            if context_key in self.pending_writes:
+                return self.pending_writes[context_key]
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
@@ -68,7 +94,7 @@ class OrbitStore:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
                         entry_data = f.read(size)
-                return pickle.loads(entry_data)
+                return msgpack.unpackb(entry_data, raw=False)
         return None
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
@@ -77,14 +103,13 @@ class OrbitStore:
             if "context_signature" not in entry:
                 entry = entry.copy()
                 entry["context_signature"] = context_key
-            self.pending_writes.append((context_key, entry.copy()))
+            self.pending_writes[context_key] = entry.copy()
             if len(self.pending_writes) >= self.write_threshold:
                 pending_fsync = self._flush()
         if pending_fsync:
             pending_fsync.result()
 
     def commit(self) -> None:
-        pending_fsync = None
         with self.lock:
             # Always flush to ensure index is up to date
             self._flush()
@@ -94,8 +119,6 @@ class OrbitStore:
                 current_size = os.path.getsize(self.log_path)
                 if self._mmap is None or current_size != self._mmap_size:
                     self._open_mmap()
-        if pending_fsync:
-            pending_fsync.result()
         # Ensure commit waits for the pending fsync to complete
         if self._pending_fsync:
             self._pending_fsync.result()
@@ -104,16 +127,19 @@ class OrbitStore:
         pending_fsync = None
         if not self.log_file or not self.pending_writes:
             return None
-        for context_key, entry in self.pending_writes:
-            data = pickle.dumps(entry, protocol=pickle.HIGHEST_PROTOCOL)
+        for context_key, entry in self.pending_writes.items():
+            data = msgpack.packb(entry, use_bin_type=True)
             offset = self.log_file.tell()
             size = len(data)
             self.log_file.write(data)
             self.index[context_key] = (offset, size)
         self.log_file.flush()
+        now = time.time()
+        if now - self._last_fsync > self._fsync_interval:
+            self._pending_fsync = self._fsync_executor.submit(os.fsync, self.log_file.fileno())
+            self._last_fsync = now
         if self._pending_fsync:
             pending_fsync = self._pending_fsync
-        self._pending_fsync = self._fsync_executor.submit(os.fsync, self.log_file.fileno())
         self.pending_writes.clear()
         self._flush_count += 1
         if self._flush_count >= 10:
@@ -122,6 +148,13 @@ class OrbitStore:
             self._flush_count = 0
         return pending_fsync
 
+    def mark_dirty(self, context_key: Tuple[int, int], entry: Any) -> None:
+        """
+        Mark an entry as dirty in memory without serializing to disk immediately.
+        """
+        with self.lock:
+            self.pending_writes[context_key] = entry.copy()
+
     def _load_index(self) -> None:
         if os.path.exists(self.index_path):
             with gzip.open(self.index_path, "rb") as f:
@@ -129,18 +162,21 @@ class OrbitStore:
             return
         if not os.path.exists(self.log_path):
             return
+        # Replay log only if index is missing, reading in 1MB chunks to avoid memory spikes
         with open(self.log_path, "rb") as f:
             offset = 0
+            unpacker = msgpack.Unpacker(use_list=False, raw=False)
             while True:
-                try:
-                    entry = pickle.load(f)
+                chunk = f.read(1024 * 1024)  # 1MB
+                if not chunk:
+                    break
+                unpacker.feed(chunk)
+                for entry in unpacker:
                     size = f.tell() - offset
                     if "context_signature" in entry:
                         context_key = entry["context_signature"]
                         self.index[context_key] = (offset, size)
                     offset = f.tell()
-                except EOFError:
-                    break
 
     def delete(self, context_key: Tuple[int, int]) -> None:
         with self.lock:
@@ -174,10 +210,16 @@ class OrbitStore:
         with open(self.log_path, "rb") as f:
             while True:
                 try:
-                    entry = pickle.load(f)
-                    if "context_signature" in entry:
-                        context_key = entry["context_signature"]
-                        entries[context_key] = entry
+                    entry_data = f.read()
+                    if not entry_data:
+                        break
+                    unpacker = msgpack.Unpacker(use_list=False, raw=False)
+                    unpacker.feed(entry_data)
+                    for entry in unpacker:
+                        if "context_signature" in entry:
+                            context_key = entry["context_signature"]
+                            entries[context_key] = entry
+                    break
                 except EOFError:
                     break
         return entries
@@ -204,7 +246,8 @@ class OrbitStore:
         with open(self.log_path, "rb") as f:
             for context_key, (offset, size) in self.index.items():
                 f.seek(offset)
-                entry = pickle.load(f)
+                entry_data = f.read(size)
+                entry = msgpack.unpackb(entry_data, raw=False)
                 if "context_signature" in entry:
                     yield context_key, entry
 
@@ -215,19 +258,8 @@ class CanonicalView:
 
         self.base_store = base_store
         self.lock = getattr(base_store, "lock", threading.RLock())
-        with open(phenomenology_map_path, "r") as f:
-            loaded = json.load(f)
-            if isinstance(loaded, list):
-                raw_map = loaded
-            elif isinstance(loaded, dict) and "phenomenology_map" in loaded:
-                raw_map = loaded["phenomenology_map"]
-            else:
-                raise ValueError("Unrecognized phenomenology map format")
-
-            if isinstance(raw_map, list):
-                self.phenomenology_map = {i: rep for i, rep in enumerate(raw_map)}
-            else:
-                self.phenomenology_map = {int(k): int(v) for k, v in raw_map.items()}
+        # Use shared singleton loader for the phenomenology map
+        self.phenomenology_map = load_phenomenology_map(phenomenology_map_path)
 
     def _get_phenomenology_key(self, context_key: Tuple[int, int]) -> Tuple[int, int]:
         tensor_index, intron = context_key
@@ -702,6 +734,131 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
         success=len(issues) == 0,
         entries_processed=len(ontology_map),
         entries_modified=0,
+        elapsed_seconds=elapsed,
+    )
+
+
+def prune_and_compact_store(
+    store_path: str,
+    output_path: Optional[str] = None,
+    max_age_days: Optional[float] = None,
+    min_confidence: Optional[float] = None,
+    dry_run: bool = False,
+    archive_summary_path: Optional[str] = None,
+) -> MaintenanceReport:
+    """
+    Prune and compact an OrbitStore in one pass.
+
+    This removes phenotypes that are older than `max_age_days` and/or below
+    `min_confidence`, then rewrites the log with only retained entries so
+    stale historical versions are discarded.
+
+    Args:
+        store_path: Base path of the OrbitStore (same value passed to OrbitStore()).
+        output_path: Optional destination path. If None, compacts in-place.
+        max_age_days: Remove entries whose last_updated is older than now - max_age_days.
+        min_confidence: Remove entries with confidence < min_confidence.
+        dry_run: If True, only report what would be removed.
+        archive_summary_path: If provided, write JSON summary of pruned entries.
+
+    Returns:
+        MaintenanceReport describing the operation.
+    """
+    start_time = time.time()
+    now = time.time()
+
+    # Resolve output destination
+    destination = output_path or store_path
+
+    # Load source store
+    source_store = OrbitStore(store_path)
+    total_entries = 0
+    pruned_entries = 0
+
+    keep: Dict[Tuple[int, int], Any] = {}
+    archive_summary: Dict[str, Any] = {
+        "pruned": [],
+        "criteria": {
+            "max_age_days": max_age_days,
+            "min_confidence": min_confidence,
+        },
+        "generated_at": now,
+        "source_path": store_path,
+        "output_path": destination,
+    }
+
+    # Thresholds
+    age_cutoff_ts: Optional[float] = None
+    if max_age_days is not None and max_age_days > 0:
+        age_cutoff_ts = now - (max_age_days * 24 * 3600)
+
+    for key, entry in source_store.iter_entries():
+        total_entries += 1
+        conf = entry.get("confidence", 0.0)
+        last_updated = entry.get("last_updated", now)
+
+        remove = False
+        if min_confidence is not None and conf < min_confidence:
+            remove = True
+        if age_cutoff_ts is not None and last_updated < age_cutoff_ts:
+            remove = True
+
+        if remove:
+            pruned_entries += 1
+            if archive_summary_path:
+                archive_summary["pruned"].append(
+                    {
+                        "key": list(key),
+                        "confidence": float(conf),
+                        "last_updated": float(last_updated),
+                        "usage_count": int(entry.get("usage_count", 0)),
+                    }
+                )
+        else:
+            keep[key] = entry
+
+    # If dry-run, do not modify anything
+    if dry_run:
+        source_store.close()
+        elapsed = time.time() - start_time
+        if archive_summary_path:
+            os.makedirs(os.path.dirname(archive_summary_path) or ".", exist_ok=True)
+            with open(archive_summary_path, "w") as f:
+                json.dump(archive_summary, f)
+        return MaintenanceReport(
+            operation="prune_and_compact_store",
+            success=True,
+            entries_processed=total_entries,
+            entries_modified=pruned_entries,
+            elapsed_seconds=elapsed,
+        )
+
+    # Perform compaction into destination
+    # If destination == store_path we reuse the existing instance
+    if destination == store_path:
+        # Rewrite in-place using existing store API
+        source_store.set_data_dict(keep)
+        source_store.commit()
+        source_store.close()
+    else:
+        # Write to new path
+        source_store.close()
+        dest_store = OrbitStore(destination)
+        dest_store.set_data_dict(keep)
+        dest_store.commit()
+        dest_store.close()
+
+    if archive_summary_path:
+        os.makedirs(os.path.dirname(archive_summary_path) or ".", exist_ok=True)
+        with open(archive_summary_path, "w") as f:
+            json.dump(archive_summary, f)
+
+    elapsed = time.time() - start_time
+    return MaintenanceReport(
+        operation="prune_and_compact_store",
+        success=True,
+        entries_processed=total_entries,
+        entries_modified=pruned_entries,
         elapsed_seconds=elapsed,
     )
 

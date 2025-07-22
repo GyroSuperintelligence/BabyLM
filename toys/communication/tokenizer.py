@@ -8,19 +8,31 @@ from pathlib import Path
 from functools import lru_cache
 from typing import List
 from tokenizers import Tokenizer
+import os
+import numpy as np
 
-_ROOT = Path("memories/public/tokenizers")
+# Use an absolute path for _ROOT based on the file location
+_ROOT = (Path(__file__).resolve().parent / "../../../memories/public/tokenizers").resolve()
 
-@lru_cache(maxsize=8)
+# Module-level tokenizer cache keyed by (name, mtime)
+_tokenizer_cache = {}
+
 def _load(name: str = "bert-base-uncased") -> Tokenizer:
-    """Load and cache a tokenizer from disk."""
+    """Load and cache a tokenizer from disk, auto-reload if file changes."""
     path = _ROOT / name / "tokenizer.json"
     if not path.exists():
         raise FileNotFoundError(
             f"Tokenizer '{name}' not installed at {path}. "
             "Run: python toys/communication/setup_tokenizers.py"
         )
-    return Tokenizer.from_file(str(path))
+    mtime = os.path.getmtime(path)
+    cache_key = (name, mtime)
+    if cache_key in _tokenizer_cache:
+        return _tokenizer_cache[cache_key]
+    tokenizer = Tokenizer.from_file(str(path))
+    _tokenizer_cache.clear()  # Only keep one loaded at a time
+    _tokenizer_cache[cache_key] = tokenizer
+    return tokenizer
 
 # ---------- LEB128 encoding ----------
 def _id_to_bytes(idx: int) -> List[int]:
@@ -57,12 +69,24 @@ def _bytes_to_ids(blob: bytes) -> List[int]:
 
 # ---------- Public API ----------
 def encode(text: str, name: str = "bert-base-uncased") -> bytes:
-    """Encode text to bytes via tokenizer + LEB128."""
+    """Encode text to bytes via tokenizer + LEB128 (vectorized)."""
     ids = _load(name).encode(text).ids
-    flat: List[int] = []
+    # Estimate max output size: each id can take up to 5 bytes (for 32-bit int)
+    out = bytearray(len(ids) * 5)
+    pos = 0
     for i in ids:
-        flat.extend(_id_to_bytes(i))
-    return bytes(flat)
+        val = i
+        while True:
+            b = val & 0x7F
+            val >>= 7
+            if val:
+                out[pos] = b | 0x80
+                pos += 1
+            else:
+                out[pos] = b
+                pos += 1
+                break
+    return bytes(out[:pos])
 
 def decode(blob: bytes, name: str = "bert-base-uncased") -> str:
     """Decode LEB128 bytes back to text via tokenizer."""

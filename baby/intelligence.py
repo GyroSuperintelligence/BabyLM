@@ -11,7 +11,7 @@ import time
 import uuid
 from collections import OrderedDict, deque
 from threading import RLock
-from typing import Any, Dict, List, Optional, TypedDict, cast
+from typing import Any, Dict, List, Optional, TypedDict, cast, TYPE_CHECKING
 
 import numpy as np
 
@@ -20,6 +20,11 @@ from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
+
+import warnings
+if TYPE_CHECKING:
+    from toys.communication import tokenizer as tok
+import hashlib
 
 
 class StateInfo(TypedDict):
@@ -40,7 +45,7 @@ class IntelligenceEngine:
     and implements operational strategies. Handles adaptation to external demands.
     """
 
-    def __init__(self, ontology_path: str, phenotype_store: Any, agent_id: Optional[str] = None):
+    def __init__(self, ontology_path: str, phenotype_store: Any, agent_id: Optional[str] = None, hook_batch_interval: int = 8):
         """
         Initialize intelligence engine.
 
@@ -48,6 +53,7 @@ class IntelligenceEngine:
             ontology_path: Path to discovered ontology data
             phenotype_store: Storage interface for learned knowledge
             agent_id: Unique identifier for this agent instance
+            hook_batch_interval: Number of cycles between hook processing (default 8)
         """
         # Initialize subsystem engines
         self.s2: InformationEngine = InformationEngine(self._load_ontology(ontology_path))
@@ -83,6 +89,8 @@ class IntelligenceEngine:
         self._microstep_count: int = 0  # Track internal cooling/autonomic steps
         # Extension points
         self.post_cycle_hooks: List[CycleHookFunction] = []
+        self._hook_event_buffer = deque(maxlen=hook_batch_interval)
+        self._hook_batch_interval = hook_batch_interval
 
         # Algedonic regulation and autonomic cycles
         self._θ_buf: deque = deque(maxlen=128)
@@ -156,9 +164,17 @@ class IntelligenceEngine:
         # S3: Learn through Monodromic Fold
         self.operator.learn(phenotype_entry, last_intron)
 
-        # Execute post-cycle hooks for monitoring/maintenance
-        for hook in self.post_cycle_hooks:
-            hook(self, phenotype_entry, last_intron)
+        # Buffer hook events and process hooks every N cycles, unless pain spike
+        self._hook_event_buffer.append((self, phenotype_entry, last_intron))
+        process_hooks_now = False
+        θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
+        if θ > self._θ_high or len(self._hook_event_buffer) >= self._hook_batch_interval:
+            process_hooks_now = True
+        if process_hooks_now and self.post_cycle_hooks:
+            while self._hook_event_buffer:
+                event = self._hook_event_buffer.popleft()
+                for hook in self.post_cycle_hooks:
+                    hook(*event)
 
         # Store original phenotype_entry for output
         output_phenotype_entry = phenotype_entry
@@ -378,34 +394,42 @@ class GyroSI:
         """
         Generate an intelligent response to input data.
 
-        Each byte of input triggers an egress→ingress cycle, producing
-        one byte of intelligent output based on accumulated knowledge.
-
         Args:
             data: Input bytes to respond to
 
         Returns:
             Intelligent response bytes
         """
-        response = bytearray()
-
         if not data:
-            return bytes(response)
+            return b""
 
+        introns = []
         for byte in data:
-            # Egress: Transform input into internal action
             intron = self.engine.process_egress(byte)
+            introns.append(intron)
 
-            # Ingress: Learn and generate intelligent response
-            output_byte = self.engine.process_ingress(intron)
-            response.append(output_byte)
+        # Option 1: classic per-byte ingress (status quo)
+        # response = bytearray()
+        # for intron in introns:
+        #     output_byte = self.engine.process_ingress(intron)
+        #     response.append(output_byte)
+        # return bytes(response)
 
-        # Ensure pending writes are flushed
+        # Option 2: fold to one ingress (batched)
+        acc = 0
+        for intron in introns:
+            acc = governance.fold(acc, intron)
+
+        output_byte = self.engine.process_ingress(acc)
+        response = bytes([output_byte])  # one-byte response
+
+        self._commit_if_needed()
+        return response
+
+    def _commit_if_needed(self):
         store = self.engine.operator.store
         if isinstance(store, OrbitStore):
             store.commit()
-        # Removed automatic close()
-        return bytes(response)
 
     def get_agent_info(self) -> Dict[str, Any]:
         """
@@ -525,7 +549,9 @@ class LRUAgentCache(OrderedDict):
 
 
 class AgentPool:
-    """Manages a collection of independent GyroSI agents with eviction policy."""
+    """Manages a collection of independent GyroSI agents with eviction policy, using sharded pools for concurrency."""
+
+    SHARD_COUNT = 16  # Power of two for fast masking
 
     def __init__(self, ontology_path: str, base_knowledge_path: str, preferences: Optional[PreferencesConfig] = None):
         """
@@ -544,15 +570,25 @@ class AgentPool:
         max_agents = self.preferences.get("max_agents_in_memory", 1000)
         self.eviction_policy = self.preferences.get("agent_eviction_policy", "lru")
         self.agent_access_times: Dict[str, float] = {}  # Always initialize
-        # Initialize agent storage based on eviction policy
-        self.agents: Any
-        if self.eviction_policy == "lru":
-            self.agents = LRUAgentCache(max_agents)
-        else:
-            # Simple dict with manual eviction
-            self.agents = {}
-            self.max_agents = max_agents
-        self._lock = RLock()
+        # Sharded agent storage and locks
+        self._shards = []
+        for _ in range(self.SHARD_COUNT):
+            if self.eviction_policy == "lru":
+                self._shards.append({
+                    "agents": LRUAgentCache(max_agents // self.SHARD_COUNT),
+                    "lock": RLock()
+                })
+            else:
+                self._shards.append({
+                    "agents": OrderedDict(),
+                    "lock": RLock()
+                })
+        # Cache a single public read-only store
+        self._public_store = ReadOnlyView(OrbitStore(base_knowledge_path, write_threshold=100))
+
+    def _shard_index(self, agent_id: str) -> int:
+        # Use hash for even distribution; mask for power-of-two
+        return (hash(agent_id) if isinstance(agent_id, str) else agent_id) & (self.SHARD_COUNT - 1)
 
     def get_or_create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
         """
@@ -565,16 +601,19 @@ class AgentPool:
         Returns:
             GyroSI agent instance
         """
-        with self._lock:
+        idx = self._shard_index(agent_id)
+        shard = self._shards[idx]
+        with shard["lock"]:
+            agents = shard["agents"]
             # Update access time for TTL-based eviction
             if self.eviction_policy == "ttl":
                 self.agent_access_times[agent_id] = time.time()
                 self._evict_expired_agents()
 
-            if agent_id not in self.agents:
+            if agent_id not in agents:
                 # Check if we need to evict before creating new
-                if not isinstance(self.agents, LRUAgentCache):
-                    self._maybe_evict_agent()
+                if not isinstance(agents, LRUAgentCache):
+                    self._maybe_evict_agent(shard)
 
                 # Create private knowledge path
                 private_path = f"memories/private/agents/{agent_id}/knowledge.pkl.gz"
@@ -582,8 +621,8 @@ class AgentPool:
                 # Ensure directory exists
                 os.makedirs(os.path.dirname(private_path), exist_ok=True)
 
-                # Multi-agent overlay using decorators
-                public_store = ReadOnlyView(OrbitStore(self.base_knowledge_path, write_threshold=100))
+                # Multi-agent overlay using decorators, reuse cached public store
+                public_store = self._public_store
                 private_store = OrbitStore(private_path, write_threshold=100)
                 store = OverlayView(public_store, private_store)
 
@@ -599,9 +638,9 @@ class AgentPool:
                 if role_hint:
                     config["agent_metadata"] = {"role_hint": role_hint}
 
-                self.agents[agent_id] = GyroSI(config=config, agent_id=agent_id, phenotype_store=store)
+                agents[agent_id] = GyroSI(config=config, agent_id=agent_id, phenotype_store=store)
 
-            return cast(GyroSI, self.agents[agent_id])
+            return cast(GyroSI, agents[agent_id])
 
     def remove_agent(self, agent_id: str) -> bool:
         """
@@ -613,10 +652,13 @@ class AgentPool:
         Returns:
             True if agent was found and removed
         """
-        with self._lock:
-            if agent_id in self.agents:
-                self.agents[agent_id].close()
-                del self.agents[agent_id]
+        idx = self._shard_index(agent_id)
+        shard = self._shards[idx]
+        with shard["lock"]:
+            agents = shard["agents"]
+            if agent_id in agents:
+                agents[agent_id].close()
+                del agents[agent_id]
                 if self.eviction_policy != "lru" and agent_id in self.agent_access_times:
                     del self.agent_access_times[agent_id]
                 return True
@@ -624,93 +666,93 @@ class AgentPool:
 
     def get_active_agents(self) -> List[str]:
         """Get list of active agent IDs."""
-        with self._lock:
-            return list(self.agents.keys())
+        result = []
+        for shard in self._shards:
+            with shard["lock"]:
+                result.extend(list(shard["agents"].keys()))
+        return result
 
     def close_all(self) -> None:
         """Close all agents in the pool."""
-        with self._lock:
-            for agent in self.agents.values():
-                agent.close()
-            self.agents.clear()
-            if self.eviction_policy != "lru":
-                self.agent_access_times.clear()
+        for shard in self._shards:
+            with shard["lock"]:
+                for agent in shard["agents"].values():
+                    agent.close()
+                shard["agents"].clear()
+        if self.eviction_policy != "lru":
+            self.agent_access_times.clear()
+        # Only close the public store once here
+        if hasattr(self, "_public_store") and self._public_store is not None:
+            self._public_store.close()
+            self._public_store = None
 
-    def _maybe_evict_agent(self) -> None:
-        """Evict agent if at capacity (non-LRU policies)."""
-        if len(self.agents) >= self.max_agents:
+    def _maybe_evict_agent(self, shard) -> None:
+        """Evict agent if at capacity (non-LRU policies) for a shard."""
+        agents = shard["agents"]
+        if hasattr(self, "max_agents") and len(agents) >= self.max_agents // self.SHARD_COUNT:
             if self.eviction_policy == "lfu":
-                # Evict least frequently used (would need usage tracking)
-                # For now, just evict oldest
-                oldest_id = next(iter(self.agents))
+                oldest_id = next(iter(agents))
             elif self.eviction_policy == "ttl":
-                # Evict oldest by access time
                 oldest_id = min(self.agent_access_times, key=lambda k: self.agent_access_times[k])
             else:
-                # Default: evict oldest
-                oldest_id = next(iter(self.agents))
-
+                oldest_id = next(iter(agents))
             self.remove_agent(oldest_id)
 
     def _evict_expired_agents(self) -> None:
         """Remove agents that haven't been accessed recently (TTL policy)."""
         if self.eviction_policy != "ttl":
             return
-
         ttl_minutes = self.preferences.get("agent_ttl_minutes", 60)
         ttl_seconds = ttl_minutes * 60
         current_time = time.time()
-
         expired_agents = [
             agent_id
             for agent_id, last_access in self.agent_access_times.items()
             if current_time - last_access > ttl_seconds
         ]
-
         for agent_id in expired_agents:
             self.remove_agent(agent_id)
 
 
-def orchestrate_turn(pool: AgentPool, user_id: str, assistant_id: str, user_input: str, tokenizer: Optional[str] = None) -> str:
+def orchestrate_turn(
+    pool: AgentPool,
+    user_id: str,
+    assistant_id: str,
+    user_input: str,
+    tokenizer_name: str,  # Make this mandatory
+) -> str:
     """
-    Orchestrate a single conversational turn between agents.
+    Orchestrate a single conversational turn between agents using a tokenizer.
 
     Args:
         pool: Agent pool containing the agents
         user_id: User agent identifier
         assistant_id: Assistant agent identifier
         user_input: User's input text
-        tokenizer: Optional tokenizer name (e.g. "bert-base-uncased")
+        tokenizer_name: Name of the tokenizer to use (e.g., "bert-base-uncased")
 
     Returns:
         Assistant's response text
     """
+    try:
+        from toys.communication import tokenizer as tok
+    except ImportError:
+        warnings.warn("Tokenizer bridge not found. Text processing will be unavailable.")
+        return "[ERROR: Tokenizer not found]"
+
     # Get participating agents
     user_agent = pool.get_or_create_agent(user_id, role_hint="user")
     assistant_agent = pool.get_or_create_agent(assistant_id, role_hint="assistant")
 
-    # Encode input
-    if tokenizer:
-        from toys.communication import tokenizer as tok
-        in_bytes = tok.encode(user_input, tokenizer)
-    else:
-        in_bytes = user_input.encode("utf-8")
+    # 1. Encode input using the specified tokenizer. No fallback.
+    in_bytes = tok.encode(user_input, name=tokenizer_name)
 
-    # User agent processes input, creating stimulus
+    # 2. User agent processes input, creating stimulus
     stimulus = user_agent.respond(in_bytes)
 
-    # Assistant responds to stimulus
+    # 3. Assistant responds to stimulus
     response = assistant_agent.respond(stimulus)
 
-    # Decode response
-    if tokenizer:
-        try:
-            return response.decode("utf-8")
-        except UnicodeDecodeError:
-            from toys.communication import tokenizer as tok
-            return tok.decode(response, tokenizer)
-    else:
-        try:
-            return response.decode("utf-8")
-        except UnicodeDecodeError:
-            return response.decode("utf-8", errors="replace")
+    # 4. Decode response using the same tokenizer.
+    #    The `decode` function already has a UTF-8 fallback for robustness.
+    return tok.decode(response, name=tokenizer_name)

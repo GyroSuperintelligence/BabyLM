@@ -412,11 +412,11 @@ class TestIntegration:
         assert assistant_agent.agent_id == "integration_assistant"
 
         # Test conversation (multiple turns)
-        first_response = orchestrate_turn(agent_pool, "integration_user", "integration_assistant", "Hello!")
+        first_response = orchestrate_turn(agent_pool, "integration_user", "integration_assistant", "Hello!", tokenizer_name="bert-base-uncased")
         assert isinstance(first_response, str)
 
         # Second turn
-        second_response = orchestrate_turn(agent_pool, "integration_user", "integration_assistant", "How are you?")
+        second_response = orchestrate_turn(agent_pool, "integration_user", "integration_assistant", "How are you?", tokenizer_name="bert-base-uncased")
         assert isinstance(second_response, str)
 
         # Agents should persist across turns
@@ -429,7 +429,7 @@ class TestIntegration:
         unicode_input = "Hello 世界! 🌍"
 
         # Should not raise exceptions
-        response = orchestrate_turn(agent_pool, "unicode_user", "unicode_assistant", unicode_input)
+        response = orchestrate_turn(agent_pool, "unicode_user", "unicode_assistant", unicode_input, tokenizer_name="bert-base-uncased")
 
         # Response should be valid
         assert isinstance(response, str)
@@ -452,11 +452,11 @@ def assert_phenotype_entry_valid(entry: PhenotypeEntry) -> None:
     assert len(entry["context_signature"]) == 2
 
 
-def orchestrate_turn(pool: "AgentPool", user_id: str, assistant_id: str, user_input: str) -> str:
+def orchestrate_turn(pool: "AgentPool", user_id: str, assistant_id: str, user_input: str, tokenizer_name: str = "bert-base-uncased") -> str:
     """Orchestrate a turn between agents (with proper import)."""
     from baby.intelligence import orchestrate_turn as actual_orchestrate_turn
 
-    return actual_orchestrate_turn(pool, user_id, assistant_id, user_input)
+    return actual_orchestrate_turn(pool, user_id, assistant_id, user_input, tokenizer_name=tokenizer_name)
 
 
 if __name__ == "__main__":

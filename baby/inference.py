@@ -149,23 +149,22 @@ class InferenceEngine:
 
         # Always increment usage count for any learn attempt
         phenotype_entry["usage_count"] = phenotype_entry.get("usage_count", 0) + 1
-        phenotype_entry["last_updated"] = time.time()
 
         # Use Monodromic Fold and clamp result
         new_mask = fold(old_mask, intron) & 0xFF
-        # Early return if no change (optimization)
-        if new_mask == old_mask:
-            # Still need to persist the updated usage_count/timestamp
-            self.store.put(context_key, phenotype_entry)
-            return phenotype_entry
-        # Calculate novelty as fraction of bits that flipped
+        # Calculate learning rate and confidence
         novelty = bin(old_mask ^ new_mask).count("1") / 8.0
-        # Calculate learning rate based on variety
         v = self.s2.orbit_cardinality[state_index]
         alpha = (1 / 6) * math.sqrt(v / self._v_max)
-        # Update confidence using monotonic formula
         current_confidence = phenotype_entry.get("confidence", 0.1)
         new_confidence = min(1.0, current_confidence + (1 - current_confidence) * alpha * novelty)
+        # Short-circuit: if mask and confidence unchanged, only update usage_count/last_updated in memory
+        if new_mask == old_mask and abs(new_confidence - current_confidence) < 1e-9:
+            phenotype_entry["usage_count"] = phenotype_entry.get("usage_count", 0)  # already inc’d
+            phenotype_entry["last_updated"] = time.time()
+            if hasattr(self.store, "mark_dirty"):
+                self.store.mark_dirty(context_key, phenotype_entry)
+            return phenotype_entry
         # Assertions before updating
         assert 0 <= new_mask <= 255
         assert 0 <= new_confidence <= 1

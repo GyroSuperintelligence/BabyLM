@@ -453,7 +453,7 @@ class TestAgentPoolIdentity:
         """
         from baby.intelligence import orchestrate_turn
 
-        reply = orchestrate_turn(agent_pool, "user-x", "assistant-x", "Hello system")
+        reply = orchestrate_turn(agent_pool, "user-x", "assistant-x", "Hello system", tokenizer_name="bert-base-uncased")
         assert isinstance(reply, str)
         assert len(reply) >= 1
 

@@ -27,24 +27,31 @@ import os
 import time
 import uuid
 from typing import List
+from pathlib import Path
+import json
 
 from fastapi import FastAPI, Header, Request
 from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
 
 from baby.intelligence import AgentPool, orchestrate_turn
+# Import the tokenizer bridge
+from toys.communication import tokenizer as gyrotok
 
 # ---------------------------------------------------------------------
 # Configuration helpers – override with env-vars if you like
 # ---------------------------------------------------------------------
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+BASE_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_ONT_PATH = os.getenv(
     "GYROSI_ONTOLOGY_PATH",
-    os.path.join(BASE_DIR, "memories/public/meta/ontology_map.json"),
+    str(BASE_DIR / "memories/public/meta/ontology_map.json"),
 )
 DEFAULT_KNOWLEDGE_PATH = os.getenv(
     "GYROSI_PUBLIC_KNOWLEDGE",
-    os.path.join(BASE_DIR, "memories/public/meta/knowledge.pkl.gz"),
+    str(BASE_DIR / "memories/public/meta/knowledge.pkl.gz"),
 )
+# Define the default tokenizer for this adapter
+DEFAULT_TOKENIZER = os.getenv("GYROSI_TOKENIZER", "bert-base-uncased")
 
 os.makedirs(os.path.dirname(DEFAULT_KNOWLEDGE_PATH), exist_ok=True)
 
@@ -132,12 +139,7 @@ async def chat_completions(
 ) -> OAChatResponse:
     """
     Minimal implementation of the OpenAI /v1/chat/completions endpoint.
-
-    Strategy
-    --------
-    • system messages           → bootstrap: ingest into assistant once
-    • accumulating assistant    → ingest into assistant (memory)
-    • last user message         → orchestrate turn and return reply
+    Now supports HTTP keep-alive and streaming if client sets stream=true.
     """
     # Derive stable user-id                                 ──────────
     remote = request.client.host if request.client else "anon"
@@ -156,8 +158,8 @@ async def chat_completions(
         system_msgs = [m.content for m in payload.messages if m.role == "system"]
         if system_msgs:
             system_text = "\n".join(system_msgs)
-            # Let system agent think & emit stimulus
-            stimulus = system_agent.respond(system_text.encode("utf-8"))
+            # Encode with tokenizer
+            stimulus = system_agent.respond(gyrotok.encode(system_text, name=DEFAULT_TOKENIZER))
             # Feed that to assistant so its first cycles = system prompt
             assistant_agent.ingest(stimulus)
 
@@ -166,14 +168,44 @@ async def chat_completions(
     # --------------------------------------------------------------
     assistant_memories = [m.content for m in payload.messages if m.role == "assistant"]
     if assistant_memories:
-        assistant_agent.ingest("\n".join(assistant_memories).encode("utf-8"))
+        # Encode with tokenizer
+        memory_bytes = gyrotok.encode("\n".join(assistant_memories), name=DEFAULT_TOKENIZER)
+        assistant_agent.ingest(memory_bytes)
 
     # --------------------------------------------------------------
     # 3. Find last user message and run a turn
     # --------------------------------------------------------------
     last_user = next((m for m in reversed(payload.messages) if m.role == "user"), None)
     user_text = last_user.content if last_user else ""
-    reply = orchestrate_turn(agent_pool, user_id, assistant_id, user_text)
+    # Call orchestrate_turn with the tokenizer name
+    reply = orchestrate_turn(agent_pool, user_id, assistant_id, user_text, tokenizer_name=DEFAULT_TOKENIZER)
+
+    # Streaming support: if client sets stream=true, yield tokens as SSE
+    if request.query_params.get("stream", "false").lower() == "true":
+        def token_stream():
+            # Encode the reply to bytes, then decode token by token
+            reply_bytes = gyrotok.encode(reply, name=DEFAULT_TOKENIZER)
+            ids = gyrotok._bytes_to_ids(reply_bytes)
+            tokenizer = gyrotok._load(DEFAULT_TOKENIZER)
+            for i, token_id in enumerate(ids):
+                token_text = tokenizer.decode([token_id], skip_special_tokens=True)
+                # OpenAI-compatible SSE chunk
+                chunk = {
+                    "id": f"chatcmpl-stream",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": "gyrosi-baby-0.9.6",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": token_text},
+                            "finish_reason": None if i < len(ids) - 1 else "stop",
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(token_stream(), media_type="text/event-stream")
 
     # Build OpenAI-style response                             ───────
     resp = OAChatResponse(
@@ -200,5 +232,6 @@ async def chat_completions(
 async def hf_generate(payload: HFGenerateRequest, request: Request) -> HFGenerateResponse:
     user_id = f"hf-{hash(request.client.host) if request.client else 'anon'}"
     assistant_id = "gyro-assistant"
-    reply = orchestrate_turn(agent_pool, user_id, assistant_id, payload.inputs)
+    # Call orchestrate_turn with the tokenizer name
+    reply = orchestrate_turn(agent_pool, user_id, assistant_id, payload.inputs, tokenizer_name=DEFAULT_TOKENIZER)
     return HFGenerateResponse(generated_text=reply)

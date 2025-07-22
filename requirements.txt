@@ -34,4 +34,6 @@ tqdm>=4.66.0
 types-tqdm>=4.66.0
 types-ujson>=5.10.0
 
+msgpack
+
 

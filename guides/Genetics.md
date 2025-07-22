@@ -68,7 +68,7 @@ GyroSI embodies the principle that each part contains information about the whol
 
 **Angular Progression**: The CGM stages follow the precise angular sequence π/2 → π/4 → π/4 → 0, corresponding to CS → UNA → ONA → BU. This progression ensures complete closure with zero defect, achieving perfect recursive alignment.
 
-> The build-time discovery process, a cornerstone of GyroSI, explores this physical reality and discovers an immutable, finite ontology of **precisely 788,986 unique physical states**. The entire universe of possible system configurations is not only known but also compact, with a measured **diameter of 6 steps**, meaning any state is reachable from any other in at most seven transformations. This is the 'Genome', the system's complete set of possible states.
+> The build-time discovery process, a cornerstone of GyroSI, explores this physical reality and discovers an immutable, finite ontology of **precisely 788,986 unique physical states**. The entire universe of possible system configurations is not only known but also compact, with a measured **diameter of 6 steps**, meaning any state is reachable from any other in at most six transformations. This is the 'Genome', the system's complete set of possible states.
 
 **Abstraction via Manifold and Hashing**: The system's primary mechanism for generalization is its finite physical ontology. An infinite variety of input sequences will inevitably drive the system into one of the 788,986 canonical states. When different experiences lead to the same internal state, the system learns they share a fundamental structural meaning. Hash collisions in the phenotype layer are a secondary, context-specific abstraction built upon this primary physical reality, where different physical contexts mapping to the same semantic address are learned to share an essential meaning.
 
@@ -581,6 +581,15 @@ The `intelligence.py` module defines the orchestration and protocol boundary for
 * All external monitoring, introspection, and maintenance operations must be registered via `add_hook` at the intelligence layer.
 * All storage, canonicalisation, and multi-agent overlay mechanisms are constructed at initialisation and cannot be bypassed by runtime code.
 
+#### Automated Pruning Hook
+
+A standard post-cycle hook `auto_prune_hook(engine)` MAY be registered to trigger periodic compaction:
+  - Every N cycles or when store size > threshold
+  - Calls `prune_and_compact_store()` (baby.policies)
+  - Uses age/confidence thresholds from PreferencesConfig (`decay_interval_hours`, `confidence_threshold`)
+
+This keeps disk usage bounded without losing aggregate knowledge (masks/confidence are merged).
+
 ---
 
 ## 6.5 Shared Contracts and Storage Policies
@@ -800,7 +809,8 @@ The GyroSI system enforces strict separation between the core physics kernel, ru
 
 ### 7.2 Memory Architecture
 
-The `memories/` directory contains the system's persistent state.
+* The `memories/` directory contains the system's persistent state.
+* memories/public/tokenizers/ — shared, read-only pretrained tokenizer assets (tokenizer.json, vocab.txt, etc.)
 
 **Knowledge Storage:**
 
@@ -826,64 +836,31 @@ GyroSI's integration model is compositional. All agent orchestration and interac
 **Agent Pool Management:**
 Applications manage a pool of active agents with automatic eviction, overlay storage, and policy control. The pool ensures clean lifecycle and concurrency discipline for all agents.
 
-```python
-from baby.intelligence import AgentPool, orchestrate_turn
-
-# Example pool instantiation
-pool = AgentPool(
-    ontology_path="memories/public/meta/ontology_map.json",
-    base_knowledge_path="memories/public/meta/knowledge.pkl.gz"
-)
-```
-
 ### 8.2 Conversation Orchestration
 
 Conversations are managed by composing agent interactions using the stable GyroSI API. No special conversation-specific infrastructure is required.
 
-```python
-def orchestrate_turn(pool: AgentPool, user_id: str, assistant_id: str, user_input: str) -> str:
-    user_agent = pool.get_or_create_agent(user_id, role_hint="user")
-    assistant_agent = pool.get_or_create_agent(assistant_id, role_hint="assistant")
-    stimulus = user_agent.respond(user_input.encode("utf-8"))
-    response = assistant_agent.respond(stimulus)
-    try:
-        return response.decode("utf-8")
-    except UnicodeDecodeError:
-        return response.decode("utf-8", errors="replace")
-```
-
 ### 8.3 Protocol Adapters
 
 External protocols are integrated through thin adapters that map messages to agent API calls.
-
-**Example: OpenAI-Compatible Adapter**
-
-```python
-@app.post("/v1/chat/completions")
-async def chat_completion(request: ChatCompletionRequest):
-    user_id = request.headers.get("X-User-ID", f"anon-{hash(request.client.host)}")
-    assistant_id = "shared-assistant-v1"
-    assistant = pool.get_or_create_agent(assistant_id)
-
-    system_message = next((m for m in request.messages if m.role == "system"), None)
-    if system_message and assistant.engine.cycle_count == 0:
-        assistant.ingest(system_message.content.encode("utf-8"))
-
-    assistant_messages = [m.content for m in request.messages if m.role == "assistant"]
-    if assistant_messages:
-        assistant.ingest("\n".join(assistant_messages).encode("utf-8"))
-
-    last_user_message = next((m for m in reversed(request.messages) if m.role == "user"), None)
-    final_response = ""
-    if last_user_message:
-        final_response = orchestrate_turn(pool, user_id, assistant_id, last_user_message.content)
-
-    return format_openai_response(final_response)
-```
+FastAPI adapter at toys/communication/external_adapter.py exposes OpenAI /v1/chat/completions and HF /generate. All text goes through tokenizer bridge.
 
 ### 8.4 Multi-Pattern Support
 
 This approach supports multi-tenant, multi-user, networked, and hierarchical agent topologies through policy and orchestration only. The physics and engine logic remain strictly invariant.
+
+### 8.5 Tokenization & Codec Layer (toys/communication/tokenizer.py)
+
+- All external text I/O MUST pass through a reversible tokenizer codec.
+- Default implementation: HuggingFace WordPiece (bert-base-uncased), stored at `memories/public/tokenizers/<name>/tokenizer.json`.
+- Encoding: token IDs → LEB128 variable-length bytes (<=0xFF).
+- Decoding: bytes → token IDs → text.
+- Config surface:
+  * Env var `GYROSI_TOKENIZER` (adapter default)
+  * `tokenizer_name` field in `AgentConfig`
+- Scripts:
+  * `setup_tokenizers.py` (download/install)
+  * `train_tokenizer.py` (domain fine-tune)
 
 ---
 
@@ -1033,8 +1010,8 @@ Assuming 1 char ≈ 1 byte, and using the per‑core rate above:
 
 #### 4 Context length in day‑to‑day terms
 
-GyroSI has no fixed token window.
-What matters is how many distinct `(state, context)` pairs the index can keep:
+GyroSI has a 6-byte active context that acts as a dynamic "pointer" or "search query" into a passive memory that can theoretically grow to 202 million entries (many gigabytes) over the agent's lifetime.
+ Long‑term memory is unbounded and addressable via (state_index, intron), so effective context is limited only by store size:
 
 * 8 GB laptop → **tens of millions** of separate contexts.
 * Look‑up latency stays < 2 µs so long as the active slice fits in last‑level cache (≈ 10 M contexts on current hardware).

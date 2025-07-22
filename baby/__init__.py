@@ -22,6 +22,7 @@ from baby.policies import (
     export_knowledge_statistics,
     merge_phenotype_maps,
     validate_ontology_integrity,
+    prune_and_compact_store,
 )
 
 __version__ = "0.9.6"
@@ -40,4 +41,5 @@ __all__ = [
     "export_knowledge_statistics",
     "validate_ontology_integrity",
     "discover_and_save_ontology",
+    "prune_and_compact_store",
 ]
