@@ -362,6 +362,7 @@ class IntelligenceEngine:
         # If result is a Mapping (e.g., ValidationReport TypedDict), treat as True if total_entries > 0
         try:
             from collections.abc import Mapping
+
             if isinstance(result, Mapping):
                 return bool(result.get("total_entries", 0) > 0)
         except ImportError:
