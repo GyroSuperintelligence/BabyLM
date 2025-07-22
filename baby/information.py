@@ -468,7 +468,7 @@ def _compute_sccs(
     introns_arr = np.array(introns_to_use, dtype=np.int32)
 
     def neighbors(v: int) -> "np.ndarray[np.int32, Any]":
-        # No np.unique, just return all neighbors (duplicates are fine)
+        # Return all neighbors; duplicates are fine
         return ep[v, introns_arr]
 
     for root in range(N):
@@ -485,14 +485,22 @@ def _compute_sccs(
             try:
                 while True:
                     w = int(next(child_iter))
-                    if indices[w] != -1:
-                        continue  # Skip already-visited
-                    indices[w] = lowlink[w] = counter
-                    counter += 1
-                    stack.append(w)
-                    on_stack[w] = True
-                    dfs_stack.append((w, iter(neighbors(w))))
-                    break
+                    if indices[w] == -1:
+                        # Tree edge: recurse
+                        indices[w] = lowlink[w] = counter
+                        counter += 1
+                        stack.append(w)
+                        on_stack[w] = True
+                        dfs_stack.append((w, iter(neighbors(w))))
+                        break
+                    elif on_stack[w]:
+                        # Back edge to a node in current SCC: update lowlink
+                        if indices[w] < lowlink[v]:
+                            lowlink[v] = indices[w]
+                        continue  # keep looping children
+                    else:
+                        # Edge to an already closed SCC – ignore
+                        continue
             except StopIteration:
                 dfs_stack.pop()
                 if dfs_stack:
