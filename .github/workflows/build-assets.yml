@@ -41,7 +41,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git lfs track "*.npy" "*.json"
-          git add memories/public/meta/ontology_map.json memories/public/meta/phenomenology_map.json memories/public/meta/epistemology.npy
+          git add memories/public/meta/ontology_map.json memories/public/meta/phenomenology_map.json memories/public/meta/epistemology.npy memories/public/meta/theta.npy
           git commit -m "Add prebuilt ontology assets [skip ci]" || echo "No changes to commit"
           git push
         env:
