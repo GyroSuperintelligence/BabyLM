@@ -173,7 +173,7 @@ def preferences_config() -> PreferencesConfig:
         "agent_eviction_policy": "lru",
         "agent_ttl_minutes": 60,
         "enable_profiling": False,
-        "batch_size": 100,
+        "write_batch_size": 100,
         "cache_size_mb": 10,
     }
 

@@ -48,13 +48,13 @@ def build_masks_and_constants() -> Tuple[int, np.ndarray, np.ndarray]:
     return FULL_MASK, XFORM_MASK, INTRON_BROADCAST_MASKS
 
 
-FULL_MASK, XFORM_MASK, PATTERN_MASK = build_masks_and_constants()
+FULL_MASK, XFORM_MASK, INTRON_BROADCAST_MASKS = build_masks_and_constants()
 
 
 def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> "np.ndarray[np.uint64, Any]":
     """Vectorised transform for a batch of states (uint64)."""
     mask = XFORM_MASK[intron]
-    pattern = PATTERN_MASK[intron]
+    pattern = INTRON_BROADCAST_MASKS[intron]
     temp = states ^ mask
     return (temp ^ (temp & pattern)).astype(np.uint64)
 

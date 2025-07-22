@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from typing import List
+from typing import List, Any
 from pathlib import Path
 import atexit
 import json
@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
 from baby.intelligence import AgentPool, orchestrate_turn
+
 # Import the tokenizer bridge
 from toys.communication import tokenizer as gyrotok
 
@@ -138,7 +139,7 @@ async def chat_completions(
     payload: OAChatRequest,
     request: Request,
     x_user_id: str | None = Header(default=None, convert_underscores=False),
-) -> OAChatResponse:
+) -> Any:
     """
     Minimal implementation of the OpenAI /v1/chat/completions endpoint.
     Now supports HTTP keep-alive and streaming if client sets stream=true.
@@ -184,6 +185,7 @@ async def chat_completions(
 
     # Streaming support: if client sets stream=true, yield tokens as SSE
     if request.query_params.get("stream", "false").lower() == "true":
+
         def token_stream():
             # Encode the reply to bytes, then decode token by token
             reply_bytes = gyrotok.encode(reply, name=DEFAULT_TOKENIZER)
@@ -193,7 +195,7 @@ async def chat_completions(
                 token_text = tokenizer.decode([token_id], skip_special_tokens=True)
                 # OpenAI-compatible SSE chunk
                 chunk = {
-                    "id": f"chatcmpl-stream",
+                    "id": "chatcmpl-stream",
                     "object": "chat.completion.chunk",
                     "created": int(time.time()),
                     "model": "gyrosi-baby-0.9.6",
@@ -207,6 +209,7 @@ async def chat_completions(
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"
             yield "data: [DONE]\n\n"
+
         return StreamingResponse(token_stream(), media_type="text/event-stream")
 
     # Build OpenAI-style response                             ───────

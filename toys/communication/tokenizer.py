@@ -5,11 +5,9 @@ Provides reversible text↔bytes encoding using LEB128 to ensure all bytes ≤ 2
 """
 
 from pathlib import Path
-from functools import lru_cache
 from typing import List
 from tokenizers import Tokenizer
 import os
-import numpy as np
 
 # Use an absolute path for _ROOT based on the file location
 _ROOT = (Path(__file__).resolve().parent / "../../../memories/public/tokenizers").resolve()
@@ -17,29 +15,32 @@ _ROOT = (Path(__file__).resolve().parent / "../../../memories/public/tokenizers"
 # Module-level tokenizer cache keyed by (name, mtime)
 _tokenizer_cache = {}
 
+
 def _load(name: str = "bert-base-uncased") -> Tokenizer:
-    """Load and cache a tokenizer from disk, auto-reload if file changes."""
+    """Load and cache a tokenizer from disk, auto-reload if file changes.
+    Only one tokenizer is kept in memory at a time: _tokenizer_cache.clear() is intentional to cap memory usage.
+    """
     path = _ROOT / name / "tokenizer.json"
     if not path.exists():
         raise FileNotFoundError(
-            f"Tokenizer '{name}' not installed at {path}. "
-            "Run: python toys/communication/setup_tokenizers.py"
+            f"Tokenizer '{name}' not installed at {path}. " "Run: python toys/communication/setup_tokenizers.py"
         )
     mtime = os.path.getmtime(path)
     cache_key = (name, mtime)
     if cache_key in _tokenizer_cache:
         return _tokenizer_cache[cache_key]
     tokenizer = Tokenizer.from_file(str(path))
-    _tokenizer_cache.clear()  # Only keep one loaded at a time
+    _tokenizer_cache.clear()  # Only keep one loaded at a time (intentional)
     _tokenizer_cache[cache_key] = tokenizer
     return tokenizer
+
 
 # ---------- LEB128 encoding ----------
 def _id_to_bytes(idx: int) -> List[int]:
     """Convert token ID to variable-length bytes."""
     if idx < 0:
         raise ValueError(f"Token ID must be non-negative, got {idx}")
-    
+
     out: List[int] = []
     while True:
         byte = idx & 0x7F
@@ -51,11 +52,14 @@ def _id_to_bytes(idx: int) -> List[int]:
             break
     return out
 
+
 def _bytes_to_ids(blob: bytes) -> List[int]:
-    """Decode LEB128 bytes back to token IDs."""
+    """Decode LEB128 bytes back to token IDs.
+    The overflow guard (shift > 28) assumes token IDs are at most 32 bits, which is true for HuggingFace tokenizers.
+    """
     ids, cur, shift = [], 0, 0
     for i, b in enumerate(blob):
-        if shift > 28:  # Prevent overflow
+        if shift > 28:  # Prevent overflow (32-bit token ID assumption)
             raise ValueError(f"Token ID too large at byte {i}")
         cur |= (b & 0x7F) << shift
         if b & 0x80:
@@ -66,6 +70,7 @@ def _bytes_to_ids(blob: bytes) -> List[int]:
     if shift:
         raise ValueError("Incomplete token ID sequence")
     return ids
+
 
 # ---------- Public API ----------
 def encode(text: str, name: str = "bert-base-uncased") -> bytes:
@@ -88,6 +93,7 @@ def encode(text: str, name: str = "bert-base-uncased") -> bytes:
                 break
     return bytes(out[:pos])
 
+
 def decode(blob: bytes, name: str = "bert-base-uncased") -> str:
     """Decode LEB128 bytes back to text via tokenizer."""
     try:
@@ -96,6 +102,7 @@ def decode(blob: bytes, name: str = "bert-base-uncased") -> str:
     except Exception:
         # Fallback to UTF-8 if tokenizer decode fails
         return blob.decode("utf-8", errors="replace")
+
 
 def vocab_size(name: str = "bert-base-uncased") -> int:
     """Get vocabulary size of a tokenizer."""

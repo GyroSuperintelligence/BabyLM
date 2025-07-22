@@ -3,7 +3,7 @@ import os
 import sys
 import time
 import warnings
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -125,22 +125,34 @@ class InformationEngine:
                 # Fallback: keep all ones
                 pass
 
-        # Load θ table (theta.npy) if available
+        # Load θ table (theta.npy) if available, or auto-generate if missing
         self._theta_table = None
         default_theta = "memories/public/meta/theta.npy"
         if "ontology_map_path" in ontology_data:
             default_theta = ontology_data["ontology_map_path"].replace("ontology_map.json", "theta.npy")
         elif "phenomap_path" in ontology_data:
             default_theta = ontology_data["phenomap_path"].replace("phenomenology_map.json", "theta.npy")
+        if not os.path.exists(default_theta):
+            # Auto-generate theta.npy if missing
+            print(f"[INFO] theta.npy not found at {default_theta}, generating...")
+            # Get ontology map
+            if self.use_array_indexing and self._keys is not None:
+                states = self._keys
+            elif self.ontology_map is not None:
+                states = np.array(sorted(self.ontology_map.keys()), dtype=np.uint64)
+            else:
+                raise RuntimeError("Cannot generate theta.npy: ontology map not available.")
+            origin = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
+            acos_lut = np.arccos(1 - 2 * np.arange(49) / 48.0).astype(np.float32)
+            theta = np.empty(len(states), dtype=np.float32)
+            for i, s in enumerate(states):
+                h = int(s ^ origin).bit_count()
+                theta[i] = acos_lut[h]
+            os.makedirs(os.path.dirname(default_theta) or ".", exist_ok=True)
+            np.save(default_theta, theta)
+            print(f"[INFO] theta.npy generated and saved to {default_theta}")
         if os.path.exists(default_theta):
             self._theta_table = np.load(default_theta, mmap_mode="r")
-
-        # Cache the archetypal state as an int
-        self._origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
-        # Precompute acos LUT for 0..48 bits
-        self._acos_lut = np.arccos(1 - 2 * np.arange(49) / 48.0).astype(np.float32)
-        # Debug/env switch for fallback
-        self._use_fast_divergence = os.environ.get("BABYLM_USE_FAST_DIVERGENCE", "1") != "0"
 
     def get_index_from_state(self, state_int: int) -> int:
         """
@@ -258,12 +270,6 @@ class InformationEngine:
         # Convert to integer, big-endian
         result = int.from_bytes(packed.tobytes(), "big")
 
-        # Round-trip validation (debug mode)
-        if __debug__:
-            round_trip = InformationEngine.int_to_tensor(result)
-            assert round_trip.shape == tensor.shape
-            assert np.array_equal(round_trip, tensor)
-
         return result
 
     def gyrodistance_angular(self, T1: np.ndarray, T2: np.ndarray) -> float:
@@ -289,22 +295,11 @@ class InformationEngine:
 
         return float(np.arccos(cosine_similarity))
 
-    def _angular_divergence_fast(self, state_int: int) -> float:
-        """
-        Fast angular divergence using XOR+bit_count and LUT.
-        """
-        h = (state_int ^ self._origin_int).bit_count()
-        return float(self._acos_lut[h])
-
     def measure_state_divergence(self, state_int: int) -> float:
-        if self._theta_table is not None:
-            idx = self.get_index_from_state(state_int)
-            return float(self._theta_table[idx])
-        # Fallbacks (shouldn’t trigger in production)
-        if self._use_fast_divergence:
-            return self._angular_divergence_fast(state_int)
-        current_tensor = self.int_to_tensor(state_int)
-        return self.gyrodistance_angular(current_tensor, governance.GENE_Mac_S)
+        if self._theta_table is None:
+            raise RuntimeError("Theta table is not loaded. Cannot compute state divergence.")
+        idx = self.get_index_from_state(state_int)
+        return float(self._theta_table[idx])
 
     def get_orbit_cardinality(self, state_index: int) -> int:
         return int(self.orbit_cardinality[state_index])
@@ -403,6 +398,8 @@ def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
                 "ontology_diameter": 6,
                 "total_states": 788_986,
                 "build_timestamp": int(time.time()),
+                "ontology_map_path": output_path,
+                "theta_path": output_path.replace("ontology_map.json", "theta.npy"),
             },
             f,
         )
@@ -440,7 +437,7 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
         # Vectorized: apply all introns at once
         next_states_all = governance.apply_gyration_and_transform_all_introns(chunk_states)
         # next_states_all shape: (chunk_len, 256)
-        idxs = np.searchsorted(states, next_states_all, side='left')
+        idxs = np.searchsorted(states, next_states_all, side="left")
         # Debug check: ensure all next_states are in the ontology
         if __debug__:
             if idxs.max() >= states.size or not np.all(states[idxs] == next_states_all):

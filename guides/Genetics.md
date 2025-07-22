@@ -1,4 +1,4 @@
-# Gyroscopic Superintelligence Specifications: GyroSI Baby Language Model 0.9.6.2
+# Gyroscopic Superintelligence Specifications: GyroSI Baby Language Model 0.9.6.3
 
 *A physics-grounded architecture for superintelligence through recursive structural alignment*
 

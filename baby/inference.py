@@ -160,7 +160,6 @@ class InferenceEngine:
         new_confidence = min(1.0, current_confidence + (1 - current_confidence) * alpha * novelty)
         # Short-circuit: if mask and confidence unchanged, only update usage_count/last_updated in memory
         if new_mask == old_mask and abs(new_confidence - current_confidence) < 1e-9:
-            phenotype_entry["usage_count"] = phenotype_entry.get("usage_count", 0)  # already inc’d
             phenotype_entry["last_updated"] = time.time()
             if hasattr(self.store, "mark_dirty"):
                 self.store.mark_dirty(context_key, phenotype_entry)
@@ -201,10 +200,7 @@ class InferenceEngine:
         confidence_sum = 0.0
         anomaly_count = 0
 
-        if not hasattr(self.store, "data"):
-            raise NotImplementedError("Validation requires direct data access")
-
-        for key, entry in getattr(self.store, "iter_entries", lambda: self.store.data.items())():
+        for key, entry in self.store.iter_entries():
             total_entries += 1
             confidence_sum += entry.get("confidence", 0.0)
 
@@ -258,12 +254,10 @@ class InferenceEngine:
         Returns:
             Report with number of modified entries
         """
-        if not hasattr(self.store, "data"):
-            raise NotImplementedError("Decay only supported for stores with direct data access")
-
         modified_count = 0
+        total_entries = 0
 
-        for key, entry in getattr(self.store, "iter_entries", lambda: self.store.data.items())():
+        for key, entry in self.store.iter_entries():
             # Apply simple exponential decay to confidence only
             new_conf = max(0.01, entry.get("confidence", 0.1) * math.exp(-decay_factor))
             assert 0 <= new_conf <= 1.0
@@ -271,12 +265,13 @@ class InferenceEngine:
 
             self.store.put(key, entry)
             modified_count += 1
+            total_entries += 1
 
         if hasattr(self.store, "commit"):
             self.store.commit()
 
         return ValidationReport(
-            total_entries=len(self.store.data) if hasattr(self.store, "data") else 0,
+            total_entries=total_entries,
             average_confidence=0.0,  # Would need full recalculation
             store_type=type(self.store).__name__,
             modified_entries=modified_count,
@@ -292,12 +287,9 @@ class InferenceEngine:
         Returns:
             Number of entries removed
         """
-        if not hasattr(self.store, "data"):
-            raise NotImplementedError("Pruning only supported for stores with direct data access")
-
         keys_to_remove = []
 
-        for key, entry in getattr(self.store, "iter_entries", lambda: self.store.data.items())():
+        for key, entry in self.store.iter_entries():
             if entry.get("confidence", 1.0) < confidence_threshold:
                 keys_to_remove.append(key)
 

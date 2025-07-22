@@ -20,6 +20,7 @@ import argparse
 import json
 from baby.policies import prune_and_compact_store
 
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Prune and compact a GyroSI OrbitStore.")
     p.add_argument("--store", required=True, help="Path passed originally to OrbitStore (without .log/.idx).")
@@ -29,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dry-run", action="store_true", help="Report what would be pruned without modifying data.")
     p.add_argument("--archive", help="Optional JSON file to record summary of pruned entries.")
     return p.parse_args()
+
 
 def main() -> None:
     args = parse_args()
@@ -42,5 +44,6 @@ def main() -> None:
     )
     print(json.dumps(report, indent=2))
 
+
 if __name__ == "__main__":
-    main() 
+    main()

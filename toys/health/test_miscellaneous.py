@@ -453,7 +453,9 @@ class TestAgentPoolIdentity:
         """
         from baby.intelligence import orchestrate_turn
 
-        reply = orchestrate_turn(agent_pool, "user-x", "assistant-x", "Hello system", tokenizer_name="bert-base-uncased")
+        reply = orchestrate_turn(
+            agent_pool, "user-x", "assistant-x", "Hello system", tokenizer_name="bert-base-uncased"
+        )
         assert isinstance(reply, str)
         assert len(reply) >= 1
 
@@ -630,6 +632,7 @@ class TestInferenceEnginePhenotypeCreation:
     @pytest.fixture
     def engine(self, real_ontology, real_orbit_store):
         import json
+
         ontology_path, phenomenology_path, _ = real_ontology
         with open(ontology_path) as f:
             ontology_data = json.load(f)

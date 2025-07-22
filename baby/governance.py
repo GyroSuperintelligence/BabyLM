@@ -111,7 +111,6 @@ for i in range(256):
     if i & 0b00011000:  # BG
         m ^= BG_MASK
     XFORM_MASK[i] = m
-PATTERN_MASK = INTRON_BROADCAST_MASKS  # semantic alias, now a NumPy array
 
 
 def apply_gyration_and_transform(state_int: int, intron: int) -> int:
@@ -151,7 +150,7 @@ def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> "np.n
     """
     intron &= 0xFF  # Defensive masking
     mask = XFORM_MASK[intron]
-    pattern = PATTERN_MASK[intron]
+    pattern = INTRON_BROADCAST_MASKS[intron]
     temp = states ^ mask
     return cast("np.ndarray[np.uint64, Any]", (temp ^ (temp & pattern)).astype(np.uint64))
 
@@ -162,20 +161,7 @@ def apply_gyration_and_transform_all_introns(states: np.ndarray) -> "np.ndarray[
     Memory-heavy; prefer intron loop for large batches.
     """
     temp = states[:, np.newaxis] ^ XFORM_MASK[np.newaxis, :]
-    return cast("np.ndarray[np.uint64, Any]", (temp ^ (temp & PATTERN_MASK[np.newaxis, :])).astype(np.uint64))
-
-
-# Optional: test helper for equivalence (not run by default)
-def _test_vector_equivalence() -> None:
-    rng = np.random.default_rng(0)
-    sample_states = rng.integers(0, 1 << 48, size=4096, dtype=np.uint64)
-    for intron in range(256):
-        scalar = np.array(
-            [apply_gyration_and_transform(int(s), intron) for s in sample_states],
-            dtype=np.uint64,
-        )
-        batch = apply_gyration_and_transform_batch(sample_states, intron)
-        assert np.array_equal(scalar, batch)
+    return cast("np.ndarray[np.uint64, Any]", (temp ^ (temp & INTRON_BROADCAST_MASKS[np.newaxis, :])).astype(np.uint64))
 
 
 def transcribe_byte(byte: int) -> int:

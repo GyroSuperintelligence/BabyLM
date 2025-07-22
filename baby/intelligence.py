@@ -22,9 +22,9 @@ from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
 
 import warnings
+
 if TYPE_CHECKING:
-    from toys.communication import tokenizer as tok
-import hashlib
+    pass
 
 
 class StateInfo(TypedDict):
@@ -45,7 +45,9 @@ class IntelligenceEngine:
     and implements operational strategies. Handles adaptation to external demands.
     """
 
-    def __init__(self, ontology_path: str, phenotype_store: Any, agent_id: Optional[str] = None, hook_batch_interval: int = 8):
+    def __init__(
+        self, ontology_path: str, phenotype_store: Any, agent_id: Optional[str] = None, hook_batch_interval: int = 8
+    ):
         """
         Initialize intelligence engine.
 
@@ -137,9 +139,7 @@ class IntelligenceEngine:
             self._sync_index_from_state_int()
 
         # State integrity assertion
-        assert (
-            self.gene_mac_m_int if not self.use_epistemology else self._cached_state_int
-        ) < (1 << 48)
+        assert (self.gene_mac_m_int if not self.use_epistemology else self._cached_state_int) < (1 << 48)
 
         self.cycle_count += 1
 
@@ -169,20 +169,20 @@ class IntelligenceEngine:
         # Buffer hook events and process hooks every N cycles, unless pain spike
         self._hook_event_buffer.append((self, phenotype_entry, last_intron))
         process_hooks_now = False
-        θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
+        θ = np.mean(self._θ_buf) if self._θ_buf else 0.0  # Cache θ once
         if θ > self._θ_high or len(self._hook_event_buffer) >= self._hook_batch_interval:
             process_hooks_now = True
         if process_hooks_now and self.post_cycle_hooks:
-            while self._hook_event_buffer:
-                event = self._hook_event_buffer.popleft()
+            for event in list(self._hook_event_buffer):
                 for hook in self.post_cycle_hooks:
                     hook(*event)
+            self._hook_event_buffer.clear()
 
         # Store original phenotype_entry for output
         output_phenotype_entry = phenotype_entry
 
         # Algedonic decision at start (must run before output)
-        θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
+        # Use cached θ
         if θ > self._θ_high:
             self._pain_streak += 1
             cooling_intron = self._cool_introns[self.cycle_count % len(self._cool_introns)]
@@ -484,9 +484,9 @@ class GyroSI:
 
         # Create base store
         public_knowledge_path = self.config.get("public_knowledge_path")
-        batch_size = self.config.get("batch_size", 100)
-        if batch_size is None:
-            batch_size = 100
+        learn_batch_size = self.config.get("learn_batch_size", 100)
+        if learn_batch_size is None:
+            learn_batch_size = 100
         phenomenology_map_path: Optional[str] = None  # Ensure always defined
         if public_knowledge_path is not None:
             # Multi-agent setup with public/private knowledge
@@ -494,8 +494,8 @@ class GyroSI:
             if private_path is None:
                 private_path = f"memories/private/agents/{self.agent_id}/knowledge.pkl.gz"
             # Multi-agent overlay using decorators
-            public_store = ReadOnlyView(OrbitStore(public_knowledge_path, write_threshold=batch_size))
-            private_store = OrbitStore(private_path, write_threshold=batch_size)
+            public_store = ReadOnlyView(OrbitStore(public_knowledge_path, write_threshold=learn_batch_size))
+            private_store = OrbitStore(private_path, write_threshold=learn_batch_size)
             base_store: Any = OverlayView(public_store, private_store)
             phenomenology_map_path = self.config.get("phenomenology_map_path")
         else:
@@ -503,7 +503,7 @@ class GyroSI:
             knowledge_path = self.config.get("knowledge_path")
             if knowledge_path is None:
                 knowledge_path = "memories/knowledge.pkl.gz"
-            base_store = OrbitStore(knowledge_path, write_threshold=batch_size)
+            base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size)
 
             # CanonicalView: enable if flag is True, or autodetect if None and file exists
             phenomenology_map_path = self.config.get("phenomenology_map_path")
@@ -577,15 +577,9 @@ class AgentPool:
         self._shards = []
         for _ in range(self.SHARD_COUNT):
             if self.eviction_policy == "lru":
-                self._shards.append({
-                    "agents": LRUAgentCache(self.max_agents // self.SHARD_COUNT),
-                    "lock": RLock()
-                })
+                self._shards.append({"agents": LRUAgentCache(self.max_agents // self.SHARD_COUNT), "lock": RLock()})
             else:
-                self._shards.append({
-                    "agents": OrderedDict(),
-                    "lock": RLock()
-                })
+                self._shards.append({"agents": OrderedDict(), "lock": RLock()})
         # Cache a single public read-only store
         self._public_store = ReadOnlyView(OrbitStore(base_knowledge_path, write_threshold=100))
 
@@ -682,8 +676,8 @@ class AgentPool:
                 for agent in shard["agents"].values():
                     agent.close()
                 shard["agents"].clear()
-        if self.eviction_policy != "lru":
-            self.agent_access_times.clear()
+            if self.eviction_policy != "lru":
+                self.agent_access_times.clear()
         # Only close the public store once here
         if hasattr(self, "_public_store") and self._public_store is not None:
             self._public_store.close()

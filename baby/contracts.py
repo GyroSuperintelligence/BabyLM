@@ -57,7 +57,10 @@ class PhenomenologyData(TypedDict, total=False):
 
 
 class AgentConfig(TypedDict, total=False):
-    """Configuration for GyroSI agents."""
+    """Configuration for GyroSI agents.
+
+    learn_batch_size: Number of input items to process in a learning batch.
+    """
 
     ontology_path: str
     knowledge_path: Optional[str]
@@ -66,14 +69,17 @@ class AgentConfig(TypedDict, total=False):
     agent_metadata: Optional[Dict[str, Any]]
     max_memory_mb: Optional[int]
     enable_phenomenology_storage: Optional[bool]
-    batch_size: Optional[int]
+    learn_batch_size: Optional[int]
     phenomenology_map_path: Optional[str]
-    tokenizer_name: Optional[str]      # e.g. "bert-base-uncased"
-    tokenizer_mode: Optional[str]      # "input" | "io" | None
+    tokenizer_name: Optional[str]  # e.g. "bert-base-uncased"
+    tokenizer_mode: Optional[str]  # "input" | "io" | None
 
 
 class PreferencesConfig(TypedDict, total=False):
-    """Preferences and settings configuration."""
+    """Preferences and settings configuration.
+
+    write_batch_size: Number of store writes to buffer before flushing to disk.
+    """
 
     # Storage preferences
     storage_backend: str  # "pickle", "sqlite", "rocksdb"
@@ -95,7 +101,7 @@ class PreferencesConfig(TypedDict, total=False):
 
     # Performance preferences
     enable_profiling: bool
-    batch_size: int
+    write_batch_size: int
     cache_size_mb: int
 
 

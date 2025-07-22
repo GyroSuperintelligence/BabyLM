@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 _phenomenology_map_cache = {}
 _phenomenology_map_lock = threading.Lock()
 
+
 def load_phenomenology_map(phenomenology_map_path: str):
     """Load and cache the phenomenology map from disk, shared between all CanonicalViews."""
     with _phenomenology_map_lock:
@@ -60,6 +61,10 @@ class OrbitStore:
         self.pending_writes: Dict[Tuple[int, int], Any] = {}
         self._mmap: Optional[mmap.mmap] = None
         self._mmap_size = 0
+        self._remap_counter = 0  # Track commits since last remap
+        self._last_remap_size = 0  # Track file size at last remap
+        self._remap_interval = 10  # Remap every 10 commits
+        self._remap_min_size_increase = 1024 * 1024  # 1MB
         self._load_index()
         self.log_file = open(self.log_path, "ab")
         if use_mmap and os.path.exists(self.log_path):
@@ -104,7 +109,7 @@ class OrbitStore:
                 entry = entry.copy()
                 entry["context_signature"] = context_key
             self.pending_writes[context_key] = entry.copy()
-            if len(self.pending_writes) >= self.write_threshold:
+            if self.pending_writes is not None and len(self.pending_writes) >= self.write_threshold:
                 pending_fsync = self._flush()
         if pending_fsync:
             pending_fsync.result()
@@ -117,8 +122,22 @@ class OrbitStore:
                 pickle.dump(self.index, f, protocol=pickle.HIGHEST_PROTOCOL)
             if self.use_mmap:
                 current_size = os.path.getsize(self.log_path)
-                if self._mmap is None or current_size != self._mmap_size:
+                remap_needed = False
+                if self._mmap is None:
+                    remap_needed = True
+                else:
+                    self._remap_counter += 1
+                    size_increase = current_size - self._last_remap_size
+                    if (
+                        self._remap_counter >= self._remap_interval
+                        or size_increase > self._remap_min_size_increase
+                        or current_size != self._mmap_size
+                    ):
+                        remap_needed = True
+                if remap_needed:
                     self._open_mmap()
+                    self._remap_counter = 0
+                    self._last_remap_size = os.path.getsize(self.log_path)
         # Ensure commit waits for the pending fsync to complete
         if self._pending_fsync:
             self._pending_fsync.result()
@@ -329,6 +348,22 @@ class OverlayView:
         combined_data = self.public_store.data.copy()
         combined_data.update(self.private_store.data)
         return cast(Dict[Tuple[int, int], Any], combined_data)
+
+    def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
+        """
+        Yields (key, entry) pairs, merging public and private stores.
+        Private store entries take precedence over public store entries.
+        This is memory-efficient for large stores.
+        """
+        yielded = set()
+        # Yield all private entries first
+        for key, entry in self.private_store.iter_entries():
+            yield key, entry
+            yielded.add(key)
+        # Yield public entries not shadowed by private
+        for key, entry in self.public_store.iter_entries():
+            if key not in yielded:
+                yield key, entry
 
     def _load_index(self) -> None:
         if hasattr(self.private_store, "_load_index"):
