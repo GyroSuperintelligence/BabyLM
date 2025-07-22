@@ -5,15 +5,15 @@ Provides reversible text↔bytes encoding using LEB128 to ensure all bytes ≤ 2
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 from tokenizers import Tokenizer
 import os
 
 # Use an absolute path for _ROOT based on the file location
-_ROOT = (Path(__file__).resolve().parent / "../../../memories/public/tokenizers").resolve()
+_ROOT = Path("memories/public/tokenizers").resolve()
 
 # Module-level tokenizer cache keyed by (name, mtime)
-_tokenizer_cache = {}
+_tokenizer_cache: Dict[Any, Any] = {}
 
 
 def _load(name: str = "bert-base-uncased") -> Tokenizer:
@@ -98,7 +98,7 @@ def decode(blob: bytes, name: str = "bert-base-uncased") -> str:
     """Decode LEB128 bytes back to text via tokenizer."""
     try:
         ids = _bytes_to_ids(blob)
-        return _load(name).decode(ids, skip_special_tokens=True)
+        return str(_load(name).decode(ids, skip_special_tokens=True))
     except Exception:
         # Fallback to UTF-8 if tokenizer decode fails
         return blob.decode("utf-8", errors="replace")
@@ -106,4 +106,4 @@ def decode(blob: bytes, name: str = "bert-base-uncased") -> str:
 
 def vocab_size(name: str = "bert-base-uncased") -> int:
     """Get vocabulary size of a tokenizer."""
-    return _load(name).get_vocab_size()
+    return int(_load(name).get_vocab_size())

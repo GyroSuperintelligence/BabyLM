@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
-from typing import List, Any
+from typing import List, Any, Iterator
 from pathlib import Path
 import atexit
 import json
@@ -120,7 +120,7 @@ class HFGenerateResponse(BaseModel):
 
 
 @app.get("/v1/models")
-def list_models() -> dict:
+def list_models() -> dict[str, Any]:
     """Return a single ‘model’ so OpenAI clients are satisfied."""
     return {
         "data": [
@@ -139,7 +139,7 @@ async def chat_completions(
     payload: OAChatRequest,
     request: Request,
     x_user_id: str | None = Header(default=None, convert_underscores=False),
-) -> Any:
+) -> OAChatResponse | StreamingResponse:
     """
     Minimal implementation of the OpenAI /v1/chat/completions endpoint.
     Now supports HTTP keep-alive and streaming if client sets stream=true.
@@ -186,7 +186,7 @@ async def chat_completions(
     # Streaming support: if client sets stream=true, yield tokens as SSE
     if request.query_params.get("stream", "false").lower() == "true":
 
-        def token_stream():
+        def token_stream() -> Iterator[str]:
             # Encode the reply to bytes, then decode token by token
             reply_bytes = gyrotok.encode(reply, name=DEFAULT_TOKENIZER)
             ids = gyrotok._bytes_to_ids(reply_bytes)

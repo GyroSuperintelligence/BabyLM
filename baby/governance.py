@@ -7,9 +7,10 @@ all operations are stateless functions.
 """
 
 from functools import reduce
-from typing import Any, List, Tuple, cast
+from typing import List, Tuple, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 # Core genetic constants - Section 4.1 & 4.2
 GENE_Mic_S = 0xAA  # 10101010 binary, stateless constant
@@ -98,7 +99,7 @@ def build_masks_and_constants() -> Tuple[int, int, int, List[int]]:
 
 # Pre-compute the masks at module load time
 FG_MASK, BG_MASK, FULL_MASK, INTRON_BROADCAST_MASKS_LIST = build_masks_and_constants()
-INTRON_BROADCAST_MASKS: np.ndarray = np.array(INTRON_BROADCAST_MASKS_LIST, dtype=np.uint64)
+INTRON_BROADCAST_MASKS: NDArray[np.uint64] = np.array(INTRON_BROADCAST_MASKS_LIST, dtype=np.uint64)
 
 # Precompute transformation masks for all 256 introns
 XFORM_MASK = np.empty(256, dtype=np.uint64)
@@ -143,7 +144,7 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     return final_state
 
 
-def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> "np.ndarray[np.uint64, Any]":
+def apply_gyration_and_transform_batch(states: NDArray[np.uint64], intron: int) -> NDArray[np.uint64]:
     """
     Vectorised transform for a batch of states (uint64).
     Semantics identical to apply_gyration_and_transform per element.
@@ -152,16 +153,16 @@ def apply_gyration_and_transform_batch(states: np.ndarray, intron: int) -> "np.n
     mask = XFORM_MASK[intron]
     pattern = INTRON_BROADCAST_MASKS[intron]
     temp = states ^ mask
-    return cast("np.ndarray[np.uint64, Any]", (temp ^ (temp & pattern)).astype(np.uint64))
+    return cast("NDArray[np.uint64]", (temp ^ (temp & pattern)).astype(np.uint64))
 
 
-def apply_gyration_and_transform_all_introns(states: np.ndarray) -> "np.ndarray[np.uint64, Any]":
+def apply_gyration_and_transform_all_introns(states: NDArray[np.uint64]) -> NDArray[np.uint64]:
     """
     Returns an array shape (states.size, 256) of successor states.
     Memory-heavy; prefer intron loop for large batches.
     """
     temp = states[:, np.newaxis] ^ XFORM_MASK[np.newaxis, :]
-    return cast("np.ndarray[np.uint64, Any]", (temp ^ (temp & INTRON_BROADCAST_MASKS[np.newaxis, :])).astype(np.uint64))
+    return cast("NDArray[np.uint64]", (temp ^ (temp & INTRON_BROADCAST_MASKS[np.newaxis, :])).astype(np.uint64))
 
 
 def transcribe_byte(byte: int) -> int:

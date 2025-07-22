@@ -101,7 +101,7 @@ def explore_ontology(start_state_int: int) -> None:
     discovered = {start_state_int}
     state_depth = {start_state_int: 0}
     frontier = deque([start_state_int])
-    total_time = 0
+    total_time: float = 0.0
 
     print("Starting ontology exploration with depth recording.")
     print("-" * 68)

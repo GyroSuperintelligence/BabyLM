@@ -6,6 +6,7 @@ import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from baby import governance
 
@@ -30,7 +31,7 @@ Build steps:
 try:
     import ujson as json
 except ImportError:
-    import json
+    import json  # type: ignore[no-redef]
 
 
 class InformationEngine:
@@ -46,8 +47,9 @@ class InformationEngine:
 
     ontology_map: Optional[Dict[int, int]]
     inverse_ontology_map: Optional[Dict[int, int]]
-    _keys: Optional[np.ndarray]
-    _inverse: Optional[np.ndarray]
+    _keys: NDArray[np.uint64] | None
+    _inverse: NDArray[np.uint64] | None
+    orbit_cardinality: NDArray[np.uint32]
 
     def __init__(
         self,
@@ -214,7 +216,7 @@ class InformationEngine:
             return state_int
 
     @staticmethod
-    def int_to_tensor(state_int: int) -> "np.ndarray[np.int8, Any]":
+    def int_to_tensor(state_int: int) -> NDArray[np.int8]:
         """
         Converts a canonical 48-bit integer state to geometric tensor.
 
@@ -246,7 +248,7 @@ class InformationEngine:
         return tensor_flat.reshape(4, 2, 3, 2)
 
     @staticmethod
-    def tensor_to_int(tensor: np.ndarray) -> int:
+    def tensor_to_int(tensor: NDArray[np.int8]) -> int:
         """
         Converts a geometric tensor to its canonical 48-bit integer state.
 
@@ -272,7 +274,7 @@ class InformationEngine:
 
         return result
 
-    def gyrodistance_angular(self, T1: np.ndarray, T2: np.ndarray) -> float:
+    def gyrodistance_angular(self, T1: NDArray[np.int8], T2: NDArray[np.int8]) -> float:
         """
         Calculate angular divergence between tensors in radians.
 
@@ -339,6 +341,19 @@ class ProgressReporter:
     def done(self) -> None:
         elapsed = time.time() - self.start_time
         print(f"\r{self.desc}: Done in {elapsed:.1f}s" + " " * 50)
+
+
+def open_memmap_int32(
+    filename: str,
+    mode: str,
+    shape: tuple[int, ...],
+) -> NDArray[np.int32]:
+    from numpy.lib.format import open_memmap as _open_memmap
+
+    arr = _open_memmap(filename, dtype=np.int32, mode=mode, shape=shape)  # type: ignore[no-untyped-call]
+    from typing import cast
+
+    return cast(NDArray[np.int32], arr)
 
 
 # ==============================================================================
@@ -427,7 +442,7 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
         theta[i] = acos_lut[h]
 
     # Memory-mapped output
-    ep = np.lib.format.open_memmap(output_path, dtype=np.int32, mode="w+", shape=(N, 256))
+    ep = open_memmap_int32(output_path, "w+", (N, 256))
 
     # Process in chunks for memory efficiency
     CHUNK_SIZE = 10_000
@@ -447,7 +462,7 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
 
     # Save theta table
     np.save(theta_path, theta)
-    ep.flush()
+    ep.flush()  # type: ignore[attr-defined]
     progress.done()
 
 
@@ -457,8 +472,8 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
 
 
 def _compute_sccs(
-    ep: np.ndarray, idx_to_state: np.ndarray, introns_to_use: List[int]
-) -> Tuple[np.ndarray, Dict[int, int], List[int]]:
+    ep: NDArray[Any], idx_to_state: NDArray[Any], introns_to_use: List[int]
+) -> Tuple[NDArray[Any], Dict[int, int], List[int]]:
     """
     Core Tarjan's SCC algorithm restricted to a subset of introns.
     Optimized: neighbors() does not np.unique, just returns ep[v, introns_arr].
@@ -474,9 +489,9 @@ def _compute_sccs(
     counter = 0
     introns_arr = np.array(introns_to_use, dtype=np.int32)
 
-    def neighbors(v: int) -> "np.ndarray[np.int32, Any]":
+    def neighbors(v: int) -> NDArray[np.int32]:
         # Return all neighbors; duplicates are fine
-        return ep[v, introns_arr]
+        return np.asarray(ep[v, introns_arr], dtype=np.int32)
 
     for root in range(N):
         if indices[root] != -1:

@@ -50,9 +50,9 @@ class PhenomenologyData(TypedDict, total=False):
     """Structure of the phenomenology mapping data."""
 
     schema_version: str
-    phenomenology_map: list
-    orbit_sizes: dict
-    metadata: dict
+    phenomenology_map: list[int]
+    orbit_sizes: dict[int, int]
+    metadata: dict[str, Any]
     _diagnostics: Dict[str, Any]
 
 

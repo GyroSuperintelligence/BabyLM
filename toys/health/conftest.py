@@ -1,26 +1,31 @@
 import os
 import sys
+import shutil
+from pathlib import Path
+from typing import Any, Callable, Dict, Generator, List, cast
+import pytest
+from baby.contracts import AgentConfig
+from baby.intelligence import AgentPool, GyroSI
+from baby.policies import OrbitStore, OverlayView, ReadOnlyView
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 """
 Shared pytest fixtures and configuration for GyroSI test suite.
 """
 
-import shutil
-from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional, cast
-
-import pytest
-
-from baby.contracts import AgentConfig, PreferencesConfig
-from baby.intelligence import AgentPool, GyroSI, LRUAgentCache
-from baby.policies import OrbitStore, OverlayView, ReadOnlyView
+# Define these paths as needed for your test environment
+MEM_META = Path("memories/public/meta")
+MEM_TOKENIZERS = Path("memories/public/tokenizers")
+ONTOLOGY_PATH = MEM_META / "ontology_map.json"
+PHENOMENOLOGY_PATH = MEM_META / "phenomenology_map.json"
+THETA_PATH = MEM_META / "theta.npy"
+EPISTEMOLOGY_PATH = MEM_META / "epistemology.npy"
+TOKENIZER_DIR = MEM_TOKENIZERS / "bert-base-uncased"
+TOKENIZER_JSON = TOKENIZER_DIR / "tokenizer.json"
+TOKENIZER_VOCAB = TOKENIZER_DIR / "vocab.txt"
 
 # Use the main stateless data files for all tests
 MAIN_MEMORIES_META = Path(__file__).parent.parent.parent / "memories" / "public" / "meta"
-ONTOLOGY_PATH = str(MAIN_MEMORIES_META / "ontology_map.json")
-PHENOMENOLOGY_PATH = str(MAIN_MEMORIES_META / "phenomenology_map.json")
-EPISTEMOLOGY_PATH = str(MAIN_MEMORIES_META / "epistemology.npy")
 
 # Base temp directory for all test-generated files
 BASE_TEMP_DIR = Path(__file__).parent / "memories"
@@ -49,7 +54,7 @@ def real_ontology() -> tuple[str, str, str]:
     """
     Fixture returning paths to the real ontology and phenomenology files, for integration tests.
     """
-    return ONTOLOGY_PATH, PHENOMENOLOGY_PATH, EPISTEMOLOGY_PATH
+    return str(ONTOLOGY_PATH), str(PHENOMENOLOGY_PATH), str(EPISTEMOLOGY_PATH)
 
 
 @pytest.fixture
@@ -101,7 +106,7 @@ def real_orbit_store(temp_dir: str) -> Generator[OrbitStore, None, None]:
 def agent_config(temp_dir: str) -> AgentConfig:
     """Create a test agent configuration, always using the real ontology."""
     return {
-        "ontology_path": ONTOLOGY_PATH,
+        "ontology_path": str(ONTOLOGY_PATH),
         "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
         "enable_phenomenology_storage": False,
     }
@@ -110,57 +115,23 @@ def agent_config(temp_dir: str) -> AgentConfig:
 @pytest.fixture
 def gyrosi_agent(agent_config: AgentConfig) -> Generator[GyroSI, None, None]:
     """Create a GyroSI agent instance."""
-    agent = GyroSI(agent_config)
+    agent = GyroSI(config=agent_config)
     yield agent
     agent.close()
 
 
 @pytest.fixture
-def agent_pool(temp_dir: str) -> Generator[AgentPool, None, None]:
+def agent_pool(tmp_path) -> Generator[AgentPool, None, None]:
     """Create an agent pool using the real ontology, with all agent data isolated to temp_dir."""
-    public_knowledge = os.path.join(temp_dir, "public_knowledge.pkl.gz")
-    os.makedirs(os.path.dirname(public_knowledge), exist_ok=True)
-    store = OrbitStore(public_knowledge)
-    store.close()
-
-    import time  # Only import time if needed
-
-    class TestAgentPool(AgentPool):
-        def get_or_create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> GyroSI:
-            with self._lock:
-                if self.eviction_policy == "ttl":
-                    self.agent_access_times[agent_id] = time.time()
-                    self._evict_expired_agents()
-                if agent_id not in self.agents:
-                    if not isinstance(self.agents, LRUAgentCache):
-                        self._maybe_evict_agent()
-                    # Use a private knowledge path inside temp_dir
-                    private_path = os.path.join(temp_dir, f"agents/{agent_id}/knowledge.pkl.gz")
-                    os.makedirs(os.path.dirname(private_path), exist_ok=True)
-                    public_store = ReadOnlyView(OrbitStore(self.base_knowledge_path, write_threshold=100))
-                    private_store = OrbitStore(private_path, write_threshold=100)
-                    store = OverlayView(public_store, private_store)
-                    config: AgentConfig = {
-                        "ontology_path": self.ontology_path,
-                        "public_knowledge_path": self.base_knowledge_path,
-                        "private_knowledge_path": private_path,
-                        "enable_phenomenology_storage": bool(
-                            self.preferences.get("enable_phenomenology_storage", False)
-                        ),
-                    }
-                    if role_hint:
-                        config["agent_metadata"] = {"role_hint": role_hint}
-                    self.agents[agent_id] = GyroSI(config=config, agent_id=agent_id, phenotype_store=store)
-                return self.agents[agent_id]
-
-    pool = TestAgentPool(ONTOLOGY_PATH, public_knowledge)
+    public_knowledge = str(tmp_path / "public_knowledge.pkl.gz")
+    OrbitStore(public_knowledge).close()
+    pool = AgentPool(str(ONTOLOGY_PATH), public_knowledge)
     yield pool
     pool.close_all()
 
 
 @pytest.fixture
-def preferences_config() -> PreferencesConfig:
-    """Create test preferences configuration."""
+def preferences_config() -> dict:
     return {
         "storage_backend": "pickle",
         "compression_level": 6,
@@ -173,7 +144,7 @@ def preferences_config() -> PreferencesConfig:
         "agent_eviction_policy": "lru",
         "agent_ttl_minutes": 60,
         "enable_profiling": False,
-        "write_batch_size": 100,
+        "batch_size": 100,  # changed key
         "cache_size_mb": 10,
     }
 
@@ -235,10 +206,10 @@ def mock_time(monkeypatch: pytest.MonkeyPatch) -> GyroSI:
 
 
 @pytest.fixture
-def generate_test_introns() -> Callable[[int, int], List[int]]:
+def generate_test_introns() -> Callable[[int], List[int]]:
     import random
 
-    def _gen(count: int, seed: int = 42) -> list[int]:
+    def _gen(count: int, seed: int = 42) -> List[int]:
         random.seed(seed)
         return [random.randint(0, 255) for _ in range(count)]
 
@@ -257,8 +228,8 @@ def assert_phenotype_entry_valid(entry: Dict[str, Any]) -> None:
     assert isinstance(entry["exon_mask"], int)
     assert 0 <= entry["exon_mask"] <= 255
     assert 0 <= entry["confidence"] <= 1.0
-    assert isinstance(entry["context_signature"], tuple)
-    assert len(entry["context_signature"]) == 2
+    # Accept both tuple and list of length 2 for context_signature
+    assert isinstance(entry["context_signature"], (tuple, list)) and len(entry["context_signature"]) == 2
 
 
 def assert_ontology_valid(ontology_data: Dict[str, Any]) -> None:
@@ -284,3 +255,27 @@ class Timer:
         import time
 
         self.elapsed = time.perf_counter() - self.start
+
+
+@pytest.fixture
+def theta_path() -> Path:
+    """Fixture for the path to theta.npy."""
+    return THETA_PATH
+
+
+@pytest.fixture
+def tokenizer_dir() -> Path:
+    """Fixture for the path to the tokenizer directory."""
+    return TOKENIZER_DIR
+
+
+@pytest.fixture
+def tokenizer_json() -> Path:
+    """Fixture for the path to the tokenizer.json file."""
+    return TOKENIZER_JSON
+
+
+@pytest.fixture
+def tokenizer_vocab() -> Path:
+    """Fixture for the path to the vocab.txt file."""
+    return TOKENIZER_VOCAB

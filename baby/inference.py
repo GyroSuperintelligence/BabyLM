@@ -207,7 +207,7 @@ class InferenceEngine:
             # Check invariants
             try:
                 # Key matches context signature
-                if entry.get("context_signature") != key:
+                if entry.get("context_signature") != (key):
                     anomaly_count += 1
 
                 # Memory mask in valid range
@@ -241,41 +241,41 @@ class InferenceEngine:
             modified_entries=anomaly_count,
         )
 
-    def apply_confidence_decay(self, decay_factor: float = 0.001) -> ValidationReport:
-        """
-        Applies temporal decay to aging knowledge entries.
-
-        Uses a fixed decay rate to simulate forgetting of unused knowledge.
-        Only confidence is decayed, never the memory mask.
-
-        Args:
-            decay_factor: Fixed decay rate per step (small value, e.g. 0.001)
-
-        Returns:
-            Report with number of modified entries
-        """
+    def apply_confidence_decay(self, decay_factor: float = 0.001) -> Dict[str, Any]:
         modified_count = 0
         total_entries = 0
-
         for key, entry in self.store.iter_entries():
             # Apply simple exponential decay to confidence only
             new_conf = max(0.01, entry.get("confidence", 0.1) * math.exp(-decay_factor))
             assert 0 <= new_conf <= 1.0
             entry["confidence"] = new_conf
-
             self.store.put(key, entry)
             modified_count += 1
             total_entries += 1
-
         if hasattr(self.store, "commit"):
             self.store.commit()
-
-        return ValidationReport(
+        report = ValidationReport(
             total_entries=total_entries,
             average_confidence=0.0,  # Would need full recalculation
             store_type=type(self.store).__name__,
             modified_entries=modified_count,
         )
+        # Convert ValidationReport to dict
+        try:
+            from dataclasses import asdict, is_dataclass
+
+            if is_dataclass(report):
+                return asdict(report)
+        except ImportError:
+            pass
+        if hasattr(report, "__dict__"):
+            return vars(report)
+        return {
+            "total_entries": total_entries,
+            "average_confidence": 0.0,
+            "store_type": type(self.store).__name__,
+            "modified_entries": modified_count,
+        }
 
     def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
         """
@@ -353,33 +353,4 @@ class InferenceEngine:
             "created_at": current_time,
             "last_updated": current_time,
             "_original_context": None,
-        }
-
-    def get_knowledge_statistics(self) -> Dict[str, Any]:
-        """
-        Get basic knowledge base statistics.
-
-        Returns:
-            Dictionary with core statistics
-        """
-        if not hasattr(self.store, "data"):
-            return {"error": "Statistics not available for this store type"}
-
-        entries = list(self.store.data.values())
-
-        if not entries:
-            return {"total_entries": 0, "average_confidence": 0.0, "memory_utilization": 0.0}
-
-        confidences = [e.get("confidence", 0.0) for e in entries]
-        exon_masks = [e.get("exon_mask", 0) for e in entries]
-
-        # Calculate memory utilization (average bits set in masks)
-        total_bits = sum(bin(mask).count("1") for mask in exon_masks)
-        max_possible_bits = len(exon_masks) * 8  # 8 bits per mask
-        memory_utilization = total_bits / max_possible_bits if max_possible_bits > 0 else 0
-
-        return {
-            "total_entries": len(entries),
-            "average_confidence": sum(confidences) / len(confidences) if confidences else 0,
-            "memory_utilization": memory_utilization,
         }

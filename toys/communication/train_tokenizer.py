@@ -1,18 +1,19 @@
 """Train custom tokenizers on domain-specific data."""
 
 from pathlib import Path
+
 from tokenizers import Tokenizer, trainers, pre_tokenizers
 from tokenizers.models import WordPiece
 
 
-def train_wordpiece(files: list[str], vocab_size: int = 30000, save_name: str = "custom-wordpiece"):
+def train_wordpiece(files: list[str], vocab_size: int = 30000, save_name: str = "custom-wordpiece") -> None:
     """Train a new WordPiece tokenizer on provided files."""
 
     # Initialize tokenizer with WordPiece model
     tokenizer = Tokenizer(WordPiece(vocab={}, unk_token="[UNK]", max_input_chars_per_word=100))
 
     # Pre-tokenization (BERT-style)
-    tokenizer.pre_tokenizer = pre_tokenizers.BertPreTokenizer()
+    tokenizer.pre_tokenizer = pre_tokenizers.BertPreTokenizer()  # pyright: ignore[reportAttributeAccessIssue]
 
     # Training configuration
     trainer = trainers.WordPieceTrainer(

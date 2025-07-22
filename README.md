@@ -65,7 +65,6 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 - 📚 **No Training Data Needed**: Learns directly from conversation, not from scraped internet data.
 - 🔍 **100% Explainable**: Every decision can be traced through simple physics operations.
 - 🎯 **Zero Hallucination**: Can only generate what it has physically learned, not random guesses.
-- 🔄 **No Tokenizer**: Understands any language, emoji, or binary data at the byte level.
 - 🔢 **Holographic Geometry**: Built on numerical patterns (3, 6, 12, 24, 48) found in crystals and rotation groups.
 - 🌐 **Six Degrees of Everything**: Any knowledge is reachable from any other in at most 6 steps, a provable property of the state space.
 

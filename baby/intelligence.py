@@ -5,15 +5,18 @@ This module provides the IntelligenceEngine and GyroSI classes responsible for
 orchestrating the complete system and providing the external API.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import time
 import uuid
 from collections import OrderedDict, deque
 from threading import RLock
-from typing import Any, Dict, List, Optional, TypedDict, cast, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TypedDict, cast, TYPE_CHECKING, Deque, Tuple
 
 import numpy as np
+from dataclasses import asdict, is_dataclass
 
 from baby import governance
 from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig
@@ -22,6 +25,7 @@ from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
 
 import warnings
+
 
 if TYPE_CHECKING:
     pass
@@ -92,11 +96,11 @@ class IntelligenceEngine:
         self._microstep_count: int = 0  # Track internal cooling/autonomic steps
         # Extension points
         self.post_cycle_hooks: List[CycleHookFunction] = []
-        self._hook_event_buffer = deque(maxlen=hook_batch_interval)
+        self._hook_event_buffer: Deque[Tuple[Any, ...]] = deque(maxlen=hook_batch_interval)
         self._hook_batch_interval = hook_batch_interval
 
         # Algedonic regulation and autonomic cycles
-        self._θ_buf: deque = deque(maxlen=128)
+        self._θ_buf: deque[float] = deque(maxlen=128)
         self._θ_high: float = 0.9  # radians
         self._θ_low: float = 0.3
         self._cool_introns: tuple[int, ...] = (0b01000010,)
@@ -332,7 +336,7 @@ class IntelligenceEngine:
         """Loads the ontology data from a JSON file as ManifoldData."""
         with open(ontology_path, "r") as f:
             data = json.load(f)
-        return data
+        return dict(data)
 
     def _sync_state_fields_from_index(self) -> None:
         if self.use_epistemology:
@@ -342,6 +346,50 @@ class IntelligenceEngine:
     def _sync_index_from_state_int(self) -> None:
         if self.use_epistemology:
             self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
+
+    def validate_knowledge_integrity(self) -> bool:
+        """
+        Validate the integrity of the knowledge base.
+
+        Returns:
+            True if integrity is maintained, False otherwise
+        """
+        result = self.operator.validate_knowledge_integrity()
+        if isinstance(result, bool):
+            return result
+        if hasattr(result, "success"):
+            return bool(getattr(result, "success"))
+        # If result is a Mapping (e.g., ValidationReport TypedDict), treat as True if total_entries > 0
+        try:
+            from collections.abc import Mapping
+            if isinstance(result, Mapping):
+                return bool(result.get("total_entries", 0) > 0)
+        except ImportError:
+            pass
+        return False
+
+    def apply_confidence_decay(self, decay_rate: float = 0.001) -> Dict[str, Any]:
+        result = self.operator.apply_confidence_decay(decay_rate)
+        try:
+            return dict(result)
+        except Exception:
+            if is_dataclass(result):
+                return asdict(result)
+            if hasattr(result, "__dict__"):
+                return vars(result)
+            return {}
+
+    def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
+        """
+        Prune entries from the knowledge base with confidence below a threshold.
+
+        Args:
+            confidence_threshold: Minimum confidence for entry retention
+
+        Returns:
+            Number of entries pruned
+        """
+        return self.operator.prune_low_confidence_entries(confidence_threshold)
 
 
 class GyroSI:
@@ -429,7 +477,7 @@ class GyroSI:
         self._commit_if_needed()
         return response
 
-    def _commit_if_needed(self):
+    def _commit_if_needed(self) -> None:
         store = self.engine.operator.store
         if isinstance(store, OrbitStore):
             store.commit()
@@ -446,8 +494,7 @@ class GyroSI:
         return {
             **state_info,
             "config": self.config,
-            "knowledge_statistics": self.engine.operator.get_knowledge_statistics(),
-            "system_integrity": self.engine.operator.validate_knowledge_integrity(),
+            "system_integrity": self.engine.validate_knowledge_integrity(),
         }
 
     def add_monitoring_hook(self, hook: CycleHookFunction) -> None:
@@ -466,10 +513,10 @@ class GyroSI:
             Maintenance report
         """
         # Apply confidence decay
-        decay_report = self.engine.operator.apply_confidence_decay(decay_rate)
+        decay_report = self.engine.apply_confidence_decay(decay_rate)
 
         # Prune low-confidence entries
-        pruned_count = self.engine.operator.prune_low_confidence_entries(confidence_threshold)
+        pruned_count = self.engine.prune_low_confidence_entries(confidence_threshold)
 
         return {"decay_applied": decay_report, "entries_pruned": pruned_count, "timestamp": time.time()}
 
@@ -521,7 +568,7 @@ class GyroSI:
         return base_store
 
 
-class LRUAgentCache(OrderedDict):
+class LRUAgentCache(OrderedDict[Any, Any]):
     """LRU cache for agent instances with size limit."""
 
     def __init__(self, max_size: int, *args: Any, **kwargs: Any):
@@ -574,14 +621,14 @@ class AgentPool:
         self.eviction_policy = self.preferences.get("agent_eviction_policy", "lru")
         self.agent_access_times: Dict[str, float] = {}  # Always initialize
         # Sharded agent storage and locks
-        self._shards = []
+        self._shards: List[Dict[str, Any]] = []
         for _ in range(self.SHARD_COUNT):
             if self.eviction_policy == "lru":
                 self._shards.append({"agents": LRUAgentCache(self.max_agents // self.SHARD_COUNT), "lock": RLock()})
             else:
                 self._shards.append({"agents": OrderedDict(), "lock": RLock()})
         # Cache a single public read-only store
-        self._public_store = ReadOnlyView(OrbitStore(base_knowledge_path, write_threshold=100))
+        self._public_store: Optional[ReadOnlyView] = ReadOnlyView(OrbitStore(base_knowledge_path, write_threshold=100))
 
     def _shard_index(self, agent_id: str) -> int:
         # Use hash for even distribution; mask for power-of-two
@@ -683,7 +730,7 @@ class AgentPool:
             self._public_store.close()
             self._public_store = None
 
-    def _maybe_evict_agent(self, shard) -> None:
+    def _maybe_evict_agent(self, shard: Dict[str, Any]) -> None:
         """Evict agent if at capacity (non-LRU policies) for a shard."""
         agents = shard["agents"]
         if len(agents) >= self.max_agents // self.SHARD_COUNT:

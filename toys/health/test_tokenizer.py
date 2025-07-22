@@ -9,7 +9,7 @@ from toys.communication import tokenizer as tok
 from toys.communication import external_adapter
 
 
-def test_leb128_roundtrip():
+def test_leb128_roundtrip() -> None:
     """Test LEB128 encoding is reversible."""
     # Test various token ID sizes
     test_ids = [0, 127, 128, 16383, 16384, 30000]
@@ -21,7 +21,7 @@ def test_leb128_roundtrip():
         assert all(0 <= b <= 255 for b in encoded)
 
 
-def test_text_roundtrip():
+def test_text_roundtrip() -> None:
     """Test full text encoding/decoding."""
     test_texts = [
         "Hello, world!",
@@ -41,7 +41,7 @@ def test_text_roundtrip():
             pytest.skip("Tokenizer not installed. Run setup_tokenizers.py")
 
 
-def test_vocab_size():
+def test_vocab_size() -> None:
     """Test vocabulary size retrieval."""
     try:
         size = tok.vocab_size("bert-base-uncased")
@@ -50,7 +50,7 @@ def test_vocab_size():
         pytest.skip("Tokenizer not installed")
 
 
-def get_free_port():
+def get_free_port() -> int:
     s = socket.socket()
     s.bind(("", 0))
     port = s.getsockname()[1]
@@ -59,7 +59,7 @@ def get_free_port():
 
 
 @pytest.mark.integration
-def test_rest_adapter_hf_generate_200(temp_dir):
+def test_rest_adapter_hf_generate_200(temp_dir) -> None:
     """Test that the REST adapter responds 200 to a minimal HF /generate request."""
     port = get_free_port()
     # Patch the agent_pool to use temp_dir for isolation

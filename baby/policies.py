@@ -10,7 +10,7 @@ import math
 import mmap
 import os
 import pickle
-import msgpack
+import msgpack  # type: ignore[import-untyped]
 import threading
 import time
 from pathlib import Path
@@ -21,11 +21,11 @@ from baby.contracts import MaintenanceReport
 logger = logging.getLogger(__name__)
 
 # Singleton cache for phenomenology maps by path
-_phenomenology_map_cache = {}
+_phenomenology_map_cache: Dict[str, Dict[int, int]] = {}
 _phenomenology_map_lock = threading.Lock()
 
 
-def load_phenomenology_map(phenomenology_map_path: str):
+def load_phenomenology_map(phenomenology_map_path: str) -> Dict[int, int]:
     """Load and cache the phenomenology map from disk, shared between all CanonicalViews."""
     with _phenomenology_map_lock:
         if phenomenology_map_path in _phenomenology_map_cache:
@@ -71,7 +71,7 @@ class OrbitStore:
             self._open_mmap()
         self._flush_count = 0
         self._fsync_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        self._pending_fsync: Optional[concurrent.futures.Future] = None
+        self._pending_fsync: Optional[concurrent.futures.Future[Any]] = None
         self._last_fsync = 0.0
         self._fsync_interval = 0.05  # 50ms or configurable
 
@@ -142,14 +142,14 @@ class OrbitStore:
         if self._pending_fsync:
             self._pending_fsync.result()
 
-    def _flush(self) -> Optional[concurrent.futures.Future]:
+    def _flush(self) -> Optional[concurrent.futures.Future[Any]]:
         pending_fsync = None
         if not self.log_file or not self.pending_writes:
             return None
         for context_key, entry in self.pending_writes.items():
-            data = msgpack.packb(entry, use_bin_type=True)
+            data = msgpack.packb(to_native(entry), use_bin_type=True)
             offset = self.log_file.tell()
-            size = len(data)
+            size = len(data) if data is not None else 0
             self.log_file.write(data)
             self.index[context_key] = (offset, size)
         self.log_file.flush()
@@ -908,3 +908,18 @@ at the point where you instantiate them, e.g.:
 
 This avoids referencing undefined variables at the module level.
 """
+
+
+def to_native(obj: Any) -> Any:
+    import numpy as np
+
+    if isinstance(obj, dict):
+        return {k: to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [to_native(v) for v in obj]
+    elif isinstance(obj, tuple):
+        return tuple(to_native(v) for v in obj)
+    elif isinstance(obj, np.generic):
+        return obj.item()
+    else:
+        return obj

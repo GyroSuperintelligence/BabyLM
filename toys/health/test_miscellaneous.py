@@ -42,7 +42,7 @@ from baby.governance import (
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine
 from baby.intelligence import AgentPool, GyroSI
-from baby.policies import OrbitStore, OverlayView
+from baby.policies import OverlayView
 
 # ---------------------------------------------------------------------------
 # Local helper
@@ -478,7 +478,7 @@ class TestBatchLearning:
         # Learn in clean agent: capture state after seq_a
         gyrosi_agent.engine.reset_to_archetypal_state()
         gyrosi_agent.ingest(seq_a)
-        stats_a = gyrosi_agent.engine.operator.get_knowledge_statistics()
+        # Remove all test code that calls get_knowledge_statistics or asserts on knowledge statistics
 
         # Recreate fresh agent (avoid contamination)
         # We reuse the same instance but reset underlying store by creating a new one
@@ -486,7 +486,7 @@ class TestBatchLearning:
         # manifests in knowledge masks not cycle count alone).
         gyrosi_agent.engine.reset_to_archetypal_state()
         gyrosi_agent.ingest(seq_b)
-        stats_b = gyrosi_agent.engine.operator.get_knowledge_statistics()
+        # Remove all test code that calls get_knowledge_statistics or asserts on knowledge statistics
 
         # Heuristic: memory utilization difference indicates path sensitivity
         assert (

@@ -361,6 +361,8 @@ class TestAgentPool:
 
     def test_orchestrate_turn(self, agent_pool: "AgentPool") -> None:
         """Test orchestration of a conversation turn."""
+        os.environ["MEM_TOKENIZERS"] = "bert-base-uncased"
+        os.environ["ONTOLOGY_PATH"] = "memories/public/meta/ontology_map.json"
         # Test basic orchestration
         response = orchestrate_turn(
             agent_pool, "test_user_orchestrate", "test_assistant_orchestrate", "Hello, how are you?"

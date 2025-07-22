@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 import os
 import sys
+import collections
+from baby.governance import fold, transcribe_byte
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 """
 Explore the structure of the 5-element basis for fold algebra.
 """
-
-from collections import defaultdict
-
-from baby.governance import fold, transcribe_byte
 
 
 def analyze_basis_structure() -> None:
@@ -44,7 +42,7 @@ def analyze_basis_structure() -> None:
     print("\nGENERATION PROCESS")
     print("=" * 50)
 
-    gen_counts = defaultdict(int)
+    gen_counts = collections.defaultdict(int)
     gen_counts[0] = len(known)
 
     while head < len(queue):
