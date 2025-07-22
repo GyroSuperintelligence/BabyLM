@@ -28,6 +28,7 @@ import time
 import uuid
 from typing import List
 from pathlib import Path
+import atexit
 import json
 
 from fastapi import FastAPI, Header, Request
@@ -59,6 +60,7 @@ os.makedirs(os.path.dirname(DEFAULT_KNOWLEDGE_PATH), exist_ok=True)
 # One shared AgentPool for the whole process
 # ---------------------------------------------------------------------
 agent_pool = AgentPool(DEFAULT_ONT_PATH, DEFAULT_KNOWLEDGE_PATH)
+atexit.register(agent_pool.close_all)
 
 # ---------------------------------------------------------------------
 # FastAPI application

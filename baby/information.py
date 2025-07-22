@@ -17,17 +17,12 @@ This module provides the InformationEngine class responsible for measurement,
 storage coordination, and conversion between state representations.
 
 Build steps:
-1. Generate ontology_map.json (the ontology)
-   python -m baby.information ontology --output memories/public/meta/ontology_map.json
-
-2. Generate epistemology.npy (the state transition table)
-   python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json \\
-       --output memories/public/meta/epistemology.npy
-
-3. Generate phenomenology_map.json (the phenomenology mapping)
-   python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy \\
-       --output memories/public/meta/phenomenology_map.json \\
-       --ontology memories/public/meta/ontology_map.json
+    python -m baby.information ontology     --output memories/public/meta/ontology_map.json
+    python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json \
+           --output  memories/public/meta/epistemology.npy
+    python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy \
+           --ontology memories/public/meta/ontology_map.json \
+           --output memories/public/meta/phenomenology_map.json
 """
 
 
@@ -129,6 +124,16 @@ class InformationEngine:
             else:
                 # Fallback: keep all ones
                 pass
+
+        # Load θ table (theta.npy) if available
+        self._theta_table = None
+        default_theta = "memories/public/meta/theta.npy"
+        if "ontology_map_path" in ontology_data:
+            default_theta = ontology_data["ontology_map_path"].replace("ontology_map.json", "theta.npy")
+        elif "phenomap_path" in ontology_data:
+            default_theta = ontology_data["phenomap_path"].replace("phenomenology_map.json", "theta.npy")
+        if os.path.exists(default_theta):
+            self._theta_table = np.load(default_theta, mmap_mode="r")
 
         # Cache the archetypal state as an int
         self._origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
@@ -292,20 +297,14 @@ class InformationEngine:
         return float(self._acos_lut[h])
 
     def measure_state_divergence(self, state_int: int) -> float:
-        """
-        Measure angular divergence from the archetypal tensor state (GENE_Mac_S).
-
-        Args:
-            state_int: Current physical state
-
-        Returns:
-            Angular divergence in radians
-        """
-        if getattr(self, '_use_fast_divergence', True):
+        if self._theta_table is not None:
+            idx = self.get_index_from_state(state_int)
+            return float(self._theta_table[idx])
+        # Fallbacks (shouldn’t trigger in production)
+        if self._use_fast_divergence:
             return self._angular_divergence_fast(state_int)
-        else:
-            current_tensor = self.int_to_tensor(state_int)
-            return self.gyrodistance_angular(current_tensor, governance.GENE_Mac_S)
+        current_tensor = self.int_to_tensor(state_int)
+        return self.gyrodistance_angular(current_tensor, governance.GENE_Mac_S)
 
     def get_orbit_cardinality(self, state_index: int) -> int:
         return int(self.orbit_cardinality[state_index])
@@ -421,6 +420,15 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
     N = len(ontology_map)
     states = np.array(sorted(ontology_map.keys()), dtype=np.uint64)
 
+    # ----- θ table (angular divergence from origin) -----
+    theta_path = output_path.replace("epistemology.npy", "theta.npy")
+    origin = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
+    acos_lut = np.arccos(1 - 2 * np.arange(49) / 48.0).astype(np.float32)
+    theta = np.empty(N, dtype=np.float32)
+    for i, s in enumerate(states):
+        h = int(s ^ origin).bit_count()
+        theta[i] = acos_lut[h]
+
     # Memory-mapped output
     ep = np.lib.format.open_memmap(output_path, dtype=np.int32, mode="w+", shape=(N, 256))
 
@@ -440,6 +448,8 @@ def build_state_transition_table(ontology_map: Dict[int, int], output_path: str)
         ep[chunk_start:chunk_end, :] = idxs
         progress.update(chunk_end, N)
 
+    # Save theta table
+    np.save(theta_path, theta)
     ep.flush()
     progress.done()
 

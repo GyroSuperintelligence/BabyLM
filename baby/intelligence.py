@@ -64,6 +64,7 @@ class IntelligenceEngine:
         self.use_epistemology: bool = False
         self.current_state_index: int
         self.gene_mac_m_int: int
+        self._cached_state_int: int = 0  # Only used if use_epistemology is True
         epistemology_path = ontology_path.replace("ontology_map.json", "epistemology.npy")
         if os.path.exists(epistemology_path):
             try:
@@ -129,6 +130,7 @@ class IntelligenceEngine:
         # S1: Apply gyroscopic transformation to physical state
         if self.use_epistemology:
             self.current_state_index = self.epistemology[self.current_state_index, intron]
+            self._cached_state_int = self.s2.get_state_from_index(self.current_state_index)
             # No eager sync here
         else:
             self.gene_mac_m_int = governance.apply_gyration_and_transform(self.gene_mac_m_int, intron)
@@ -136,14 +138,14 @@ class IntelligenceEngine:
 
         # State integrity assertion
         assert (
-            self.gene_mac_m_int if not self.use_epistemology else self.s2.get_state_from_index(self.current_state_index)
+            self.gene_mac_m_int if not self.use_epistemology else self._cached_state_int
         ) < (1 << 48)
 
         self.cycle_count += 1
 
         # Record divergence in θ buffer
         div = self.s2.measure_state_divergence(
-            self.gene_mac_m_int if not self.use_epistemology else self.s2.get_state_from_index(self.current_state_index)
+            self.gene_mac_m_int if not self.use_epistemology else self._cached_state_int
         )
         self._θ_buf.append(div)
         return intron
@@ -335,6 +337,7 @@ class IntelligenceEngine:
     def _sync_state_fields_from_index(self) -> None:
         if self.use_epistemology:
             self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
+            self._cached_state_int = self.gene_mac_m_int
 
     def _sync_index_from_state_int(self) -> None:
         if self.use_epistemology:
@@ -567,7 +570,7 @@ class AgentPool:
 
         # Load preferences
         self.preferences = preferences or {}
-        max_agents = self.preferences.get("max_agents_in_memory", 1000)
+        self.max_agents = self.preferences.get("max_agents_in_memory", 1000)
         self.eviction_policy = self.preferences.get("agent_eviction_policy", "lru")
         self.agent_access_times: Dict[str, float] = {}  # Always initialize
         # Sharded agent storage and locks
@@ -575,7 +578,7 @@ class AgentPool:
         for _ in range(self.SHARD_COUNT):
             if self.eviction_policy == "lru":
                 self._shards.append({
-                    "agents": LRUAgentCache(max_agents // self.SHARD_COUNT),
+                    "agents": LRUAgentCache(self.max_agents // self.SHARD_COUNT),
                     "lock": RLock()
                 })
             else:
@@ -689,7 +692,7 @@ class AgentPool:
     def _maybe_evict_agent(self, shard) -> None:
         """Evict agent if at capacity (non-LRU policies) for a shard."""
         agents = shard["agents"]
-        if hasattr(self, "max_agents") and len(agents) >= self.max_agents // self.SHARD_COUNT:
+        if len(agents) >= self.max_agents // self.SHARD_COUNT:
             if self.eviction_policy == "lfu":
                 oldest_id = next(iter(agents))
             elif self.eviction_policy == "ttl":
