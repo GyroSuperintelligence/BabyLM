@@ -595,7 +595,7 @@ class TestEdgeCases:
         """Test error when phenotype entry lacks context_signature."""
         engine = gyrosi_agent.engine.operator
 
-        bad_entry: PhenotypeEntry = {
+        bad_entry = {
             "phenotype": "bad",
             "exon_mask": 42,
             "confidence": 0.5,
@@ -606,10 +606,9 @@ class TestEdgeCases:
             "governance_signature": {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0},
             "_original_context": None,
         }
-
         # Only cast when not testing error handling for bad dicts
         with pytest.raises(KeyError, match="missing required 'context_signature' key"):
-            engine.learn(bad_entry, 42)
+            engine.learn(cast(Any, bad_entry), 42)
 
     def test_learn_with_invalid_state_index(self, gyrosi_agent: "GyroSI") -> None:
         """Test assertion failure with invalid state index."""
@@ -721,7 +720,7 @@ class TestEdgeCases:
         # Create problematic entry that might cause exceptions
         bad_entry: PhenotypeEntry = {
             "phenotype": "bad",
-            "confidence": "not-a-float",  # Invalid type triggers anomaly
+            "confidence": -0.5,  # Invalid value triggers anomaly, but type is float
             "exon_mask": 0,
             "usage_count": 0,
             "created_at": time.time(),

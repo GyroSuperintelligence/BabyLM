@@ -158,13 +158,14 @@ def test_bytes() -> bytes:
 
 
 @pytest.fixture
-def client(patched_adapter_pool):
+def client(patched_adapter_pool: Any) -> TestClient:
     from toys.communication.external_adapter import app
+
     return TestClient(app)
 
 
 @pytest.fixture
-def patched_adapter_pool(tmp_path, meta_paths):
+def patched_adapter_pool(tmp_path: Path, meta_paths: Dict[str, str]) -> Generator[AgentPool, None, None]:
     from toys.communication import external_adapter as ea
 
     pub = tmp_path / "public.pkl.gz"

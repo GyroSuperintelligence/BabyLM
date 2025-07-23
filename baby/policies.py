@@ -212,8 +212,9 @@ class OrbitStore:
                     break
                 unpacker.feed(chunk)
                 for entry in unpacker:
-                    packed: bytes = msgpack.packb(entry, use_bin_type=True)
-                    assert isinstance(packed, bytes)
+                    packed = msgpack.packb(entry, use_bin_type=True)
+                    if not isinstance(packed, bytes):
+                        continue  # skip if not bytes
                     size = len(packed)
                     if "context_signature" in entry:
                         context_key = entry["context_signature"]
@@ -291,7 +292,7 @@ class OrbitStore:
 class CanonicalView:
     def __init__(self, base_store: Any, phenomenology_map_path: str, base_path: Path = PROJECT_ROOT):
         """CanonicalView with base_path for sandboxing phenomenology_map_path."""
-        self.base_store = base_store
+        self.base_store: Optional[Any] = base_store
         self.phenomenology_map_path = _abs(phenomenology_map_path, base_path)
         if not self.phenomenology_map_path:
             raise ValueError("phenomenology_map_path must not be None")
@@ -305,6 +306,8 @@ class CanonicalView:
         return (phenomenology_index, intron)
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
+        if self.base_store is None:
+            raise RuntimeError("CanonicalView: base_store is closed or None")
         phenomenology_key = self._get_phenomenology_key(context_key)
         entry = self.base_store.get(phenomenology_key)
         if entry and "_original_context" in entry:
@@ -317,6 +320,8 @@ class CanonicalView:
         return entry
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
+        if self.base_store is None:
+            raise RuntimeError("CanonicalView: base_store is closed or None")
         phen_key = self._get_phenomenology_key(context_key)
         if entry.get("context_signature") != phen_key:
             e = entry.copy()
@@ -326,6 +331,8 @@ class CanonicalView:
         self.base_store.put(phen_key, entry)
 
     def delete(self, context_key: Tuple[int, int]) -> None:
+        if self.base_store is None:
+            raise RuntimeError("CanonicalView: base_store is closed or None")
         phen_key = self._get_phenomenology_key(context_key)
         deleter = getattr(self.base_store, "delete", None)
         if callable(deleter):
@@ -334,14 +341,18 @@ class CanonicalView:
             raise NotImplementedError("Underlying store does not support deletion.")
 
     def close(self) -> None:
-        self.base_store.close()
+        if self.base_store is not None:
+            self.base_store.close()
+            self.base_store = None
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
+        if self.base_store is None:
+            raise RuntimeError("CanonicalView: base_store is closed or None")
         return cast(Dict[Tuple[int, int], Any], self.base_store.data)
 
     def _load_index(self) -> None:
-        if hasattr(self.base_store, "_load_index"):
+        if self.base_store is not None and hasattr(self.base_store, "_load_index"):
             self.base_store._load_index()
 
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
@@ -349,6 +360,8 @@ class CanonicalView:
         Yield entries keyed by their original context (if present), ensuring a single logical
         entry per phenotype. Also strip _original_context from the yielded entry.
         """
+        if self.base_store is None:
+            raise RuntimeError("CanonicalView: base_store is closed or None")
         for phen_key, entry in self.base_store.iter_entries():
             orig = entry.get("_original_context")
             if orig is not None:
@@ -364,12 +377,14 @@ class OverlayView:
     def __init__(self, public_store: Any, private_store: Any):
         import threading
 
-        self.public_store = public_store
-        self.private_store = private_store
+        self.public_store: Optional[Any] = public_store
+        self.private_store: Optional[Any] = private_store
         self.lock = getattr(private_store, "lock", threading.RLock())
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
         with self.lock:
+            if self.private_store is None or self.public_store is None:
+                raise RuntimeError("OverlayView: store is closed or None")
             entry = self.private_store.get(context_key)
             if entry:
                 return entry
@@ -377,9 +392,13 @@ class OverlayView:
             return fallback
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
+        if self.private_store is None:
+            raise RuntimeError("OverlayView: private_store is closed or None")
         self.private_store.put(context_key, entry)
 
     def delete(self, context_key: Tuple[int, int]) -> None:
+        if self.private_store is None:
+            raise RuntimeError("OverlayView: private_store is closed or None")
         deleter = getattr(self.private_store, "delete", None)
         if callable(deleter):
             deleter(context_key)
@@ -395,11 +414,13 @@ class OverlayView:
             self.public_store = None
 
     def reload_public_knowledge(self) -> None:
-        if hasattr(self.public_store, "_load_index"):
+        if self.public_store is not None and hasattr(self.public_store, "_load_index"):
             self.public_store._load_index()
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
+        if self.public_store is None or self.private_store is None:
+            raise RuntimeError("OverlayView: store is closed or None")
         combined_data = self.public_store.data.copy()
         combined_data.update(self.private_store.data)
         return cast(Dict[Tuple[int, int], Any], combined_data)
@@ -410,6 +431,8 @@ class OverlayView:
         Private store entries take precedence over public store entries.
         This is memory-efficient for large stores.
         """
+        if self.public_store is None or self.private_store is None:
+            raise RuntimeError("OverlayView: store is closed or None")
         yielded = set()
         # Yield all private entries first
         for key, entry in self.private_store.iter_entries():
@@ -421,7 +444,7 @@ class OverlayView:
                 yield key, entry
 
     def _load_index(self) -> None:
-        if hasattr(self.private_store, "_load_index"):
+        if self.private_store is not None and hasattr(self.private_store, "_load_index"):
             self.private_store._load_index()
 
 
@@ -429,27 +452,35 @@ class ReadOnlyView:
     def __init__(self, base_store: Any):
         import threading
 
-        self.base_store = base_store
+        self.base_store: Optional[Any] = base_store
         self.lock = getattr(base_store, "lock", threading.RLock())
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
+        if self.base_store is None:
+            raise RuntimeError("ReadOnlyView: base_store is closed or None")
         return self.base_store.get(context_key)
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
         raise RuntimeError("This store is read-only.")
 
     def close(self) -> None:
-        self.base_store.close()
+        if self.base_store is not None:
+            self.base_store.close()
+            self.base_store = None
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
+        if self.base_store is None:
+            raise RuntimeError("ReadOnlyView: base_store is closed or None")
         return cast(Dict[Tuple[int, int], Any], self.base_store.data)
 
     def _load_index(self) -> None:
-        if hasattr(self.base_store, "_load_index"):
+        if self.base_store is not None and hasattr(self.base_store, "_load_index"):
             self.base_store._load_index()
 
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
+        if self.base_store is None:
+            raise RuntimeError("ReadOnlyView: base_store is closed or None")
         yield from self.base_store.iter_entries()
 
 
@@ -750,9 +781,7 @@ def validate_ontology_integrity(
     # Check phenomenology map if provided
     phenomenology_issues = 0
     resolved_phenomenology_map_path = (
-        _abs(phenomenology_map_path, base_path)
-        if phenomenology_map_path is not None
-        else None
+        _abs(phenomenology_map_path, base_path) if phenomenology_map_path is not None else None
     )
     if resolved_phenomenology_map_path and os.path.exists(resolved_phenomenology_map_path):
         try:

@@ -72,14 +72,18 @@ class IntelligenceEngine:
         self.base_path = base_path
         self.ontology_path = _abs(ontology_path, self.base_path)
         self.epistemology_path = _abs(
-            epistemology_path if epistemology_path is not None else str(
-                Path(self.ontology_path).with_name("epistemology.npy")
+            (
+                epistemology_path
+                if epistemology_path is not None
+                else str(Path(self.ontology_path).with_name("epistemology.npy"))
             ),
             self.base_path,
         )
         self.phenomenology_map_path = _abs(
-            phenomenology_map_path if phenomenology_map_path is not None else str(
-                Path(self.ontology_path).with_name("phenomenology_map.json")
+            (
+                phenomenology_map_path
+                if phenomenology_map_path is not None
+                else str(Path(self.ontology_path).with_name("phenomenology_map.json"))
             ),
             self.base_path,
         )
@@ -448,72 +452,50 @@ class GyroSI:
             and self.config["ontology_path"]
             and not os.path.isabs(str(self.config["ontology_path"]))
         ):
-            self.config["ontology_path"] = str(
-                self.base_path / str(self.config["ontology_path"])
-            )
+            self.config["ontology_path"] = str(self.base_path / str(self.config["ontology_path"]))
         if (
             "knowledge_path" in self.config
             and self.config["knowledge_path"]
             and not os.path.isabs(str(self.config["knowledge_path"]))
         ):
-            self.config["knowledge_path"] = str(
-                self.base_path / str(self.config["knowledge_path"])
-            )
+            self.config["knowledge_path"] = str(self.base_path / str(self.config["knowledge_path"]))
         if (
             "public_knowledge_path" in self.config
             and self.config["public_knowledge_path"]
             and not os.path.isabs(str(self.config["public_knowledge_path"]))
         ):
-            self.config["public_knowledge_path"] = str(
-                self.base_path / str(self.config["public_knowledge_path"])
-            )
+            self.config["public_knowledge_path"] = str(self.base_path / str(self.config["public_knowledge_path"]))
         if (
             "private_knowledge_path" in self.config
             and self.config["private_knowledge_path"]
             and not os.path.isabs(str(self.config["private_knowledge_path"]))
         ):
-            self.config["private_knowledge_path"] = str(
-                self.base_path / str(self.config["private_knowledge_path"])
-            )
+            self.config["private_knowledge_path"] = str(self.base_path / str(self.config["private_knowledge_path"]))
         if (
             "phenomenology_map_path" in self.config
             and self.config["phenomenology_map_path"]
             and not os.path.isabs(str(self.config["phenomenology_map_path"]))
         ):
-            self.config["phenomenology_map_path"] = str(
-                self.base_path / str(self.config["phenomenology_map_path"])
-            )
+            self.config["phenomenology_map_path"] = str(self.base_path / str(self.config["phenomenology_map_path"]))
         if (
             "private_agents_base_path" in self.config
             and self.config["private_agents_base_path"]
             and not os.path.isabs(str(self.config["private_agents_base_path"]))
         ):
-            self.config["private_agents_base_path"] = str(
-                self.base_path / str(self.config["private_agents_base_path"])
-            )
+            self.config["private_agents_base_path"] = str(self.base_path / str(self.config["private_agents_base_path"]))
         if "base_path" in self.config and self.config["base_path"] and not os.path.isabs(str(self.config["base_path"])):
-            self.config["base_path"] = str(
-                self.base_path / str(self.config["base_path"])
-            )
+            self.config["base_path"] = str(self.base_path / str(self.config["base_path"]))
         if "private_agents_base_path" not in self.config or not self.config["private_agents_base_path"]:
-            self.config["private_agents_base_path"] = str(
-                self.base_path / "memories/private/agents"
-            )
+            self.config["private_agents_base_path"] = str(self.base_path / "memories/private/agents")
         # Only assign keys that are valid for AgentConfig
         if "phenomenology_map_path" not in self.config or not self.config["phenomenology_map_path"]:
             onto = self.config.get("ontology_path")
             if onto is not None:
-                self.config["phenomenology_map_path"] = str(
-                    Path(onto).with_name("phenomenology_map.json")
-                )
+                self.config["phenomenology_map_path"] = str(Path(onto).with_name("phenomenology_map.json"))
             else:
-                raise ValueError(
-                    "ontology_path must be set in config"
-                )
+                raise ValueError("ontology_path must be set in config")
         if "base_path" not in self.config or not self.config["base_path"]:
-            self.config["base_path"] = str(
-                self.base_path / "memories"
-            )
+            self.config["base_path"] = str(self.base_path / "memories")
         self.agent_id = agent_id or str(uuid.uuid4())
         if phenotype_store is None:
             phenotype_store = self._create_default_store()
@@ -651,7 +633,9 @@ class GyroSI:
                     raise ValueError("private_agents_base_path must not be None")
                 private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.pkl.gz")
             # Multi-agent overlay using decorators
-            public_store = ReadOnlyView(OrbitStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path))
+            public_store = ReadOnlyView(
+                OrbitStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
+            )
             private_store = OrbitStore(private_path, write_threshold=learn_batch_size, base_path=self.base_path)
             base_store: Any = OverlayView(public_store, private_store)
             phenomenology_map_path = self.config.get("phenomenology_map_path")
@@ -793,9 +777,8 @@ class AgentPool:
                     "public_knowledge_path": self.base_knowledge_path,
                     "private_knowledge_path": private_path,
                     "phenomenology_map_path": str(
-                        self.preferences.get("phenomenology_map_path") or str(
-                            Path(self.ontology_path).with_name("phenomenology_map.json")
-                        )
+                        self.preferences.get("phenomenology_map_path")
+                        or str(Path(self.ontology_path).with_name("phenomenology_map.json"))
                     ),
                     "private_agents_base_path": str(self.private_agents_base_path),
                     "base_path": str(self.base_path),
