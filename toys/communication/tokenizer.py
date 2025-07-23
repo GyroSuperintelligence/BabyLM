@@ -5,28 +5,28 @@ Provides reversible text↔bytes encoding using LEB128 to ensure all bytes ≤ 2
 """
 
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, cast
 from tokenizers import Tokenizer
 import os
 
-# Use an absolute path for _ROOT based on the file location
-_ROOT = Path("memories/public/tokenizers").resolve()
+
+def get_tokenizer_root(base_path: Path = Path(__file__).resolve().parents[2]) -> Path:
+    return (base_path / "memories/public/tokenizers").resolve()
+
 
 # Module-level tokenizer cache keyed by (name, mtime)
 _tokenizer_cache: Dict[Any, Any] = {}
 
 
-def _load(name: str = "bert-base-uncased") -> Tokenizer:
-    """Load and cache a tokenizer from disk, auto-reload if file changes.
-    Only one tokenizer is kept in memory at a time: _tokenizer_cache.clear() is intentional to cap memory usage.
-    """
-    path = _ROOT / name / "tokenizer.json"
+def _load(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> Tokenizer:
+    """Load and cache a tokenizer from disk, auto-reload if file changes. Uses base_path for root."""
+    path = get_tokenizer_root(base_path) / name / "tokenizer.json"
     if not path.exists():
         raise FileNotFoundError(
-            f"Tokenizer '{name}' not installed at {path}. " "Run: python toys/communication/setup_tokenizers.py"
+            f"Tokenizer '{name}' not installed at {path}. Run: python toys/communication/setup_tokenizers.py"
         )
     mtime = os.path.getmtime(path)
-    cache_key = (name, mtime)
+    cache_key = (str(path), mtime)
     if cache_key in _tokenizer_cache:
         return _tokenizer_cache[cache_key]
     tokenizer = Tokenizer.from_file(str(path))
@@ -73,9 +73,9 @@ def _bytes_to_ids(blob: bytes) -> List[int]:
 
 
 # ---------- Public API ----------
-def encode(text: str, name: str = "bert-base-uncased") -> bytes:
-    """Encode text to bytes via tokenizer + LEB128 (vectorized)."""
-    ids = _load(name).encode(text).ids
+def encode(text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> bytes:
+    """Encode text to bytes via tokenizer + LEB128 (vectorized). Uses base_path for root."""
+    ids = _load(name, base_path).encode(text).ids
     # Estimate max output size: each id can take up to 5 bytes (for 32-bit int)
     out = bytearray(len(ids) * 5)
     pos = 0
@@ -94,16 +94,16 @@ def encode(text: str, name: str = "bert-base-uncased") -> bytes:
     return bytes(out[:pos])
 
 
-def decode(blob: bytes, name: str = "bert-base-uncased") -> str:
-    """Decode LEB128 bytes back to text via tokenizer."""
+def decode(blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> str:
+    """Decode LEB128 bytes back to text via tokenizer. Uses base_path for root."""
     try:
         ids = _bytes_to_ids(blob)
-        return str(_load(name).decode(ids, skip_special_tokens=True))
+        return cast(str, _load(name, base_path).decode(ids, skip_special_tokens=True))
     except Exception:
         # Fallback to UTF-8 if tokenizer decode fails
         return blob.decode("utf-8", errors="replace")
 
 
-def vocab_size(name: str = "bert-base-uncased") -> int:
-    """Get vocabulary size of a tokenizer."""
-    return int(_load(name).get_vocab_size())
+def vocab_size(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> int:
+    """Get vocabulary size of a tokenizer. Uses base_path for root."""
+    return int(_load(name, base_path).get_vocab_size())

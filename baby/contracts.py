@@ -57,22 +57,16 @@ class PhenomenologyData(TypedDict, total=False):
 
 
 class AgentConfig(TypedDict, total=False):
-    """Configuration for GyroSI agents.
-
-    learn_batch_size: Number of input items to process in a learning batch.
-    """
-
     ontology_path: str
     knowledge_path: Optional[str]
     public_knowledge_path: Optional[str]
     private_knowledge_path: Optional[str]
-    agent_metadata: Optional[Dict[str, Any]]
-    max_memory_mb: Optional[int]
     enable_phenomenology_storage: Optional[bool]
-    learn_batch_size: Optional[int]
     phenomenology_map_path: Optional[str]
-    tokenizer_name: Optional[str]  # e.g. "bert-base-uncased"
-    tokenizer_mode: Optional[str]  # "input" | "io" | None
+    learn_batch_size: Optional[int]
+    agent_metadata: Optional[Dict[str, Any]]
+    private_agents_base_path: Optional[str]  # for test path overrides
+    base_path: Optional[str]  # for test path overrides
 
 
 class PreferencesConfig(TypedDict, total=False):
@@ -111,7 +105,7 @@ class ValidationReport(TypedDict):
     total_entries: int
     average_confidence: float
     store_type: str
-    modified_entries: Optional[int]
+    modified_entries: int
 
 
 class CycleHookFunction(Protocol):

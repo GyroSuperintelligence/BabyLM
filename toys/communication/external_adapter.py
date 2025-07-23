@@ -43,7 +43,7 @@ from toys.communication import tokenizer as gyrotok
 # ---------------------------------------------------------------------
 # Configuration helpers – override with env-vars if you like
 # ---------------------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parents[1]
+BASE_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_ONT_PATH = os.getenv(
     "GYROSI_ONTOLOGY_PATH",
     str(BASE_DIR / "memories/public/meta/ontology_map.json"),
@@ -60,7 +60,14 @@ os.makedirs(os.path.dirname(DEFAULT_KNOWLEDGE_PATH), exist_ok=True)
 # ---------------------------------------------------------------------
 # One shared AgentPool for the whole process
 # ---------------------------------------------------------------------
-agent_pool = AgentPool(DEFAULT_ONT_PATH, DEFAULT_KNOWLEDGE_PATH)
+agent_pool = AgentPool(
+    DEFAULT_ONT_PATH,
+    DEFAULT_KNOWLEDGE_PATH,
+    allow_auto_create=False,
+    allowed_ids={"user", "system", "assistant"},
+    private_agents_base_path=str(BASE_DIR / "memories/private/agents"),
+)
+agent_pool.ensure_triad()
 atexit.register(agent_pool.close_all)
 
 # ---------------------------------------------------------------------
@@ -147,12 +154,14 @@ async def chat_completions(
     # Derive stable user-id                                 ──────────
     remote = request.client.host if request.client else "anon"
     user_id = x_user_id or f"anon-{hash(remote)}"
-    assistant_id = "gyro-assistant"
-    system_id = "gyro-system"
+    # map all external users → internal "user"
+    user_id = "user"
+    assistant_id = "assistant"
+    system_id = "system"
 
     # Get or create the three agents                        ──────────
-    system_agent = agent_pool.get_or_create_agent(system_id)
-    assistant_agent = agent_pool.get_or_create_agent(assistant_id)
+    system_agent = agent_pool.get(system_id)
+    assistant_agent = agent_pool.get(assistant_id)
 
     # --------------------------------------------------------------
     # 1. Handle system messages (bootstrap once per assistant reset)
@@ -236,7 +245,11 @@ async def chat_completions(
 @app.post("/generate", response_model=HFGenerateResponse)
 async def hf_generate(payload: HFGenerateRequest, request: Request) -> HFGenerateResponse:
     user_id = f"hf-{hash(request.client.host) if request.client else 'anon'}"
-    assistant_id = "gyro-assistant"
+    # map all external users → internal "user"
+    user_id = "user"
+    assistant_id = "assistant"
+    # Remove or comment out the assignment to 'system_id' at line 251
+    # system_id = "system"
     # Call orchestrate_turn with the tokenizer name
     reply = orchestrate_turn(agent_pool, user_id, assistant_id, payload.inputs, tokenizer_name=DEFAULT_TOKENIZER)
     return HFGenerateResponse(generated_text=reply)

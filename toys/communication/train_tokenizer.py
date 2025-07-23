@@ -6,8 +6,13 @@ from tokenizers import Tokenizer, trainers, pre_tokenizers
 from tokenizers.models import WordPiece
 
 
-def train_wordpiece(files: list[str], vocab_size: int = 30000, save_name: str = "custom-wordpiece") -> None:
-    """Train a new WordPiece tokenizer on provided files."""
+def train_wordpiece(
+    files: list[str],
+    vocab_size: int = 30000,
+    save_name: str = "custom-wordpiece",
+    base_path: Path = Path(__file__).resolve().parents[2],
+) -> None:
+    """Train a new WordPiece tokenizer on provided files. base_path controls where 'memories/' is rooted."""
 
     # Initialize tokenizer with WordPiece model
     tokenizer = Tokenizer(WordPiece(vocab={}, unk_token="[UNK]", max_input_chars_per_word=100))
@@ -27,7 +32,7 @@ def train_wordpiece(files: list[str], vocab_size: int = 30000, save_name: str = 
     tokenizer.train(files, trainer)
 
     # Save
-    save_dir = Path(f"memories/public/tokenizers/{save_name}")
+    save_dir = base_path / f"memories/public/tokenizers/{save_name}"
     save_dir.mkdir(parents=True, exist_ok=True)
     tokenizer.save(str(save_dir / "tokenizer.json"))
 

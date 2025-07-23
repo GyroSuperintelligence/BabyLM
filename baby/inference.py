@@ -183,150 +183,182 @@ class InferenceEngine:
         return phenotype_entry
 
     def validate_knowledge_integrity(self) -> ValidationReport:
-        """
-        Validates the integrity of the knowledge base.
+        def _flush_store(s: Any) -> None:
+            if hasattr(s, "_flush"):
+                s._flush()
+            if hasattr(s, "commit"):
+                s.commit()
+            for attr in ("private_store", "public_store", "base_store"):
+                if hasattr(s, attr):
+                    _flush_store(getattr(s, attr))
 
-        Verifies critical invariants for all entries:
-        - Context signatures match keys
-        - Memory masks within valid range
-        - Confidence values within valid range
-        - State indices canonical
+        _flush_store(self.store)
 
-        Returns:
-            Report with integrity statistics and anomaly count.
-            Note: The 'modified_entries' field in the returned ValidationReport is the anomaly count.
-        """
         total_entries = 0
         confidence_sum = 0.0
         anomaly_count = 0
+        seen: set[tuple[int, int]] = set()
 
-        for key, entry in self.store.iter_entries():
-            total_entries += 1
-            confidence_sum += entry.get("confidence", 0.0)
+        # Walk down to the lowest OrbitStore (or anything that has an 'index') to inspect raw keys
+        def _unwrap_raw_store(s: Any) -> Any:
+            for attr in ("base_store", "private_store", "public_store"):
+                if hasattr(s, attr):
+                    return _unwrap_raw_store(getattr(s, attr))
+            return s
 
-            # Check invariants
+        raw_store = _unwrap_raw_store(self.store)
+        raw_pairs: list[tuple[tuple[int, int], Any]] = []
+        if hasattr(raw_store, "iter_entries"):
+            # raw_store.iter_entries() on OrbitStore yields the key used in its index (true raw key)
             try:
-                # Key matches context signature
-                if entry.get("context_signature") != (key):
+                raw_pairs = list(raw_store.iter_entries())
+            except Exception:
+                raw_pairs = []
+
+        def _norm_key(store_key: tuple[int, int], entry: Any) -> tuple[int, int]:
+            # Used only for deduplication, not for anomaly detection
+            ctx = entry.get("context_signature")
+            try:
+                if ctx is not None:
+                    t = tuple(int(x) for x in ctx)
+                    return (t[0], t[1])
+            except Exception:
+                pass
+            t = tuple(int(x) for x in store_key)
+            return (t[0], t[1])
+
+        # First pass: detect mismatches using the *viewed* entries
+        if hasattr(self.store, "iter_entries"):
+            for key, entry in self.store.iter_entries():
+                raw_key = tuple(int(x) for x in key)
+                # Detect mismatches BEFORE deduping
+                mismatch = False
+                try:
+                    ctx = entry.get("context_signature")
+                    if ctx is not None and tuple(int(x) for x in ctx) != raw_key:
+                        mismatch = True
+                    orig_ctx = entry.get("_original_context")
+                    if orig_ctx is not None and tuple(int(x) for x in orig_ctx) != raw_key:
+                        mismatch = True
+                except Exception:
+                    mismatch = True
+
+                norm = _norm_key(key, entry)
+                if norm in seen:
+                    # Already counted; still record anomaly if we found one
+                    if mismatch:
+                        anomaly_count += 1
+                    continue
+                seen.add((norm[0], norm[1]))
+                total_entries += 1
+                try:
+                    if mismatch:
+                        anomaly_count += 1
+                    mask = int(entry.get("exon_mask", 0))
+                    conf_raw = entry.get("confidence", 0.0)
+                    conf = float(conf_raw)
+                    confidence_sum += conf
+                    state_idx = int(entry.get("context_signature", (0, 0))[0])
+                    created = float(entry.get("created_at", 0))
+                    updated = float(entry.get("last_updated", 0))
+                    if not (0 <= mask <= 255):
+                        anomaly_count += 1
+                    if not (0 <= conf <= 1.0):
+                        anomaly_count += 1
+                    if not (0 <= state_idx < self.endogenous_modulus):
+                        anomaly_count += 1
+                    if updated < created:
+                        anomaly_count += 1
+                except Exception:
                     anomaly_count += 1
 
-                # Memory mask in valid range
-                mask = entry.get("exon_mask", 0)
-                if not (0 <= mask <= 255):
-                    anomaly_count += 1
-
-                # Confidence in valid range
-                conf = entry.get("confidence", 0.0)
-                if not (0 <= conf <= 1.0):
-                    anomaly_count += 1
-
-                # State index canonical
-                state_idx = entry.get("context_signature", (0, 0))[0]
-                if not (0 <= state_idx < self.endogenous_modulus):
-                    anomaly_count += 1
-
-                # Timestamps monotonic
-                created = entry.get("created_at", 0)
-                updated = entry.get("last_updated", 0)
-                if updated < created:
+        # Second pass: raw-store cross check (catches context_signature/key mismatches hidden by views)
+        for rkey, rentry in raw_pairs:
+            try:
+                rctx = rentry.get("context_signature")
+                if rctx is None:
+                    continue
+                if tuple(int(x) for x in rctx) != tuple(int(x) for x in rkey):
                     anomaly_count += 1
             except Exception:
-                # Any other exception during validation
                 anomaly_count += 1
 
+        # Do NOT re-walk pending buffers; they’re flushed.
         return ValidationReport(
             total_entries=total_entries,
-            average_confidence=confidence_sum / total_entries if total_entries > 0 else 0,
+            average_confidence=confidence_sum / total_entries if total_entries else 0.0,
             store_type=type(self.store).__name__,
-            modified_entries=anomaly_count,
+            modified_entries=int(anomaly_count),
         )
 
     def apply_confidence_decay(self, decay_factor: float = 0.001) -> Dict[str, Any]:
         import time
-        # --- 0. Normalise: get to the underlying OrbitStore(s) and flush ---
+
         def _flush_store(s: Any) -> None:
             if hasattr(s, "_flush"):
                 s._flush()
-            if hasattr(s, "private_store"):
-                _flush_store(s.private_store)
-            if hasattr(s, "public_store"):
-                _flush_store(s.public_store)
-            if hasattr(s, "base_store"):
-                _flush_store(s.base_store)
+            for attr in ("private_store", "public_store", "base_store"):
+                if hasattr(s, attr):
+                    _flush_store(getattr(s, attr))
 
         _flush_store(self.store)
 
-        modified = 0
         now = time.time()
-        seen_keys: set[tuple[int, int]] = set()
-        all_keys = []
+        modified = 0
+        seen: set[tuple[int, int]] = set()
 
-        def _decay_entry(key, entry: Dict[str, Any]) -> None:
-            nonlocal modified
-            key_tuple = tuple(int(x) for x in key)
-            old = entry.get("confidence", 0.1)
-            new = max(0.01, float(old) * math.exp(-decay_factor))
+        for key, entry in self.store.iter_entries():
+            old = float(entry.get("confidence", 0.1))
+            new = max(0.01, old * math.exp(-decay_factor))
             if abs(new - old) > 1e-15:
+                entry = entry.copy()
                 entry["confidence"] = new
                 entry["last_updated"] = now
-                self.store.put(key_tuple, entry)
+                self.store.put(key, entry)
                 modified += 1
-            seen_keys.add(key_tuple)
-            all_keys.append(key_tuple)
-
-        if hasattr(self.store, "iter_entries"):
-            for key, entry in self.store.iter_entries():
-                _decay_entry(key, entry)
-
-        pending = getattr(self.store, "pending_writes", None)
-        if isinstance(pending, dict):
-            for key, entry in list(pending.items()):
-                key_tuple = tuple(int(x) for x in key)
-                if key_tuple not in seen_keys:
-                    _decay_entry(key, entry)
-
-        if hasattr(self.store, "data"):
-            for key, entry in getattr(self.store, "data").items():
-                key_tuple = tuple(int(x) for x in key)
-                if key_tuple not in seen_keys:
-                    _decay_entry(key, entry)
+            seen.add((int(key[0]), int(key[1])))
 
         if hasattr(self.store, "commit"):
             self.store.commit()
 
-        print("DEBUG: all_keys seen during decay:", all_keys)
-        print("DEBUG: unique seen_keys:", seen_keys)
-        print("DEBUG: total_entries (len(seen_keys)):", len(seen_keys))
-
         return {
-            "total_entries": len(seen_keys),
+            "total_entries": len(seen),
             "average_confidence": 0.0,
             "store_type": type(self.store).__name__,
             "modified_entries": modified,
         }
 
     def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
-        """
-        Remove entries below confidence threshold.
+        # Ensure pending writes are visible to iter_entries
+        def _flush_store(s: Any) -> None:
+            if hasattr(s, "_flush"):
+                s._flush()
+            if hasattr(s, "commit"):
+                s.commit()
+            for attr in ("private_store", "public_store", "base_store"):
+                if hasattr(s, attr):
+                    _flush_store(getattr(s, attr))
 
-        Args:
-            confidence_threshold: Minimum confidence to retain
+        _flush_store(self.store)
 
-        Returns:
-            Number of entries removed
-        """
-        keys_to_remove = []
-
+        keys_to_remove: list[tuple[int, int]] = []
         for key, entry in self.store.iter_entries():
-            if entry.get("confidence", 1.0) < confidence_threshold:
+            try:
+                conf = float(entry.get("confidence", 1.0))
+            except (TypeError, ValueError):
+                conf = 1.0
+            if conf < confidence_threshold:
                 keys_to_remove.append(key)
 
-        # Directly delete entries instead of using tombstones
+        # Robust deletion detection: require delete to be an actual attribute of the concrete class
+        deleter = getattr(self.store, "delete", None)
+        has_real_delete = deleter is not None and "delete" in type(self.store).__dict__ and callable(deleter)
+        if not has_real_delete:
+            raise NotImplementedError("Store does not support deletion via 'delete' method.")
+
         for key in keys_to_remove:
-            if hasattr(self.store, "delete"):
-                self.store.delete(key)
-            else:
-                raise NotImplementedError("Store does not support deletion via 'delete' method.")
+            if deleter is not None:
+                deleter(key)
 
         if hasattr(self.store, "commit"):
             self.store.commit()

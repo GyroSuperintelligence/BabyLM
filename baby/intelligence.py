@@ -17,14 +17,13 @@ from typing import Any, Dict, List, Optional, TypedDict, cast, TYPE_CHECKING, De
 
 import numpy as np
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 
 from baby import governance
 from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
-
-import warnings
 
 
 if TYPE_CHECKING:
@@ -41,6 +40,13 @@ class StateInfo(TypedDict):
     active_hooks: int
 
 
+def _abs(path: Optional[str], base: Path) -> str:
+    if path is None:
+        raise ValueError("Path must not be None")
+    p = Path(os.path.expanduser(str(path)))
+    return str(p if p.is_absolute() else base / p)
+
+
 class IntelligenceEngine:
     """
     S4: Strategic Operations & Environment Interface.
@@ -50,19 +56,35 @@ class IntelligenceEngine:
     """
 
     def __init__(
-        self, ontology_path: str, phenotype_store: Any, agent_id: Optional[str] = None, hook_batch_interval: int = 8
+        self,
+        ontology_path: str,
+        phenotype_store: Any,
+        agent_id: Optional[str] = None,
+        hook_batch_interval: int = 8,
+        epistemology_path: Optional[str] = None,
+        phenomenology_map_path: Optional[str] = None,
+        base_path: Path = Path(__file__).resolve().parents[1],
     ):
         """
         Initialize intelligence engine.
-
-        Args:
-            ontology_path: Path to discovered ontology data
-            phenotype_store: Storage interface for learned knowledge
-            agent_id: Unique identifier for this agent instance
-            hook_batch_interval: Number of cycles between hook processing (default 8)
+        All file paths are resolved with respect to base_path unless absolute.
         """
+        self.base_path = base_path
+        self.ontology_path = _abs(ontology_path, self.base_path)
+        self.epistemology_path = _abs(
+            epistemology_path if epistemology_path is not None else str(
+                Path(self.ontology_path).with_name("epistemology.npy")
+            ),
+            self.base_path,
+        )
+        self.phenomenology_map_path = _abs(
+            phenomenology_map_path if phenomenology_map_path is not None else str(
+                Path(self.ontology_path).with_name("phenomenology_map.json")
+            ),
+            self.base_path,
+        )
         # Initialize subsystem engines
-        self.s2: InformationEngine = InformationEngine(self._load_ontology(ontology_path))
+        self.s2: InformationEngine = InformationEngine(self._load_ontology(self.ontology_path))
         self.operator: InferenceEngine = InferenceEngine(self.s2, phenotype_store)
 
         # Agent state
@@ -71,17 +93,16 @@ class IntelligenceEngine:
         self.current_state_index: int
         self.gene_mac_m_int: int
         self._cached_state_int: int = 0  # Only used if use_epistemology is True
-        epistemology_path = ontology_path.replace("ontology_map.json", "epistemology.npy")
-        if os.path.exists(epistemology_path):
+        if self.epistemology_path and os.path.exists(self.epistemology_path):
             try:
                 import numpy as np
 
-                self.epistemology = np.load(epistemology_path, mmap_mode="r")
+                self.epistemology = np.load(self.epistemology_path, mmap_mode="r")
                 self.use_epistemology = True
-                print("INFO: State Transition Table (STT) loaded. " "Using optimized state transitions.")
+                print("INFO: State Transition Table (STT) loaded. Using optimized state transitions.")
             except Exception as e:
                 print(
-                    f"WARNING: Could not load STT from {epistemology_path}. "
+                    f"WARNING: Could not load STT from {self.epistemology_path}. "
                     f"Error: {e}. Falling back to dynamic physics."
                 )
 
@@ -104,12 +125,15 @@ class IntelligenceEngine:
         self._θ_high: float = 0.9  # radians
         self._θ_low: float = 0.3
         self._cool_introns: tuple[int, ...] = (0b01000010,)
-        phenomap = ontology_path.replace("ontology_map.json", "phenomenology_map.json")
         try:
-            with open(phenomap) as f:
-                pheno_data = json.load(f)
-                self._autonomic_cycles: list[Any] = pheno_data.get("autonomic_cycles", [])
-                self._autonomic_cycles_curated: dict[str, Any] = pheno_data.get("autonomic_cycles_curated", {})
+            if self.phenomenology_map_path and os.path.exists(self.phenomenology_map_path):
+                with open(self.phenomenology_map_path) as f:
+                    pheno_data = json.load(f)
+                    self._autonomic_cycles: list[Any] = pheno_data.get("autonomic_cycles", [])
+                    self._autonomic_cycles_curated: dict[str, Any] = pheno_data.get("autonomic_cycles_curated", {})
+            else:
+                self._autonomic_cycles = []
+                self._autonomic_cycles_curated = {}
         except Exception:
             self._autonomic_cycles = []
             self._autonomic_cycles_curated = {}
@@ -295,6 +319,10 @@ class IntelligenceEngine:
                 state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
             phenotype_entry = self.operator.get_phenotype(state_index, acc)
             self.operator.learn(phenotype_entry, acc)
+        # Ensure all writes are flushed/committed
+        store = self.operator.store
+        if hasattr(store, "commit"):
+            store.commit()
 
     def get_state_info(self) -> StateInfo:
         """
@@ -401,28 +429,106 @@ class GyroSI:
     Manages configuration, agent identity, and provides the stable external API.
     """
 
-    def __init__(self, config: AgentConfig, agent_id: Optional[str] = None, phenotype_store: Optional[Any] = None):
+    def __init__(
+        self,
+        config: AgentConfig,
+        agent_id: Optional[str] = None,
+        phenotype_store: Optional[Any] = None,
+        base_path: Path = Path(__file__).resolve().parents[1],
+    ):
         """
-        Initialize GyroSI with configuration.
-
-        Args:
-            config: Agent configuration dictionary
-            agent_id: Unique agent identifier
-            phenotype_store: Optional custom storage implementation
+        Initialize GyroSI agent.
+        All file paths are resolved with respect to base_path unless absolute.
         """
-        self.config = config
+        self.base_path = base_path.resolve()
+        self.config = config.copy()
+        # Patch only allowed AgentConfig path keys to be absolute if not already
+        if (
+            "ontology_path" in self.config
+            and self.config["ontology_path"]
+            and not os.path.isabs(str(self.config["ontology_path"]))
+        ):
+            self.config["ontology_path"] = str(
+                self.base_path / str(self.config["ontology_path"])
+            )
+        if (
+            "knowledge_path" in self.config
+            and self.config["knowledge_path"]
+            and not os.path.isabs(str(self.config["knowledge_path"]))
+        ):
+            self.config["knowledge_path"] = str(
+                self.base_path / str(self.config["knowledge_path"])
+            )
+        if (
+            "public_knowledge_path" in self.config
+            and self.config["public_knowledge_path"]
+            and not os.path.isabs(str(self.config["public_knowledge_path"]))
+        ):
+            self.config["public_knowledge_path"] = str(
+                self.base_path / str(self.config["public_knowledge_path"])
+            )
+        if (
+            "private_knowledge_path" in self.config
+            and self.config["private_knowledge_path"]
+            and not os.path.isabs(str(self.config["private_knowledge_path"]))
+        ):
+            self.config["private_knowledge_path"] = str(
+                self.base_path / str(self.config["private_knowledge_path"])
+            )
+        if (
+            "phenomenology_map_path" in self.config
+            and self.config["phenomenology_map_path"]
+            and not os.path.isabs(str(self.config["phenomenology_map_path"]))
+        ):
+            self.config["phenomenology_map_path"] = str(
+                self.base_path / str(self.config["phenomenology_map_path"])
+            )
+        if (
+            "private_agents_base_path" in self.config
+            and self.config["private_agents_base_path"]
+            and not os.path.isabs(str(self.config["private_agents_base_path"]))
+        ):
+            self.config["private_agents_base_path"] = str(
+                self.base_path / str(self.config["private_agents_base_path"])
+            )
+        if "base_path" in self.config and self.config["base_path"] and not os.path.isabs(str(self.config["base_path"])):
+            self.config["base_path"] = str(
+                self.base_path / str(self.config["base_path"])
+            )
+        if "private_agents_base_path" not in self.config or not self.config["private_agents_base_path"]:
+            self.config["private_agents_base_path"] = str(
+                self.base_path / "memories/private/agents"
+            )
+        # Only assign keys that are valid for AgentConfig
+        if "phenomenology_map_path" not in self.config or not self.config["phenomenology_map_path"]:
+            onto = self.config.get("ontology_path")
+            if onto is not None:
+                self.config["phenomenology_map_path"] = str(
+                    Path(onto).with_name("phenomenology_map.json")
+                )
+            else:
+                raise ValueError(
+                    "ontology_path must be set in config"
+                )
+        if "base_path" not in self.config or not self.config["base_path"]:
+            self.config["base_path"] = str(
+                self.base_path / "memories"
+            )
         self.agent_id = agent_id or str(uuid.uuid4())
-
-        # Initialize storage if not provided
         if phenotype_store is None:
             phenotype_store = self._create_default_store()
-
-        # Initialize core engine
-        ontology_path = config.get("ontology_path")
-        if not ontology_path:
-            raise ValueError("AgentConfig must include 'ontology_path'.")
+        # Use local variables for extra paths
+        onto = self.config.get("ontology_path")
+        if onto is None:
+            raise ValueError("ontology_path must be set in config")
+        epistemology_path = str(Path(onto).with_name("epistemology.npy"))
         self.engine = IntelligenceEngine(
-            ontology_path=ontology_path, phenotype_store=phenotype_store, agent_id=self.agent_id
+            ontology_path=onto,
+            phenotype_store=phenotype_store,
+            agent_id=self.agent_id,
+            epistemology_path=epistemology_path,
+            phenomenology_map_path=self.config["phenomenology_map_path"],
+            base_path=self.base_path,
         )
 
     def ingest(self, data: bytes) -> None:
@@ -438,7 +544,7 @@ class GyroSI:
         self.engine.batch_learn(data)
         # Ensure pending writes are flushed
         store = self.engine.operator.store
-        if isinstance(store, OrbitStore):
+        if hasattr(store, "commit"):
             store.commit()
         # Removed automatic close()
 
@@ -480,7 +586,7 @@ class GyroSI:
 
     def _commit_if_needed(self) -> None:
         store = self.engine.operator.store
-        if isinstance(store, OrbitStore):
+        if hasattr(store, "commit"):
             store.commit()
 
     def get_agent_info(self) -> Dict[str, Any]:
@@ -536,11 +642,14 @@ class GyroSI:
         if learn_batch_size is None:
             learn_batch_size = 100
         phenomenology_map_path: Optional[str] = None  # Ensure always defined
+        private_root = self.config.get("private_agents_base_path", str(self.base_path / "memories/private/agents"))
         if public_knowledge_path is not None:
             # Multi-agent setup with public/private knowledge
             private_path = self.config.get("private_knowledge_path")
             if private_path is None:
-                private_path = f"memories/private/agents/{self.agent_id}/knowledge.pkl.gz"
+                if private_root is None:
+                    raise ValueError("private_agents_base_path must not be None")
+                private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.pkl.gz")
             # Multi-agent overlay using decorators
             public_store = ReadOnlyView(OrbitStore(public_knowledge_path, write_threshold=learn_batch_size))
             private_store = OrbitStore(private_path, write_threshold=learn_batch_size)
@@ -550,21 +659,23 @@ class GyroSI:
             # Single-agent setup
             knowledge_path = self.config.get("knowledge_path")
             if knowledge_path is None:
-                knowledge_path = "memories/knowledge.pkl.gz"
+                base_path = self.config.get("base_path") or str(self.base_path / "memories")
+                knowledge_path = os.path.join(base_path, "knowledge.pkl.gz")
             base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size)
 
             # CanonicalView: enable if flag is True, or autodetect if None and file exists
             phenomenology_map_path = self.config.get("phenomenology_map_path")
         # Ensure phenomenology_map_path is always a str before use
         if phenomenology_map_path is None:
-            phenomenology_map_path = "memories/public/meta/phenomenology_map.json"
-        if enable_phenomenology is not False:
-            if enable_phenomenology or (enable_phenomenology is None and os.path.exists(phenomenology_map_path)):
-                if os.path.exists(phenomenology_map_path):
-                    return CanonicalView(base_store, phenomenology_map_path)
-                else:
-                    print(f"Warning: phenomenology map not found at {phenomenology_map_path}")
-                    pass
+            phenomenology_map_path = str(self.base_path / "memories/public/meta/phenomenology_map.json")
+        if enable_phenomenology or (
+            enable_phenomenology is None and phenomenology_map_path and os.path.exists(phenomenology_map_path)
+        ):
+            if phenomenology_map_path and os.path.exists(phenomenology_map_path):
+                return CanonicalView(base_store, phenomenology_map_path)
+            else:
+                print(f"Warning: phenomenology map not found at {phenomenology_map_path}")
+                pass
 
         return base_store
 
@@ -604,48 +715,53 @@ class AgentPool:
 
     SHARD_COUNT = 16  # Power of two for fast masking
 
-    def __init__(self, ontology_path: str, base_knowledge_path: str, preferences: Optional[PreferencesConfig] = None):
-        """
-        Initialize agent pool.
-
-        Args:
-            ontology_path: Path to physical ontology data
-            base_knowledge_path: Path to shared knowledge base
-            preferences: Optional preferences configuration
-        """
-        self.ontology_path = ontology_path
-        self.base_knowledge_path = base_knowledge_path
-
-        # Load preferences
+    def __init__(
+        self,
+        ontology_path: str,
+        base_knowledge_path: str,
+        preferences: Optional[PreferencesConfig] = None,
+        *,
+        allowed_ids: Optional[set[str]] = None,
+        allow_auto_create: bool = False,
+        private_agents_base_path: Optional[str] = None,
+        base_path: Path = Path(__file__).resolve().parents[1],
+        meta_dir: Optional[str] = None,
+    ):
+        self.base_path = base_path.resolve()
+        self.meta_dir = meta_dir
+        if private_agents_base_path is None:
+            private_agents_base_path = str(self.base_path / "memories/private/agents")
+        self.private_agents_base_path = private_agents_base_path
+        self.ontology_path = _abs(ontology_path, self.base_path)
+        self.base_knowledge_path = _abs(base_knowledge_path, self.base_path)
         self.preferences = preferences or {}
         self.max_agents = self.preferences.get("max_agents_in_memory", 1000)
         self.eviction_policy = self.preferences.get("agent_eviction_policy", "lru")
-        self.agent_access_times: Dict[str, float] = {}  # Always initialize
-        # Sharded agent storage and locks
+        self.allowed_ids = allowed_ids or {"user", "system", "assistant"}
+        self.allow_auto_create = allow_auto_create
+        self.agent_access_times: Dict[str, float] = {}
         self._shards: List[Dict[str, Any]] = []
         for _ in range(self.SHARD_COUNT):
             if self.eviction_policy == "lru":
                 self._shards.append({"agents": LRUAgentCache(self.max_agents // self.SHARD_COUNT), "lock": RLock()})
             else:
                 self._shards.append({"agents": OrderedDict(), "lock": RLock()})
-        # Cache a single public read-only store
-        self._public_store: Optional[ReadOnlyView] = ReadOnlyView(OrbitStore(base_knowledge_path, write_threshold=100))
+        self._public_store: Optional[ReadOnlyView] = ReadOnlyView(
+            OrbitStore(self.base_knowledge_path, write_threshold=100)
+        )
 
     def _shard_index(self, agent_id: str) -> int:
         # Use hash for even distribution; mask for power-of-two
         return (hash(agent_id) if isinstance(agent_id, str) else agent_id) & (self.SHARD_COUNT - 1)
 
     def get_or_create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
-        """
-        Retrieve existing agent or create new one.
+        # legacy path – still here, but now obeys policy
+        if not self.allow_auto_create and agent_id not in self.allowed_ids:
+            raise PermissionError(f"Auto-create disabled and agent_id '{agent_id}' is not allowed.")
+        return self._get_or_create(agent_id, role_hint)
 
-        Args:
-            agent_id: Unique agent identifier
-            role_hint: Optional role metadata (not used by physics)
-
-        Returns:
-            GyroSI agent instance
-        """
+    # NEW: internal impl so we can reuse it
+    def _get_or_create(self, agent_id: str, role_hint: Optional[str]) -> "GyroSI":
         idx = self._shard_index(agent_id)
         shard = self._shards[idx]
         with shard["lock"]:
@@ -661,7 +777,7 @@ class AgentPool:
                     self._maybe_evict_agent(shard)
 
                 # Create private knowledge path
-                private_path = f"memories/private/agents/{agent_id}/knowledge.pkl.gz"
+                private_path = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.pkl.gz")
 
                 # Ensure directory exists
                 os.makedirs(os.path.dirname(private_path), exist_ok=True)
@@ -669,13 +785,20 @@ class AgentPool:
                 # Multi-agent overlay using decorators, reuse cached public store
                 public_store = self._public_store
                 private_store = OrbitStore(private_path, write_threshold=100)
-                store = OverlayView(public_store, private_store)
+                base_store: Any = OverlayView(public_store, private_store)
 
                 # Create agent config
                 config: AgentConfig = {
                     "ontology_path": self.ontology_path,
                     "public_knowledge_path": self.base_knowledge_path,
                     "private_knowledge_path": private_path,
+                    "phenomenology_map_path": str(
+                        self.preferences.get("phenomenology_map_path") or str(
+                            Path(self.ontology_path).with_name("phenomenology_map.json")
+                        )
+                    ),
+                    "private_agents_base_path": str(self.private_agents_base_path),
+                    "base_path": str(self.base_path),
                     "enable_phenomenology_storage": bool(self.preferences.get("enable_phenomenology_storage", False)),
                 }
 
@@ -683,9 +806,48 @@ class AgentPool:
                 if role_hint:
                     config["agent_metadata"] = {"role_hint": role_hint}
 
-                agents[agent_id] = GyroSI(config=config, agent_id=agent_id, phenotype_store=store)
+                agents[agent_id] = GyroSI(
+                    config=config,
+                    agent_id=agent_id,
+                    phenotype_store=base_store,
+                    base_path=self.base_path,
+                )
 
             return cast(GyroSI, agents[agent_id])
+
+    # NEW: get without creating
+    def get(self, agent_id: str) -> "GyroSI":
+        idx = self._shard_index(agent_id)
+        shard = self._shards[idx]
+        with shard["lock"]:
+            agents = shard["agents"]
+            if agent_id not in agents:
+                raise KeyError(f"Agent '{agent_id}' not found in pool.")
+            return cast(GyroSI, agents[agent_id])
+
+    # NEW: explicit creation API (ignores allowed_ids, but still respects base path etc.)
+    def create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
+        onto = self.ontology_path
+        phenomap = str(Path(onto).with_name("phenomenology_map.json"))
+        if self.private_agents_base_path is None:
+            raise ValueError("private_agents_base_path must not be None")
+        private_path = os.path.join(str(self.private_agents_base_path), f"{agent_id}/knowledge.pkl.gz")
+        config: AgentConfig = {
+            "ontology_path": onto,
+            "public_knowledge_path": self.base_knowledge_path,
+            "private_knowledge_path": private_path,
+            "phenomenology_map_path": str(phenomap),
+            "private_agents_base_path": str(self.private_agents_base_path),
+            "base_path": str(self.base_path),
+            "enable_phenomenology_storage": bool(self.preferences.get("enable_phenomenology_storage", False)),
+        }
+        return GyroSI(config, agent_id=agent_id, base_path=self.base_path)
+
+    # NEW: bootstrap trio
+    def ensure_triad(self) -> None:
+        for aid, role in (("user", "user"), ("system", "system"), ("assistant", "assistant")):
+            if aid not in self.get_active_agents():
+                self._get_or_create(aid, role)
 
     def remove_agent(self, agent_id: str) -> bool:
         """
@@ -780,16 +942,14 @@ def orchestrate_turn(
         Assistant's response text
     """
     try:
-        from toys.communication import tokenizer as tok
-    except ImportError:
-        warnings.warn("Tokenizer bridge not found. Text processing will be unavailable.")
-        return "[ERROR: Tokenizer not found]"
-
-    # Get participating agents
-    user_agent = pool.get_or_create_agent(user_id, role_hint="user")
-    assistant_agent = pool.get_or_create_agent(assistant_id, role_hint="assistant")
+        user_agent = pool.get(user_id)
+        assistant_agent = pool.get(assistant_id)
+    except KeyError as e:
+        raise RuntimeError(f"Missing required agent: {e}. Call pool.ensure_triad() or pool.create_agent() first.")
 
     # 1. Encode input using the specified tokenizer. No fallback.
+    from toys.communication import tokenizer as tok
+
     in_bytes = tok.encode(user_input, name=tokenizer_name)
 
     # 2. User agent processes input, creating stimulus

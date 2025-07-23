@@ -25,12 +25,27 @@ _phenomenology_map_cache: Dict[str, Dict[int, int]] = {}
 _phenomenology_map_lock = threading.Lock()
 
 
-def load_phenomenology_map(phenomenology_map_path: str) -> Dict[int, int]:
-    """Load and cache the phenomenology map from disk, shared between all CanonicalViews."""
+def _abs(path: Optional[str], base: Path) -> str:
+    if path is None:
+        raise ValueError("Path must not be None")
+    p = Path(os.path.expanduser(str(path)))
+    return str(p if p.is_absolute() else base / p)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJECT_ROOT) -> Dict[int, int]:
+    """Load and cache the phenomenology map from disk, shared between all CanonicalViews. Uses base_path for root."""
+    resolved_path = _abs(phenomenology_map_path, base_path)
+    if not resolved_path:
+        raise ValueError("phenomenology_map_path must not be None")
     with _phenomenology_map_lock:
-        if phenomenology_map_path in _phenomenology_map_cache:
-            return _phenomenology_map_cache[phenomenology_map_path]
-        with open(phenomenology_map_path, "r") as f:
+        if resolved_path in _phenomenology_map_cache:
+            return _phenomenology_map_cache[resolved_path]
+        if not os.path.exists(resolved_path):
+            raise FileNotFoundError(f"Phenomenology map not found: {resolved_path}")
+        with open(resolved_path, "r") as f:
             loaded = json.load(f)
             if isinstance(loaded, list):
                 raw_map = loaded
@@ -42,17 +57,23 @@ def load_phenomenology_map(phenomenology_map_path: str) -> Dict[int, int]:
                 phen_map = {i: rep for i, rep in enumerate(raw_map)}
             else:
                 phen_map = {int(k): int(v) for k, v in raw_map.items()}
-            _phenomenology_map_cache[phenomenology_map_path] = phen_map
+            _phenomenology_map_cache[resolved_path] = phen_map
             return phen_map
 
 
 class OrbitStore:
     """S5: Core storage primitive - handles file-based phenotype storage (write/policy)."""
 
-    def __init__(self, store_path: str, write_threshold: int = 100, use_mmap: bool = False):
-        self.store_path = store_path
-        self.index_path = store_path + ".idx"
-        self.log_path = store_path + ".log"
+    def __init__(
+        self, store_path: str, write_threshold: int = 100, use_mmap: bool = False, base_path: Path = PROJECT_ROOT
+    ):
+        """Core storage primitive. All file paths are resolved with respect to base_path unless absolute."""
+        resolved_store_path = _abs(store_path, base_path)
+        if not resolved_store_path:
+            raise ValueError("store_path must not be None")
+        self.store_path = resolved_store_path
+        self.index_path = resolved_store_path + ".idx"
+        self.log_path = resolved_store_path + ".log"
         self.write_threshold = write_threshold
         self.use_mmap = use_mmap
         self.lock = threading.RLock()
@@ -191,11 +212,13 @@ class OrbitStore:
                     break
                 unpacker.feed(chunk)
                 for entry in unpacker:
-                    size = f.tell() - offset
+                    packed: bytes = msgpack.packb(entry, use_bin_type=True)
+                    assert isinstance(packed, bytes)
+                    size = len(packed)
                     if "context_signature" in entry:
                         context_key = entry["context_signature"]
                         self.index[context_key] = (offset, size)
-                    offset = f.tell()
+                    offset += size
 
     def delete(self, context_key: Tuple[int, int]) -> None:
         with self.lock:
@@ -227,20 +250,12 @@ class OrbitStore:
         if not os.path.exists(self.log_path):
             return entries
         with open(self.log_path, "rb") as f:
-            while True:
-                try:
-                    entry_data = f.read()
-                    if not entry_data:
-                        break
-                    unpacker = msgpack.Unpacker(use_list=False, raw=False)
-                    unpacker.feed(entry_data)
-                    for entry in unpacker:
-                        if "context_signature" in entry:
-                            context_key = entry["context_signature"]
-                            entries[context_key] = entry
-                    break
-                except EOFError:
-                    break
+            for context_key, (offset, size) in self.index.items():
+                f.seek(offset)
+                entry_data = f.read(size)
+                entry = msgpack.unpackb(entry_data, raw=False)
+                if isinstance(entry, dict):
+                    entries[context_key] = entry
         return entries
 
     def set_data_dict(self, data: Dict[Tuple[int, int], Any]) -> None:
@@ -256,33 +271,37 @@ class OrbitStore:
             self._flush()
 
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
-        """
-        Yields (key, entry) pairs for only the latest entry for each key, using self.index.
-        Mutating the entry requires calling store.put(key, entry) to persist.
-        """
+        yielded = set()
+        with self.lock:
+            for k, v in self.pending_writes.items():
+                yield k, v
+                yielded.add(k)
         if not os.path.exists(self.log_path):
             return
         with open(self.log_path, "rb") as f:
             for context_key, (offset, size) in self.index.items():
+                if context_key in yielded:
+                    continue
                 f.seek(offset)
                 entry_data = f.read(size)
                 entry = msgpack.unpackb(entry_data, raw=False)
-                if "context_signature" in entry:
-                    yield context_key, entry
+                yield context_key, entry
 
 
 class CanonicalView:
-    def __init__(self, base_store: Any, phenomenology_map_path: str):
-        import threading
-
+    def __init__(self, base_store: Any, phenomenology_map_path: str, base_path: Path = PROJECT_ROOT):
+        """CanonicalView with base_path for sandboxing phenomenology_map_path."""
         self.base_store = base_store
-        self.lock = getattr(base_store, "lock", threading.RLock())
-        # Use shared singleton loader for the phenomenology map
-        self.phenomenology_map = load_phenomenology_map(phenomenology_map_path)
+        self.phenomenology_map_path = _abs(phenomenology_map_path, base_path)
+        if not self.phenomenology_map_path:
+            raise ValueError("phenomenology_map_path must not be None")
+        if not os.path.exists(self.phenomenology_map_path):
+            raise FileNotFoundError(f"Phenomenology map not found: {self.phenomenology_map_path}")
+        self.phen_map = load_phenomenology_map(self.phenomenology_map_path, base_path)
 
     def _get_phenomenology_key(self, context_key: Tuple[int, int]) -> Tuple[int, int]:
         tensor_index, intron = context_key
-        phenomenology_index = self.phenomenology_map.get(tensor_index, tensor_index)
+        phenomenology_index = self.phen_map.get(tensor_index, tensor_index)
         return (phenomenology_index, intron)
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
@@ -291,7 +310,9 @@ class CanonicalView:
         if entry and "_original_context" in entry:
             # Strip metadata added by put() method
             clean_entry = entry.copy()
-            clean_entry.pop("_original_context", None)  # Optional hiding
+            orig_ctx = clean_entry.pop("_original_context", None)
+            if orig_ctx is not None:
+                clean_entry["context_signature"] = orig_ctx
             return clean_entry
         return entry
 
@@ -303,6 +324,14 @@ class CanonicalView:
             e["context_signature"] = phen_key
             entry = e
         self.base_store.put(phen_key, entry)
+
+    def delete(self, context_key: Tuple[int, int]) -> None:
+        phen_key = self._get_phenomenology_key(context_key)
+        deleter = getattr(self.base_store, "delete", None)
+        if callable(deleter):
+            deleter(phen_key)
+        else:
+            raise NotImplementedError("Underlying store does not support deletion.")
 
     def close(self) -> None:
         self.base_store.close()
@@ -316,9 +345,19 @@ class CanonicalView:
             self.base_store._load_index()
 
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
+        """
+        Yield entries keyed by their original context (if present), ensuring a single logical
+        entry per phenotype. Also strip _original_context from the yielded entry.
+        """
         for phen_key, entry in self.base_store.iter_entries():
-            original = entry.get("_original_context")
-            yield (original if original else phen_key), entry
+            orig = entry.get("_original_context")
+            if orig is not None:
+                clean = entry.copy()
+                clean.pop("_original_context", None)
+                clean["context_signature"] = orig
+                yield orig, clean
+            else:
+                yield phen_key, entry
 
 
 class OverlayView:
@@ -340,9 +379,20 @@ class OverlayView:
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
         self.private_store.put(context_key, entry)
 
+    def delete(self, context_key: Tuple[int, int]) -> None:
+        deleter = getattr(self.private_store, "delete", None)
+        if callable(deleter):
+            deleter(context_key)
+        else:
+            raise NotImplementedError("Underlying private_store does not support deletion.")
+
     def close(self) -> None:
-        self.private_store.close()
-        self.public_store.close()
+        if self.private_store is not None:
+            self.private_store.close()
+            self.private_store = None
+        if self.public_store is not None:
+            self.public_store.close()
+            self.public_store = None
 
     def reload_public_knowledge(self) -> None:
         if hasattr(self.public_store, "_load_index"):
@@ -404,7 +454,10 @@ class ReadOnlyView:
 
 
 def merge_phenotype_maps(
-    source_paths: List[str], dest_path: str, conflict_resolution: str = "highest_confidence"
+    source_paths: List[str],
+    dest_path: str,
+    conflict_resolution: str = "highest_confidence",
+    base_path: Path = PROJECT_ROOT,
 ) -> MaintenanceReport:
     """
     Merge multiple phenotype maps into a single consolidated map.
@@ -428,7 +481,10 @@ def merge_phenotype_maps(
     conflict_count = 0
     total_entries = 0
 
-    for path in source_paths:
+    resolved_dest = _abs(dest_path, base_path)
+    resolved_sources = [_abs(p, base_path) for p in source_paths]
+
+    for path in resolved_sources:
         log_path = Path(str(path) + ".log")
         if log_path.exists():
             try:
@@ -485,30 +541,30 @@ def merge_phenotype_maps(
                     existing["last_updated"] = max(existing.get("last_updated", 0), entry.get("last_updated", 0))
 
     # Save merged result
-    os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(resolved_dest) or ".", exist_ok=True)
 
-    dest_store = OrbitStore(dest_path)
+    dest_store = OrbitStore(resolved_dest)
     dest_store.set_data_dict(merged_data)
     dest_store.commit()
     dest_store.close()
 
     elapsed = time.time() - start_time
 
-    return MaintenanceReport(
-        operation="merge_phenotype_maps",
-        success=True,
-        entries_processed=total_entries,
-        entries_modified=len(merged_data),
-        elapsed_seconds=elapsed,
-    )
+    return {
+        "operation": "merge_phenotype_maps",
+        "success": True,
+        "entries_processed": total_entries,
+        "entries_modified": len(merged_data),
+        "elapsed_seconds": elapsed,
+    }
 
 
 def apply_global_confidence_decay(
     store_path: str,
     decay_factor: float = 0.999,
-    age_threshold: int = 100,
     time_threshold_days: float = 30.0,
     dry_run: bool = False,
+    base_path: Path = PROJECT_ROOT,
 ) -> MaintenanceReport:
     """
     Apply confidence decay to all entries in a knowledge store.
@@ -519,7 +575,6 @@ def apply_global_confidence_decay(
     Args:
         store_path: Path to the phenotype store
         decay_factor: Exponential decay rate per age unit (small value, e.g. 0.001)
-        age_threshold: Minimum age counter to trigger decay
         time_threshold_days: Days without update to trigger decay
         dry_run: If True, calculate but don't apply changes
 
@@ -528,18 +583,19 @@ def apply_global_confidence_decay(
     """
     start_time = time.time()
 
+    resolved_store_path = _abs(store_path, base_path)
     # Check if it's an OrbitStore file (has .log file)
-    log_path = Path(str(store_path) + ".log")
-    if not os.path.exists(store_path) and not log_path.exists():
-        return MaintenanceReport(
-            operation="apply_global_confidence_decay",
-            success=False,
-            entries_processed=0,
-            entries_modified=0,
-            elapsed_seconds=0,
-        )
+    log_path = Path(str(resolved_store_path) + ".log")
+    if not os.path.exists(resolved_store_path) and not log_path.exists():
+        return {
+            "operation": "apply_global_confidence_decay",
+            "success": False,
+            "entries_processed": 0,
+            "entries_modified": 0,
+            "elapsed_seconds": 0,
+        }
 
-    store = OrbitStore(store_path)
+    store = OrbitStore(resolved_store_path)
     modified_count = 0
     processed_count = 0
     current_time = time.time()
@@ -571,16 +627,16 @@ def apply_global_confidence_decay(
     store.close()
     elapsed = time.time() - start_time
 
-    return MaintenanceReport(
-        operation="apply_global_confidence_decay",
-        success=True,
-        entries_processed=processed_count,
-        entries_modified=modified_count,
-        elapsed_seconds=elapsed,
-    )
+    return {
+        "operation": "apply_global_confidence_decay",
+        "success": True,
+        "entries_processed": processed_count,
+        "entries_modified": modified_count,
+        "elapsed_seconds": elapsed,
+    }
 
 
-def export_knowledge_statistics(store_path: str, output_path: str) -> MaintenanceReport:
+def export_knowledge_statistics(store_path: str, output_path: str, base_path: Path = PROJECT_ROOT) -> MaintenanceReport:
     """
     Export detailed statistics about a knowledge store.
 
@@ -593,98 +649,50 @@ def export_knowledge_statistics(store_path: str, output_path: str) -> Maintenanc
     """
     start_time = time.time()
 
+    resolved_store_path = _abs(store_path, base_path)
+    resolved_output_path = _abs(output_path, base_path)
     # Check if it's an OrbitStore file (has .log file)
-    log_path = Path(str(store_path) + ".log")
-    if not os.path.exists(store_path) and not log_path.exists():
-        return MaintenanceReport(
-            operation="export_knowledge_statistics",
-            success=False,
-            entries_processed=0,
-            entries_modified=0,
-            elapsed_seconds=0,
-        )
+    log_path = Path(str(resolved_store_path) + ".log")
+    if not os.path.exists(resolved_store_path) and not log_path.exists():
+        return {
+            "operation": "export_knowledge_statistics",
+            "success": False,
+            "entries_processed": 0,
+            "entries_modified": 0,
+            "elapsed_seconds": 0,
+        }
 
-    store = OrbitStore(store_path)
+    store = OrbitStore(resolved_store_path)
     entries = list(store.data.values())
     store.close()
 
-    if not entries:
-        stats_data: Dict[str, Any] = {"total_entries": 0, "generated_at": time.time()}
-    else:
-        # Calculate comprehensive statistics
-        confidences = [e.get("confidence", 0.0) for e in entries]
-        exon_masks = [e.get("exon_mask", 0) for e in entries]
-        usage_counts = [e.get("usage_count", 0) for e in entries]
-
-        # Memory utilization
-        total_bits = sum(bin(mask).count("1") for mask in exon_masks)
-        max_possible_bits = len(exon_masks) * 8
-        memory_utilization = total_bits / max_possible_bits if max_possible_bits > 0 else 0
-
-        # Temporal analysis
-        current_time = time.time()
-        ages_days = []
-        for entry in entries:
-            last_updated = entry.get("last_updated", current_time)
-            age_days = (current_time - last_updated) / (24 * 3600)
-            ages_days.append(age_days)
-
-        # Phenotype diversity
-        phenotypes: Dict[str, int] = {}
-        for entry in entries:
-            phenotype = entry.get("phenotype", "?")
-            phenotypes[phenotype] = phenotypes.get(phenotype, 0) + 1
-
-        stats_data = {
-            "total_entries": len(entries),
-            "confidence": {
-                "average": float(sum(confidences) / len(confidences)) if confidences else 0.0,
-                "median": float(sorted(confidences)[len(confidences) // 2]) if confidences else 0.0,
-                "min": float(min(confidences)) if confidences else 0.0,
-                "max": float(max(confidences)) if confidences else 0.0,
-                "high_confidence_count": sum(1 for c in confidences if c > 0.8),
-                "low_confidence_count": sum(1 for c in confidences if c < 0.2),
-            },
-            "memory": {
-                "utilization": float(memory_utilization),
-                "total_bits_set": total_bits,
-                "average_bits_per_entry": float(total_bits / len(entries)) if entries else 0.0,
-            },
-            "usage": {
-                "total_usage": sum(usage_counts),
-                "average_usage": float(sum(usage_counts) / len(usage_counts)) if usage_counts else 0.0,
-                "max_usage": max(usage_counts) if usage_counts else 0,
-            },
-            "age": {
-                "average_days_since_update": float(sum(ages_days) / len(ages_days)) if ages_days else 0.0,
-                "oldest_entry_days": float(max(ages_days)) if ages_days else 0.0,
-            },
-            "phenotype_diversity": {
-                "unique_phenotypes": len(phenotypes),
-                "top_phenotypes": sorted(phenotypes.items(), key=lambda x: x[1], reverse=True)[:10],
-            },
-            "generated_at": float(time.time()),
-            "store_path": store_path,
-        }
+    stats_data = {
+        "total_entries": len(entries),
+        "confidence": [float(e.get("confidence", 0.0)) for e in entries],
+        "memory": [int(e.get("usage_count", 0)) for e in entries],
+        "created_at": [float(e.get("created_at", 0.0)) for e in entries],
+        "last_updated": [float(e.get("last_updated", 0.0)) for e in entries],
+    }
 
     # Save statistics
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, "w") as f:
+    os.makedirs(os.path.dirname(resolved_output_path) or ".", exist_ok=True)
+    with open(resolved_output_path, "w") as f:
         # ujson does not support indent argument
         json.dump(stats_data, f)
 
     elapsed = time.time() - start_time
+    return {
+        "operation": "export_knowledge_statistics",
+        "success": True,
+        "entries_processed": len(entries),
+        "entries_modified": 0,
+        "elapsed_seconds": elapsed,
+    }
 
-    return MaintenanceReport(
-        operation="export_knowledge_statistics",
-        success=True,
-        entries_processed=len(entries),
-        entries_modified=0,
-        elapsed_seconds=elapsed,
-    )
 
-
-def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Optional[str] = None) -> MaintenanceReport:
+def validate_ontology_integrity(
+    ontology_path: str, phenomenology_map_path: Optional[str] = None, base_path: Path = PROJECT_ROOT
+) -> MaintenanceReport:
     """
     Validate the integrity of ontology data files.
 
@@ -698,27 +706,28 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
     start_time = time.time()
     issues = []
 
+    resolved_ontology_path = _abs(ontology_path, base_path)
     # Check ontology file
-    if not os.path.exists(ontology_path):
-        return MaintenanceReport(
-            operation="validate_ontology_integrity",
-            success=False,
-            entries_processed=0,
-            entries_modified=0,
-            elapsed_seconds=0,
-        )
+    if not os.path.exists(resolved_ontology_path):
+        return {
+            "operation": "validate_ontology_integrity",
+            "success": False,
+            "entries_processed": 0,
+            "entries_modified": 0,
+            "elapsed_seconds": 0,
+        }
 
     try:
-        with open(ontology_path, "r") as f:
+        with open(resolved_ontology_path, "r") as f:
             ontology_data = json.load(f)
     except Exception:
-        return MaintenanceReport(
-            operation="validate_ontology_integrity",
-            success=False,
-            entries_processed=0,
-            entries_modified=0,
-            elapsed_seconds=0,
-        )
+        return {
+            "operation": "validate_ontology_integrity",
+            "success": False,
+            "entries_processed": 0,
+            "entries_modified": 0,
+            "elapsed_seconds": 0,
+        }
 
     # Validate ontology structure
     expected_keys = ["schema_version", "ontology_map", "endogenous_modulus", "ontology_diameter", "total_states"]
@@ -740,9 +749,14 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
 
     # Check phenomenology map if provided
     phenomenology_issues = 0
-    if phenomenology_map_path and os.path.exists(phenomenology_map_path):
+    resolved_phenomenology_map_path = (
+        _abs(phenomenology_map_path, base_path)
+        if phenomenology_map_path is not None
+        else None
+    )
+    if resolved_phenomenology_map_path and os.path.exists(resolved_phenomenology_map_path):
         try:
-            with open(phenomenology_map_path, "r") as f:
+            with open(resolved_phenomenology_map_path, "r") as f:
                 data = json.load(f)
             if isinstance(data, list):
                 raw_map = data
@@ -772,13 +786,13 @@ def validate_ontology_integrity(ontology_path: str, phenomenology_map_path: Opti
 
     elapsed = time.time() - start_time
 
-    return MaintenanceReport(
-        operation="validate_ontology_integrity",
-        success=len(issues) == 0,
-        entries_processed=len(ontology_map),
-        entries_modified=0,
-        elapsed_seconds=elapsed,
-    )
+    return {
+        "operation": "validate_ontology_integrity",
+        "success": len(issues) == 0,
+        "entries_processed": len(ontology_map),
+        "entries_modified": 0,
+        "elapsed_seconds": elapsed,
+    }
 
 
 def prune_and_compact_store(
@@ -788,6 +802,7 @@ def prune_and_compact_store(
     min_confidence: Optional[float] = None,
     dry_run: bool = False,
     archive_summary_path: Optional[str] = None,
+    base_path: Path = PROJECT_ROOT,
 ) -> MaintenanceReport:
     """
     Prune and compact an OrbitStore in one pass.
@@ -810,11 +825,13 @@ def prune_and_compact_store(
     start_time = time.time()
     now = time.time()
 
-    # Resolve output destination
-    destination = output_path or store_path
+    resolved_store_path = _abs(store_path, base_path)
+    resolved_output_path = _abs(output_path, base_path) if output_path is not None else None
+    destination = resolved_output_path or resolved_store_path
+    resolved_archive_summary_path = _abs(archive_summary_path, base_path) if archive_summary_path is not None else None
 
     # Load source store
-    source_store = OrbitStore(store_path)
+    source_store = OrbitStore(resolved_store_path)
     total_entries = 0
     pruned_entries = 0
 
@@ -864,21 +881,21 @@ def prune_and_compact_store(
     if dry_run:
         source_store.close()
         elapsed = time.time() - start_time
-        if archive_summary_path:
-            os.makedirs(os.path.dirname(archive_summary_path) or ".", exist_ok=True)
-            with open(archive_summary_path, "w") as f:
+        if resolved_archive_summary_path:
+            os.makedirs(os.path.dirname(resolved_archive_summary_path) or ".", exist_ok=True)
+            with open(resolved_archive_summary_path, "w") as f:
                 json.dump(archive_summary, f)
-        return MaintenanceReport(
-            operation="prune_and_compact_store",
-            success=True,
-            entries_processed=total_entries,
-            entries_modified=pruned_entries,
-            elapsed_seconds=elapsed,
-        )
+        return {
+            "operation": "prune_and_compact_store",
+            "success": True,
+            "entries_processed": total_entries,
+            "entries_modified": pruned_entries,
+            "elapsed_seconds": elapsed,
+        }
 
     # Perform compaction into destination
     # If destination == store_path we reuse the existing instance
-    if destination == store_path:
+    if destination == resolved_store_path:
         # Rewrite in-place using existing store API
         source_store.set_data_dict(keep)
         source_store.commit()
@@ -891,19 +908,19 @@ def prune_and_compact_store(
         dest_store.commit()
         dest_store.close()
 
-    if archive_summary_path:
-        os.makedirs(os.path.dirname(archive_summary_path) or ".", exist_ok=True)
-        with open(archive_summary_path, "w") as f:
+    if resolved_archive_summary_path:
+        os.makedirs(os.path.dirname(resolved_archive_summary_path) or ".", exist_ok=True)
+        with open(resolved_archive_summary_path, "w") as f:
             json.dump(archive_summary, f)
 
     elapsed = time.time() - start_time
-    return MaintenanceReport(
-        operation="prune_and_compact_store",
-        success=True,
-        entries_processed=total_entries,
-        entries_modified=pruned_entries,
-        elapsed_seconds=elapsed,
-    )
+    return {
+        "operation": "prune_and_compact_store",
+        "success": True,
+        "entries_processed": total_entries,
+        "entries_modified": pruned_entries,
+        "elapsed_seconds": elapsed,
+    }
 
 
 """

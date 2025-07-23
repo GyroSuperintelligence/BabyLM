@@ -3,13 +3,12 @@
 from pathlib import Path
 from transformers import AutoTokenizer
 
-ROOT = Path("memories/public/tokenizers")
 
-
-def install_bert() -> None:
-    """Download and save BERT tokenizer."""
+def install_bert(base_path: Path = Path(__file__).resolve().parents[2]) -> None:
+    """Download and save BERT tokenizer. base_path controls where 'memories/' is rooted."""
+    root = base_path / "memories/public/tokenizers"
     name = "bert-base-uncased"
-    dest = ROOT / name
+    dest = root / name
     dest.mkdir(parents=True, exist_ok=True)
 
     # Download from Hugging Face

@@ -11,6 +11,7 @@ import time
 from collections import deque
 
 import numpy as np
+from typing import Any
 
 # ───────────────────────────────────────────────────────────────────
 # 1. ARCHETYPAL STATE AND MASKS (The Invariant Physics)
@@ -52,7 +53,7 @@ def _build_masks() -> tuple[int, int, int, list[int]]:
 FG_MASK, BG_MASK, FULL_MASK, INTRON_BROADCAST_MASKS = _build_masks()
 
 
-def tensor_to_int(T: np.ndarray) -> int:
+def tensor_to_int(T: np.ndarray[Any, np.dtype[np.int8]]) -> int:
     """Encodes a {-1, 1} tensor into a 48-bit integer (bit 1 = -1, bit 0 = +1)."""
     bits = 0
     # C-order flattening must match the mask construction order

@@ -4,6 +4,84 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 
 ---
 
+## [0.9.6.3] – 2025-07-23
+
+#### 🚀 Added
+
+* **Mandatory 3‑mind bootstrap (`user`, `system`, `assistant`)**
+
+  * `AgentPool.ensure_triad()` creates (and guarantees presence of) the canonical trio.
+  * New `AgentPool.get()` to fetch an agent *without* creating it (raises `KeyError` if missing).
+  * `AgentPool.create_agent()` explicit creation API when you *do* want a new id.
+
+* **Creation policy controls**
+
+  * `AgentPool.__init__` now accepts:
+
+    * `allowed_ids: set[str]` – whitelist of ids permitted when `allow_auto_create=False`.
+    * `allow_auto_create: bool` – gate automatic creation of arbitrary ids.
+    * `private_agents_base_path: str` – base dir for private agent stores.
+
+* **Path override plumbing**
+
+  * `GyroSI._create_default_store()` honors `private_agents_base_path` and `base_path`.
+  * All file/folder creation under `memories/private/agents/` can be redirected via config (great for tests).
+
+#### 🔧 Changed
+
+* **`orchestrate_turn`** now *requires* that agents already exist; otherwise it raises with a helpful message.
+
+* **External FastAPI adapter (`toys/communication/external_adapter.py`)**
+
+  * Uses the shared pool with `ensure_triad()`.
+  * Maps all external users to the internal `"user"` id by default.
+  * No silent auto-creation of “user2”, “assistant42”, etc.
+
+* **Store construction**
+
+  * Default CanonicalView enabling logic kept, but paths are fully configurable.
+  * OverlayView still used for public/private knowledge, but private paths respect overrides.
+
+#### 🧪 Tests
+
+* Removed / rewrote tests that assumed:
+
+  * Auto-creation of arbitrary agent ids (`test_orchestrate_turn_creates_agents`, parts of AgentPool tests).
+  * Phenotype count always increases on batch learn (CanonicalView may collapse keys).
+* Added new policy tests:
+
+  * `test_ensure_triad_bootstraps_all_three`
+  * `test_get_raises_for_missing_agent`
+  * `test_permission_error_on_auto_create_off`
+
+#### 🗑️ Removed (or mark as obsolete)
+
+* Any test relying on `agent_pool.get_or_create_agent()` to silently create unknown ids **when `allow_auto_create=False`**.
+* Assertions that depend on raw entry counts increasing without considering canonicalization.
+
+#### 🧭 Migration Notes
+
+1. **Instantiate pools** with the new args:
+
+   ```python
+   pool = AgentPool(
+       ontology_path,
+       public_store_path,
+       allow_auto_create=False,
+       allowed_ids={"user", "system", "assistant"},
+       private_agents_base_path="memories/private/agents"
+   )
+   pool.ensure_triad()
+   ```
+2. **APIs / protocols** should reference only `"user"`, `"system"`, `"assistant"` unless they explicitly call `create_agent`.
+3. **Tests/fixtures**: pass `base_path` or `private_agents_base_path` in configs to keep temp data out of real `memories/`.
+
+---
+
+Let me know if you want this formatted as a `CHANGELOG.md` with semantic version headers.
+
+---
+
 ## [0.9.6.3] – 2025-07-22
 
 ### Major Refactor, Optimization, and Cleanup
