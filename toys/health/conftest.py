@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator
 
 import pytest
+from fastapi.testclient import TestClient
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -154,6 +155,37 @@ def sample_phenotype() -> Dict[str, Any]:
 def test_bytes() -> bytes:
     """Sample test bytes."""
     return b"Hello, GyroSI!"
+
+
+@pytest.fixture
+def client(patched_adapter_pool):
+    from toys.communication.external_adapter import app
+    return TestClient(app)
+
+
+@pytest.fixture
+def patched_adapter_pool(tmp_path, meta_paths):
+    from toys.communication import external_adapter as ea
+
+    pub = tmp_path / "public.pkl.gz"
+    OrbitStore(str(pub)).close()
+
+    if hasattr(ea, "agent_pool"):
+        ea.agent_pool.close_all()
+
+    ea.agent_pool = AgentPool(
+        ontology_path=meta_paths["ontology"],
+        base_knowledge_path=str(pub),
+        allowed_ids={"user", "system", "assistant"},
+        allow_auto_create=True,
+        private_agents_base_path="agents",
+        base_path=tmp_path,
+    )
+    ea.agent_pool.ensure_triad()
+
+    yield ea.agent_pool
+
+    ea.agent_pool.close_all()
 
 
 # Test utilities

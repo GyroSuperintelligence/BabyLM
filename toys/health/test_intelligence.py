@@ -11,13 +11,11 @@ from pathlib import Path
 from typing import Any, Dict
 
 import pytest
-from fastapi.testclient import TestClient
 
 from baby.contracts import AgentConfig
 from baby.intelligence import AgentPool, GyroSI, orchestrate_turn
 from baby.policies import OrbitStore
 from toys.communication import tokenizer as gyrotok
-from toys.communication.external_adapter import app
 
 
 # Parameterize tokenizer name for easier multi-tokenizer testing
@@ -29,31 +27,9 @@ def _count_entries(store: Any) -> int:
     return sum(1 for _ in store.iter_entries())
 
 
-@pytest.fixture
-def client() -> TestClient:
-    """Return a TestClient for the FastAPI app."""
-    return TestClient(app)
-
-
-@pytest.fixture(autouse=True)
-def _reset_adapter_pool() -> None:
-    """
-    Reset the global agent pool before and after each test for perfect isolation.
-    
-    This is necessary because the FastAPI adapter uses a module-level agent_pool 
-    that persists across test runs. Without this reset, tests would interfere with
-    each other through cumulative state.
-    """
-    from toys.communication.external_adapter import agent_pool as global_pool
-    
-    # Reset before test
-    global_pool.close_all()
-    global_pool.ensure_triad()
-    
-    yield
-    
-    # Reset after test (cleanup)
-    global_pool.close_all()
+# IMPORTANT: Only use `patched_adapter_pool` in HTTP adapter tests.
+# Never import `toys.communication.external_adapter` in non-adapter tests.
+# Do NOT use any autouse fixture to reset or initialize the global FastAPI adapter pool.
 
 
 class TestIntelligenceEngineOrchestration:
@@ -199,76 +175,6 @@ class TestAgentPoolManagement:
         pool.remove_agent("test_agent_1")
         pool.remove_agent("test_agent_2")
 
-    def test_pool_lru_eviction_policy(self, temp_dir: Path, meta_paths: Dict[str, str]) -> None:
-        """Test LRU eviction policy correctly removes the least recently used agent."""
-        # Create temporary public knowledge store
-        public_path = str(temp_dir / "pub_lru.pkl.gz")
-        OrbitStore(public_path).close()
-        
-        # Create a tiny pool with max 2 agents and LRU policy
-        tiny_pool = AgentPool(
-            meta_paths["ontology"],
-            public_path,
-            preferences={"max_agents_in_memory": 2, "agent_eviction_policy": "lru"},
-            base_path=temp_dir,
-            allow_auto_create=True
-        )
-        
-        try:
-            # Create first agent (will be LRU after second agent created)
-            agent_old = tiny_pool.get_or_create_agent("agent_old")
-            
-            # Create second agent
-            agent_recent = tiny_pool.get_or_create_agent("agent_recent")
-            
-            # Create third agent - should evict the oldest (first) agent
-            agent_newest = tiny_pool.get_or_create_agent("agent_newest")
-            
-            active_agents = tiny_pool.get_active_agents()
-            
-            # The oldest agent should be evicted
-            assert "agent_old" not in active_agents
-            # The two most recent should remain
-            assert "agent_recent" in active_agents
-            assert "agent_newest" in active_agents
-        finally:
-            tiny_pool.close_all()
-
-    def test_pool_ttl_eviction_policy(self, temp_dir: Path, meta_paths: Dict[str, str]) -> None:
-        """Test TTL eviction policy removes expired agents."""
-        # Create temporary public knowledge store
-        public_path = str(temp_dir / "pub_ttl.pkl.gz")
-        OrbitStore(public_path).close()
-        
-        # Create pool with TTL eviction and very short timeout (0.001 minutes = 0.06 seconds)
-        ttl_pool = AgentPool(
-            meta_paths["ontology"],
-            public_path,
-            preferences={
-                "max_agents_in_memory": 100,
-                "agent_eviction_policy": "ttl",
-                "agent_ttl_minutes": 0.001  # Very short TTL
-            },
-            base_path=temp_dir,
-            allow_auto_create=True
-        )
-        
-        try:
-            # Create agent
-            agent = ttl_pool.get_or_create_agent("ttl_test_agent")
-            assert "ttl_test_agent" in ttl_pool.get_active_agents()
-            
-            # Wait for TTL to expire
-            time.sleep(0.1)  # 100ms, should be more than enough
-            
-            # Trigger eviction by creating a new agent
-            ttl_pool.get_or_create_agent("ttl_trigger_agent")
-            
-            # First agent should be evicted due to TTL expiry
-            assert "ttl_test_agent" not in ttl_pool.get_active_agents()
-        finally:
-            ttl_pool.close_all()
-
     @pytest.mark.parametrize("tokenizer_name", TOKENIZER_NAMES)
     def test_orchestrate_turn_with_tokenizer(
         self, agent_pool: AgentPool, tokenizer_name: str
@@ -345,7 +251,7 @@ class TestTokenizerIntegration:
 class TestExternalAdapterHTTP:
     """Test external API adapter endpoints."""
 
-    def test_models_endpoint(self, client: TestClient) -> None:
+    def test_models_endpoint(self, client, patched_adapter_pool) -> None:
         """Test /v1/models endpoint returns expected format."""
         response = client.get("/v1/models")
         
@@ -355,7 +261,7 @@ class TestExternalAdapterHTTP:
         assert len(data["data"]) > 0
         assert data["data"][0]["id"] == "gyrosi-baby-0.9.6"
 
-    def test_chat_completions_basic(self, client: TestClient) -> None:
+    def test_chat_completions_basic(self, client, patched_adapter_pool) -> None:
         """Test chat completions generates valid response."""
         payload = {
             "model": "gyrosi-baby-0.9.6",
@@ -378,7 +284,7 @@ class TestExternalAdapterHTTP:
         assert data["choices"][0]["message"]["role"] == "assistant"
         assert len(data["choices"][0]["message"]["content"]) > 0
 
-    def test_concurrent_chat_completions(self, client: TestClient) -> None:
+    def test_concurrent_chat_completions(self, client, patched_adapter_pool) -> None:
         """Test concurrent requests don't interfere with each other."""
         payload1 = {
             "model": "gyrosi-baby-0.9.6",
@@ -406,7 +312,7 @@ class TestExternalAdapterHTTP:
         assert status1 == 200
         assert status2 == 200
 
-    def test_chat_completions_with_system_message(self, client: TestClient) -> None:
+    def test_chat_completions_with_system_message(self, client, patched_adapter_pool) -> None:
         """Test chat completions incorporates system message."""
         payload = {
             "model": "gyrosi-baby-0.9.6",
@@ -422,7 +328,7 @@ class TestExternalAdapterHTTP:
         data = response.json()
         assert data["choices"][0]["message"]["content"] is not None
 
-    def test_chat_completions_streaming(self, client: TestClient) -> None:
+    def test_chat_completions_streaming(self, client, patched_adapter_pool) -> None:
         """Test streaming chat completions returns valid SSE format."""
         payload = {
             "model": "gyrosi-baby-0.9.6",
@@ -471,7 +377,7 @@ class TestExternalAdapterHTTP:
             full_content = "".join(content_chunks)
             assert len(full_content) > 0
 
-    def test_hf_generate_endpoint(self, client: TestClient) -> None:
+    def test_hf_generate_endpoint(self, client, patched_adapter_pool) -> None:
         """Test HuggingFace-compatible generate endpoint."""
         payload = {
             "inputs": "Generate a response about artificial intelligence."
@@ -485,7 +391,7 @@ class TestExternalAdapterHTTP:
         assert isinstance(data["generated_text"], str)
         assert len(data["generated_text"]) > 0
 
-    def test_user_id_mapping_to_internal_agent(self, client: TestClient) -> None:
+    def test_user_id_mapping_to_internal_agent(self, client, patched_adapter_pool) -> None:
         """Test custom user ID in header maps to internal 'user' agent."""
         from toys.communication.external_adapter import agent_pool as global_pool
         

@@ -651,8 +651,8 @@ class GyroSI:
                     raise ValueError("private_agents_base_path must not be None")
                 private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.pkl.gz")
             # Multi-agent overlay using decorators
-            public_store = ReadOnlyView(OrbitStore(public_knowledge_path, write_threshold=learn_batch_size))
-            private_store = OrbitStore(private_path, write_threshold=learn_batch_size)
+            public_store = ReadOnlyView(OrbitStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path))
+            private_store = OrbitStore(private_path, write_threshold=learn_batch_size, base_path=self.base_path)
             base_store: Any = OverlayView(public_store, private_store)
             phenomenology_map_path = self.config.get("phenomenology_map_path")
         else:
@@ -661,7 +661,7 @@ class GyroSI:
             if knowledge_path is None:
                 base_path = self.config.get("base_path") or str(self.base_path / "memories")
                 knowledge_path = os.path.join(base_path, "knowledge.pkl.gz")
-            base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size)
+            base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
 
             # CanonicalView: enable if flag is True, or autodetect if None and file exists
             phenomenology_map_path = self.config.get("phenomenology_map_path")
@@ -672,7 +672,7 @@ class GyroSI:
             enable_phenomenology is None and phenomenology_map_path and os.path.exists(phenomenology_map_path)
         ):
             if phenomenology_map_path and os.path.exists(phenomenology_map_path):
-                return CanonicalView(base_store, phenomenology_map_path)
+                return CanonicalView(base_store, phenomenology_map_path, base_path=self.base_path)
             else:
                 print(f"Warning: phenomenology map not found at {phenomenology_map_path}")
                 pass
@@ -743,11 +743,12 @@ class AgentPool:
         self._shards: List[Dict[str, Any]] = []
         for _ in range(self.SHARD_COUNT):
             if self.eviction_policy == "lru":
-                self._shards.append({"agents": LRUAgentCache(self.max_agents // self.SHARD_COUNT), "lock": RLock()})
+                shard_size = max(1, self.max_agents // self.SHARD_COUNT)
+                self._shards.append({"agents": LRUAgentCache(shard_size), "lock": RLock()})
             else:
                 self._shards.append({"agents": OrderedDict(), "lock": RLock()})
         self._public_store: Optional[ReadOnlyView] = ReadOnlyView(
-            OrbitStore(self.base_knowledge_path, write_threshold=100)
+            OrbitStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path)
         )
 
     def _shard_index(self, agent_id: str) -> int:
@@ -777,14 +778,13 @@ class AgentPool:
                     self._maybe_evict_agent(shard)
 
                 # Create private knowledge path
-                private_path = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.pkl.gz")
-
-                # Ensure directory exists
+                private_path_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.pkl.gz")
+                private_path = _abs(private_path_rel, self.base_path)
                 os.makedirs(os.path.dirname(private_path), exist_ok=True)
 
                 # Multi-agent overlay using decorators, reuse cached public store
                 public_store = self._public_store
-                private_store = OrbitStore(private_path, write_threshold=100)
+                private_store = OrbitStore(private_path, write_threshold=100, base_path=self.base_path)
                 base_store: Any = OverlayView(public_store, private_store)
 
                 # Create agent config
@@ -812,6 +812,7 @@ class AgentPool:
                     phenotype_store=base_store,
                     base_path=self.base_path,
                 )
+                print(f"DEBUG: Created agent {agent_id}. Current agents: {list(agents.keys())}")
 
             return cast(GyroSI, agents[agent_id])
 
@@ -829,9 +830,8 @@ class AgentPool:
     def create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
         onto = self.ontology_path
         phenomap = str(Path(onto).with_name("phenomenology_map.json"))
-        if self.private_agents_base_path is None:
-            raise ValueError("private_agents_base_path must not be None")
-        private_path = os.path.join(str(self.private_agents_base_path), f"{agent_id}/knowledge.pkl.gz")
+        private_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.pkl.gz")
+        private_path = _abs(private_rel, self.base_path)
         config: AgentConfig = {
             "ontology_path": onto,
             "public_knowledge_path": self.base_knowledge_path,
