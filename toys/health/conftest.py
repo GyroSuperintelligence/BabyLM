@@ -204,3 +204,59 @@ __all__ = [
     "assert_ontology_valid", 
     "assert_no_main_pollution",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Ensure external_adapter’s global AgentPool writes only to per-test dirs
+# ---------------------------------------------------------------------------
+
+import os
+from pathlib import Path
+
+import pytest
+
+from baby.policies import OrbitStore
+from baby.intelligence import AgentPool
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_external_adapter_pool(meta_paths: Dict[str, str], tmp_path_factory) -> None:  # type: ignore[valid-type]
+    """Replace toys.communication.external_adapter.agent_pool with a temp-dir instance.
+
+    The external adapter creates its AgentPool at import time, pointing at the
+    real `memories/` hierarchy.  That pollutes the repo during test discovery.
+    We immediately dispose of that pool and swap in a new one whose public and
+    private stores live inside a session-scoped tmp directory.
+    """
+    from toys.communication import external_adapter as ea  # Local import to ensure module is already loaded.
+
+    temp_base: Path = tmp_path_factory.mktemp("adapter_pool")
+    public_path = temp_base / "public_knowledge.pkl.gz"
+    # Initialize an empty OrbitStore so the path exists.
+    OrbitStore(str(public_path)).close()
+
+    # Close and discard the original pool created at import time
+    ea.agent_pool.close_all()
+
+    # Replace with a sandboxed pool
+    ea.agent_pool = AgentPool(
+        meta_paths["ontology"],
+        str(public_path),
+        allow_auto_create=True,
+        private_agents_base_path=str(temp_base / "agents"),
+    )
+
+    # Also ensure no artefacts remain in the main memories folder
+    default_pub = Path(ea.DEFAULT_KNOWLEDGE_PATH)
+    for suffix in ("", ".log", ".idx"):
+        p = default_pub.with_suffix(default_pub.suffix + suffix) if suffix else default_pub
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+
+    yield
+
+    # Clean up the sandboxed pool at session end
+    ea.agent_pool.close_all()
