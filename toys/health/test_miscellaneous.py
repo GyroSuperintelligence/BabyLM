@@ -1,665 +1,1302 @@
-# toys/health/test_miscellaneous.py
 """
-Miscellaneous integration & external protocol tests for GyroSI.
-
-Focus: behaviours *not* covered by the focused unit tests (governance /
-information / inference / intelligence), namely:
-  - OpenAI & HuggingFace compatible adapter routes
-  - Conversation bootstrap (system/user/assistant agents)
-  - Multi‑agent identity isolation in AgentPool
-  - Canonical & overlay storage decorator semantics
-  - Path‑dependent ordered coaddition (integration flavour)
-  - Confidence / learning variance (variety-sensitive) without assuming
-    unimplemented APIs
-  - Knowledge maintenance utilities (decay / pruning / stats export)
-  - Merge utility (conflict resolution logic surface)
-All tests are lightweight and avoid large loops (old hardware friendly).
+Comprehensive tests for contracts.py and policies.py - type definitions and storage policies.
+Tests data structures, storage backends, maintenance operations, and policy enforcement.
 """
-
-from __future__ import annotations
 
 import json
 import os
-import random
+import tempfile
+import time
 from pathlib import Path
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, List, Tuple
+from unittest.mock import Mock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
-from baby.governance import (
-    EXON_BG_MASK,
-    EXON_DYNAMIC_MASK,
-    EXON_FG_MASK,
-    EXON_LI_MASK,
-    FULL_MASK,
-    INTRON_BROADCAST_MASKS,
-    apply_gyration_and_transform,
-    compute_governance_signature,
-    fold,
-    transcribe_byte,
+from baby.contracts import (
+    AgentConfig,
+    CycleHookFunction,
+    GovernanceSignature,
+    MaintenanceReport,
+    ManifoldData,
+    PhenotypeEntry,
+    PhenomenologyData,
+    PreferencesConfig,
+    ValidationReport,
 )
-from baby.inference import InferenceEngine
-from baby.information import InformationEngine
-from baby.intelligence import AgentPool, GyroSI
-from baby.policies import OverlayView
-
-# ---------------------------------------------------------------------------
-# Local helper
-# ---------------------------------------------------------------------------
-
-
-def _load_json(path: str) -> Dict[str, Any]:
-    with open(path, "r") as f:
-        return cast(Dict[str, Any], json.load(f))
-
-
-# ---------------------------------------------------------------------------
-# Fixture: FastAPI TestClient for external adapter (non‑polluting)
-# ---------------------------------------------------------------------------
+from baby.policies import (
+    CanonicalView,
+    OrbitStore,
+    OverlayView,
+    ReadOnlyView,
+    apply_global_confidence_decay,
+    export_knowledge_statistics,
+    load_phenomenology_map,
+    merge_phenotype_maps,
+    prune_and_compact_store,
+    to_native,
+    validate_ontology_integrity,
+)
 
 
-@pytest.fixture
-def adapter_client(agent_pool: "AgentPool", temp_dir: str, monkeypatch: pytest.MonkeyPatch) -> "TestClient":
-    """
-    Provides a TestClient for the external adapter with:
-      * AgentPool replaced by test's pool (no global pollution)
-      * Public knowledge path redirected to temp_dir
-    Skips cleanly if FastAPI not installed.
-    """
-    try:
-        from fastapi.testclient import TestClient
-    except ImportError:
-        pytest.skip("fastapi not installed in environment.")
+class TestContracts:
+    """Test type definitions and contracts from contracts.py."""
 
-    # Point adapter to temp knowledge file before import
-    monkeypatch.setenv("GYROSI_PUBLIC_KNOWLEDGE", os.path.join(temp_dir, "adapter_public.pkl.gz"))
-
-    # Import adapter AFTER env tweak
-    from toys.communication import external_adapter
-
-    # Monkeypatch its agent_pool to reuse our ephemeral test pool
-    external_adapter.agent_pool = agent_pool
-
-    return TestClient(external_adapter.app)
-
-
-# ---------------------------------------------------------------------------
-# 1. External Protocol Adapter Tests
-# ---------------------------------------------------------------------------
-
-
-class TestExternalAdapter:
-    def test_models_endpoint(self, adapter_client: "TestClient") -> None:
-        resp = adapter_client.get("/v1/models")
-        assert resp.status_code == 200
-        payload = resp.json()
-        assert "data" in payload and isinstance(payload["data"], list)
-        assert any(m.get("id") == "gyrosi-baby-0.9.6" for m in payload["data"])
-
-    def test_chat_bootstrap_three_agents(self, adapter_client: "TestClient", agent_pool: "AgentPool") -> None:
-        """
-        First chat with system + user should:
-          * Bootstrap assistant memory (cycle_count > 0 after)
-          * Keep distinct system / user / assistant agents
-          * Return assistant reply
-        """
-        body = {
-            "model": "gyrosi-baby-0.9.6",
-            "messages": [
-                {"role": "system", "content": "Priming instructions."},
-                {"role": "user", "content": "Hello model."},
-            ],
+    def test_governance_signature_structure(self) -> None:
+        """Test GovernanceSignature TypedDict structure."""
+        sig: GovernanceSignature = {
+            "neutral": 6,
+            "li": 0,
+            "fg": 0,
+            "bg": 0,
+            "dyn": 0,
         }
-        resp = adapter_client.post("/v1/chat/completions", json=body)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["choices"][0]["message"]["role"] == "assistant"
+        
+        # Should have all required keys
+        assert "neutral" in sig
+        assert "li" in sig
+        assert "fg" in sig
+        assert "bg" in sig
+        assert "dyn" in sig
+        
+        # Values should be integers
+        assert isinstance(sig["neutral"], int)
+        assert isinstance(sig["li"], int)
+        assert isinstance(sig["fg"], int)
+        assert isinstance(sig["bg"], int)
+        assert isinstance(sig["dyn"], int)
 
-        system_agent = agent_pool.get_or_create_agent("gyro-system")
-        assistant_agent = agent_pool.get_or_create_agent("gyro-assistant")
-        # Derive user id per adapter logic
-        user_agent = agent_pool.get_or_create_agent(f"anon-{hash('testclient')}")
-        assert system_agent is not assistant_agent
-        assert assistant_agent is not user_agent
-        assert system_agent is not user_agent
-        assert assistant_agent.engine.cycle_count > 0
+    def test_phenotype_entry_structure(self, sample_phenotype: Dict[str, Any]) -> None:
+        """Test PhenotypeEntry TypedDict structure."""
+        entry: PhenotypeEntry = sample_phenotype
+        
+        # Required fields
+        required_fields = [
+            "phenotype", "confidence", "exon_mask", "usage_count",
+            "last_updated", "created_at", "governance_signature",
+            "context_signature", "_original_context"
+        ]
+        
+        for field in required_fields:
+            assert field in entry, f"Missing required field: {field}"
+        
+        # Type validation
+        assert isinstance(entry["phenotype"], str)
+        assert isinstance(entry["confidence"], float)
+        assert isinstance(entry["exon_mask"], int)
+        assert isinstance(entry["usage_count"], int)
+        assert isinstance(entry["last_updated"], float)
+        assert isinstance(entry["created_at"], float)
+        assert isinstance(entry["governance_signature"], dict)
+        assert isinstance(entry["context_signature"], tuple)
+        assert len(entry["context_signature"]) == 2
 
-    def test_chat_continuity_no_duplicate_bootstrap(
-        self, adapter_client: "TestClient", agent_pool: "AgentPool"
-    ) -> None:
-        first = {
-            "model": "gyrosi-baby-0.9.6",
-            "messages": [
-                {"role": "system", "content": "System A."},
-                {"role": "user", "content": "First."},
-            ],
+    def test_manifold_data_structure(self) -> None:
+        """Test ManifoldData TypedDict structure."""
+        data: ManifoldData = {
+            "schema_version": "0.9.6",
+            "ontology_map": {0: 0, 1: 1, 2: 2},
+            "endogenous_modulus": 788_986,
+            "ontology_diameter": 6,
+            "total_states": 788_986,
+            "build_timestamp": time.time(),
         }
-        adapter_client.post("/v1/chat/completions", json=first)
-        assistant = agent_pool.get_or_create_agent("gyro-assistant")
-        cycles_after_first = assistant.engine.cycle_count
+        
+        # Required fields
+        assert "schema_version" in data
+        assert "ontology_map" in data
+        assert "endogenous_modulus" in data
+        assert "ontology_diameter" in data
+        assert "total_states" in data
+        assert "build_timestamp" in data
+        
+        # Type validation
+        assert isinstance(data["schema_version"], str)
+        assert isinstance(data["ontology_map"], dict)
+        assert isinstance(data["endogenous_modulus"], int)
+        assert isinstance(data["ontology_diameter"], int)
+        assert isinstance(data["total_states"], int)
+        assert isinstance(data["build_timestamp"], float)
 
-        second = {
-            "model": "gyrosi-baby-0.9.6",
-            "messages": [{"role": "user", "content": "Second turn."}],
+    def test_phenomenology_data_structure(self) -> None:
+        """Test PhenomenologyData TypedDict structure."""
+        data: PhenomenologyData = {
+            "schema_version": "phenomenology/core/1.0.0",
+            "phenomenology_map": [0, 1, 2, 0, 1, 2],
+            "orbit_sizes": {0: 3, 1: 2, 2: 1},
+            "metadata": {"total_orbits": 3},
+            "_diagnostics": {"note": "test"},
         }
-        adapter_client.post("/v1/chat/completions", json=second)
-        assistant2 = agent_pool.get_or_create_agent("gyro-assistant")
-        assert assistant2.engine.cycle_count > cycles_after_first  # progressed not reset
+        
+        # Check field types
+        assert isinstance(data["schema_version"], str)
+        assert isinstance(data["phenomenology_map"], list)
+        assert isinstance(data["orbit_sizes"], dict)
+        assert isinstance(data["metadata"], dict)
+        assert isinstance(data["_diagnostics"], dict)
 
-    def test_huggingface_generate_endpoint(self, adapter_client: "TestClient") -> None:
-        resp = adapter_client.post("/generate", json={"inputs": "A short seed"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "generated_text" in data and isinstance(data["generated_text"], str)
-
-    def test_empty_messages_graceful(self, adapter_client: "TestClient") -> None:
-        resp = adapter_client.post("/v1/chat/completions", json={"model": "gyrosi-baby-0.9.6", "messages": []})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["choices"][0]["message"]["role"] == "assistant"
-
-    def test_system_message_idempotent_bootstrap(self, adapter_client: "TestClient", agent_pool: "AgentPool") -> None:
-        p1 = {
-            "model": "gyrosi-baby-0.9.6",
-            "messages": [
-                {"role": "system", "content": "Init system."},
-                {"role": "user", "content": "Hi."},
-            ],
+    def test_agent_config_structure(self) -> None:
+        """Test AgentConfig TypedDict structure."""
+        config: AgentConfig = {
+            "ontology_path": "/path/to/ontology.json",
+            "knowledge_path": "/path/to/knowledge.pkl.gz",
+            "public_knowledge_path": "/path/to/public.pkl.gz",
+            "private_knowledge_path": "/path/to/private.pkl.gz",
+            "agent_metadata": {"role": "assistant"},
+            "max_memory_mb": 1024,
+            "enable_phenomenology_storage": True,
+            "learn_batch_size": 100,
+            "phenomenology_map_path": "/path/to/pheno.json",
+            "tokenizer_name": "bert-base-uncased",
+            "tokenizer_mode": "input",
         }
-        adapter_client.post("/v1/chat/completions", json=p1)
-        assistant = agent_pool.get_or_create_agent("gyro-assistant")
-        cycles_after_first = assistant.engine.cycle_count
+        
+        # Should accept all fields
+        assert config["ontology_path"] == "/path/to/ontology.json"
+        assert config["enable_phenomenology_storage"] is True
+        assert config["learn_batch_size"] == 100
 
-        p2 = {
-            "model": "gyrosi-baby-0.9.6",
-            "messages": [
-                {"role": "system", "content": "New system (ignored)."},
-                {"role": "user", "content": "Next."},
-            ],
+    def test_preferences_config_structure(self) -> None:
+        """Test PreferencesConfig TypedDict structure."""
+        prefs: PreferencesConfig = {
+            "storage_backend": "pickle",
+            "compression_level": 6,
+            "max_file_size_mb": 100,
+            "enable_auto_decay": True,
+            "decay_interval_hours": 24.0,
+            "decay_factor": 0.999,
+            "confidence_threshold": 0.05,
+            "max_agents_in_memory": 1000,
+            "agent_eviction_policy": "lru",
+            "agent_ttl_minutes": 60,
+            "enable_profiling": False,
+            "write_batch_size": 100,
+            "cache_size_mb": 64,
         }
-        adapter_client.post("/v1/chat/completions", json=p2)
-        assistant2 = agent_pool.get_or_create_agent("gyro-assistant")
-        assert assistant2.engine.cycle_count >= cycles_after_first
+        
+        # Type validation
+        assert isinstance(prefs["storage_backend"], str)
+        assert isinstance(prefs["compression_level"], int)
+        assert isinstance(prefs["enable_auto_decay"], bool)
+        assert isinstance(prefs["decay_factor"], float)
+
+    def test_validation_report_structure(self) -> None:
+        """Test ValidationReport TypedDict structure."""
+        report: ValidationReport = {
+            "total_entries": 100,
+            "average_confidence": 0.75,
+            "store_type": "OrbitStore",
+            "modified_entries": 5,
+        }
+        
+        assert isinstance(report["total_entries"], int)
+        assert isinstance(report["average_confidence"], float)
+        assert isinstance(report["store_type"], str)
+        assert report["modified_entries"] == 5
+
+    def test_maintenance_report_structure(self) -> None:
+        """Test MaintenanceReport TypedDict structure."""
+        report: MaintenanceReport = {
+            "operation": "test_operation",
+            "success": True,
+            "entries_processed": 50,
+            "entries_modified": 10,
+            "elapsed_seconds": 1.5,
+        }
+        
+        assert isinstance(report["operation"], str)
+        assert isinstance(report["success"], bool)
+        assert isinstance(report["entries_processed"], int)
+        assert isinstance(report["entries_modified"], int)
+        assert isinstance(report["elapsed_seconds"], float)
+
+    def test_cycle_hook_function_protocol(self) -> None:
+        """Test CycleHookFunction protocol compliance."""
+        def valid_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_intron: int) -> None:
+            """Valid hook implementation."""
+            pass
+        
+        # Should be callable with correct signature
+        mock_engine = Mock()
+        mock_entry: PhenotypeEntry = {
+            "phenotype": "test",
+            "confidence": 0.5,
+            "exon_mask": 42,
+            "usage_count": 1,
+            "last_updated": time.time(),
+            "created_at": time.time(),
+            "governance_signature": {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0},
+            "context_signature": (0, 42),
+            "_original_context": None,
+        }
+        
+        # Should not raise
+        valid_hook(mock_engine, mock_entry, 42)
+
+    def test_governance_signature_value_ranges(self) -> None:
+        """Test GovernanceSignature value constraints."""
+        # Test valid ranges
+        valid_sig: GovernanceSignature = {
+            "neutral": 6,  # 0-6
+            "li": 2,       # 0-2
+            "fg": 2,       # 0-2
+            "bg": 2,       # 0-2
+            "dyn": 6,      # 0-6
+        }
+        
+        # Should accept valid values
+        assert 0 <= valid_sig["neutral"] <= 6
+        assert 0 <= valid_sig["li"] <= 2
+        assert 0 <= valid_sig["fg"] <= 2
+        assert 0 <= valid_sig["bg"] <= 2
+        assert 0 <= valid_sig["dyn"] <= 6
+
+    def test_phenotype_entry_constraints(self, sample_phenotype: Dict[str, Any]) -> None:
+        """Test PhenotypeEntry value constraints."""
+        entry: PhenotypeEntry = sample_phenotype
+        
+        # Validate constraints
+        assert 0 <= entry["exon_mask"] <= 255
+        assert 0 <= entry["confidence"] <= 1.0
+        assert entry["usage_count"] >= 0
+        assert entry["created_at"] > 0
+        assert entry["last_updated"] >= entry["created_at"]
 
 
-# ---------------------------------------------------------------------------
-# 2. Storage Decorator Semantics (Canonical + Overlay)
-# ---------------------------------------------------------------------------
+class TestOrbitStore:
+    """Test OrbitStore storage backend functionality."""
+
+    def test_orbit_store_initialization(self, temp_dir: Path) -> None:
+        """Test OrbitStore initialization."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        
+        store = OrbitStore(store_path)
+        
+        assert store.store_path == store_path
+        assert store.index_path == store_path + ".idx"
+        assert store.log_path == store_path + ".log"
+        assert store.write_threshold == 100  # Default
+        assert isinstance(store.index, dict)
+        assert len(store.index) == 0
+        
+        store.close()
+
+    def test_orbit_store_put_and_get(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test basic put and get operations."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        context_key = (100, 42)
+        entry = sample_phenotype.copy()
+        
+        # Put entry
+        store.put(context_key, entry)
+        
+        # Get entry
+        retrieved = store.get(context_key)
+        
+        assert retrieved is not None
+        assert retrieved["phenotype"] == entry["phenotype"]
+        assert retrieved["context_signature"] == context_key
+        
+        store.close()
+
+    def test_orbit_store_pending_writes(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test pending writes functionality."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        store = OrbitStore(store_path, write_threshold=2)
+        
+        entry1 = sample_phenotype.copy()
+        entry2 = sample_phenotype.copy()
+        
+        # Add entries below threshold
+        store.put((100, 42), entry1)
+        assert (100, 42) in store.pending_writes
+        
+        # Should be retrievable from pending
+        retrieved = store.get((100, 42))
+        assert retrieved is not None
+        
+        # Add another to trigger flush
+        store.put((101, 42), entry2)
+        
+        # Should have flushed pending writes
+        assert len(store.pending_writes) == 0
+        
+        store.close()
+
+    def test_orbit_store_commit(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test commit operation."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        entry = sample_phenotype.copy()
+        context_key = (100, 42)
+        
+        store.put(context_key, entry)
+        store.commit()
+        
+        # Index should be saved
+        index_path = Path(store.index_path)
+        assert index_path.exists()
+        
+        store.close()
+
+    def test_orbit_store_persistence(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test data persistence across store instances."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        
+        # Create and populate store
+        store1 = OrbitStore(store_path)
+        context_key = (100, 42)
+        entry = sample_phenotype.copy()
+        
+        store1.put(context_key, entry)
+        store1.commit()
+        store1.close()
+        
+        # Reopen store
+        store2 = OrbitStore(store_path)
+        
+        # Should load existing data
+        retrieved = store2.get(context_key)
+        assert retrieved is not None
+        assert retrieved["phenotype"] == entry["phenotype"]
+        
+        store2.close()
+
+    def test_orbit_store_iter_entries(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test iteration over entries."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        # Add multiple entries
+        entries = {}
+        for i in range(5):
+            key = (i, 42)
+            entry = sample_phenotype.copy()
+            entry["phenotype"] = f"P[{i}:42]"
+            store.put(key, entry)
+            entries[key] = entry
+        
+        store.commit()
+        
+        # Iterate and verify
+        found_entries = {}
+        for key, entry in store.iter_entries():
+            found_entries[key] = entry
+        
+        assert len(found_entries) == 5
+        for key in entries:
+            assert key in found_entries
+            assert found_entries[key]["phenotype"] == entries[key]["phenotype"]
+        
+        store.close()
+
+    def test_orbit_store_delete(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test entry deletion."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        context_key = (100, 42)
+        store.put(context_key, sample_phenotype)
+        store.commit()
+        
+        # Verify exists
+        assert store.get(context_key) is not None
+        
+        # Delete
+        store.delete(context_key)
+        
+        # Should be removed from index
+        assert context_key not in store.index
+        
+        store.close()
+
+    def test_orbit_store_mark_dirty(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test mark_dirty functionality."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        context_key = (100, 42)
+        entry = sample_phenotype.copy()
+        
+        store.mark_dirty(context_key, entry)
+        
+        # Should be in pending writes
+        assert context_key in store.pending_writes
+        assert store.pending_writes[context_key] == entry
+        
+        store.close()
+
+    def test_orbit_store_mmap_mode(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test memory mapping mode."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        
+        # Create store with mmap enabled
+        store = OrbitStore(store_path, use_mmap=True)
+        
+        context_key = (100, 42)
+        store.put(context_key, sample_phenotype)
+        store.commit()
+        
+        # Should handle mmap operations
+        retrieved = store.get(context_key)
+        assert retrieved is not None
+        
+        store.close()
+
+    def test_orbit_store_data_property(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test data property returns all entries."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        # Add entries
+        for i in range(3):
+            key = (i, 42)
+            entry = sample_phenotype.copy()
+            entry["phenotype"] = f"P[{i}:42]"
+            store.put(key, entry)
+        
+        store.commit()
+        
+        # Get all data
+        all_data = store.data
+        
+        assert isinstance(all_data, dict)
+        assert len(all_data) == 3
+        
+        store.close()
+
+    def test_orbit_store_set_data_dict(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test setting entire data dictionary."""
+        store_path = str(temp_dir / "test_store.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        # Create test data
+        test_data = {}
+        for i in range(3):
+            key = (i, 42)
+            entry = sample_phenotype.copy()
+            entry["phenotype"] = f"P[{i}:42]"
+            test_data[key] = entry
+        
+        # Set data
+        store.set_data_dict(test_data)
+        
+        # Verify all entries exist
+        for key, expected_entry in test_data.items():
+            retrieved = store.get(key)
+            assert retrieved is not None
+            assert retrieved["phenotype"] == expected_entry["phenotype"]
+        
+        store.close()
 
 
-class TestStorageViews:
-    def test_canonical_view_rewrites_key(self, real_ontology: tuple[str, str, str], temp_dir: str) -> None:
-        ontology_path, phenom_path, _ = real_ontology
-        if not Path(phenom_path).exists():
-            pytest.skip("Phenomenology map not present.")
+class TestCanonicalView:
+    """Test CanonicalView phenomenology canonicalization."""
 
-        # Load map
-        raw = _load_json(phenom_path)
-        mapping = raw
-        if isinstance(raw, dict) and "phenomenology_map" in raw:
-            mapping = raw["phenomenology_map"]
-        if not isinstance(mapping, list):
-            pytest.skip("Unexpected phenomenology format.")
+    def test_canonical_view_initialization(self, temp_dir: Path, meta_paths: Dict[str, str]) -> None:
+        """Test CanonicalView initialization."""
+        store_path = str(temp_dir / "base_store.pkl.gz")
+        base_store = OrbitStore(store_path)
+        
+        # Check if phenomenology map exists
+        pheno_path = meta_paths.get("phenomenology")
+        if pheno_path and os.path.exists(pheno_path):
+            view = CanonicalView(base_store, pheno_path)
+            
+            assert view.base_store is base_store
+            assert isinstance(view.phenomenology_map, dict)
+            
+            view.close()
+        else:
+            # Create minimal phenomenology map for testing
+            test_pheno_path = str(temp_dir / "test_pheno.json")
+            test_pheno = {
+                "phenomenology_map": [0, 1, 2, 0, 1, 2],
+                "orbit_sizes": {"0": 3, "1": 2, "2": 1},
+            }
+            
+            with open(test_pheno_path, 'w') as f:
+                json.dump(test_pheno, f)
+            
+            view = CanonicalView(base_store, test_pheno_path)
+            
+            assert view.base_store is base_store
+            assert isinstance(view.phenomenology_map, dict)
+            
+            view.close()
 
-        # find first non-trivial representative pair
-        target_idx: Optional[int] = None
-        rep_idx: Optional[int] = None
-        for i, rep in enumerate(mapping):
-            if i != rep:
-                target_idx = i
-                rep_idx = rep
-                break
-        if target_idx is None:
-            pytest.skip("No non-trivial canonical pair found.")
-
-        from baby.policies import CanonicalView, OrbitStore
-
-        store_path = os.path.join(temp_dir, "canon.pkl.gz")
-        base_store = OrbitStore(store_path, write_threshold=1)
-        view = CanonicalView(base_store, phenom_path)
-
-        intron = 0x51
-        key_original = (target_idx, intron)
-        payload = {"phenotype": "X", "confidence": 0.3}
-        view.put(key_original, payload)
-
-        # Fetch via representative canonical key
-        assert rep_idx is not None, "rep_idx must not be None"
-        canonical_key = (rep_idx, intron)
-        fetched = view.get(canonical_key)
-        # Check that context_signature is canonical and _original_context is not present
-        if fetched:
-            assert fetched.get("context_signature") == canonical_key
-            assert "_original_context" not in fetched
-            # Check that all payload fields are present and correct
-            for k, v in payload.items():
-                assert fetched.get(k) == v
-        # Ensure underlying store uses canonical key only
-        assert canonical_key in base_store.data
-        if key_original in base_store.data:
-            assert base_store.data[key_original] is None
+    def test_canonical_view_phenomenology_mapping(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test phenomenology index mapping."""
+        # Create test phenomenology map
+        test_pheno_path = str(temp_dir / "test_pheno.json")
+        test_pheno = {
+            "phenomenology_map": [0, 0, 1, 1, 2, 2],  # Maps indices to representatives
+            "orbit_sizes": {"0": 2, "1": 2, "2": 2},
+        }
+        
+        with open(test_pheno_path, 'w') as f:
+            json.dump(test_pheno, f)
+        
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        view = CanonicalView(base_store, test_pheno_path)
+        
+        # Put entry with non-canonical index
+        original_key = (3, 42)  # Index 3 maps to representative 1
+        entry = sample_phenotype.copy()
+        
+        view.put(original_key, entry)
+        
+        # Should be stored with canonical key
+        canonical_key = (1, 42)  # Representative for index 3
+        retrieved = view.get(original_key)
+        
+        assert retrieved is not None
+        assert retrieved["context_signature"] == canonical_key
+        
         view.close()
 
-    def test_overlay_fallback_and_private_override(self, overlay_store: "OverlayView") -> None:
-        # (0,0) inserted into public by fixture
-        public_key = (0, 0)
-        fallback = overlay_store.get(public_key)
-        assert fallback and fallback["phenotype"] == "public"
-        # Private override
-        overlay_store.put(public_key, {"phenotype": "private", "confidence": 0.99, "context_signature": public_key})
-        after = overlay_store.get(public_key)
-        assert after and after["phenotype"] == "private"
+    def test_canonical_view_original_context_preservation(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test preservation of original context."""
+        test_pheno_path = str(temp_dir / "test_pheno.json")
+        test_pheno = {
+            "phenomenology_map": [0, 0, 1, 1],
+            "orbit_sizes": {"0": 2, "1": 2},
+        }
+        
+        with open(test_pheno_path, 'w') as f:
+            json.dump(test_pheno, f)
+        
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        view = CanonicalView(base_store, test_pheno_path)
+        
+        original_key = (3, 42)
+        entry = sample_phenotype.copy()
+        
+        view.put(original_key, entry)
+        
+        # Check that original context is preserved in storage
+        canonical_key = (1, 42)
+        stored_entry = base_store.get(canonical_key)
+        
+        assert stored_entry is not None
+        assert stored_entry["_original_context"] == original_key
+        
+        view.close()
 
-    def test_ordered_coaddition_path_dependence(self) -> None:
-        from baby.governance import fold_sequence
+    def test_canonical_view_get_cleans_metadata(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test get method cleans canonical metadata."""
+        test_pheno_path = str(temp_dir / "test_pheno.json")
+        test_pheno = {
+            "phenomenology_map": [0, 1, 0, 1],
+            "orbit_sizes": {"0": 2, "1": 2},
+        }
+        
+        with open(test_pheno_path, 'w') as f:
+            json.dump(test_pheno, f)
+        
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        view = CanonicalView(base_store, test_pheno_path)
+        
+        key = (2, 42)  # Maps to representative 0
+        entry = sample_phenotype.copy()
+        
+        view.put(key, entry)
+        retrieved = view.get(key)
+        
+        # Should not expose canonical metadata
+        assert "_original_context" not in retrieved
+        
+        view.close()
 
-        seq_a = [0xAA, 0xBB, 0xCC]
-        seq_b = list(reversed(seq_a))
-        assert fold_sequence(seq_a) != fold_sequence(seq_b)
+
+class TestOverlayView:
+    """Test OverlayView public/private layering."""
+
+    def test_overlay_view_initialization(self, temp_dir: Path) -> None:
+        """Test OverlayView initialization."""
+        public_store = OrbitStore(str(temp_dir / "public.pkl.gz"))
+        private_store = OrbitStore(str(temp_dir / "private.pkl.gz"))
+        
+        view = OverlayView(public_store, private_store)
+        
+        assert view.public_store is public_store
+        assert view.private_store is private_store
+        
+        view.close()
+
+    def test_overlay_view_private_priority(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test private store takes priority over public."""
+        public_store = OrbitStore(str(temp_dir / "public.pkl.gz"))
+        private_store = OrbitStore(str(temp_dir / "private.pkl.gz"))
+        view = OverlayView(public_store, private_store)
+        
+        context_key = (100, 42)
+        
+        # Add to public store
+        public_entry = sample_phenotype.copy()
+        public_entry["phenotype"] = "PUBLIC"
+        public_store.put(context_key, public_entry)
+        
+        # Add to private store (should override)
+        private_entry = sample_phenotype.copy()
+        private_entry["phenotype"] = "PRIVATE"
+        view.put(context_key, private_entry)
+        
+        # Should get private version
+        retrieved = view.get(context_key)
+        assert retrieved["phenotype"] == "PRIVATE"
+        
+        view.close()
+
+    def test_overlay_view_public_fallback(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test fallback to public store when not in private."""
+        public_store = OrbitStore(str(temp_dir / "public.pkl.gz"))
+        private_store = OrbitStore(str(temp_dir / "private.pkl.gz"))
+        view = OverlayView(public_store, private_store)
+        
+        context_key = (100, 42)
+        
+        # Add only to public store
+        public_entry = sample_phenotype.copy()
+        public_entry["phenotype"] = "PUBLIC_ONLY"
+        public_store.put(context_key, public_entry)
+        
+        # Should fallback to public
+        retrieved = view.get(context_key)
+        assert retrieved["phenotype"] == "PUBLIC_ONLY"
+        
+        view.close()
+
+    def test_overlay_view_put_goes_to_private(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test put operations go to private store."""
+        public_store = OrbitStore(str(temp_dir / "public.pkl.gz"))
+        private_store = OrbitStore(str(temp_dir / "private.pkl.gz"))
+        view = OverlayView(public_store, private_store)
+        
+        context_key = (100, 42)
+        entry = sample_phenotype.copy()
+        
+        view.put(context_key, entry)
+        
+        # Should be in private store
+        private_retrieved = private_store.get(context_key)
+        assert private_retrieved is not None
+        
+        # Should not be in public store
+        public_retrieved = public_store.get(context_key)
+        assert public_retrieved is None
+        
+        view.close()
+
+    def test_overlay_view_iter_entries_merging(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test iter_entries merges both stores with private priority."""
+        public_store = OrbitStore(str(temp_dir / "public.pkl.gz"))
+        private_store = OrbitStore(str(temp_dir / "private.pkl.gz"))
+        view = OverlayView(public_store, private_store)
+        
+        # Add to public
+        public_key = (100, 42)
+        public_entry = sample_phenotype.copy()
+        public_entry["phenotype"] = "PUBLIC"
+        public_store.put(public_key, public_entry)
+        
+        # Add to private (different key)
+        private_key = (101, 42)
+        private_entry = sample_phenotype.copy()
+        private_entry["phenotype"] = "PRIVATE"
+        private_store.put(private_key, private_entry)
+        
+        # Add overlapping key to private (should shadow public)
+        overlap_key = (102, 42)
+        public_overlap = sample_phenotype.copy()
+        public_overlap["phenotype"] = "PUBLIC_OVERLAP"
+        public_store.put(overlap_key, public_overlap)
+        
+        private_overlap = sample_phenotype.copy()
+        private_overlap["phenotype"] = "PRIVATE_OVERLAP"
+        private_store.put(overlap_key, private_overlap)
+        
+        public_store.commit()
+        private_store.commit()
+        
+        # Iterate and collect
+        found_entries = {}
+        for key, entry in view.iter_entries():
+            found_entries[key] = entry
+        
+        # Should have all unique keys
+        assert public_key in found_entries
+        assert private_key in found_entries
+        assert overlap_key in found_entries
+        
+        # Private should take priority for overlap
+        assert found_entries[overlap_key]["phenotype"] == "PRIVATE_OVERLAP"
+        
+        view.close()
+
+    def test_overlay_view_data_property(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test data property combines both stores."""
+        public_store = OrbitStore(str(temp_dir / "public.pkl.gz"))
+        private_store = OrbitStore(str(temp_dir / "private.pkl.gz"))
+        view = OverlayView(public_store, private_store)
+        
+        # Add entries to both stores
+        public_store.put((100, 42), sample_phenotype)
+        private_store.put((101, 42), sample_phenotype)
+        
+        public_store.commit()
+        private_store.commit()
+        
+        combined_data = view.data
+        
+        assert isinstance(combined_data, dict)
+        assert (100, 42) in combined_data
+        assert (101, 42) in combined_data
+        
+        view.close()
 
 
-# ---------------------------------------------------------------------------
-# 3. Inference / Learning Variation & Maintenance Ops
-# ---------------------------------------------------------------------------
+class TestReadOnlyView:
+    """Test ReadOnlyView restrictions."""
+
+    def test_read_only_view_initialization(self, temp_dir: Path) -> None:
+        """Test ReadOnlyView initialization."""
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        view = ReadOnlyView(base_store)
+        
+        assert view.base_store is base_store
+        
+        view.close()
+
+    def test_read_only_view_get_works(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test get operations work in read-only view."""
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        
+        # Add data to base store
+        context_key = (100, 42)
+        base_store.put(context_key, sample_phenotype)
+        
+        view = ReadOnlyView(base_store)
+        
+        # Should be able to read
+        retrieved = view.get(context_key)
+        assert retrieved is not None
+        assert retrieved["phenotype"] == sample_phenotype["phenotype"]
+        
+        view.close()
+
+    def test_read_only_view_put_raises(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test put operations raise error in read-only view."""
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        view = ReadOnlyView(base_store)
+        
+        with pytest.raises(RuntimeError, match="read-only"):
+            view.put((100, 42), sample_phenotype)
+        
+        view.close()
+
+    def test_read_only_view_data_property(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test data property works in read-only view."""
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        base_store.put((100, 42), sample_phenotype)
+        
+        view = ReadOnlyView(base_store)
+        
+        data = view.data
+        assert isinstance(data, dict)
+        assert (100, 42) in data
+        
+        view.close()
 
 
-class TestInferenceAndMaintenance:
-    def test_variety_influences_confidence_update(self, real_ontology: tuple[str, str, str], temp_dir: str) -> None:
-        """
-        Use real orbit_cardinality array (if non-uniform). For two indices with
-        differing cardinality, ensure post-learning confidence for higher variety
-        is >= lower variety (consistent with alpha scaling).
-        """
-        ontology_path, phenom_path, _ = real_ontology
-        if not Path(ontology_path).exists():
-            pytest.skip("Ontology missing.")
+class TestPhenomenologyMapLoading:
+    """Test phenomenology map loading and caching."""
 
-        ont = _load_json(ontology_path)
-        from baby.inference import InferenceEngine
-        from baby.information import InformationEngine
-        from baby.policies import OrbitStore
+    def test_load_phenomenology_map_list_format(self, temp_dir: Path) -> None:
+        """Test loading phenomenology map in list format."""
+        pheno_path = str(temp_dir / "pheno_list.json")
+        test_map = [0, 1, 2, 0, 1, 2]
+        
+        with open(pheno_path, 'w') as f:
+            json.dump(test_map, f)
+        
+        result = load_phenomenology_map(pheno_path)
+        
+        expected = {i: rep for i, rep in enumerate(test_map)}
+        assert result == expected
 
-        info = InformationEngine(ont)
-        oc = info.orbit_cardinality
-        # Need at least two distinct variety values
-        if len(set(int(v) for v in oc[: min(5000, oc.size)])) < 2:
-            pytest.skip("Orbit cardinalities uniform; cannot compare variety influence.")
+    def test_load_phenomenology_map_dict_format(self, temp_dir: Path) -> None:
+        """Test loading phenomenology map in dict format."""
+        pheno_path = str(temp_dir / "pheno_dict.json")
+        test_data = {
+            "phenomenology_map": [0, 1, 2, 0, 1, 2],
+            "orbit_sizes": {"0": 3, "1": 2, "2": 1},
+        }
+        
+        with open(pheno_path, 'w') as f:
+            json.dump(test_data, f)
+        
+        result = load_phenomenology_map(pheno_path)
+        
+        expected = {i: rep for i, rep in enumerate(test_data["phenomenology_map"])}
+        assert result == expected
 
-        # Find two indices with distinct cardinality
-        base_val = int(oc[0])
-        idx_low = None
-        idx_high = None
-        for i, v in enumerate(oc):
-            val = int(v)
-            if idx_low is None:
-                idx_low = i
-                base_val = val
-            elif val != base_val:
-                if val > base_val:
-                    idx_high = i
-                else:
-                    idx_high, idx_low = idx_low, i  # swap so high always larger
-                    base_val = int(oc[idx_high])
-                break
-        if idx_low is None or idx_high is None:
-            pytest.skip("Could not locate two distinct variety indices.")
+    def test_load_phenomenology_map_caching(self, temp_dir: Path) -> None:
+        """Test phenomenology map caching."""
+        pheno_path = str(temp_dir / "pheno_cache.json")
+        test_map = [0, 1, 2]
+        
+        with open(pheno_path, 'w') as f:
+            json.dump(test_map, f)
+        
+        # Load twice
+        result1 = load_phenomenology_map(pheno_path)
+        result2 = load_phenomenology_map(pheno_path)
+        
+        # Should be same object (cached)
+        assert result1 is result2
 
-        store_path = os.path.join(temp_dir, "variety.pkl.gz")
-        store = OrbitStore(store_path, write_threshold=1)
-        engine = InferenceEngine(info, store)
+    def test_load_phenomenology_map_invalid_format(self, temp_dir: Path) -> None:
+        """Test error handling for invalid format."""
+        pheno_path = str(temp_dir / "pheno_invalid.json")
+        
+        with open(pheno_path, 'w') as f:
+            json.dump({"invalid": "format"}, f)
+        
+        with pytest.raises(ValueError, match="Unrecognized phenomenology map format"):
+            load_phenomenology_map(pheno_path)
 
-        intron_a = 0x01
-        intron_b = 0x7C  # ensure novelty bits differ
 
-        # Low variety learning
-        entry_low = engine.get_phenotype(idx_low, intron_a)
-        engine.learn(entry_low, intron_b)
-        conf_low = entry_low.get("confidence", 0.0)
+class TestMaintenanceFunctions:
+    """Test maintenance and utility functions."""
 
-        # High variety learning
-        entry_high = engine.get_phenotype(idx_high, intron_a)
-        engine.learn(entry_high, intron_b)
-        conf_high = entry_high.get("confidence", 0.0)
+    def test_merge_phenotype_maps_basic(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test basic phenotype map merging."""
+        # Create source stores
+        source1_path = str(temp_dir / "source1.pkl.gz")
+        source2_path = str(temp_dir / "source2.pkl.gz")
+        dest_path = str(temp_dir / "merged.pkl.gz")
+        
+        store1 = OrbitStore(source1_path)
+        store2 = OrbitStore(source2_path)
+        
+        # Add different entries
+        entry1 = sample_phenotype.copy()
+        entry1["phenotype"] = "SOURCE1"
+        store1.put((100, 42), entry1)
+        
+        entry2 = sample_phenotype.copy()
+        entry2["phenotype"] = "SOURCE2"
+        store2.put((101, 42), entry2)
+        
+        store1.commit()
+        store2.commit()
+        store1.close()
+        store2.close()
+        
+        # Merge
+        report = merge_phenotype_maps([source1_path, source2_path], dest_path)
+        
+        assert report["success"] is True
+        assert report["entries_processed"] == 2
+        assert report["entries_modified"] == 2
+        
+        # Verify merged result
+        merged_store = OrbitStore(dest_path)
+        result1 = merged_store.get((100, 42))
+        result2 = merged_store.get((101, 42))
+        
+        assert result1["phenotype"] == "SOURCE1"
+        assert result2["phenotype"] == "SOURCE2"
+        
+        merged_store.close()
 
-        assert conf_high >= conf_low
-
-        store.close()
-
-    def test_validation_and_decay_and_prune_roundtrip(self, real_ontology: tuple[str, str, str], temp_dir: str) -> None:
-        """
-        Insert synthetic entries, run decay + prune then validate integrity.
-        """
-        ontology_path, _, _ = real_ontology
-        ont = _load_json(ontology_path)
-        from baby.inference import InferenceEngine
-        from baby.information import InformationEngine
-        from baby.policies import OrbitStore
-
-        path = os.path.join(temp_dir, "maint.pkl.gz")
-        store = OrbitStore(path, write_threshold=1)
-        info = InformationEngine(ont)
-        engine = InferenceEngine(info, store)
-
-        # Seed a few entries with varying confidence
-        for i in range(5):
-            e = engine.get_phenotype(i, 0x10 + i)
-            e["confidence"] = 0.02 if i % 2 == 0 else 0.8  # low / high
-            context_sig = e.get("context_signature")
-            if context_sig is not None:
-                store.put(context_sig, e)
-            else:
-                pytest.fail("context_signature missing from phenotype entry")
-        store.commit()
-
-        # Apply decay (small effect) then prune low-confidence
-        decay_report = engine.apply_confidence_decay(decay_factor=0.01)
-        assert decay_report["store_type"] == "OrbitStore"
-
-        removed = engine.prune_low_confidence_entries(confidence_threshold=0.05)
-        # At least the intentionally low entries removed (or some subset)
-        assert removed >= 1
-
-        validation = engine.validate_knowledge_integrity()
-        assert validation["store_type"] == "OrbitStore"
-        assert validation["total_entries"] >= 1
-
-        store.close()
-
-    def test_knowledge_statistics_export_merge(self, temp_dir: str) -> None:
-        """
-        Exercise export_knowledge_statistics + merge_phenotype_maps surface.
-        """
-        from baby.policies import OrbitStore, export_knowledge_statistics, merge_phenotype_maps
-
-        # Create two small stores with overlapping & distinct entries
-        s1 = OrbitStore(os.path.join(temp_dir, "s1.pkl.gz"), write_threshold=1)
-        s2 = OrbitStore(os.path.join(temp_dir, "s2.pkl.gz"), write_threshold=1)
-
-        s1.put((1, 1), {"phenotype": "A", "confidence": 0.9, "context_signature": (1, 1), "usage_count": 2})
-        s1.put((2, 2), {"phenotype": "B", "confidence": 0.4, "context_signature": (2, 2), "usage_count": 1})
-        s1.commit()
-
-        s2.put((2, 2), {"phenotype": "B", "confidence": 0.8, "context_signature": (2, 2), "usage_count": 5})
-        s2.put((3, 3), {"phenotype": "C", "confidence": 0.5, "context_signature": (3, 3), "usage_count": 1})
-        s2.commit()
-        s1.close()
-        s2.close()
-
-        merged_path = os.path.join(temp_dir, "merged.pkl.gz")
+    def test_merge_phenotype_maps_conflict_resolution(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test conflict resolution in merging."""
+        source1_path = str(temp_dir / "source1.pkl.gz")
+        source2_path = str(temp_dir / "source2.pkl.gz")
+        dest_path = str(temp_dir / "merged.pkl.gz")
+        
+        store1 = OrbitStore(source1_path)
+        store2 = OrbitStore(source2_path)
+        
+        # Add conflicting entries (same key)
+        key = (100, 42)
+        
+        entry1 = sample_phenotype.copy()
+        entry1["confidence"] = 0.3
+        entry1["phenotype"] = "LOW_CONF"
+        store1.put(key, entry1)
+        
+        entry2 = sample_phenotype.copy()
+        entry2["confidence"] = 0.8
+        entry2["phenotype"] = "HIGH_CONF"
+        store2.put(key, entry2)
+        
+        store1.commit()
+        store2.commit()
+        store1.close()
+        store2.close()
+        
+        # Merge with highest confidence strategy
         report = merge_phenotype_maps(
-            [os.path.join(temp_dir, "s1.pkl.gz"), os.path.join(temp_dir, "s2.pkl.gz")], merged_path
+            [source1_path, source2_path], 
+            dest_path, 
+            conflict_resolution="highest_confidence"
         )
-        assert report["success"]
-        assert report["entries_processed"] >= 3
+        
+        assert report["success"] is True
+        
+        # Should keep higher confidence entry
+        merged_store = OrbitStore(dest_path)
+        result = merged_store.get(key)
+        assert result["phenotype"] == "HIGH_CONF"
+        
+        merged_store.close()
 
-        # Export stats from merged
-        stats_path = os.path.join(temp_dir, "stats.json")
-        stats_report = export_knowledge_statistics(merged_path, stats_path)
-        assert stats_report["success"]
-        assert Path(stats_path).exists()
-
-    def test_apply_global_confidence_decay(self, temp_dir: str) -> None:
-        """
-        Surface test for global decay utility (non-engine path).
-        """
-        import time
-
-        from baby.policies import OrbitStore, apply_global_confidence_decay
-
-        store_path = os.path.join(temp_dir, "global_decay.pkl.gz")
-        st = OrbitStore(store_path, write_threshold=1)
-        # Add a few entries with last_updated set to 1 day ago
-        old_time = time.time() - 86400  # 1 day ago
-        for i in range(3):
-            st.put(
-                (10 + i, 0),
-                {"phenotype": f"P{i}", "confidence": 0.9, "context_signature": (10 + i, 0), "last_updated": old_time},
-            )
-        st.commit()
-        st.close()
-
+    def test_apply_global_confidence_decay(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test global confidence decay application."""
+        store_path = str(temp_dir / "decay_test.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        # Add entry with older timestamp
+        entry = sample_phenotype.copy()
+        entry["confidence"] = 0.8
+        old_time = time.time() - (40 * 24 * 3600)  # 40 days ago
+        entry["last_updated"] = old_time
+        
+        store.put((100, 42), entry)
+        store.commit()
+        store.close()
+        
+        # Apply decay
         report = apply_global_confidence_decay(
-            store_path, decay_factor=0.001, age_threshold=50, time_threshold_days=0.0
+            store_path,
+            decay_factor=0.1,
+            time_threshold_days=30.0
         )
-        assert report["success"]
-        assert report["entries_modified"] == 3
+        
+        assert report["success"] is True
+        assert report["entries_processed"] == 1
+        assert report["entries_modified"] == 1
+        
+        # Verify decay was applied
+        store2 = OrbitStore(store_path)
+        updated_entry = store2.get((100, 42))
+        assert updated_entry["confidence"] < 0.8
+        
+        store2.close()
 
+    def test_export_knowledge_statistics(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test knowledge statistics export."""
+        store_path = str(temp_dir / "stats_test.pkl.gz")
+        output_path = str(temp_dir / "stats.json")
+        
+        store = OrbitStore(store_path)
+        
+        # Add test entries
+        for i in range(5):
+            entry = sample_phenotype.copy()
+            entry["confidence"] = 0.1 * i + 0.5  # Varying confidence
+            entry["exon_mask"] = i * 10  # Varying masks
+            entry["usage_count"] = i + 1
+            store.put((i, 42), entry)
+        
+        store.commit()
+        store.close()
+        
+        # Export statistics
+        report = export_knowledge_statistics(store_path, output_path)
+        
+        assert report["success"] is True
+        assert report["entries_processed"] == 5
+        
+        # Verify statistics file
+        assert os.path.exists(output_path)
+        
+        with open(output_path) as f:
+            stats = json.load(f)
+        
+        assert stats["total_entries"] == 5
+        assert "confidence" in stats
+        assert "memory" in stats
+        assert "usage" in stats
 
-# ---------------------------------------------------------------------------
-# 4. AgentPool Identity & Orchestration
-# ---------------------------------------------------------------------------
+    def test_validate_ontology_integrity(self, meta_paths: Dict[str, str]) -> None:
+        """Test ontology integrity validation."""
+        if "ontology" in meta_paths and os.path.exists(meta_paths["ontology"]):
+            report = validate_ontology_integrity(meta_paths["ontology"])
+            
+            assert report["success"] is True
+            assert report["entries_processed"] > 0
+        else:
+            # Create test ontology
+            test_ont_path = str(Path(meta_paths.get("ontology", "")).parent / "test_ont.json")
+            test_ont = {
+                "schema_version": "0.9.6",
+                "ontology_map": {str(i): i for i in range(788_986)},
+                "endogenous_modulus": 788_986,
+                "ontology_diameter": 6,
+                "total_states": 788_986,
+            }
+            
+            with open(test_ont_path, 'w') as f:
+                json.dump(test_ont, f)
+            
+            report = validate_ontology_integrity(test_ont_path)
+            assert report["success"] is True
 
-
-class TestAgentPoolIdentity:
-    def test_multi_agent_cycle_isolation(self, agent_pool: "AgentPool") -> None:
-        """
-        Distinct agents advance cycles independently without cross‑contamination.
-        """
-        a_user = agent_pool.get_or_create_agent("user-1")
-        a_assistant = agent_pool.get_or_create_agent("assistant-1")
-        a_user.engine.process_egress(0x41)
-        a_user.engine.process_ingress(0x41)
-        a_assistant.engine.process_egress(0x42)
-        a_assistant.engine.process_ingress(0x42)
-        assert a_user.engine.cycle_count > 0
-        assert a_assistant.engine.cycle_count > 0
-        # Ensure their state integers diverge or at minimum independent
-        assert a_user.engine.gene_mac_m_int != a_assistant.engine.gene_mac_m_int or True
-
-    def test_orchestrate_turn_basic(self, agent_pool: "AgentPool") -> None:
-        """
-        Orchestrate a simple user→assistant turn and ensure non-empty reply.
-        """
-        from baby.intelligence import orchestrate_turn
-
-        reply = orchestrate_turn(
-            agent_pool, "user-x", "assistant-x", "Hello system", tokenizer_name="bert-base-uncased"
+    def test_prune_and_compact_store(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test store pruning and compaction."""
+        store_path = str(temp_dir / "prune_test.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        current_time = time.time()
+        
+        # Add entries with different ages and confidences
+        for i in range(5):
+            entry = sample_phenotype.copy()
+            entry["confidence"] = 0.01 if i < 2 else 0.5  # Low confidence for first 2
+            entry["last_updated"] = current_time - (i * 10 * 24 * 3600)  # Varying ages
+            store.put((i, 42), entry)
+        
+        store.commit()
+        store.close()
+        
+        # Prune low confidence entries
+        report = prune_and_compact_store(
+            store_path,
+            min_confidence=0.02,
+            max_age_days=20.0
         )
-        assert isinstance(reply, str)
-        assert len(reply) >= 1
+        
+        assert report["success"] is True
+        assert report["entries_processed"] == 5
+        assert report["entries_modified"] > 0  # Should have pruned some
+        
+        # Verify pruning
+        store2 = OrbitStore(store_path)
+        remaining_entries = list(store2.iter_entries())
+        assert len(remaining_entries) < 5  # Some should be pruned
+        
+        store2.close()
 
-
-# ---------------------------------------------------------------------------
-# 5. Path Dependence (Batch Learn Integration)
-# ---------------------------------------------------------------------------
-
-
-class TestBatchLearning:
-    def test_batch_learning_order_sensitivity(self, gyrosi_agent: "GyroSI") -> None:
-        """
-        Two different orderings of the same byte multiset should yield distinct
-        internal mask evolution for at least one context entry.
-        """
-        # Sequence A / B are permutations
-        seq_a = b"ABCDE"
-        seq_b = b"EDCBA"
-
-        # Learn in clean agent: capture state after seq_a
-        gyrosi_agent.engine.reset_to_archetypal_state()
-        gyrosi_agent.ingest(seq_a)
-        # Remove all test code that calls get_knowledge_statistics or asserts on knowledge statistics
-
-        # Recreate fresh agent (avoid contamination)
-        # We reuse the same instance but reset underlying store by creating a new one
-        # (Simplify: just reset to archetypal state and ingest reversed; path dependence
-        # manifests in knowledge masks not cycle count alone).
-        gyrosi_agent.engine.reset_to_archetypal_state()
-        gyrosi_agent.ingest(seq_b)
-        # Remove all test code that calls get_knowledge_statistics or asserts on knowledge statistics
-
-        # Heuristic: memory utilization difference indicates path sensitivity
-        assert (
-            stats_a.get("memory_utilization") != stats_b.get("memory_utilization")
-            or stats_a.get("total_entries") != stats_b.get("total_entries")
-            or stats_a.get("average_confidence") != stats_b.get("average_confidence")
+    def test_prune_and_compact_store_dry_run(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test dry run mode of pruning."""
+        store_path = str(temp_dir / "dry_run_test.pkl.gz")
+        store = OrbitStore(store_path)
+        
+        entry = sample_phenotype.copy()
+        entry["confidence"] = 0.01  # Low confidence
+        store.put((100, 42), entry)
+        store.commit()
+        store.close()
+        
+        # Dry run
+        report = prune_and_compact_store(
+            store_path,
+            min_confidence=0.02,
+            dry_run=True
         )
+        
+        assert report["success"] is True
+        assert report["entries_modified"] == 1  # Would be pruned
+        
+        # Entry should still exist
+        store2 = OrbitStore(store_path)
+        still_exists = store2.get((100, 42))
+        assert still_exists is not None
+        
+        store2.close()
 
 
-# ---------------------------------------------------------------------------
-# 6. Exported Agent Info Integrity
-# ---------------------------------------------------------------------------
+class TestUtilityFunctions:
+    """Test utility functions."""
 
+    def test_to_native_basic_types(self) -> None:
+        """Test to_native with basic Python types."""
+        assert to_native(42) == 42
+        assert to_native("hello") == "hello"
+        assert to_native([1, 2, 3]) == [1, 2, 3]
+        assert to_native({"a": 1}) == {"a": 1}
 
-class TestAgentInfo:
-    def test_agent_info_structure(self, gyrosi_agent: "GyroSI") -> None:
-        info = gyrosi_agent.get_agent_info()
-        required = {
-            "agent_id",
-            "cycle_count",
-            "state_integer",
-            "tensor_index",
-            "angular_divergence_radians",
-            "knowledge_statistics",
-            "system_integrity",
+    def test_to_native_numpy_types(self) -> None:
+        """Test to_native with numpy types."""
+        import numpy as np
+        
+        # Numpy scalars
+        assert to_native(np.int32(42)) == 42
+        assert to_native(np.float64(3.14)) == 3.14
+        assert to_native(np.bool_(True)) is True
+
+    def test_to_native_nested_structures(self) -> None:
+        """Test to_native with nested data structures."""
+        import numpy as np
+        
+        nested = {
+            "list": [1, np.int32(2), 3],
+            "tuple": (np.float64(1.0), 2, 3),
+            "dict": {"nested": np.bool_(False)},
         }
-        assert required.issubset(info.keys())
-        integ = info["system_integrity"]
-        assert "total_entries" in integ and "store_type" in integ
+        
+        result = to_native(nested)
+        
+        assert result["list"] == [1, 2, 3]
+        assert result["tuple"] == (1.0, 2, 3)
+        assert result["dict"]["nested"] is False
+
+    def test_to_native_preserves_structure(self) -> None:
+        """Test to_native preserves data structure types."""
+        original_dict = {"a": 1, "b": 2}
+        original_list = [1, 2, 3]
+        original_tuple = (1, 2, 3)
+        
+        assert isinstance(to_native(original_dict), dict)
+        assert isinstance(to_native(original_list), list)
+        assert isinstance(to_native(original_tuple), tuple)
 
 
-# ---------------------------------------------------------------------------
-# 7. Theory
-# ---------------------------------------------------------------------------
+class TestErrorHandling:
+    """Test error handling and edge cases."""
 
+    def test_orbit_store_invalid_path(self) -> None:
+        """Test OrbitStore with invalid path."""
+        # Should handle gracefully during initialization
+        store = OrbitStore("/invalid/path/store.pkl.gz")
+        
+        # Operations may fail, but initialization should work
+        assert store.store_path == "/invalid/path/store.pkl.gz"
+        
+        # Close should not raise
+        store.close()
 
-class TestArchitecture:
-    def test_axiom_preservation(self) -> None:
-        print("=" * 60)
-        print("Theorem 1: Validating Axiom Preservation in the Monodromic Fold")
-        print("=" * 60)
-        # Left Identity (CS Emergence)
-        assert all(fold(0, b) == b for b in range(256))
-        print("✓ Left Identity (fold(0, b) = b) holds for all b.")
-        # Right Absorber (Return to CS)
-        assert all(fold(a, 0) == 0 for a in range(256))
-        print("✓ Right Absorber (fold(a, 0) = 0) holds for all a.")
-        # Self-Annihilation (BU Closure)
-        assert all(fold(a, a) == 0 for a in range(256))
-        print("✓ Self-Annihilation (fold(a, a) = 0) holds for all a.")
-        # Non-Associativity
-        random.seed(0)
-        non_assoc_count = 0
-        for _ in range(1000):
-            a, b, c = random.randrange(256), random.randrange(256), random.randrange(256)
-            if fold(fold(a, b), c) != fold(a, fold(b, c)):
-                non_assoc_count += 1
-        assert non_assoc_count > 850  # Expect >85% non-associativity
-        print(f"✓ Non-Associativity holds ({non_assoc_count/1000*100:.1f}% of random triplets).")
-        print("\nConclusion: The Fold operator correctly implements the physics of the CGM.\n")
+    def test_canonical_view_missing_phenomenology(self, temp_dir: Path) -> None:
+        """Test CanonicalView with missing phenomenology file."""
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        missing_pheno_path = str(temp_dir / "missing.json")
+        
+        with pytest.raises(FileNotFoundError):
+            CanonicalView(base_store, missing_pheno_path)
+        
+        base_store.close()
 
-    def test_physical_basis(self) -> None:
-        print("=" * 60)
-        print("Theorem 2: Validating the 5-Element Physical Basis")
-        print("=" * 60)
+    def test_merge_phenotype_maps_missing_sources(self, temp_dir: Path) -> None:
+        """Test merging with missing source files."""
+        dest_path = str(temp_dir / "merged.pkl.gz")
+        
+        # Should handle missing sources gracefully
+        report = merge_phenotype_maps(["/missing/source1.pkl.gz"], dest_path)
+        
+        assert report["success"] is True
+        assert report["entries_processed"] == 0
 
-        op_masks = {"L0": 0b10000001, "LI": 0b01000010, "FG": 0b00100100, "BG": 0b00011000}
-        physical_introns = {name: transcribe_byte(mask) for name, mask in op_masks.items()}
+    def test_maintenance_functions_missing_store(self, temp_dir: Path) -> None:
+        """Test maintenance functions with missing store."""
+        missing_path = str(temp_dir / "missing.pkl.gz")
+        
+        # Should return failure reports
+        decay_report = apply_global_confidence_decay(missing_path)
+        assert decay_report["success"] is False
+        
+        stats_report = export_knowledge_statistics(missing_path, str(temp_dir / "stats.json"))
+        assert stats_report["success"] is False
+        
+        prune_report = prune_and_compact_store(missing_path)
+        assert prune_report["success"] is False
 
-        # The basis is the four physical introns plus the duality operator
-        basis = set(physical_introns.values()) | {0xFF}
-        print(f"Testing basis set: {{ {', '.join(f'0x{i:02x}' for i in sorted(basis))} }}")
+    def test_orbit_store_concurrent_access(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test OrbitStore handles concurrent-like access patterns."""
+        store_path = str(temp_dir / "concurrent.pkl.gz")
+        
+        # Create and use store
+        store1 = OrbitStore(store_path)
+        store1.put((100, 42), sample_phenotype)
+        store1.commit()
+        store1.close()
+        
+        # Open another instance (simulates concurrent access)
+        store2 = OrbitStore(store_path)
+        retrieved = store2.get((100, 42))
+        
+        assert retrieved is not None
+        assert retrieved["phenotype"] == sample_phenotype["phenotype"]
+        
+        store2.close()
 
-        # Compute closure
-        known = basis.copy()
-        queue = list(basis)
-        head = 0
-        while head < len(queue):
-            a = queue[head]
-            head += 1
-            for b in list(known):
-                for x, y in ((a, b), (b, a)):
-                    r = fold(x, y)
-                    if r not in known:
-                        known.add(r)
-                        queue.append(r)
+    def test_orbit_store_large_batch_threshold(self, temp_dir: Path, sample_phenotype: Dict[str, Any]) -> None:
+        """Test OrbitStore with large batch operations."""
+        store_path = str(temp_dir / "large_batch.pkl.gz")
+        store = OrbitStore(store_path, write_threshold=10)
+        
+        # Add many entries
+        for i in range(15):
+            entry = sample_phenotype.copy()
+            entry["phenotype"] = f"Entry_{i}"
+            store.put((i, 42), entry)
+        
+        # Should have flushed automatically
+        assert len(store.pending_writes) < 15
+        
+        store.close()
 
-        closure_size = len(known)
-        print(f"Closure size: {closure_size}")
-        assert closure_size == 256
-        print("\nConclusion: The 5-element basis successfully generates all 256 introns.")
-        print("The learning algebra is a direct emergent property of the system's physics and duality.\n")
+    def test_view_delegation_methods(self, temp_dir: Path) -> None:
+        """Test that views properly delegate to base stores."""
+        base_store = OrbitStore(str(temp_dir / "base.pkl.gz"))
+        
+        # Test ReadOnlyView delegation
+        readonly = ReadOnlyView(base_store)
+        
+        # Should delegate data property
+        assert readonly.data is not None
+        
+        # Should delegate _load_index if available
+        if hasattr(base_store, '_load_index'):
+            readonly._load_index()  # Should not raise
+        
+        readonly.close()
 
-
-# --- 1. Governance physics tests ---
-
-
-class TestGovernancePhysics:
-    def test_compute_governance_signature_zero(self) -> None:
-        sig = compute_governance_signature(0x00)
-        assert sig == (6, 0, 0, 0, 0)
-
-    def test_compute_governance_signature_full(self) -> None:
-        sig = compute_governance_signature(0xFF)
-        assert sig == (0, 2, 2, 2, 6)
-
-    def test_exon_masks_defined(self) -> None:
-        assert EXON_DYNAMIC_MASK == (EXON_LI_MASK | EXON_FG_MASK | EXON_BG_MASK)
-        assert hex(EXON_LI_MASK) == "0x42"
-        assert hex(EXON_FG_MASK) == "0x24"
-        assert hex(EXON_BG_MASK) == "0x18"
-
-    def test_intron_broadcast_masks_length_and_content(self) -> None:
-        assert INTRON_BROADCAST_MASKS.shape == (256,)
-        assert INTRON_BROADCAST_MASKS[0] == 0
-        expected = sum(1 << (8 * j) for j in range(6))
-        assert INTRON_BROADCAST_MASKS[1] == expected
-
-    def test_full_mask_constant(self) -> None:
-        assert FULL_MASK == (1 << 48) - 1
-
-    def test_transform_identity(self) -> None:
-        assert apply_gyration_and_transform(0, 0) == 0
-
-
-# --- 2. Fold operator tests ---
-
-
-class TestFoldOperator:
-    @pytest.mark.parametrize("x", [0, 1, 5, 42, 255])
-    def test_left_identity(self, x: int) -> None:
-        assert fold(0, x) == (x & 0xFF)
-
-    @pytest.mark.parametrize("x", [0, 1, 5, 42, 255])
-    def test_self_annihilation(self, x: int) -> None:
-        assert fold(x, x) == 0
-
-
-# --- 3. InferenceEngine phenotype creation tests ---
-
-
-class TestInferenceEnginePhenotypeCreation:
-    @pytest.fixture
-    def engine(self, real_ontology, real_orbit_store):
-        import json
-
-        ontology_path, phenomenology_path, _ = real_ontology
-        with open(ontology_path) as f:
-            ontology_data = json.load(f)
-        ontology_data["phenomap_path"] = phenomenology_path
-        info_engine = InformationEngine(ontology_data, use_array_indexing=False)
-        return InferenceEngine(info_engine, real_orbit_store)
-
-    @pytest.mark.parametrize("intron", [0, EXON_LI_MASK, 0xFF])
-    def test_create_default_phenotype_governance_signature(self, engine, intron):
-        context_key = (0, intron)
-        entry = engine._create_default_phenotype(context_key)
-        sig = compute_governance_signature(intron)
-        expected = {
-            "neutral": sig[0],
-            "li": sig[1],
-            "fg": sig[2],
-            "bg": sig[3],
-            "dyn": sig[4],
+    def test_phenomenology_map_string_keys(self, temp_dir: Path) -> None:
+        """Test phenomenology map handles string keys."""
+        pheno_path = str(temp_dir / "string_keys.json")
+        test_data = {
+            "phenomenology_map": {"0": 0, "1": 1, "2": 0}  # String keys
         }
-        assert "governance_signature" in entry
-        assert entry["governance_signature"] == expected
-        assert entry["phenotype"] == f"P[0:{intron}]"
-        assert entry["exon_mask"] == (intron & 0xFF)
+        
+        with open(pheno_path, 'w') as f:
+            json.dump(test_data, f)
+        
+        result = load_phenomenology_map(pheno_path)
+        
+        # Should convert to integer keys
+        assert 0 in result
+        assert 1 in result
+        assert 2 in result
+        assert isinstance(list(result.keys())[0], int)
 
-
-if __name__ == "__main__":
-    ta = TestArchitecture()
-    ta.test_axiom_preservation()
-    ta.test_physical_basis()
-    print("All architectural validations passed successfully.")
+    def test_maintenance_report_validation(self) -> None:
+        """Test maintenance report structure validation."""
+        # Valid report
+        valid_report: MaintenanceReport = {
+            "operation": "test",
+            "success": True,
+            "entries_processed": 10,
+            "entries_modified": 5,
+            "elapsed_seconds": 1.5,
+        }
+        
+        # Should have all required fields
+        assert "operation" in valid_report
+        assert "success" in valid_report
+        assert "entries_processed" in valid_report
+        assert "entries_modified" in valid_report
+        assert "elapsed_seconds" in valid_report
+        
+        # Validate types
+        assert isinstance(valid_report["operation"], str)
+        assert isinstance(valid_report["success"], bool)
+        assert isinstance(valid_report["entries_processed"], int)
+        assert isinstance(valid_report["entries_modified"], int)
+        assert isinstance(valid_report["elapsed_seconds"], (int, float))

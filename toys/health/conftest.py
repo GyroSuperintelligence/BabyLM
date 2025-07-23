@@ -1,281 +1,206 @@
+"""
+Optimized pytest configuration for GyroSI test suite.
+Uses main meta files but isolates all test data to temporary directories.
+"""
+
 import os
 import sys
 import shutil
+import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, cast
+from typing import Any, Dict, Generator
 import pytest
+
+# Add project root to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
 from baby.contracts import AgentConfig
 from baby.intelligence import AgentPool, GyroSI
-from baby.policies import OrbitStore, OverlayView, ReadOnlyView
+from baby.policies import OrbitStore
+from fastapi.testclient import TestClient
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-"""
-Shared pytest fixtures and configuration for GyroSI test suite.
-"""
+# Main files (read-only, shared across tests)
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+MAIN_META = PROJECT_ROOT / "memories" / "public" / "meta"
+MAIN_TOKENIZERS = PROJECT_ROOT / "memories" / "public" / "tokenizers"
 
-# Define these paths as needed for your test environment
-MEM_META = Path("memories/public/meta")
-MEM_TOKENIZERS = Path("memories/public/tokenizers")
-ONTOLOGY_PATH = MEM_META / "ontology_map.json"
-PHENOMENOLOGY_PATH = MEM_META / "phenomenology_map.json"
-THETA_PATH = MEM_META / "theta.npy"
-EPISTEMOLOGY_PATH = MEM_META / "epistemology.npy"
-TOKENIZER_DIR = MEM_TOKENIZERS / "bert-base-uncased"
-TOKENIZER_JSON = TOKENIZER_DIR / "tokenizer.json"
-TOKENIZER_VOCAB = TOKENIZER_DIR / "vocab.txt"
-
-# Use the main stateless data files for all tests
-MAIN_MEMORIES_META = Path(__file__).parent.parent.parent / "memories" / "public" / "meta"
-
-# Base temp directory for all test-generated files
-BASE_TEMP_DIR = Path(__file__).parent / "memories"
+# Test isolation directory
+TEST_BASE = Path(__file__).parent / "temp_memories"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_test_environment() -> Generator[None, None, None]:
-    """Setup and teardown test environment."""
-    BASE_TEMP_DIR.mkdir(exist_ok=True)
+def test_environment() -> Generator[None, None, None]:
+    """Setup isolated test environment."""
+    TEST_BASE.mkdir(exist_ok=True)
     yield
-    # For CI or production, uncomment the following line to ensure a clean slate after tests:
-    shutil.rmtree(BASE_TEMP_DIR, ignore_errors=True)
+    shutil.rmtree(TEST_BASE, ignore_errors=True)
 
 
 @pytest.fixture
-def temp_dir() -> Generator[str, None, None]:
-    """Create a unique temporary directory for each test. Safe for parallel test runs."""
-    test_dir = BASE_TEMP_DIR / f"test_{os.getpid()}_{id(object())}"
-    test_dir.mkdir(parents=True, exist_ok=True)
-    yield str(test_dir)
-    shutil.rmtree(test_dir, ignore_errors=True)
+def temp_dir() -> Generator[Path, None, None]:
+    """Isolated temporary directory per test."""
+    with tempfile.TemporaryDirectory(dir=TEST_BASE, prefix="test_") as tmpdir:
+        yield Path(tmpdir)
 
 
-@pytest.fixture(scope="module")
-def real_ontology() -> tuple[str, str, str]:
-    """
-    Fixture returning paths to the real ontology and phenomenology files, for integration tests.
-    """
-    return str(ONTOLOGY_PATH), str(PHENOMENOLOGY_PATH), str(EPISTEMOLOGY_PATH)
-
-
-@pytest.fixture
-def orbit_store(temp_dir: str) -> Generator[OrbitStore, None, None]:
-    """Create an OrbitStore instance (empty) in a test directory."""
-    store_path = os.path.join(temp_dir, "knowledge.pkl.gz")
-    store = OrbitStore(store_path)
-    yield store
-    store.close()
-
-
-@pytest.fixture
-def overlay_store(temp_dir: str) -> Generator[OverlayView, None, None]:
-    """
-    Provide an OverlayView composed of a read-only public store and a writable private store.
-    Public store points to a main (or shared) store, private store is in temp_dir.
-    """
-    # Public store is a (possibly empty) shared file, treated as read-only
-    public_store_path = os.path.join(temp_dir, "public_knowledge.pkl.gz")
-    os.makedirs(os.path.dirname(public_store_path), exist_ok=True)
-    # Ensure the file exists and has one entry
-    public_store = OrbitStore(public_store_path)
-    public_store.put((0, 0), {"phenotype": "public", "confidence": 0.9, "context_signature": (0, 0)})
-    public_store.commit()
-    public_store.close()
-    # Wrap as read-only
-    public_readonly = ReadOnlyView(OrbitStore(public_store_path))
-    # Private store for this test
-    private_store_path = os.path.join(temp_dir, "private_knowledge.pkl.gz")
-    private_store = OrbitStore(private_store_path)
-    overlay = OverlayView(public_readonly, private_store)
-    yield overlay
-    overlay.close()
-
-
-@pytest.fixture
-def real_orbit_store(temp_dir: str) -> Generator[OrbitStore, None, None]:
-    """
-    Provides a real OrbitStore using the main ontology and phenomenology, but stores all data in temp_dir.
-    Use this fixture in tests that want to test the real OrbitStore logic without polluting the main memories folder.
-    """
-    store_path = os.path.join(temp_dir, "real_knowledge.pkl.gz")
-    store = OrbitStore(store_path)
-    yield store
-    store.close()
-
-
-@pytest.fixture
-def agent_config(temp_dir: str) -> AgentConfig:
-    """Create a test agent configuration, always using the real ontology."""
+@pytest.fixture(scope="session")
+def meta_paths() -> Dict[str, str]:
+    """Main meta file paths (read-only)."""
     return {
-        "ontology_path": str(ONTOLOGY_PATH),
-        "knowledge_path": os.path.join(temp_dir, "knowledge.pkl.gz"),
-        "enable_phenomenology_storage": False,
+        "ontology": str(MAIN_META / "ontology_map.json"),
+        "epistemology": str(MAIN_META / "epistemology.npy"), 
+        "phenomenology": str(MAIN_META / "phenomenology_map.json"),
+        "theta": str(MAIN_META / "theta.npy"),
+        "tokenizer": str(MAIN_TOKENIZERS / "bert-base-uncased"),
     }
 
 
 @pytest.fixture
-def gyrosi_agent(agent_config: AgentConfig) -> Generator[GyroSI, None, None]:
-    """Create a GyroSI agent instance."""
-    agent = GyroSI(config=agent_config)
+def temp_store(temp_dir: Path) -> Generator[OrbitStore, None, None]:
+    """Temporary OrbitStore for testing."""
+    store = OrbitStore(str(temp_dir / "test_knowledge.pkl.gz"))
+    yield store
+    store.close()
+
+
+@pytest.fixture
+def gyrosi_agent(meta_paths: Dict[str, str], temp_dir: Path) -> Generator[GyroSI, None, None]:
+    """GyroSI agent with isolated storage."""
+    config: AgentConfig = {
+        "ontology_path": meta_paths["ontology"],
+        "knowledge_path": str(temp_dir / "agent_knowledge.pkl.gz"),
+        "enable_phenomenology_storage": True,
+        "phenomenology_map_path": meta_paths["phenomenology"],
+    }
+    agent = GyroSI(config)
     yield agent
     agent.close()
 
 
 @pytest.fixture
-def agent_pool(tmp_path) -> Generator[AgentPool, None, None]:
-    """Create an agent pool using the real ontology, with all agent data isolated to temp_dir."""
-    public_knowledge = str(tmp_path / "public_knowledge.pkl.gz")
-    OrbitStore(public_knowledge).close()
-    pool = AgentPool(str(ONTOLOGY_PATH), public_knowledge)
+def agent_pool(meta_paths: Dict[str, str], temp_dir: Path) -> Generator[AgentPool, None, None]:
+    """AgentPool with isolated storage."""
+    public_path = str(temp_dir / "public_knowledge.pkl.gz")
+    # Initialize empty public store
+    OrbitStore(public_path).close()
+    
+    pool = AgentPool(meta_paths["ontology"], public_path)
     yield pool
     pool.close_all()
 
 
 @pytest.fixture
-def preferences_config() -> dict:
-    return {
-        "storage_backend": "pickle",
-        "compression_level": 6,
-        "max_file_size_mb": 100,
-        "enable_auto_decay": False,
-        "decay_interval_hours": 24,
-        "decay_factor": 0.999,
-        "confidence_threshold": 0.05,
-        "max_agents_in_memory": 10,
-        "agent_eviction_policy": "lru",
-        "agent_ttl_minutes": 60,
-        "enable_profiling": False,
-        "batch_size": 100,  # changed key
-        "cache_size_mb": 10,
+def multi_agent_setup(meta_paths: Dict[str, str], temp_dir: Path) -> Generator[Dict[str, Any], None, None]:
+    """Multi-agent setup with public/private knowledge separation."""
+    public_path = str(temp_dir / "public.pkl.gz")
+    
+    # Initialize public store
+    OrbitStore(public_path).close()
+    
+    # Create agent configs
+    user_config: AgentConfig = {
+        "ontology_path": meta_paths["ontology"],
+        "public_knowledge_path": public_path,
+        "private_knowledge_path": str(temp_dir / "user_private.pkl.gz"),
+        "enable_phenomenology_storage": True,
+        "phenomenology_map_path": meta_paths["phenomenology"],
     }
+    
+    assistant_config: AgentConfig = {
+        "ontology_path": meta_paths["ontology"], 
+        "public_knowledge_path": public_path,
+        "private_knowledge_path": str(temp_dir / "assistant_private.pkl.gz"),
+        "enable_phenomenology_storage": True,
+        "phenomenology_map_path": meta_paths["phenomenology"],
+    }
+    
+    user_agent = GyroSI(user_config, agent_id="test_user")
+    assistant_agent = GyroSI(assistant_config, agent_id="test_assistant")
+    
+    yield {
+        "user": user_agent,
+        "assistant": assistant_agent,
+        "public_path": public_path,
+        "temp_dir": temp_dir,
+    }
+    
+    user_agent.close()
+    assistant_agent.close()
 
 
 @pytest.fixture
-def sample_phenotype_entry() -> dict[str, Any]:
-    """Create a sample phenotype entry for testing."""
+def test_client() -> Generator[TestClient, None, None]:
+    """FastAPI test client."""
+    from toys.communication.external_adapter import app
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture
+def sample_phenotype() -> Dict[str, Any]:
+    """Sample phenotype entry for testing."""
     return {
-        "phenotype": "A",
+        "phenotype": "P[100:42]",
         "exon_mask": 0b10101010,
         "confidence": 0.75,
         "context_signature": (100, 42),
-        "usage_count": 10,
+        "usage_count": 5,
         "created_at": 1234567890.0,
         "last_updated": 1234567890.0,
+        "governance_signature": {"neutral": 4, "li": 1, "fg": 1, "bg": 0, "dyn": 2},
+        "_original_context": None,
     }
 
 
-class TimeController:
-    """Context manager for timing code blocks in tests."""
-
-    def __init__(self) -> None:
-        self.elapsed: float = 0.0
-
-    def __enter__(self) -> "TimeController":
-        import time
-
-        self.start = time.perf_counter()
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        import time
-
-        self.elapsed = time.perf_counter() - self.start
-
-
 @pytest.fixture
-def mock_time(monkeypatch: pytest.MonkeyPatch) -> GyroSI:
-    """Mock time.time() for deterministic tests."""
-    current_time = [1234567890.0]
-
-    def mock_time_func() -> float:
-        return current_time[0]
-
-    def advance_time(seconds: float) -> None:
-        current_time[0] += seconds
-
-    monkeypatch.setattr("time.time", mock_time_func)
-
-    class _TimeController(TimeController):
-        def advance(self, seconds: float) -> None:
-            advance_time(seconds)
-
-        @property
-        def current(self) -> float:
-            return current_time[0]
-
-    return cast(GyroSI, _TimeController())
+def test_bytes() -> bytes:
+    """Sample test bytes."""
+    return b"Hello, GyroSI!"
 
 
-@pytest.fixture
-def generate_test_introns() -> Callable[[int], List[int]]:
-    import random
-
-    def _gen(count: int, seed: int = 42) -> List[int]:
-        random.seed(seed)
-        return [random.randint(0, 255) for _ in range(count)]
-
-    return _gen
-
-
-def generate_test_bytes(text: str) -> bytes:
-    return text.encode("utf-8")
-
-
-def assert_phenotype_entry_valid(entry: Dict[str, Any]) -> None:
-    required_fields = ["phenotype", "exon_mask", "confidence", "context_signature", "usage_count"]
+# Test utilities
+def assert_phenotype_valid(entry: Dict[str, Any]) -> None:
+    """Validate phenotype entry structure."""
+    required_fields = [
+        "phenotype", "exon_mask", "confidence", 
+        "context_signature", "usage_count", "governance_signature"
+    ]
     for field in required_fields:
-        assert field in entry, f"Missing required field: {field}"
-    assert isinstance(entry["phenotype"], str)
-    assert isinstance(entry["exon_mask"], int)
+        assert field in entry, f"Missing field: {field}"
+    
     assert 0 <= entry["exon_mask"] <= 255
     assert 0 <= entry["confidence"] <= 1.0
-    # Accept both tuple and list of length 2 for context_signature
-    assert isinstance(entry["context_signature"], (tuple, list)) and len(entry["context_signature"]) == 2
+    assert len(entry["context_signature"]) == 2
 
 
-def assert_ontology_valid(ontology_data: Dict[str, Any]) -> None:
-    assert ontology_data["endogenous_modulus"] == 788_986
-    assert ontology_data["ontology_diameter"] == 6
-    assert "ontology_map" in ontology_data
-    assert "schema_version" in ontology_data
+def assert_ontology_valid(data: Dict[str, Any]) -> None:
+    """Validate ontology data structure."""
+    assert data["endogenous_modulus"] == 788_986
+    assert data["ontology_diameter"] == 6
+    assert "ontology_map" in data
+    assert "schema_version" in data
 
 
-class Timer:
-    """Context manager for timing code blocks in tests."""
-
-    def __init__(self) -> None:
-        self.elapsed: float = 0.0
-
-    def __enter__(self) -> "Timer":
-        import time
-
-        self.start = time.perf_counter()
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        import time
-
-        self.elapsed = time.perf_counter() - self.start
-
-
-@pytest.fixture
-def theta_path() -> Path:
-    """Fixture for the path to theta.npy."""
-    return THETA_PATH
+def assert_no_main_pollution() -> None:
+    """Ensure no test data polluted main memories folder."""
+    main_memories = PROJECT_ROOT / "memories"
+    
+    # Check no test files in main directories
+    if main_memories.exists():
+        for item in main_memories.rglob("*test*"):
+            if item.is_file():
+                assert False, f"Test pollution detected: {item}"
+        
+        # Check no agent directories in main private area
+        private_dir = main_memories / "private" / "agents"
+        if private_dir.exists():
+            test_agents = [d for d in private_dir.iterdir() if d.name.startswith("test")]
+            assert not test_agents, f"Test agent pollution: {test_agents}"
 
 
-@pytest.fixture
-def tokenizer_dir() -> Path:
-    """Fixture for the path to the tokenizer directory."""
-    return TOKENIZER_DIR
-
-
-@pytest.fixture
-def tokenizer_json() -> Path:
-    """Fixture for the path to the tokenizer.json file."""
-    return TOKENIZER_JSON
-
-
-@pytest.fixture
-def tokenizer_vocab() -> Path:
-    """Fixture for the path to the vocab.txt file."""
-    return TOKENIZER_VOCAB
+# Export utilities for use in tests
+__all__ = [
+    "assert_phenotype_valid",
+    "assert_ontology_valid", 
+    "assert_no_main_pollution",
+]

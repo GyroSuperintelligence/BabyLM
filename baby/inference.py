@@ -242,39 +242,67 @@ class InferenceEngine:
         )
 
     def apply_confidence_decay(self, decay_factor: float = 0.001) -> Dict[str, Any]:
-        modified_count = 0
-        total_entries = 0
-        for key, entry in self.store.iter_entries():
-            # Apply simple exponential decay to confidence only
-            new_conf = max(0.01, entry.get("confidence", 0.1) * math.exp(-decay_factor))
-            assert 0 <= new_conf <= 1.0
-            entry["confidence"] = new_conf
-            self.store.put(key, entry)
-            modified_count += 1
-            total_entries += 1
+        import time
+        # --- 0. Normalise: get to the underlying OrbitStore(s) and flush ---
+        def _flush_store(s: Any) -> None:
+            if hasattr(s, "_flush"):
+                s._flush()
+            if hasattr(s, "private_store"):
+                _flush_store(s.private_store)
+            if hasattr(s, "public_store"):
+                _flush_store(s.public_store)
+            if hasattr(s, "base_store"):
+                _flush_store(s.base_store)
+
+        _flush_store(self.store)
+
+        modified = 0
+        now = time.time()
+        seen_keys: set[tuple[int, int]] = set()
+        all_keys = []
+
+        def _decay_entry(key, entry: Dict[str, Any]) -> None:
+            nonlocal modified
+            key_tuple = tuple(int(x) for x in key)
+            old = entry.get("confidence", 0.1)
+            new = max(0.01, float(old) * math.exp(-decay_factor))
+            if abs(new - old) > 1e-15:
+                entry["confidence"] = new
+                entry["last_updated"] = now
+                self.store.put(key_tuple, entry)
+                modified += 1
+            seen_keys.add(key_tuple)
+            all_keys.append(key_tuple)
+
+        if hasattr(self.store, "iter_entries"):
+            for key, entry in self.store.iter_entries():
+                _decay_entry(key, entry)
+
+        pending = getattr(self.store, "pending_writes", None)
+        if isinstance(pending, dict):
+            for key, entry in list(pending.items()):
+                key_tuple = tuple(int(x) for x in key)
+                if key_tuple not in seen_keys:
+                    _decay_entry(key, entry)
+
+        if hasattr(self.store, "data"):
+            for key, entry in getattr(self.store, "data").items():
+                key_tuple = tuple(int(x) for x in key)
+                if key_tuple not in seen_keys:
+                    _decay_entry(key, entry)
+
         if hasattr(self.store, "commit"):
             self.store.commit()
-        report = ValidationReport(
-            total_entries=total_entries,
-            average_confidence=0.0,  # Would need full recalculation
-            store_type=type(self.store).__name__,
-            modified_entries=modified_count,
-        )
-        # Convert ValidationReport to dict
-        try:
-            from dataclasses import asdict, is_dataclass
 
-            if is_dataclass(report):
-                return asdict(report)
-        except ImportError:
-            pass
-        if hasattr(report, "__dict__"):
-            return vars(report)
+        print("DEBUG: all_keys seen during decay:", all_keys)
+        print("DEBUG: unique seen_keys:", seen_keys)
+        print("DEBUG: total_entries (len(seen_keys)):", len(seen_keys))
+
         return {
-            "total_entries": total_entries,
+            "total_entries": len(seen_keys),
             "average_confidence": 0.0,
             "store_type": type(self.store).__name__,
-            "modified_entries": modified_count,
+            "modified_entries": modified,
         }
 
     def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:

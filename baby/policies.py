@@ -315,6 +315,11 @@ class CanonicalView:
         if hasattr(self.base_store, "_load_index"):
             self.base_store._load_index()
 
+    def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
+        for phen_key, entry in self.base_store.iter_entries():
+            original = entry.get("_original_context")
+            yield (original if original else phen_key), entry
+
 
 class OverlayView:
     def __init__(self, public_store: Any, private_store: Any):
@@ -393,6 +398,9 @@ class ReadOnlyView:
     def _load_index(self) -> None:
         if hasattr(self.base_store, "_load_index"):
             self.base_store._load_index()
+
+    def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
+        yield from self.base_store.iter_entries()
 
 
 def merge_phenotype_maps(

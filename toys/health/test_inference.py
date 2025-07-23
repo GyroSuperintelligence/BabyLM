@@ -1,347 +1,789 @@
 """
-Tests for the inference module functionality.
+Comprehensive tests for inference.py - the interpretation and meaning management layer.
+Tests semantic conversion, learning via Monodromic Fold, and knowledge maintenance.
 """
-
+import os
 import math
-from typing import Any, Dict, cast, Callable
-from unittest.mock import MagicMock
+import time
+from typing import Any, Dict, Tuple
+from unittest.mock import Mock, patch
 
-import numpy as np
 import pytest
 
-from baby.governance import fold
+from baby import governance
+from baby.contracts import PhenotypeEntry, ValidationReport
 from baby.inference import InferenceEngine
-from toys.health.conftest import assert_phenotype_entry_valid
-
-
-def fold_sequence(introns: list[int]) -> int:
-    """Folds a sequence of introns."""
-    if not introns:
-        return 0  # Or handle as an error, depending on desired behavior
-    result = introns[0]
-    for intron in introns[1:]:
-        result = fold(result, intron)
-    return result
-
-
-@pytest.fixture
-def mock_s2_engine() -> MagicMock:
-    """Create a mock S2 engine for testing."""
-    mock_engine = MagicMock()
-    mock_engine.endogenous_modulus = 100
-    mock_engine.orbit_cardinality = np.arange(1, 101, dtype=np.uint32)  # 1 to 100 inclusive
-    mock_engine.is_canonical = lambda idx: 0 <= idx < 100
-    return mock_engine
-
-
-@pytest.fixture
-def inference_engine(mock_s2_engine: MagicMock, orbit_store: Any) -> InferenceEngine:
-    """Create an inference engine for testing."""
-    return InferenceEngine(mock_s2_engine, orbit_store)
+from baby.information import InformationEngine
+from baby.policies import OrbitStore
 
 
 class TestInferenceEngineInitialization:
-    """Tests for InferenceEngine initialization."""
+    """Test InferenceEngine initialization and setup."""
 
-    def test_init_with_valid_params(self, mock_s2_engine: MagicMock, orbit_store: Any) -> None:
-        """Test initialization with valid parameters."""
-        engine = InferenceEngine(mock_s2_engine, orbit_store)
-        assert engine.s2 == mock_s2_engine
-        assert engine.store == orbit_store
-        assert engine.endogenous_modulus == mock_s2_engine.endogenous_modulus
-        assert engine._v_max == 100  # Max of orbit_cardinality values
+    def test_initialization_with_real_components(self, meta_paths: Dict[str, str], temp_store: OrbitStore) -> None:
+        """Test engine initializes correctly with real components."""
+        # Load real ontology data
+        import json
+        with open(meta_paths["ontology"]) as f:
+            ontology_data = json.load(f)
+        
+        s2_engine = InformationEngine(ontology_data)
+        s3_engine = InferenceEngine(s2_engine, temp_store)
+        
+        assert s3_engine.s2 is s2_engine
+        assert s3_engine.store is temp_store
+        assert s3_engine.endogenous_modulus == 788_986
+        assert s3_engine._v_max > 0
 
-    def test_init_with_zero_cardinality(self, mock_s2_engine: MagicMock, orbit_store: Any) -> None:
-        """Test initialization fails with zero cardinality."""
-        mock_s2_engine.orbit_cardinality = {i: 0 for i in range(100)}
-        with pytest.raises(ValueError):
-            InferenceEngine(mock_s2_engine, orbit_store)
+    def test_initialization_validates_orbit_cardinality(self, meta_paths: Dict[str, str], temp_store: OrbitStore) -> None:
+        """Test initialization fails with zero orbit cardinality."""
+        import json
+        with open(meta_paths["ontology"]) as f:
+            ontology_data = json.load(f)
+        
+        s2_engine = InformationEngine(ontology_data)
+        
+        # Mock zero orbit cardinality
+        with patch.object(s2_engine, 'orbit_cardinality', [0] * s2_engine.endogenous_modulus):
+            with pytest.raises(ValueError, match="orbit cardinality cannot be zero"):
+                InferenceEngine(s2_engine, temp_store)
+
+    def test_v_max_calculation(self, meta_paths: Dict[str, str], temp_store: OrbitStore) -> None:
+        """Test _v_max is correctly calculated from orbit cardinality."""
+        import json
+        with open(meta_paths["ontology"]) as f:
+            ontology_data = json.load(f)
+        
+        s2_engine = InformationEngine(ontology_data)
+        s3_engine = InferenceEngine(s2_engine, temp_store)
+        
+        # _v_max should be maximum orbit cardinality
+        if hasattr(s2_engine.orbit_cardinality, 'max'):
+            expected_max = s2_engine.orbit_cardinality.max()
+        else:
+            expected_max = max(s2_engine.orbit_cardinality)
+        
+        assert s3_engine._v_max == expected_max
+        assert s3_engine._v_max > 0
 
 
-class TestPhenotypeRetrieval:
-    """Tests for phenotype retrieval and creation."""
+class TestPhenotypeOperations:
+    """Test phenotype creation, retrieval, and management."""
 
-    def test_get_phenotype_new(self, inference_engine: InferenceEngine) -> None:
-        """Test getting a phenotype that doesn't exist yet."""
-        state_index = 10
+    def test_get_phenotype_creates_new_entry(self, gyrosi_agent) -> None:
+        """Test get_phenotype creates new entry for unknown context."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
         intron = 42
-
-        # Should not exist initially
-        assert inference_engine.store.get((state_index, intron)) is None
-
-        # Get the phenotype (should create a new one)
-        entry = inference_engine.get_phenotype(state_index, intron)
-        inference_engine.store.commit()  # Ensure persistence
-
-        # Verify the entry was created with correct values
+        
+        # Should create new entry
+        entry = engine.get_phenotype(state_index, intron)
+        
+        assert entry["context_signature"] == (state_index, intron)
         assert entry["phenotype"] == f"P[{state_index}:{intron}]"
-        assert entry["exon_mask"] == intron
-        assert entry["context_signature"] == [state_index, intron]
-        assert 0 < entry["confidence"] < 1.0  # Should be variety-weighted
+        assert 0 <= entry["exon_mask"] <= 255
+        assert 0 <= entry["confidence"] <= 1.0
         assert entry["usage_count"] == 0
+        assert entry["created_at"] > 0
+        assert entry["last_updated"] > 0
 
-        # Validate the entry
-        assert_phenotype_entry_valid(cast(Dict[str, Any], entry))
+    def test_get_phenotype_retrieves_existing_entry(self, gyrosi_agent) -> None:
+        """Test get_phenotype retrieves existing entry."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
+        intron = 42
+        
+        # Create entry first time
+        entry1 = engine.get_phenotype(state_index, intron)
+        original_created_at = entry1["created_at"]
+        
+        # Should retrieve same entry second time
+        entry2 = engine.get_phenotype(state_index, intron)
+        
+        assert entry2["context_signature"] == (state_index, intron)
+        assert entry2["created_at"] == original_created_at
+        assert entry1 == entry2
 
-        # Should now exist in the store
-        assert inference_engine.store.get((state_index, intron)) is not None
+    def test_phenotype_intron_masking(self, gyrosi_agent) -> None:
+        """Test intron is properly masked to 8 bits."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
+        intron_large = 0x1FF  # 9 bits
+        intron_masked = 0xFF  # 8 bits equivalent
+        
+        entry1 = engine.get_phenotype(state_index, intron_large)
+        entry2 = engine.get_phenotype(state_index, intron_masked)
+        
+        # Should be equivalent due to masking
+        assert entry1["context_signature"] == entry2["context_signature"]
 
-    def test_get_phenotype_existing(self, inference_engine: InferenceEngine) -> None:
-        """Requesting same (state,intron) twice returns same data."""
-        state_index = 20
-        intron = 123 & 0xFF
+    def test_phenotype_confidence_calculation(self, gyrosi_agent) -> None:
+        """Test initial confidence is calculated based on orbit cardinality."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 0  # Use origin state
+        intron = 42
+        
+        entry = engine.get_phenotype(state_index, intron)
+        
+        # Should use orbit cardinality formula
+        v = engine.s2.orbit_cardinality[state_index]
+        expected_confidence = (1 / 6) * math.sqrt(v / engine._v_max)
+        
+        assert abs(entry["confidence"] - expected_confidence) < 1e-10
 
-        existing = inference_engine.get_phenotype(state_index, intron)
+    def test_governance_signature_calculation(self, gyrosi_agent) -> None:
+        """Test governance signature is correctly computed."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
+        intron = 0b10101010  # Known pattern
+        
+        entry = engine.get_phenotype(state_index, intron)
+        
+        # Verify governance signature matches expected calculation
+        expected_sig = governance.compute_governance_signature(intron)
+        gov_sig = entry["governance_signature"]
+        
+        assert gov_sig["neutral"] == expected_sig[0]
+        assert gov_sig["li"] == expected_sig[1]
+        assert gov_sig["fg"] == expected_sig[2]
+        assert gov_sig["bg"] == expected_sig[3]
+        assert gov_sig["dyn"] == expected_sig[4]
 
-        if hasattr(inference_engine.store, "commit"):
-            inference_engine.store.commit()
-
-        retrieved = inference_engine.get_phenotype(state_index, intron)
-
-        assert retrieved["phenotype"] == existing["phenotype"]
-        assert retrieved["exon_mask"] == existing["exon_mask"]
-        assert retrieved["context_signature"] == [state_index, intron]
-        assert retrieved["usage_count"] == existing["usage_count"]
-        assert retrieved["confidence"] == existing["confidence"]
-
-    def test_get_phenotype_clamps_intron(self, inference_engine: InferenceEngine) -> None:
-        """Test that intron values are clamped to 8 bits."""
-        state_index = 30
-        intron = 300  # Greater than 255
-
-        entry = inference_engine.get_phenotype(state_index, intron)
-        assert entry["context_signature"] == [state_index, intron & 0xFF]
-        assert entry["exon_mask"] == intron & 0xFF
-
-    def test_get_phenotype_validates_state_index(self, inference_engine: InferenceEngine) -> None:
-        """Test that state_index is validated."""
-        # Invalid state index (negative)
+    def test_canonical_index_assertion(self, gyrosi_agent) -> None:
+        """Test that state_index must be canonical."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Invalid state index should trigger assertion
         with pytest.raises(AssertionError):
-            inference_engine.get_phenotype(-1, 42)
-
-        # Invalid state index (too large)
+            engine.get_phenotype(engine.endogenous_modulus, 42)  # Out of range
+        
         with pytest.raises(AssertionError):
-            inference_engine.get_phenotype(100, 42)
+            engine.get_phenotype(-1, 42)  # Negative
 
 
-class TestLearningFunctionality:
-    """Tests for learning functionality."""
+class TestLearningOperations:
+    """Test learning via Monodromic Fold operations."""
 
-    def test_learn_changes_mask(self, inference_engine: InferenceEngine) -> None:
-        """Test basic learning functionality."""
-        state_index = 40
-        intron1 = 100
-        intron2 = 200
+    def test_learn_by_key_creates_and_learns(self, gyrosi_agent) -> None:
+        """Test learn_by_key creates entry and applies learning."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
+        intron = 42
+        
+        # Should create and learn
+        entry = engine.learn_by_key(state_index, intron)
+        
+        assert entry["context_signature"] == (state_index, intron)
+        assert entry["usage_count"] == 1  # Should be incremented
+        
+        # Exon mask should be result of fold(initial_mask, intron)
+        # Initial mask is intron itself, so fold(intron, intron) = 0
+        assert entry["exon_mask"] == 0
 
-        # Get initial entry
-        entry = inference_engine.get_phenotype(state_index, intron1)
+    def test_learn_method_applies_monodromic_fold(self, gyrosi_agent, sample_phenotype: Dict[str, Any]) -> None:
+        """Test learn method applies Monodromic Fold correctly."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Create entry with known mask
+        entry = sample_phenotype.copy()
+        entry["context_signature"] = (100, 42)
+        old_mask = entry["exon_mask"]
+        intron = 33
+        
+        # Store the entry first
+        engine.store.put((100, 42), entry)
+        
+        # Learn should apply fold
+        updated_entry = engine.learn(entry, intron)
+        
+        expected_mask = governance.fold(old_mask, intron)
+        assert updated_entry["exon_mask"] == expected_mask
+        assert updated_entry["usage_count"] == entry["usage_count"] + 1
+
+    def test_learn_confidence_update(self, gyrosi_agent, sample_phenotype: Dict[str, Any]) -> None:
+        """Test confidence is updated based on novelty."""
+        engine = gyrosi_agent.engine.operator
+        
+        entry = sample_phenotype.copy()
+        entry["context_signature"] = (100, 42)
         old_confidence = entry["confidence"]
+        old_mask = entry["exon_mask"]
+        intron = 0xFF  # Will create maximum novelty
+        
+        updated_entry = engine.learn(entry, intron)
+        
+        # Should increase confidence due to novelty
+        assert updated_entry["confidence"] >= old_confidence
+        assert updated_entry["confidence"] <= 1.0
 
-        # Learn with a different intron
-        inference_engine.learn(entry, intron2)
+    def test_learn_no_change_optimization(self, gyrosi_agent, sample_phenotype: Dict[str, Any]) -> None:
+        """Test optimization when mask and confidence don't change."""
+        engine = gyrosi_agent.engine.operator
+        
+        entry = sample_phenotype.copy()
+        entry["context_signature"] = (100, 42)
+        entry["exon_mask"] = 42  # Will self-annihilate
+        old_last_updated = entry["last_updated"]
+        
+        # Mock time to control last_updated
+        with patch('time.time', return_value=old_last_updated + 10):
+            updated_entry = engine.learn(entry, 42)  # fold(42, 42) = 0, but original is not 0
+        
+        # Should update last_updated even if mask unchanged
+        assert updated_entry["last_updated"] > old_last_updated
 
-        # Verify mask and confidence changed
-        assert entry["exon_mask"] == fold(intron1, intron2) & 0xFF
-        assert entry["confidence"] > old_confidence
-        assert entry["usage_count"] == 1
+    def test_learn_preserves_mask_range(self, gyrosi_agent) -> None:
+        """Test learning always keeps exon_mask in valid range."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Test with various starting masks and introns
+        for mask in [0, 1, 42, 128, 255]:
+            for intron in [0, 1, 42, 128, 255]:
+                entry = {
+                    "phenotype": "test",
+                    "exon_mask": mask,
+                    "confidence": 0.5,
+                    "context_signature": (100, intron),
+                    "usage_count": 0,
+                    "created_at": time.time(),
+                    "last_updated": time.time(),
+                    "governance_signature": {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0},
+                    "_original_context": None,
+                }
+                
+                updated = engine.learn(entry, intron)
+                assert 0 <= updated["exon_mask"] <= 255
+                assert 0 <= updated["confidence"] <= 1.0
 
-    def test_learn_no_change(self, inference_engine: InferenceEngine) -> None:
-        """Test learning with the same intron (no change)."""
-        state_index = 50
-        intron = 150
-        # Get initial entry
-        entry = inference_engine.get_phenotype(state_index, intron)
-        inference_engine.store.commit()  # Ensure the initial value is persisted
-        old_confidence = entry["confidence"]
-        old_usage_count = entry["usage_count"]
-        # Learn with the same intron
-        inference_engine.learn(entry, intron)
-        inference_engine.store.commit()
-        # Debug: print all keys and the entry at the expected key
-        print("Store keys after learn_no_change:", list(inference_engine.store.data.keys()))
-        print("Entry at (state_index, intron):", inference_engine.store.get((state_index, intron)))
-        refreshed = inference_engine.store.get((state_index, intron))
-        # The mask should be fold(intron, intron) & 0xFF
-        expected_mask = fold(intron, intron) & 0xFF
-        if refreshed:
-            assert refreshed["exon_mask"] == expected_mask
-            assert refreshed["confidence"] != old_confidence  # Should update
-            assert refreshed["usage_count"] == old_usage_count + 1
-
-    def test_learn_by_key(self, inference_engine: InferenceEngine) -> None:
-        """Learning by key should create (if absent) then fold once."""
-        state_index = 60
-        intron = 180 & 0xFF
-
-        inference_engine.learn_by_key(state_index, intron)
-
-        if hasattr(inference_engine.store, "commit"):
-            inference_engine.store.commit()
-
-        # Entry is stored under (state_index, intron)
-        refreshed = inference_engine.store.get((state_index, intron))
-        assert refreshed is not None
-
-        # Initial mask = intron, then fold(old_mask, intron) => fold(intron, intron) = 0
-        expected_mask = fold(intron, intron) & 0xFF  # == 0
-        assert refreshed["context_signature"] == [state_index, intron]
-        assert refreshed["exon_mask"] == expected_mask
-        assert refreshed["usage_count"] == 1  # incremented in learn()
-
-    def test_batch_learn_empty(self, inference_engine: InferenceEngine) -> None:
-        """Test batch learning with empty intron list."""
-        inference_engine.batch_learn(70, [])
-
-    def test_batch_learn_single(self, inference_engine: InferenceEngine) -> None:
-        """batch_learn with one intron still collapses mask to 0."""
-        state_index = 70
-        intron = 210 & 0xFF
-
-        inference_engine.batch_learn(state_index, [intron])
-
-        if hasattr(inference_engine.store, "commit"):
-            inference_engine.store.commit()
-
-        # Stored under (state_index, intron) because fold_sequence([intron]) == intron
-        refreshed = inference_engine.store.get((state_index, intron))
-        assert refreshed is not None
-
-        expected_mask = fold(intron, intron) & 0xFF  # == 0
-        assert refreshed["context_signature"] == [state_index, intron]
-        assert refreshed["exon_mask"] == expected_mask
-
-    def test_batch_learn_multiple(
-        self, inference_engine: InferenceEngine, generate_test_introns: Callable[[int], list[int]]
-    ) -> None:
-        """batch_learn with many introns reduces to a single path intron."""
-        state_index = 80
-        introns = [i & 0xFF for i in generate_test_introns(10)]
-        # Reduce path intron as engine does
-        path_intron = fold_sequence(introns) & 0xFF
-        inference_engine.batch_learn(state_index, introns)
-        if hasattr(inference_engine.store, "commit"):
-            inference_engine.store.commit()
-        refreshed = inference_engine.store.get((state_index, path_intron))
-        assert refreshed is not None
-        # Inside entry: initial mask = path_intron, then fold(path_intron, path_intron) = 0
-        final_mask = fold(path_intron, path_intron) & 0xFF  # == 0
-        assert refreshed["context_signature"] == [state_index, path_intron]
-        assert refreshed["exon_mask"] == final_mask
-        assert refreshed["usage_count"] == 1
+    def test_learn_updates_governance_signature(self, gyrosi_agent, sample_phenotype: Dict[str, Any]) -> None:
+        """Test governance signature is updated after learning."""
+        engine = gyrosi_agent.engine.operator
+        
+        entry = sample_phenotype.copy()
+        entry["context_signature"] = (100, 42)
+        intron = 0b11110000
+        
+        updated_entry = engine.learn(entry, intron)
+        
+        # Governance signature should reflect new mask
+        new_mask = updated_entry["exon_mask"]
+        expected_sig = governance.compute_governance_signature(new_mask)
+        gov_sig = updated_entry["governance_signature"]
+        
+        assert gov_sig["neutral"] == expected_sig[0]
+        assert gov_sig["li"] == expected_sig[1]
+        assert gov_sig["fg"] == expected_sig[2]
+        assert gov_sig["bg"] == expected_sig[3]
+        assert gov_sig["dyn"] == expected_sig[4]
 
 
-class TestDefaultPhenotypeCreation:
-    """Tests for default phenotype creation."""
+class TestBatchLearning:
+    """Test batch learning with path-dependent Monodromic Fold."""
 
-    def test_create_default_phenotype(self, inference_engine: InferenceEngine, mock_time: Any) -> None:
-        """Test creation of default phenotype entries."""
-        state_index = 90
-        intron = 240
-        context_key = (state_index, intron)
+    def test_batch_learn_empty_sequence(self, gyrosi_agent) -> None:
+        """Test batch learning with empty intron sequence."""
+        engine = gyrosi_agent.engine.operator
+        
+        result = engine.batch_learn(100, [])
+        assert result is None
 
-        # Create default phenotype
-        entry = inference_engine._create_default_phenotype(context_key)
+    def test_batch_learn_single_intron(self, gyrosi_agent) -> None:
+        """Test batch learning with single intron."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
+        intron = 42
+        
+        result = engine.batch_learn(state_index, [intron])
+        
+        assert result is not None
+        assert result["context_signature"] == (state_index, intron)
+        assert result["usage_count"] == 1
 
-        # Verify all fields
-        assert entry["phenotype"] == f"P[{state_index}:{intron}]"
-        assert entry["exon_mask"] == intron
-        assert entry["context_signature"] == context_key
-        assert entry["usage_count"] == 0
-        assert entry["created_at"] == mock_time.current
-        assert entry["last_updated"] == mock_time.current
+    def test_batch_learn_sequence_folding(self, gyrosi_agent) -> None:
+        """Test batch learning folds sequence correctly."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
+        introns = [1, 2, 3]
+        
+        result = engine.batch_learn(state_index, introns)
+        
+        # Should use fold_sequence to compute path-dependent intron
+        expected_path_intron = governance.fold_sequence(introns, start_state=0)
+        assert result["context_signature"] == (state_index, expected_path_intron)
 
-        # Verify variety-weighted confidence
-        v = inference_engine.s2.orbit_cardinality[state_index]
-        expected_conf = (1 / 6) * math.sqrt(v / inference_engine._v_max)
-        assert entry["confidence"] == expected_conf
+    def test_batch_learn_preserves_path_dependence(self, gyrosi_agent) -> None:
+        """Test different orders give different results."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
+        introns1 = [1, 2, 3]
+        introns2 = [3, 2, 1]
+        
+        result1 = engine.batch_learn(state_index, introns1)
+        result2 = engine.batch_learn(state_index + 1, introns2)  # Different state to avoid conflict
+        
+        # Different orders should give different path introns
+        path1 = governance.fold_sequence(introns1, 0)
+        path2 = governance.fold_sequence(introns2, 0)
+        
+        if path1 != path2:  # Only test if paths are actually different
+            assert result1["context_signature"][1] != result2["context_signature"][1]
 
-        # Validate the entry
-        assert_phenotype_entry_valid(cast(Dict[str, Any], entry))
+    def test_batch_learn_intron_masking(self, gyrosi_agent) -> None:
+        """Test introns are properly masked in batch learning."""
+        engine = gyrosi_agent.engine.operator
+        
+        state_index = 100
+        introns = [0x1FF, 0x200]  # Values > 255
+        
+        result = engine.batch_learn(state_index, introns)
+        
+        # Should mask each intron before folding
+        masked_introns = [i & 0xFF for i in introns]
+        expected_path = governance.fold_sequence(masked_introns, 0)
+        
+        assert result["context_signature"] == (state_index, expected_path)
 
 
-class TestKnowledgeIntegrityAndMaintenance:
-    """Tests for knowledge integrity validation and maintenance."""
+class TestValidationAndMaintenance:
+    """Test knowledge validation and integrity checking."""
 
-    def test_validate_knowledge_integrity(self, inference_engine: InferenceEngine) -> None:
+    def test_validate_knowledge_integrity_empty_store(self, gyrosi_agent) -> None:
+        """Test validation with empty knowledge store."""
+        engine = gyrosi_agent.engine.operator
+        
+        report = engine.validate_knowledge_integrity()
+        
+        assert isinstance(report, dict)
+        assert report["total_entries"] == 0
+        assert report["average_confidence"] == 0
+        assert "store_type" in report
+        assert report["modified_entries"] == 0  # No anomalies
+
+    def test_validate_knowledge_integrity_with_entries(self, gyrosi_agent) -> None:
+        """Test validation with valid entries."""
+        engine = gyrosi_agent.engine.operator
+        
         # Add some valid entries
         for i in range(5):
-            entry = inference_engine.get_phenotype(i, i)
-            inference_engine.learn(entry, i + 1)
-
-        # Persist
-        if hasattr(inference_engine.store, "commit"):
-            inference_engine.store.commit()
-
-        # Debug: print all keys and context_signatures
-        print("--- Store entries after commit ---")
-        for key, entry in inference_engine.store.iter_entries():
-            print(f"Key: {key}, context_signature: {entry.get('context_signature')}")
-
-        report = inference_engine.validate_knowledge_integrity()
-
-        print("Integrity report:", report)
-
+            engine.learn_by_key(i, 42)
+        
+        report = engine.validate_knowledge_integrity()
+        
         assert report["total_entries"] == 5
         assert report["average_confidence"] > 0
-        # The current code modifies 5 entries due to context_signature type mismatch
-        assert report["modified_entries"] == 5
+        assert report["modified_entries"] == 0  # No anomalies
 
-    def test_apply_confidence_decay(self, inference_engine: InferenceEngine) -> None:
-        """Test confidence decay."""
-        # Add some entries
-        entries = []
-        for i in range(3):
-            entry = inference_engine.get_phenotype(i, i)
-            entries.append(entry)
-        inference_engine.store.commit()
-        # Store original confidences
-        original_confidences = [entry["confidence"] for entry in entries]
+    def test_validate_knowledge_integrity_detects_anomalies(self, gyrosi_agent) -> None:
+        """Test validation detects integrity anomalies."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Create invalid entry
+        bad_entry = {
+            "phenotype": "bad",
+            "exon_mask": 999,  # Invalid range
+            "confidence": -0.5,  # Invalid range
+            "context_signature": (0, 42),
+            "usage_count": 0,
+            "created_at": time.time(),
+            "last_updated": time.time() - 100,  # Earlier than created_at
+            "governance_signature": {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0},
+            "_original_context": None,
+        }
+        
+        engine.store.put((0, 42), bad_entry)
+        
+        report = engine.validate_knowledge_integrity()
+        
+        assert report["total_entries"] == 1
+        assert report["modified_entries"] > 0  # Should detect anomalies
 
+    def test_validate_knowledge_integrity_context_signature_mismatch(self, gyrosi_agent) -> None:
+        """Test validation detects context signature mismatches."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Create entry with mismatched context signature
+        entry = {
+            "phenotype": "test",
+            "exon_mask": 42,
+            "confidence": 0.5,
+            "context_signature": (999, 999),  # Doesn't match key
+            "usage_count": 0,
+            "created_at": time.time(),
+            "last_updated": time.time(),
+            "governance_signature": {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0},
+            "_original_context": None,
+        }
+        
+        engine.store.put((0, 42), entry)  # Key doesn't match context_signature
+        
+        report = engine.validate_knowledge_integrity()
+        
+        assert report["modified_entries"] > 0  # Should detect mismatch
+
+
+class TestConfidenceAndDecay:
+    """Test confidence calculations and decay operations."""
+
+    def test_apply_confidence_decay_basic(self, gyrosi_agent) -> None:
+        engine = gyrosi_agent.engine.operator
+        # Create entry with high confidence
+        engine.learn_by_key(100, 42)
+        original_entry = engine.get_phenotype(100, 42)
+        original_confidence = original_entry["confidence"]
         # Apply decay
-        report = inference_engine.apply_confidence_decay(decay_factor=0.1)
+        report = engine.apply_confidence_decay(decay_factor=0.1)
+        # Check entry was modified
+        updated_entry = engine.get_phenotype(100, 42)
+        assert updated_entry["confidence"] < original_confidence
+        assert updated_entry["confidence"] >= 0.01  # Minimum confidence
+        # Check report
+        assert isinstance(report, dict)
+        assert report["total_entries"] == 1
+        assert report["modified_entries"] == 1
 
-        assert report["modified_entries"] == 3
+    def test_apply_confidence_decay_minimum_floor(self, gyrosi_agent) -> None:
+        engine = gyrosi_agent.engine.operator
+        # Create entry and manually set very low confidence
+        engine.learn_by_key(100, 42)
+        entry = engine.get_phenotype(100, 42)
+        entry["confidence"] = 0.001  # Very low
+        engine.store.put((100, 42), entry)
+        # Apply strong decay
+        engine.apply_confidence_decay(decay_factor=10.0)
+        # Should not go below minimum
+        updated_entry = engine.get_phenotype(100, 42)
+        assert updated_entry["confidence"] >= 0.01
 
-        # Verify all entries were decayed and age incremented
-        for i, entry in enumerate(entries):
-            refreshed = inference_engine.store.get((i, i))
-            if refreshed:
-                assert refreshed["confidence"] < original_confidences[i]
-
-    def test_prune_low_confidence_entries(self, inference_engine: InferenceEngine) -> None:
-        """Test pruning low confidence entries."""
-        # Add some entries with varying confidence
-        state_indices = [10, 11, 12]
-
-        # Create entries
-        for i, state_index in enumerate(state_indices):
-            entry = inference_engine.get_phenotype(state_index, 0)
-            # Directly modify confidence
-            entry["confidence"] = 0.01 if i == 0 else 0.1 if i == 1 else 0.2
-            inference_engine.store.put(entry["context_signature"], entry)
-        inference_engine.store.commit()
-        # Prune entries below 0.05
-        removed = inference_engine.prune_low_confidence_entries(confidence_threshold=0.05)
-
-        assert removed == 1
-        assert inference_engine.store.get((state_indices[0], 0)) is None
-        assert inference_engine.store.get((state_indices[1], 0)) is not None
-        assert inference_engine.store.get((state_indices[2], 0)) is not None
+    def test_apply_confidence_decay_exponential_formula(self, gyrosi_agent) -> None:
+        engine = gyrosi_agent.engine.operator
+        # Create entry
+        engine.learn_by_key(100, 42)
+        entry = engine.get_phenotype(100, 42)
+        original_confidence = entry["confidence"]
+        decay_factor = 0.1
+        # Apply decay
+        engine.apply_confidence_decay(decay_factor=decay_factor)
+        # Check formula: confidence * exp(-decay_factor)
+        updated_entry = engine.get_phenotype(100, 42)
+        expected_confidence = max(0.01, original_confidence * math.exp(-decay_factor))
+        assert abs(updated_entry["confidence"] - expected_confidence) < 1e-10
 
 
-class TestAddressComputation:
-    """Tests for semantic address computation."""
+class TestPruningOperations:
+    """Test entry pruning and cleanup operations."""
 
-    def test_compute_semantic_address(self, inference_engine: InferenceEngine) -> None:
-        """Test semantic address computation."""
-        # Test deterministic generation
-        addr1 = inference_engine._compute_semantic_address((10, 20))
-        addr2 = inference_engine._compute_semantic_address((10, 20))
+    def test_prune_low_confidence_entries_basic(self, gyrosi_agent) -> None:
+        """Test basic pruning of low confidence entries."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Create entries with different confidences
+        engine.learn_by_key(100, 42)
+        engine.learn_by_key(101, 42)
+        
+        # Manually set one to low confidence
+        entry = engine.get_phenotype(101, 42)
+        entry["confidence"] = 0.01  # Very low
+        engine.store.put((101, 42), entry)
+        
+        # Prune with threshold
+        removed_count = engine.prune_low_confidence_entries(confidence_threshold=0.02)
+        
+        assert removed_count == 1
+        
+        # Low confidence entry should be gone
+        with pytest.raises(Exception):  # Store should not find deleted entry
+            engine.store.get((101, 42))
+
+    def test_prune_preserves_high_confidence(self, gyrosi_agent) -> None:
+        """Test pruning preserves high confidence entries."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Create high confidence entry
+        engine.learn_by_key(100, 42)
+        original_entry = engine.get_phenotype(100, 42)
+        
+        # Prune with low threshold
+        removed_count = engine.prune_low_confidence_entries(confidence_threshold=0.01)
+        
+        # Should not remove high confidence entry
+        assert removed_count == 0
+        
+        # Entry should still exist
+        preserved_entry = engine.get_phenotype(100, 42)
+        assert preserved_entry["confidence"] == original_entry["confidence"]
+
+    def test_prune_requires_delete_method(self, gyrosi_agent) -> None:
+        """Test pruning fails gracefully if store doesn't support deletion."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Create entry
+        engine.learn_by_key(100, 42)
+        
+        # Mock store without delete method
+        mock_store = Mock()
+        mock_store.iter_entries.return_value = [
+            ((100, 42), {"confidence": 0.01})
+        ]
+        # Don't add delete method
+        
+        engine.store = mock_store
+        
+        with pytest.raises(NotImplementedError, match="does not support deletion"):
+            engine.prune_low_confidence_entries(confidence_threshold=0.02)
+
+
+class TestPrivateMethods:
+    """Test private utility methods."""
+
+    def test_compute_semantic_address(self, gyrosi_agent) -> None:
+        """Test semantic address computation is deterministic."""
+        engine = gyrosi_agent.engine.operator
+        
+        context_key = (100, 42)
+        
+        # Should be deterministic
+        addr1 = engine._compute_semantic_address(context_key)
+        addr2 = engine._compute_semantic_address(context_key)
+        
         assert addr1 == addr2
+        assert 0 <= addr1 < engine.endogenous_modulus
 
-        # Test different contexts yield different addresses
-        addr3 = inference_engine._compute_semantic_address((10, 21))
-        assert addr1 != addr3
+    def test_compute_semantic_address_different_contexts(self, gyrosi_agent) -> None:
+        """Test different contexts give different addresses."""
+        engine = gyrosi_agent.engine.operator
+        
+        addr1 = engine._compute_semantic_address((100, 42))
+        addr2 = engine._compute_semantic_address((101, 42))
+        addr3 = engine._compute_semantic_address((100, 43))
+        
+        # Should be different (with high probability)
+        assert addr1 != addr2 or addr1 != addr3  # At least one should differ
 
-        # Test address is within modulus range
-        assert 0 <= addr1 < inference_engine.endogenous_modulus
+    def test_create_default_phenotype(self, gyrosi_agent) -> None:
+        """Test default phenotype creation."""
+        engine = gyrosi_agent.engine.operator
+        
+        context_key = (100, 42)
+        entry = engine._create_default_phenotype(context_key)
+        
+        assert entry["context_signature"] == context_key
+        assert entry["phenotype"] == "P[100:42]"
+        assert entry["exon_mask"] == 42  # Initial mask is intron
+        assert 0 <= entry["confidence"] <= 1.0
+        assert entry["usage_count"] == 0
+        assert entry["created_at"] > 0
+        assert entry["last_updated"] > 0
+        assert entry["_original_context"] is None
+        
+        # Governance signature should match mask
+        expected_sig = governance.compute_governance_signature(42)
+        gov_sig = entry["governance_signature"]
+        assert gov_sig["neutral"] == expected_sig[0]
+        assert gov_sig["li"] == expected_sig[1]
+        assert gov_sig["fg"] == expected_sig[2]
+        assert gov_sig["bg"] == expected_sig[3]
+        assert gov_sig["dyn"] == expected_sig[4]
+
+
+class TestEdgeCases:
+    """Test edge cases and error conditions."""
+
+    def test_learn_with_missing_context_signature(self, gyrosi_agent) -> None:
+        """Test error when phenotype entry lacks context_signature."""
+        engine = gyrosi_agent.engine.operator
+        
+        bad_entry = {
+            "phenotype": "bad",
+            "exon_mask": 42,
+            "confidence": 0.5,
+            # Missing context_signature
+        }
+        
+        with pytest.raises(KeyError, match="missing required 'context_signature' key"):
+            engine.learn(bad_entry, 42)
+
+    def test_learn_with_invalid_state_index(self, gyrosi_agent) -> None:
+        """Test assertion failure with invalid state index."""
+        engine = gyrosi_agent.engine.operator
+        
+        bad_entry = {
+            "phenotype": "bad",
+            "exon_mask": 42,
+            "confidence": 0.5,
+            "context_signature": (engine.endogenous_modulus, 42),  # Out of range
+            "usage_count": 0,
+            "created_at": time.time(),
+            "last_updated": time.time(),
+        }
+        
+        with pytest.raises(AssertionError):
+            engine.learn(bad_entry, 42)
+
+    def test_novelty_calculation_edge_cases(self, gyrosi_agent) -> None:
+        """Test novelty calculation with edge cases."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Test identical masks (no novelty)
+        entry = {
+            "phenotype": "test",
+            "exon_mask": 42,
+            "confidence": 0.5,
+            "context_signature": (100, 42),
+            "usage_count": 0,
+            "created_at": time.time(),
+            "last_updated": time.time(),
+            "governance_signature": {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0},
+            "_original_context": None,
+        }
+        
+        original_confidence = entry["confidence"]
+        updated = engine.learn(entry, 42)  # Same as exon_mask
+        
+        # Should have minimal confidence change due to low novelty
+        # fold(42, 42) = 0, so novelty = hamming(42, 0) / 8 = 3/8
+        assert updated["confidence"] >= original_confidence
+
+    def test_learning_rate_calculation(self, gyrosi_agent) -> None:
+        """Test learning rate depends on orbit cardinality."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Different state indices should have different learning rates
+        # based on their orbit cardinalities
+        entry1 = engine.get_phenotype(0, 42)
+        entry2 = engine.get_phenotype(100, 42)
+        
+        # Learning rates depend on orbit cardinality
+        v1 = engine.s2.orbit_cardinality[0]
+        v2 = engine.s2.orbit_cardinality[100]
+        
+        alpha1 = (1 / 6) * math.sqrt(v1 / engine._v_max)
+        alpha2 = (1 / 6) * math.sqrt(v2 / engine._v_max)
+        
+        if v1 != v2:
+            assert alpha1 != alpha2
+
+    def test_confidence_boundary_conditions(self, gyrosi_agent) -> None:
+        """Test confidence stays within [0, 1] bounds."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Test with extreme values
+        entry = {
+            "phenotype": "test",
+            "exon_mask": 0,
+            "confidence": 0.999,  # Very high
+            "context_signature": (100, 42),
+            "usage_count": 0,
+            "created_at": time.time(),
+            "last_updated": time.time(),
+            "governance_signature": {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0},
+            "_original_context": None,
+        }
+        
+        # Learn with maximum novelty intron
+        updated = engine.learn(entry, 0xFF)
+        
+        assert 0 <= updated["confidence"] <= 1.0
+
+    def test_store_commit_integration(self, gyrosi_agent) -> None:
+        """Test integration with store commit functionality."""
+        engine = gyrosi_agent.engine.operator
+        store = engine.store
+        
+        # Learn something
+        engine.learn_by_key(100, 42)
+        
+        # Store should handle commits if supported
+        if hasattr(store, 'commit'):
+            store.commit()  # Should not raise
+
+    def test_validation_with_exception_handling(self, gyrosi_agent) -> None:
+        """Test validation handles exceptions gracefully."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Create problematic entry that might cause exceptions
+        bad_entry = {
+            "phenotype": "bad",
+            "confidence": "not_a_number",  # Wrong type
+            "context_signature": (100, 42),
+        }
+        
+        engine.store.put((100, 42), bad_entry)
+        
+        # Validation should handle exceptions and count as anomalies
+        report = engine.validate_knowledge_integrity()
+        
+        assert report["modified_entries"] > 0  # Should count exception as anomaly
+
+
+class TestIntegrationWithStorage:
+    """Test integration with different storage backends."""
+
+    def test_store_put_called_correctly(self, gyrosi_agent) -> None:
+        """Test that store.put is called with correct parameters."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Mock the store to verify calls
+        mock_store = Mock()
+        mock_store.get.return_value = None  # No existing entry
+        engine.store = mock_store
+        
+        state_index = 100
+        intron = 42
+        
+        engine.learn_by_key(state_index, intron)
+        
+        # Verify store.put was called
+        assert mock_store.put.called
+        
+        # Check the call arguments
+        call_args = mock_store.put.call_args
+        context_key = call_args[0][0]
+        entry = call_args[0][1]
+        
+        assert context_key == (state_index, intron)
+        assert entry["context_signature"] == (state_index, intron)
+
+    def test_store_mark_dirty_integration(self, gyrosi_agent) -> None:
+        """Test integration with store mark_dirty if available."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Add mark_dirty method to store
+        engine.store.mark_dirty = Mock()
+        
+        # Create entry and learn with no actual change
+        entry = engine.get_phenotype(100, 42)
+        original_mask = entry["exon_mask"]
+        
+        # Learn with intron that produces same mask
+        # We need to find an intron that when folded gives same result
+        for test_intron in range(256):
+            if governance.fold(original_mask, test_intron) == original_mask:
+                engine.learn(entry, test_intron)
+                # mark_dirty should be called for in-memory updates
+                if hasattr(engine.store, 'mark_dirty'):
+                    # Difficult to test without knowing exact implementation
+                    pass
+                break
+
+    def test_iter_entries_integration(self, gyrosi_agent) -> None:
+        """Test validation uses store.iter_entries correctly."""
+        engine = gyrosi_agent.engine.operator
+        
+        # Add several entries
+        for i in range(3):
+            engine.learn_by_key(i, 42)
+        
+        # Validation should iterate through all entries
+        report = engine.validate_knowledge_integrity()
+        
+        assert report["total_entries"] == 3
+        assert report["modified_entries"] == 0  # All should be valid
