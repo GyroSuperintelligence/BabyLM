@@ -4,6 +4,21 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 
 ---
 
+## [0.9.6.5] – 2025-07-26
+
+### Fixed
+* **Phenomenology artefact bug**: `orbit_sizes.npy` now records the orbit cardinality
+  for **every** one of the 788,986 states, not just the 256 representatives.
+  This restores non-zero `InformationEngine.orbit_cardinality[i]` for all i
+  and re-enables variety-weighted confidence updates.
+
+### Notes
+* Canonical orbit mapping (256 SCCs) is unchanged; only the per-state size
+  array was affected.
+* Updated tests to expect correct behavior (all states have non-zero cardinality).
+
+---
+
 ## [0.9.6.4] – 2025-07-26
 
 **New Auto-Pruning Functionality** 
