@@ -5,7 +5,6 @@ S4/5: Intelligence – Orchestration & API
 
 from __future__ import annotations
 
-import json
 import os
 import time
 import uuid
@@ -13,9 +12,10 @@ from collections import OrderedDict, deque
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple, TypedDict, cast
 
-import numpy as np
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
+
+import numpy as np
 
 from baby import governance
 from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig
@@ -89,7 +89,9 @@ class IntelligenceEngine:
         All file paths are resolved with respect to base_path unless absolute.
         """
         self.base_path = base_path
-        self.ontology_path = _abs(ontology_path, self.base_path)
+        self.ontology_path = _abs(
+            ontology_path if ontology_path is not None else "memories/public/meta/ontology_keys.npy", self.base_path
+        )
         self.epistemology_path = _abs(
             (
                 epistemology_path
@@ -102,12 +104,17 @@ class IntelligenceEngine:
             (
                 phenomenology_map_path
                 if phenomenology_map_path is not None
-                else str(Path(self.ontology_path).with_name("phenomenology_map.json"))
+                else str(Path(self.ontology_path).with_name("phenomenology_map.npy"))
             ),
             self.base_path,
         )
         # Initialize subsystem engines
-        self.s2: InformationEngine = InformationEngine(self._load_ontology(self.ontology_path))
+        self.s2: InformationEngine = InformationEngine(
+            self.ontology_path,  # keys_path
+            self.epistemology_path,
+            self.phenomenology_map_path,
+            str(Path(self.ontology_path).with_name("theta.npy")),
+        )
         self.operator: InferenceEngine = InferenceEngine(self.s2, phenotype_store)
 
         # Agent state
@@ -118,8 +125,6 @@ class IntelligenceEngine:
         self._cached_state_int: int = 0  # Only used if use_epistemology is True
         if self.epistemology_path and os.path.exists(self.epistemology_path):
             try:
-                import numpy as np
-
                 self.epistemology = np.load(self.epistemology_path, mmap_mode="r")
                 self.use_epistemology = True
                 print("INFO: State Transition Table (STT) loaded. Using optimized state transitions.")
@@ -150,10 +155,10 @@ class IntelligenceEngine:
         self._cool_introns: tuple[int, ...] = (0b01000010,)
         try:
             if self.phenomenology_map_path and os.path.exists(self.phenomenology_map_path):
-                with open(self.phenomenology_map_path) as f:
-                    pheno_data = json.load(f)
-                    self._autonomic_cycles: list[Any] = pheno_data.get("autonomic_cycles", [])
-                    self._autonomic_cycles_curated: dict[str, Any] = pheno_data.get("autonomic_cycles_curated", {})
+                # The .npy file does not contain autonomic_cycles; set to empty
+                _ = np.load(self.phenomenology_map_path, mmap_mode="r")
+                self._autonomic_cycles: list[Any] = []
+                self._autonomic_cycles_curated: dict[str, Any] = {}
             else:
                 self._autonomic_cycles = []
                 self._autonomic_cycles_curated = {}
@@ -371,12 +376,6 @@ class IntelligenceEngine:
         self._sync_index_from_state_int()
         self.cycle_count = 0
 
-    def _load_ontology(self, ontology_path: str) -> Dict[str, Any]:
-        """Loads the ontology data from a JSON file as ManifoldData."""
-        with open(ontology_path, "r") as f:
-            data = json.load(f)
-        return dict(data)
-
     def _sync_state_fields_from_index(self) -> None:
         if self.use_epistemology:
             self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
@@ -498,10 +497,8 @@ class GyroSI:
         # Only assign keys that are valid for AgentConfig
         if "phenomenology_map_path" not in self.config or not self.config["phenomenology_map_path"]:
             onto = self.config.get("ontology_path")
-            if onto is not None:
-                self.config["phenomenology_map_path"] = str(Path(onto).with_name("phenomenology_map.json"))
-            else:
-                raise ValueError("ontology_path must be set in config")
+            assert isinstance(onto, str)
+            self.config["phenomenology_map_path"] = str(Path(onto).with_name("phenomenology_map.npy"))
         if "base_path" not in self.config or not self.config["base_path"]:
             self.config["base_path"] = str(self.base_path / "memories")
         self.agent_id = agent_id or str(uuid.uuid4())
@@ -511,6 +508,7 @@ class GyroSI:
         onto = self.config.get("ontology_path")
         if onto is None:
             raise ValueError("ontology_path must be set in config")
+        assert isinstance(onto, str)
         epistemology_path = str(Path(onto).with_name("epistemology.npy"))
         self.engine = IntelligenceEngine(
             ontology_path=onto,
@@ -670,7 +668,7 @@ class GyroSI:
             phenomenology_map_path = self.config.get("phenomenology_map_path")
         # Ensure phenomenology_map_path is always a str before use
         if phenomenology_map_path is None:
-            phenomenology_map_path = str(self.base_path / "memories/public/meta/phenomenology_map.json")
+            phenomenology_map_path = str(self.base_path / "memories/public/meta/phenomenology_map.npy")
         if enable_phenomenology or (
             enable_phenomenology is None and phenomenology_map_path and os.path.exists(phenomenology_map_path)
         ):
@@ -735,7 +733,9 @@ class AgentPool:
         if private_agents_base_path is None:
             private_agents_base_path = str(self.base_path / "memories/private/agents")
         self.private_agents_base_path = private_agents_base_path
-        self.ontology_path = _abs(ontology_path, self.base_path)
+        self.ontology_path = _abs(
+            ontology_path if ontology_path is not None else "memories/public/meta/ontology_keys.npy", self.base_path
+        )
         self.base_knowledge_path = _abs(base_knowledge_path, self.base_path)
         self.preferences = preferences or {}
         # cast preferences to a dict so .get is allowed
@@ -798,7 +798,7 @@ class AgentPool:
                     "private_knowledge_path": private_path,
                     "phenomenology_map_path": str(
                         self.preferences.get("phenomenology_map_path")
-                        or str(Path(self.ontology_path).with_name("phenomenology_map.json"))
+                        or str(Path(self.ontology_path).with_name("phenomenology_map.npy"))
                     ),
                     "private_agents_base_path": str(self.private_agents_base_path),
                     "base_path": str(self.base_path),
@@ -832,7 +832,7 @@ class AgentPool:
     # NEW: explicit creation API (ignores allowed_ids, but still respects base path etc.)
     def create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
         onto = self.ontology_path
-        phenomap = str(Path(onto).with_name("phenomenology_map.json"))
+        phenomap = str(Path(onto).with_name("phenomenology_map.npy"))
         private_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.mpk")
         private_path = _abs(private_rel, self.base_path)
         config: AgentConfig = {

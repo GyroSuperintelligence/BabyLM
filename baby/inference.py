@@ -34,7 +34,8 @@ class InferenceEngine:
         """
         self.s2 = s2_engine
         self.store = phenotype_store
-        self.endogenous_modulus = self.s2.endogenous_modulus
+        assert self.s2._keys is not None
+        self.endogenous_modulus = len(self.s2._keys)
 
         # Cache the maximum variety to avoid recomputation
         oc = self.s2.orbit_cardinality

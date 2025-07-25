@@ -4,7 +4,16 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 
 ---
 
-## [0.9.6.3] – 2025-07-24
+## [0.9.6.4] – 2025-07-24
+
+**Scope:** Tests, Tests, Tests - Corrections, Corrections, Corrections... 
+
+- Flake8, Pyright, Mypy Error Free
+- Pyright Robust Agent Isolation finally achieved! No littering or polution to our main data (somehow this silly thing proved to be a heck of a challenge!)
+- Pyright Pass
+---
+
+## [0.9.6.4] – 2025-07-24
 
 **Scope:** Performance, Storage, and Runtime Optimizations
 

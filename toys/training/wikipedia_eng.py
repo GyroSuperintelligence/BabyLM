@@ -177,7 +177,7 @@ class RobustTrainingConfig:
     dataset_name: str = "plaintext-wikipedia-full-english"
 
     # Model config
-    ontology_path: Path = PROJECT_ROOT / "memories/public/meta/ontology_map.json"
+    ontology_path: Path = PROJECT_ROOT / "memories/public/meta/ontology_map.npy"
     # msgpack append‑only store lives in one .mpk file – NO .log/.idx any more
     knowledge_path: Path = training_dir / "knowledge/wikipedia_knowledge.mpk"
     tokenizer_name: str = "bert-base-uncased"

@@ -18,20 +18,13 @@ This module provides the InformationEngine class responsible for measurement,
 storage coordination, and conversion between state representations.
 
 Build steps:
-    python -m baby.information ontology     --output memories/public/meta/ontology_map.json
-    python -m baby.information epistemology --ontology memories/public/meta/ontology_map.json \
+    python -m baby.information ontology     --output memories/public/meta/ontology_keys.npy
+    python -m baby.information epistemology --keys memories/public/meta/ontology_keys.npy \
            --output  memories/public/meta/epistemology.npy
     python -m baby.information phenomenology --ep memories/public/meta/epistemology.npy \
-           --ontology memories/public/meta/ontology_map.json \
-           --output memories/public/meta/phenomenology_map.json
+           --keys memories/public/meta/ontology_keys.npy \
+           --output memories/public/meta/phenomenology_map.npy
 """
-
-
-# Try to use ujson for speed, fall back to standard json if unavailable
-try:
-    import ujson as json
-except ImportError:
-    import json  # type: ignore[no-redef]
 
 
 class InformationEngine:
@@ -45,116 +38,41 @@ class InformationEngine:
     as numpy arrays for better memory/cache performance.
     """
 
-    ontology_map: Optional[Dict[int, int]]
-    inverse_ontology_map: Optional[Dict[int, int]]
     _keys: NDArray[np.uint64] | None
     _inverse: NDArray[np.uint64] | None
+    ontology_map: None
+    inverse_ontology_map: None
+    use_array_indexing: bool
     orbit_cardinality: NDArray[np.uint32]
+    _theta_table: NDArray[np.float32] | None
+    _v_max: int
 
-    def __init__(
-        self,
-        ontology_data: Dict[str, Any],
-        use_array_indexing: Optional[bool] = None,
-        strict_validation: bool = True,
-    ):
-        # Auto-enable array indexing if not set and large ontology
-        if use_array_indexing is None:
-            use_array_indexing = ontology_data["endogenous_modulus"] > 100_000
-        self.use_array_indexing = use_array_indexing
-        self.ontology_map = ontology_data["ontology_map"]
-        if self.ontology_map is not None:
-            keys = list(self.ontology_map.keys())
-            if keys and isinstance(keys[0], str):
-                self.ontology_map = {int(k): v for k, v in self.ontology_map.items()}
-        self.endogenous_modulus = ontology_data["endogenous_modulus"]
-        self.ontology_diameter = ontology_data["ontology_diameter"]
-
-        if use_array_indexing:
-            # Note: This assumes ontology indices were assigned in sorted order of state integers
-            # If ontology was generated differently, this implicitly redefines indices via sorted position
-            if self.ontology_map is None:
-                raise RuntimeError("Ontology map must be provided.")
-            keys_arr = np.array(sorted(self.ontology_map.keys()), dtype=np.uint64)
-            # Assert that the mapping is index == sorted position (array mode assumption)
-            sorted_map = self.ontology_map
-            assert all(v == i for i, v in enumerate(sorted_map.values())), (
-                "Ontology map indices must match sorted order for array mode. "
-                "If this fails, store a real inverse array instead."
-            )
-            self._keys = keys_arr
-            self._inverse = keys_arr  # index -> state_int
-            # Free memory: drop the original mapping in array mode
-            self.ontology_map = None
-            self.inverse_ontology_map = None  # free memory
-        else:
-            self._keys = None
-            self._inverse = None
-            if self.ontology_map is not None:
-                self.inverse_ontology_map = {v: k for k, v in self.ontology_map.items()}
-            else:
-                self.inverse_ontology_map = None
-
-        # Validate expected constants (allow override for testing)
-        if strict_validation:
-            if self.endogenous_modulus != 788_986:
-                raise ValueError(f"Expected endogenous modulus 788,986, got {self.endogenous_modulus}")
-            if self.ontology_diameter != 6:
-                raise ValueError(f"Expected ontology diameter 6, got {self.ontology_diameter}")
-
-        # Load orbit sizes if available
-        self.orbit_cardinality = np.ones(self.endogenous_modulus, dtype=np.uint32)
-        phenomap_path = ontology_data.get("phenomap_path")
-        if not phenomap_path and "ontology_map_path" in ontology_data:
-            phenomap_path = ontology_data["ontology_map_path"].replace("ontology_map.json", "phenomenology_map.json")
-        if not phenomap_path:
-            phenomap_path = "memories/public/meta/phenomenology_map.json"
-
-        if os.path.exists(phenomap_path):
-            with open(phenomap_path) as f:
-                payload = json.load(f)
-
-            pheno_map = payload.get("phenomenology_map")
-            orbit_sizes = payload.get("orbit_sizes", {})
-
-            if pheno_map and isinstance(pheno_map, list):
-                pheno_arr = np.array(pheno_map, dtype=np.int32)
-                # Fast vectorized fill: look up size via representative
-                size_lookup = np.ones(self.endogenous_modulus, dtype=np.uint32)
-                for rep_str, sz in orbit_sizes.items():
-                    size_lookup[int(rep_str)] = int(sz)
-                self.orbit_cardinality = size_lookup[pheno_arr]
-            else:
-                # Fallback: keep all ones
+    def __init__(self, keys_path: str, ep_path: str, phenomap_path: str, theta_path: str):
+        import numpy as np
+        self._keys = np.load(keys_path, mmap_mode="r")
+        self._inverse = self._keys
+        self.ontology_map = None
+        self.inverse_ontology_map = None
+        self.use_array_indexing = True
+        self.ep = np.load(ep_path, mmap_mode="r")
+        self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
+        if phenomap_path:
+            try:
+                pheno = np.load(phenomap_path, mmap_mode="r")
+                # Optionally, set up any additional attributes if needed
+            except Exception:
                 pass
-
-        # Load θ table (theta.npy) if available, or auto-generate if missing
-        self._theta_table = None
-        default_theta = "memories/public/meta/theta.npy"
-        if "ontology_map_path" in ontology_data:
-            default_theta = ontology_data["ontology_map_path"].replace("ontology_map.json", "theta.npy")
-        elif "phenomap_path" in ontology_data:
-            default_theta = ontology_data["phenomap_path"].replace("phenomenology_map.json", "theta.npy")
-        if not os.path.exists(default_theta):
-            # Auto-generate theta.npy if missing
-            print(f"[INFO] theta.npy not found at {default_theta}, generating...")
-            # Get ontology map
-            if self.use_array_indexing and self._keys is not None:
-                states = self._keys
-            elif self.ontology_map is not None:
-                states = np.array(sorted(self.ontology_map.keys()), dtype=np.uint64)
-            else:
-                raise RuntimeError("Cannot generate theta.npy: ontology map not available.")
-            origin = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
-            acos_lut = np.arccos(1 - 2 * np.arange(49) / 48.0).astype(np.float32)
-            theta = np.empty(len(states), dtype=np.float32)
-            for i, s in enumerate(states):
-                h = int(s ^ origin).bit_count()
-                theta[i] = acos_lut[h]
-            os.makedirs(os.path.dirname(default_theta) or ".", exist_ok=True)
-            np.save(default_theta, theta)
-            print(f"[INFO] theta.npy generated and saved to {default_theta}")
-        if os.path.exists(default_theta):
-            self._theta_table = np.load(default_theta, mmap_mode="r")
+        if theta_path:
+            try:
+                self._theta_table = np.load(theta_path, mmap_mode="r")
+            except Exception:
+                self._theta_table = None
+        else:
+            self._theta_table = None
+        self._v_max = 1 if self.orbit_cardinality is None else int(np.max(self.orbit_cardinality))
+        # Early fail if theta.npy is missing or corrupt
+        if self._theta_table is None:
+            raise RuntimeError("theta.npy is missing or corrupt; required for divergence calculations.")
 
     def get_index_from_state(self, state_int: int) -> int:
         """
@@ -204,6 +122,7 @@ class InformationEngine:
         if self.use_array_indexing:
             if self._inverse is None:
                 raise RuntimeError("Array indexing arrays not initialized.")
+            assert self._inverse is not None
             if index < 0 or index >= len(self._inverse):
                 raise ValueError(f"Index {index} out of bounds for array indexing.")
             return int(self._inverse[index])
@@ -212,7 +131,8 @@ class InformationEngine:
                 raise RuntimeError("inverse_ontology_map not initialized.")
             state_int = self.inverse_ontology_map.get(index)
             if state_int is None:
-                raise ValueError(f"Invalid index {index}, must be 0 to {self.endogenous_modulus - 1}")
+                assert self._keys is not None
+                raise ValueError(f"Invalid index {index}, must be 0 to {len(self._keys) - 1}")
             return state_int
 
     @staticmethod
@@ -359,7 +279,7 @@ def open_memmap_int32(
 # ==============================================================================
 # STEP 1: Ontology Discovery
 # ==============================================================================
-def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
+def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.uint64]]:
     """Discovers the complete 788,986 state manifold via BFS."""
     progress = ProgressReporter("Discovering ontology")
 
@@ -398,39 +318,24 @@ def discover_and_save_ontology(output_path: str) -> Dict[int, int]:
     if depth != 6:
         raise RuntimeError(f"Expected diameter 6, found {depth}")
 
-    # Create mapping
-    ontology_map = {state: idx for idx, state in enumerate(sorted(discovered))}
-
-    # Save
+    # Save sorted keys as npy
+    keys = np.array(sorted(discovered), dtype=np.uint64)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, "w") as f:
-        json_compatible_map = {str(k): v for k, v in ontology_map.items()}
-        json.dump(
-            {
-                "schema_version": "0.9.6",
-                "ontology_map": json_compatible_map,
-                "endogenous_modulus": 788_986,
-                "ontology_diameter": 6,
-                "total_states": 788_986,
-                "build_timestamp": int(time.time()),
-                "ontology_map_path": output_path,
-                "theta_path": output_path.replace("ontology_map.json", "theta.npy"),
-            },
-            f,
-        )
+    np.save(output_path, keys)
+    print(f"✓ Saved ontology keys to: {output_path}")
 
-    return ontology_map
+    return keys
 
 
 # ==============================================================================
 # STEP 2: Epistemology Table
 # ==============================================================================
-def build_state_transition_table(ontology_map: Dict[int, int], output_path: str) -> None:
+def build_state_transition_table(keys_path: str, output_path: str) -> None:
     """Builds the N×256 state transition table with validation."""
     progress = ProgressReporter("Building epistemology")
 
-    N = len(ontology_map)
-    states = np.array(sorted(ontology_map.keys()), dtype=np.uint64)
+    states = np.load(keys_path, mmap_mode="r")
+    N = len(states)
 
     # ----- θ table (angular divergence from origin) -----
     theta_path = output_path.replace("epistemology.npy", "theta.npy")
@@ -548,134 +453,31 @@ def _compute_sccs(
     return canonical, orbit_sizes, reps
 
 
-def build_phenomenology_map(
-    ep_path: str, ontology_path: str, output_path: str, include_diagnostics: bool = False
-) -> None:
+def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> None:
     """
     Builds the canonical phenomenology map for GyroSI runtime operations.
-
-    The core phenomenology uses SCCs over all 256 introns, creating 256 parity-closed
-    orbits. This honors the theoretical principle that CS (Common Source) is unobservable
-    and that UNA (global parity/LI) represents the reflexive confinement of light itself.
-
-    Each orbit is self-mirrored, meaning states and their parity complements belong to
-    the same equivalence class. This preserves the fundamental symmetry while providing
-    the deterministic canonicalization needed for the knowledge store.
-
     Args:
         ep_path: Path to epistemology.npy
-        ontology_path: Path to ontology_map.json
-        output_path: Path to save phenomenology_map.json
-        include_diagnostics: If True, also compute parity-free analysis for research
+        keys_path: Path to ontology_keys.npy
+        output_path: Path to save phenomenology_map.npy
     """
     print("=== [Phenomenology Core Builder] ===")
 
     # Load data
     ep = np.load(ep_path, mmap_mode="r")
-    with open(ontology_path) as f:
-        ontology_data = json.load(f)
-    N = ep.shape[0]
+    keys = np.load(keys_path, mmap_mode="r")
 
     # Build index→state lookup array
-    idx_to_state = np.empty(N, dtype=np.uint64)
-    for k_str, idx in ontology_data["ontology_map"].items():
-        idx_to_state[idx] = int(k_str)
+    idx_to_state = keys
 
     # Core: Compute canonical phenomenology (all 256 introns)
     print("Computing canonical phenomenology (all 256 introns)...")
     all_introns = list(range(256))
-    canonical, orbit_sizes, representatives = _compute_sccs(ep, idx_to_state, all_introns)
-    print(f"  Found {len(representatives)} canonical orbits (expected 256)")
-
-    # Create core artifact
-    artifact: Dict[str, Any] = {
-        "schema_version": "phenomenology/core/1.0.0",
-        "phenomenology_map": canonical.tolist(),
-        "orbit_sizes": {str(k): int(v) for k, v in orbit_sizes.items()},
-        "metadata": {
-            "total_states": N,
-            "total_orbits": len(representatives),
-            "largest_orbit": int(max(orbit_sizes.values())) if orbit_sizes else 0,
-            "build_timestamp": int(time.time()),
-            "construction": {
-                "method": "scc_all_introns",
-                "notes": [
-                    "Canonical phenomenology with LI (global parity) included.",
-                    "Each orbit is parity-closed and self-mirrored.",
-                    "This honors the principle that CS (Common Source) is unobservable.",
-                    "UNA (LI) represents reflexive confinement - the 'light' that cannot be stepped outside of.",
-                ],
-            },
-        },
-    }
-
-    # Optional: Add diagnostic analysis
-    if include_diagnostics:
-        print("Computing diagnostic analysis (parity-free structure)...")
-
-        # Global parity (LI) bit mask pattern
-        LI_MASK = 0b01000010
-        parity_free_introns = [i for i in all_introns if not (i & LI_MASK)]
-        canonical_pf, orbit_sizes_pf, reps_pf = _compute_sccs(ep, idx_to_state, parity_free_introns)
-
-        # Mirror pair analysis on parity-free structure
-        mirror_map: Dict[int, int] = {}
-        for rep in reps_pf:
-            if rep in mirror_map:
-                continue
-            state_int = int(idx_to_state[rep])
-            mirror_state = state_int ^ governance.FULL_MASK
-
-            m_pos = np.searchsorted(idx_to_state, mirror_state)
-            if m_pos >= N or idx_to_state[m_pos] != mirror_state:
-                mirror_map[rep] = -1
-                continue
-
-            mirror_rep = int(canonical_pf[m_pos])
-            mirror_map[rep] = mirror_rep
-            mirror_map[mirror_rep] = rep
-
-        mirror_pairs = [(a, b) for a, b in mirror_map.items() if a < b and b != -1]
-
-        # Cross-layer mapping analysis
-        pf_to_canonical = {pf_rep: int(canonical[pf_rep]) for pf_rep in reps_pf}
-        split_counter: Dict[int, int] = {}
-        for canonical_rep in pf_to_canonical.values():
-            split_counter[canonical_rep] = split_counter.get(canonical_rep, 0) + 1
-        split_histogram: Dict[str, int] = {}
-        for count in split_counter.values():
-            split_histogram[str(count)] = split_histogram.get(str(count), 0) + 1
-
-        # Add diagnostics to artifact
-        artifact["_diagnostics"] = {
-            "note": "Research data - not used by runtime engines",
-            "parity_free_analysis": {
-                "total_orbits": len(reps_pf),
-                "mirror_pairs": len(mirror_pairs),
-                "largest_orbit": int(max(orbit_sizes_pf.values())) if orbit_sizes_pf else 0,
-                "canonical_orbit_split_histogram": split_histogram,
-            },
-            "theoretical_insights": [
-                f"Removing LI reveals {len(reps_pf)} fine-grained orbits vs {len(representatives)} canonical orbits",
-                f"Found {len(mirror_pairs)} chiral pairs and {len(reps_pf) - 2*len(mirror_pairs)} achiral orbits",
-                "This demonstrates the binding power of global parity (UNA/LI) in the system",
-            ],
-        }
-
-        print(f"  Diagnostic: {len(reps_pf)} parity-free orbits, {len(mirror_pairs)} mirror pairs")
-
-    # Save artifact
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(artifact, f, indent=2)
-
-    # Print summary
+    canonical, _, _ = _compute_sccs(ep, idx_to_state, all_introns)
+    print(f"  Found {len(np.unique(canonical))} canonical orbits (expected 256)")
+    # Save canonical as .npy
+    np.save(output_path, canonical.astype(np.int32))
     print(f"\n✓ Saved canonical phenomenology to: {output_path}")
-    print(f"  - Canonical orbits: {artifact['metadata']['total_orbits']}")
-    print(f"  - Largest orbit: {artifact['metadata']['largest_orbit']} states")
-    if include_diagnostics:
-        diag = artifact["_diagnostics"]["parity_free_analysis"]
-        print(f"  - Diagnostic: {diag['total_orbits']} parity-free orbits, {diag['mirror_pairs']} mirror pairs")
 
 
 def parse_args() -> argparse.Namespace:
@@ -685,20 +487,35 @@ def parse_args() -> argparse.Namespace:
 
     # Ontology
     p_ont = subparsers.add_parser("ontology", help="Step 1: Discover the full state manifold")
-    p_ont.add_argument("--output", required=True, help="Path to save ontology_map.json")
+    p_ont.add_argument(
+        "--output",
+        required=True,
+        help="Path to save ontology_keys.npy (recommended: memories/public/meta/ontology_keys.npy)",
+    )
 
     # Epistemology
     p_epi = subparsers.add_parser("epistemology", help="Step 2: Build state transition table")
-    p_epi.add_argument("--ontology", required=True, help="Path to ontology_map.json")
-    p_epi.add_argument("--output", required=True, help="Path to save epistemology.npy")
+    p_epi.add_argument(
+        "--keys", required=True, help="Path to ontology_keys.npy (recommended: memories/public/meta/ontology_keys.npy)"
+    )
+    p_epi.add_argument(
+        "--output",
+        required=True,
+        help="Path to save epistemology.npy (recommended: memories/public/meta/epistemology.npy)",
+    )
 
     # Phenomenology
     p_pheno = subparsers.add_parser("phenomenology", help="Step 3: Build canonical orbit map")
-    p_pheno.add_argument("--ep", required=True, help="Path to epistemology.npy")
-    p_pheno.add_argument("--output", required=True, help="Path to save phenomenology_map.json")
-    p_pheno.add_argument("--ontology", required=True, help="Path to ontology_map.json")
     p_pheno.add_argument(
-        "--diagnostics", action="store_true", help="Include parity-free analysis for research (optional)"
+        "--ep", required=True, help="Path to epistemology.npy (recommended: memories/public/meta/epistemology.npy)"
+    )
+    p_pheno.add_argument(
+        "--keys", required=True, help="Path to ontology_keys.npy (recommended: memories/public/meta/ontology_keys.npy)"
+    )
+    p_pheno.add_argument(
+        "--output",
+        required=True,
+        help="Path to save phenomenology_map.npy (recommended: memories/public/meta/phenomenology_map.npy)",
     )
 
     return parser.parse_args()
@@ -716,36 +533,15 @@ if __name__ == "__main__":
 
         elif args.command == "epistemology":
             print("=== [Step 2] Epistemology Table ===")
-            with open(args.ontology) as f:
-                ontology_data = json.load(f)
-            ontology_map = {int(k): v for k, v in ontology_data["ontology_map"].items()}
-            build_state_transition_table(ontology_map, args.output)
+            build_state_transition_table(args.keys, args.output)
             file_size = os.path.getsize(args.output) / 1024**2
             print(f"\n✓ Saved: {args.output}")
             print(f"✓ File size: {file_size:.1f} MB\n")
 
         elif args.command == "phenomenology":
             print("=== [Step 3] Phenomenology Mapping ===")
-            include_diag = getattr(args, "diagnostics", False)
-            build_phenomenology_map(args.ep, args.ontology, args.output, include_diag)
-
-            # Print final summary
-            with open(args.output) as f:
-                pheno = json.load(f)
-            with open(args.ontology) as f:
-                ont = json.load(f)
-
-            print("\n--- Final Summary ---")
-            print(f"Total states: {ont['endogenous_modulus']:,}")
-            print(f"Canonical orbits: {pheno['metadata']['total_orbits']} (parity-closed)")
-            print(f"Largest orbit: {pheno['metadata']['largest_orbit']:,} states")
-
-            if "_diagnostics" in pheno:
-                diag = pheno["_diagnostics"]["parity_free_analysis"]
-                print(
-                    f"Research diagnostic: {diag['total_orbits']} parity-free orbits, "
-                    f"{diag['mirror_pairs']} chiral pairs"
-                )
+            build_phenomenology_map(args.ep, args.keys, args.output)
+            # No final summary, as output is now a .npy file
 
         else:
             print("Unknown command", file=sys.stderr)

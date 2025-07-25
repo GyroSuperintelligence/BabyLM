@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, cast
 import sys
+import numpy as np
 
 from baby.contracts import MaintenanceReport
 
@@ -44,20 +45,10 @@ def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJEC
             return _phenomenology_map_cache[resolved_path]
         if not os.path.exists(resolved_path):
             raise FileNotFoundError(f"Phenomenology map not found: {resolved_path}")
-        with open(resolved_path, "r") as f:
-            loaded = json.load(f)
-            if isinstance(loaded, list):
-                raw_map = loaded
-            elif isinstance(loaded, dict) and "phenomenology_map" in loaded:
-                raw_map = loaded["phenomenology_map"]
-            else:
-                raise ValueError("Unrecognized phenomenology map format")
-            if isinstance(raw_map, list):
-                phen_map = {i: rep for i, rep in enumerate(raw_map)}
-            else:
-                phen_map = {int(k): int(v) for k, v in raw_map.items()}
-            _phenomenology_map_cache[resolved_path] = phen_map
-            return phen_map
+        arr = np.load(resolved_path, mmap_mode="r")
+        phen_map = {i: int(rep) for i, rep in enumerate(arr)}
+        _phenomenology_map_cache[resolved_path] = phen_map
+        return phen_map
 
 
 class OrbitStore:
@@ -233,9 +224,12 @@ class OrbitStore:
             self.index = {}
             return
         with open(self.index_path, "rb") as f:
-            raw_index = msgpack.unpackb(f.read(), raw=False, strict_map_key=False)
-            # Convert any list keys to tuples for compatibility
-            self.index = {tuple(k) if isinstance(k, list) else k: v for k, v in raw_index.items()}
+            raw_index = msgpack.unpackb(f.read(), raw=False, strict_map_key=True)
+            # Enforce all keys are tuples (should always be true now)
+            for k in raw_index:
+                if not isinstance(k, tuple):
+                    raise TypeError(f"Invalid key type in index: {type(k)}. All keys must be tuples.")
+            self.index = dict(raw_index)
 
     def _load_index(self) -> None:
         if self.append_only:
@@ -577,19 +571,14 @@ def merge_phenotype_maps(
     resolved_sources = [_abs(p, base_path) for p in source_paths]
 
     for path in resolved_sources:
-        log_path = Path(str(path) + ".log")
-        if log_path.exists() or path.endswith(".mpk"):
-            try:
-                if path.endswith(".mpk"):
-                    store = OrbitStore(path, append_only=True)
-                else:
-                    store = OrbitStore(path)
-                source_data = store.data  # dict
-                store.close()
-            except Exception:
-                continue
-        else:
-            # Only support OrbitStore; skip unsupported files
+        try:
+            if path.endswith(".mpk"):
+                store = OrbitStore(path, append_only=True)
+            else:
+                store = OrbitStore(path)
+            source_data = store.data  # dict
+            store.close()
+        except Exception:
             continue
 
         for context_key, entry in source_data.items():
@@ -782,15 +771,17 @@ def validate_ontology_integrity(
     ontology_path: str, phenomenology_map_path: Optional[str] = None, base_path: Path = PROJECT_ROOT
 ) -> MaintenanceReport:
     """
-    Validate the integrity of ontology data files.
+    Validate the integrity of ontology and phenomenology .npy files.
 
     Args:
-        ontology_path: Path to genotype map
-        phenomenology_map_path: Optional path to phenomenology map
+        ontology_path: Path to ontology_keys.npy
+        phenomenology_map_path: Optional path to phenomenology_map.npy
 
     Returns:
         Maintenance report
     """
+    import numpy as np
+
     start_time = time.time()
     issues = []
 
@@ -806,8 +797,7 @@ def validate_ontology_integrity(
         }
 
     try:
-        with open(resolved_ontology_path, "r") as f:
-            ontology_data = json.load(f)
+        keys = np.load(resolved_ontology_path, mmap_mode="r")
     except Exception:
         return {
             "operation": "validate_ontology_integrity",
@@ -817,23 +807,13 @@ def validate_ontology_integrity(
             "elapsed_seconds": 0,
         }
 
-    # Validate ontology structure
-    expected_keys = ["schema_version", "ontology_map", "endogenous_modulus", "ontology_diameter", "total_states"]
-
-    for key in expected_keys:
-        if key not in ontology_data:
-            issues.append(f"Missing required key: {key}")
-
-    # Validate constants
-    if ontology_data.get("endogenous_modulus") != 788_986:
-        issues.append(f"Invalid endogenous modulus: {ontology_data.get('endogenous_modulus')}")
-
-    if ontology_data.get("ontology_diameter") != 6:
-        issues.append(f"Invalid ontology diameter: {ontology_data.get('ontology_diameter')}")
-
-    ontology_map = ontology_data.get("ontology_map", {})
-    if len(ontology_map) != 788_986:
-        issues.append(f"Invalid ontology map size: {len(ontology_map)}")
+    # Validate keys array
+    if keys.shape[0] != 788_986:
+        issues.append(f"Invalid ontology keys array size: {keys.shape[0]}")
+    if keys.dtype != np.uint64:
+        issues.append(f"Ontology keys dtype should be uint64, got {keys.dtype}")
+    if not np.all(np.diff(keys) > 0):
+        issues.append("Ontology keys are not strictly increasing (not sorted or have duplicates)")
 
     # Check phenomenology map if provided
     phenomenology_issues = 0
@@ -842,40 +822,24 @@ def validate_ontology_integrity(
     )
     if resolved_phenomenology_map_path and os.path.exists(resolved_phenomenology_map_path):
         try:
-            with open(resolved_phenomenology_map_path, "r") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                raw_map = data
-            elif isinstance(data, dict) and "phenomenology_map" in data:
-                raw_map = data["phenomenology_map"]
-            else:
-                raise ValueError("Unrecognized phenomenology map format")
-
-            if isinstance(raw_map, list):
-                phenomenology_map = {i: rep for i, rep in enumerate(raw_map)}
-            else:
-                phenomenology_map = {int(k): int(v) for k, v in raw_map.items()}
-
+            pheno = np.load(resolved_phenomenology_map_path, mmap_mode="r")
             # Validate all indices are in range
-            for idx, phenomenology_idx in phenomenology_map.items():
-                idx_int = int(idx)
-                if idx_int < 0 or idx_int >= 788_986:
+            for idx, rep in enumerate(pheno):
+                if idx < 0 or idx >= 788_986:
                     phenomenology_issues += 1
-                if phenomenology_idx < 0 or phenomenology_idx >= 788_986:
+                if rep < 0 or rep >= 788_986:
                     phenomenology_issues += 1
-
             if phenomenology_issues > 0:
                 issues.append(f"Found {phenomenology_issues} invalid phenomenology mappings")
-
-        except Exception as e:
-            issues.append(f"Failed to validate phenomenology map: {e}")
+        except Exception:
+            issues.append("Failed to validate phenomenology map.")
 
     elapsed = time.time() - start_time
 
     return {
         "operation": "validate_ontology_integrity",
         "success": len(issues) == 0,
-        "entries_processed": len(ontology_map),
+        "entries_processed": int(keys.shape[0]),
         "entries_modified": 0,
         "elapsed_seconds": elapsed,
     }

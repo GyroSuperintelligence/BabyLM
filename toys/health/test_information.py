@@ -3,9 +3,8 @@ Comprehensive tests for information.py - the measurement and storage coordinatio
 Tests state representations, distance calculations, and discovery operations.
 """
 
-import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast, Sized
 
 import numpy as np
 import pytest
@@ -21,55 +20,17 @@ from baby.information import (
 class TestInformationEngine:
     """Test the core InformationEngine functionality."""
 
-    def test_initialization_with_real_ontology(self, meta_paths: Dict[str, str]) -> None:
+    def test_initialization_with_real_ontology(self, test_env: Dict[str, Any]) -> None:
         """Test engine initializes correctly with real ontology data."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data)
-
-        assert engine.endogenous_modulus == 788_986
-        assert engine.ontology_diameter == 6
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
+        assert engine._keys is not None
+        assert len(engine._keys) == 788_986
         assert engine.orbit_cardinality is not None
         assert len(engine.orbit_cardinality) == 788_986
-
-    def test_initialization_dict_mode(self, meta_paths: Dict[str, str]) -> None:
-        """Test engine in dictionary indexing mode."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data, use_array_indexing=False)
-
-        assert not engine.use_array_indexing
-        assert engine.ontology_map is not None
-        assert engine.inverse_ontology_map is not None
-        assert engine._keys is None
-        assert engine._inverse is None
-
-    def test_initialization_array_mode(self, meta_paths: Dict[str, str]) -> None:
-        """Test engine in array indexing mode."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data, use_array_indexing=True)
-
-        assert engine.use_array_indexing
-        assert engine.ontology_map is None  # Freed in array mode
-        assert engine.inverse_ontology_map is None
-        assert engine._keys is not None
-        assert engine._inverse is not None
-
-    def test_strict_validation_enabled(self, meta_paths: Dict[str, str]) -> None:
-        """Test strict validation catches incorrect constants."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        # Modify constants to invalid values
-        bad_data = ontology_data.copy()
-        bad_data["endogenous_modulus"] = 123456
-
-        with pytest.raises(ValueError, match="Expected endogenous modulus"):
-            InformationEngine(bad_data, strict_validation=True)
 
 
 class TestTensorConversion:
@@ -150,39 +111,44 @@ class TestTensorConversion:
 class TestStateIndexing:
     """Test state index lookup operations."""
 
-    def test_get_index_dict_mode(self, meta_paths: Dict[str, str]) -> None:
+    def test_get_index_dict_mode(self, test_env: Dict[str, Any]) -> None:
         """Test state index lookup in dictionary mode."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data, use_array_indexing=False)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         # Test with known state (archetypal)
         origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
         index = engine.get_index_from_state(origin_int)
 
+        assert engine._keys is not None
         assert isinstance(index, int)
-        assert 0 <= index < engine.endogenous_modulus
+        assert 0 <= index < len(engine._keys)
 
-    def test_get_index_array_mode(self, meta_paths: Dict[str, str]) -> None:
+    def test_get_index_array_mode(self, test_env: Dict[str, Any]) -> None:
         """Test state index lookup in array mode."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data, use_array_indexing=True)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
         index = engine.get_index_from_state(origin_int)
 
+        assert engine._keys is not None
         assert isinstance(index, int)
-        assert 0 <= index < engine.endogenous_modulus
+        assert 0 <= index < len(engine._keys)
 
-    def test_get_state_from_index_dict_mode(self, meta_paths: Dict[str, str]) -> None:
+    def test_get_state_from_index_dict_mode(self, test_env: Dict[str, Any]) -> None:
         """Test state retrieval from index in dictionary mode."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data, use_array_indexing=False)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         # Test roundtrip: state → index → state
         origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
@@ -191,12 +157,13 @@ class TestStateIndexing:
 
         assert recovered_state == origin_int
 
-    def test_get_state_from_index_array_mode(self, meta_paths: Dict[str, str]) -> None:
+    def test_get_state_from_index_array_mode(self, test_env: Dict[str, Any]) -> None:
         """Test state retrieval from index in array mode."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data, use_array_indexing=True)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
         index = engine.get_index_from_state(origin_int)
@@ -204,12 +171,13 @@ class TestStateIndexing:
 
         assert recovered_state == origin_int
 
-    def test_invalid_state_lookup(self, meta_paths: Dict[str, str]) -> None:
+    def test_invalid_state_lookup(self, test_env: Dict[str, Any]) -> None:
         """Test error handling for invalid state lookup."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data, use_array_indexing=False)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         # Use a state that's not in the ontology
         invalid_state = 999999999
@@ -217,49 +185,57 @@ class TestStateIndexing:
         with pytest.raises(ValueError, match="not found in discovered ontology"):
             engine.get_index_from_state(invalid_state)
 
-    def test_invalid_index_lookup(self, meta_paths: Dict[str, str]) -> None:
+    def test_invalid_index_lookup(self, test_env: Dict[str, Any]) -> None:
         """Test error handling for invalid index lookup."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
-        engine = InformationEngine(ontology_data, use_array_indexing=False)
-
+        assert engine._keys is not None
         # Use invalid indices
         with pytest.raises(ValueError, match="Invalid index"):
             engine.get_state_from_index(-1)
 
         with pytest.raises(ValueError, match="Invalid index"):
-            engine.get_state_from_index(engine.endogenous_modulus)
+            engine.get_state_from_index(len(engine._keys))
 
 
 class TestDistanceMeasurement:
     """Test gyrodistance and divergence calculations."""
 
-    def test_gyrodistance_angular_identical_tensors(self, meta_paths: Dict[str, str]) -> None:
+    def test_gyrodistance_angular_identical_tensors(self, test_env: Dict[str, Any]) -> None:
         """Test angular distance between identical tensors is zero."""
         tensor = governance.GENE_Mac_S
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-        engine = InformationEngine(ontology_data)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
         distance = engine.gyrodistance_angular(tensor, tensor)
         assert abs(distance) < 1e-10  # Should be essentially zero
 
-    def test_gyrodistance_angular_opposite_tensors(self, meta_paths: Dict[str, str]) -> None:
+    def test_gyrodistance_angular_opposite_tensors(self, test_env: Dict[str, Any]) -> None:
         """Test angular distance between opposite tensors is π."""
         tensor1 = governance.GENE_Mac_S
         tensor2 = -tensor1  # All signs flipped
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-        engine = InformationEngine(ontology_data)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
         distance = engine.gyrodistance_angular(tensor1, tensor2)
         assert abs(distance - np.pi) < 1e-10
 
-    def test_gyrodistance_angular_range(self, meta_paths: Dict[str, str]) -> None:
+    def test_gyrodistance_angular_range(self, test_env: Dict[str, Any]) -> None:
         """Test angular distance is always in [0, π]."""
         tensor1 = governance.GENE_Mac_S
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-        engine = InformationEngine(ontology_data)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
         # Test with some transformed states
         for intron in [0, 42, 128, 255]:
             state_int = InformationEngine.tensor_to_int(tensor1)
@@ -268,16 +244,17 @@ class TestDistanceMeasurement:
             distance = engine.gyrodistance_angular(tensor1, tensor2)
             assert 0 <= distance <= np.pi
 
-    def test_measure_state_divergence_with_theta_table(self, meta_paths: Dict[str, str]) -> None:
+    def test_measure_state_divergence_with_theta_table(self, test_env: Dict[str, Any]) -> None:
         """Test state divergence measurement using theta table."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         # Ensure theta table exists
-        theta_path = Path(meta_paths["ontology"]).parent / "theta.npy"
+        theta_path = Path(test_env["main_meta_files"]["ontology"]).parent / "theta.npy"
         if theta_path.exists():
-            engine = InformationEngine(ontology_data)
-
             origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
             divergence = engine.measure_state_divergence(origin_int)
 
@@ -288,39 +265,43 @@ class TestDistanceMeasurement:
 class TestOrbitHandling:
     """Test orbit cardinality and phenomenology integration."""
 
-    def test_orbit_cardinality_initialization(self, meta_paths: Dict[str, str]) -> None:
+    def test_orbit_cardinality_initialization(self, test_env: Dict[str, Any]) -> None:
         """Test orbit cardinality loads correctly."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
-        engine = InformationEngine(ontology_data)
-
-        assert len(engine.orbit_cardinality) == engine.endogenous_modulus
+        assert engine.orbit_cardinality is not None
+        assert len(engine.orbit_cardinality) == len(cast(Sized, engine._keys))
         assert engine.orbit_cardinality.dtype == np.uint32
         assert np.all(engine.orbit_cardinality >= 1)  # All orbits have at least 1 member
 
-    def test_get_orbit_cardinality(self, meta_paths: Dict[str, str]) -> None:
+    def test_get_orbit_cardinality(self, test_env: Dict[str, Any]) -> None:
         """Test individual orbit cardinality lookup."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         # Test valid indices
         cardinality = engine.get_orbit_cardinality(0)
         assert isinstance(cardinality, int)
         assert cardinality >= 1
 
-    def test_phenomenology_integration(self, meta_paths: Dict[str, str]) -> None:
+    def test_phenomenology_integration(self, test_env: Dict[str, Any]) -> None:
         """Test phenomenology map integration if available."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         # Check if phenomenology map exists
-        pheno_path = Path(meta_paths["ontology"]).parent / "phenomenology_map.json"
+        pheno_path = Path(test_env["main_meta_files"]["ontology"]).parent / "phenomenology_map.npy"
         if pheno_path.exists():
-            engine = InformationEngine(ontology_data)
-
             # Orbit cardinalities should be loaded from phenomenology data
             unique_cardinalities = np.unique(engine.orbit_cardinality)
             assert len(unique_cardinalities) > 1  # Should have varied orbit sizes
@@ -370,9 +351,9 @@ class TestProgressReporter:
 class TestMemoryMapping:
     """Test memory mapping utilities."""
 
-    def test_open_memmap_int32(self, temp_dir: Path) -> None:
+    def test_open_memmap_int32(self, tmp_path: Path) -> None:
         """Test memory-mapped array creation."""
-        filename = str(temp_dir / "test_mmap.npy")
+        filename = str(tmp_path / "test_mmap.npy")
         shape = (100, 256)
 
         # Create memory-mapped array
@@ -392,45 +373,50 @@ class TestMemoryMapping:
 class TestEdgeCases:
     """Test edge cases and error conditions."""
 
-    def test_string_keys_in_ontology_map(self, meta_paths: Dict[str, str]) -> None:
-        """Test handling of string keys in ontology map using real ontology."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-        engine = InformationEngine(ontology_data)
-        # Check that all keys are integers
-        if not engine.use_array_indexing and isinstance(engine.ontology_map, dict):
-            assert all(isinstance(k, int) for k in engine.ontology_map.keys())
-
-    def test_array_indexing_mode_assumptions(self, meta_paths: Dict[str, str]) -> None:
+    def test_array_indexing_mode_assumptions(self, test_env: Dict[str, Any]) -> None:
         """Test array indexing mode assumptions about ordering."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
+        assert engine._keys is not None
         # Test that array mode assumes sorted order mapping
-        engine = InformationEngine(ontology_data, use_array_indexing=True)
-
         if engine._keys is not None:
             # Keys should be sorted
             assert np.all(engine._keys[:-1] <= engine._keys[1:])
+            n = len(engine._keys)
+            assert isinstance(n, int)
 
-    def test_large_state_conversion_boundary(self) -> None:
+    def test_large_state_conversion_boundary(self, test_env: Dict[str, Any]) -> None:
         """Test tensor conversion at 48-bit boundary."""
         # Test largest valid 48-bit value
         max_valid = (1 << 48) - 1
         tensor = InformationEngine.int_to_tensor(max_valid)
         recovered = InformationEngine.tensor_to_int(tensor)
         assert recovered == max_valid
-
         # Test just over the boundary
         over_boundary = 1 << 48
         with pytest.raises(ValueError):
             InformationEngine.int_to_tensor(over_boundary)
 
-    def test_gyrodistance_edge_cases(self, meta_paths: Dict[str, str]) -> None:
+    def test_len_keys_type(self, test_env: Dict[str, Any]) -> None:
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
+        assert engine._keys is not None
+        n = len(engine._keys)
+        assert isinstance(n, int)
+
+    def test_gyrodistance_edge_cases(self, test_env: Dict[str, Any]) -> None:
         """Test gyrodistance calculation edge cases using real ontology."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-        engine = InformationEngine(ontology_data)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
         # Test with identical tensors
         t1 = governance.GENE_Mac_S
         distance = engine.gyrodistance_angular(t1, t1)
@@ -448,28 +434,25 @@ class TestEdgeCases:
 class TestDataConsistency:
     """Test data consistency and integrity."""
 
-    def test_ontology_map_consistency(self, meta_paths: Dict[str, str]) -> None:
+    def test_ontology_map_consistency(self, test_env: Dict[str, Any]) -> None:
         """Test ontology map has expected properties."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        ont_map = ontology_data["ontology_map"]
-
+        keys = test_env["main_meta_files"]["ontology"]
+        ont_map = np.load(keys, mmap_mode="r")
         # Should have expected number of states
         assert len(ont_map) == 788_986
-
-        # Values should be 0 to N-1
-        values = list(ont_map.values())
-        assert min(values) == 0
-        assert max(values) == 788_985
+        # Values should be 0 to N-1 (sorted unique states)
+        values = ont_map.tolist()
+        assert ont_map[0] == min(values)
+        assert ont_map[-1] == max(values)
         assert len(set(values)) == len(values)  # All unique
 
-    def test_state_index_bidirectional_consistency(self, meta_paths: Dict[str, str]) -> None:
+    def test_state_index_bidirectional_consistency(self, test_env: Dict[str, Any]) -> None:
         """Test state ↔ index conversion is bijective."""
-        with open(meta_paths["ontology"]) as f:
-            ontology_data = json.load(f)
-
-        engine = InformationEngine(ontology_data)
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
 
         # Test a sample of states for bidirectional consistency
         origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
@@ -483,3 +466,55 @@ class TestDataConsistency:
         test_state = engine.get_state_from_index(100)  # Arbitrary valid index
         recovered_index = engine.get_index_from_state(test_state)
         assert recovered_index == 100
+
+
+class TestIsolatedInformationEngine:
+    """Test InformationEngine in complete isolation for comprehensive coverage."""
+
+    def test_engine_with_isolated_ontology_data(self, test_env: Dict[str, Any]) -> None:
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
+        assert engine._keys is not None
+        assert len(engine._keys) == 788_986
+        assert len(engine.orbit_cardinality) == 788_986
+
+    def test_engine_orbit_cardinality_edge_cases(self, test_env: Dict[str, Any]) -> None:
+        """Test orbit cardinality handling with real data."""
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
+        assert engine._keys is not None
+        # All orbit cardinalities should be > 0
+        assert np.all(engine.orbit_cardinality > 0)
+        assert engine._v_max == np.max(engine.orbit_cardinality)
+
+    def test_isolated_tensor_operations(self, test_env: Dict[str, Any]) -> None:
+        """Test tensor operations in complete isolation."""
+        # Create arbitrary test tensor
+        test_tensor = np.random.choice([-1, 1], size=(4, 2, 3, 2)).astype(np.int8)
+
+        # Test conversion roundtrip
+        state_int = InformationEngine.tensor_to_int(test_tensor)
+        recovered = InformationEngine.int_to_tensor(state_int)
+
+        assert np.array_equal(test_tensor, recovered)
+        assert 0 <= state_int < (1 << 48)
+
+    def test_isolated_distance_calculations(self, test_env: Dict[str, Any]) -> None:
+        """Test distance calculations with real engine."""
+        keys = test_env["main_meta_files"]["ontology"]
+        ep = test_env["main_meta_files"]["epistemology"]
+        pheno = test_env["main_meta_files"]["phenomenology"]
+        theta = test_env["main_meta_files"]["theta"]
+        engine = InformationEngine(keys, ep, pheno, theta)
+        # Create test tensors
+        t1 = np.ones((4, 2, 3, 2), dtype=np.int8)
+        t2 = np.full((4, 2, 3, 2), -1, dtype=np.int8)
+        # Test distance calculation
+        distance = engine.gyrodistance_angular(t1, t2)
+        assert abs(distance - np.pi) < 1e-10
