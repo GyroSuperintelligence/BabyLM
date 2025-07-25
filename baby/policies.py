@@ -3,18 +3,17 @@ Write/policy logic for GyroSI (S5): OrbitStore and storage decorators.
 """
 
 import concurrent.futures
-import gzip
-import json
 import logging
 import math
 import mmap
 import os
-import pickle
-import msgpack  # type: ignore[import-untyped]
+import json
+import msgpack
 import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, cast
+import sys
 
 from baby.contracts import MaintenanceReport
 
@@ -62,41 +61,58 @@ def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJEC
 
 
 class OrbitStore:
-    """S5: Core storage primitive - handles file-based phenotype storage (write/policy)."""
+    """
+    Unified OrbitStore: supports both advanced (indexed, mmap, deletion) and append-only (msgpack, .mpk) modes.
+    Use append_only=True for append-only msgpack mode (V2 semantics).
+    """
 
     def __init__(
-        self, store_path: str, write_threshold: int = 100, use_mmap: bool = False, base_path: Path = PROJECT_ROOT
+        self,
+        store_path: str,
+        *,
+        write_threshold: int = 100,
+        use_mmap: bool = False,
+        append_only: bool = False,
+        base_path: Path = PROJECT_ROOT,
     ):
-        """Core storage primitive. All file paths are resolved with respect to base_path unless absolute."""
         resolved_store_path = _abs(store_path, base_path)
         if not resolved_store_path:
             raise ValueError("store_path must not be None")
         self.store_path = resolved_store_path
-        self.index_path = resolved_store_path + ".idx"
-        self.log_path = resolved_store_path + ".log"
+        self.append_only = append_only
         self.write_threshold = write_threshold
         self.use_mmap = use_mmap
         self.lock = threading.RLock()
-        self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
-        self.log_file: Optional[Any] = None
         self.pending_writes: Dict[Tuple[int, int], Any] = {}
-        self._mmap: Optional[mmap.mmap] = None
-        self._mmap_size = 0
-        self._remap_counter = 0  # Track commits since last remap
-        self._last_remap_size = 0  # Track file size at last remap
-        self._remap_interval = 10  # Remap every 10 commits
-        self._remap_min_size_increase = 1024 * 1024  # 1MB
-        self._load_index()
-        self.log_file = open(self.log_path, "ab")
-        if use_mmap and os.path.exists(self.log_path):
-            self._open_mmap()
         self._flush_count = 0
         self._fsync_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._pending_fsync: Optional[concurrent.futures.Future[Any]] = None
         self._last_fsync = 0.0
         self._fsync_interval = 0.05  # 50ms or configurable
+        self.log_file: Optional[Any] = None
+        self._mmap: Optional[mmap.mmap] = None
+        self._mmap_size = 0
+        self._remap_counter = 0
+        self._last_remap_size = 0
+        self._remap_interval = 10
+        self._remap_min_size_increase = 1024 * 1024
+        self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        if self.append_only:
+            # self.index is not used in append_only mode
+            self.log_path = self.store_path  # .mpk file
+            self.index_path = None
+            self._append_only_unpacker = None
+        else:
+            self.index_path = resolved_store_path + ".idx"
+            self.log_path = resolved_store_path + ".log"
+        self._load_index()
+        self.log_file = open(self.log_path, "ab")
+        if self.use_mmap and not self.append_only and os.path.exists(self.log_path):
+            self._open_mmap()
 
     def _open_mmap(self) -> None:
+        if self.append_only:
+            return
         if self._mmap:
             self._mmap.close()
         with open(self.log_path, "rb") as f:
@@ -109,9 +125,14 @@ class OrbitStore:
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
         with self.lock:
-            # Check unflushed writes first
             if context_key in self.pending_writes:
                 return self.pending_writes[context_key]
+            if self.append_only:
+                # Linear scan for append-only mode
+                for k, v in self.iter_entries():
+                    if k == context_key:
+                        return v
+                return None
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
@@ -137,11 +158,9 @@ class OrbitStore:
 
     def commit(self) -> None:
         with self.lock:
-            # Always flush to ensure index is up to date
             self._flush()
-            with gzip.open(self.index_path, "wb") as f:
-                pickle.dump(self.index, f, protocol=pickle.HIGHEST_PROTOCOL)
-            if self.use_mmap:
+            self._write_index()
+            if self.use_mmap and not self.append_only:
                 current_size = os.path.getsize(self.log_path)
                 remap_needed = False
                 if self._mmap is None:
@@ -159,7 +178,6 @@ class OrbitStore:
                     self._open_mmap()
                     self._remap_counter = 0
                     self._last_remap_size = os.path.getsize(self.log_path)
-        # Ensure commit waits for the pending fsync to complete
         if self._pending_fsync:
             self._pending_fsync.result()
 
@@ -168,11 +186,12 @@ class OrbitStore:
         if not self.log_file or not self.pending_writes:
             return None
         for context_key, entry in self.pending_writes.items():
-            data = msgpack.packb(to_native(entry), use_bin_type=True)
+            data: bytes = cast(bytes, msgpack.packb(to_native(entry), use_bin_type=True))
             offset = self.log_file.tell()
-            size = len(data) if data is not None else 0
+            size = len(data)
             self.log_file.write(data)
-            self.index[context_key] = (offset, size)
+            if not self.append_only:
+                self.index[context_key] = (offset, size)
         self.log_file.flush()
         now = time.time()
         if now - self._last_fsync > self._fsync_interval:
@@ -182,39 +201,60 @@ class OrbitStore:
             pending_fsync = self._pending_fsync
         self.pending_writes.clear()
         self._flush_count += 1
-        if self._flush_count >= 10:
-            with gzip.open(self.index_path, "wb") as f:
-                pickle.dump(self.index, f, protocol=pickle.HIGHEST_PROTOCOL)
+        if self._flush_count >= 10 and not self.append_only:
+            self._write_index()
             self._flush_count = 0
         return pending_fsync
 
     def mark_dirty(self, context_key: Tuple[int, int], entry: Any) -> None:
-        """
-        Mark an entry as dirty in memory without serializing to disk immediately.
-        """
         with self.lock:
             self.pending_writes[context_key] = entry.copy()
 
-    def _load_index(self) -> None:
-        if os.path.exists(self.index_path):
-            with gzip.open(self.index_path, "rb") as f:
-                self.index = pickle.load(f)
+    def _write_index(self) -> None:
+        if self.append_only:
             return
+        if self.index_path is None:
+            return
+        # Convert all keys/values to native Python int before serializing
+        index_py = {tuple(int(x) for x in k): (int(v[0]), int(v[1])) for k, v in self.index.items()}
+        with open(self.index_path, "wb") as f:
+            packed = msgpack.packb(index_py, use_bin_type=True)
+            if packed is not None:
+                f.write(packed)
+                f.flush()
+                if sys.platform != "darwin":
+                    os.fsync(f.fileno())
+
+    def _read_index(self) -> None:
+        if self.append_only or not self.index_path or not os.path.exists(self.index_path):
+            return
+        # Handle empty file gracefully
+        if os.path.getsize(self.index_path) == 0:
+            self.index = {}
+            return
+        with open(self.index_path, "rb") as f:
+            raw_index = msgpack.unpackb(f.read(), raw=False, strict_map_key=False)
+            # Convert any list keys to tuples for compatibility
+            self.index = {tuple(k) if isinstance(k, list) else k: v for k, v in raw_index.items()}
+
+    def _load_index(self) -> None:
+        if self.append_only:
+            return
+        self._read_index()
         if not os.path.exists(self.log_path):
             return
-        # Replay log only if index is missing, reading in 1MB chunks to avoid memory spikes
         with open(self.log_path, "rb") as f:
             offset = 0
             unpacker = msgpack.Unpacker(use_list=False, raw=False)
             while True:
-                chunk = f.read(1024 * 1024)  # 1MB
+                chunk = f.read(1024 * 1024)
                 if not chunk:
                     break
                 unpacker.feed(chunk)
                 for entry in unpacker:
                     packed = msgpack.packb(entry, use_bin_type=True)
                     if not isinstance(packed, bytes):
-                        continue  # skip if not bytes
+                        continue
                     size = len(packed)
                     if "context_signature" in entry:
                         context_key = entry["context_signature"]
@@ -222,16 +262,15 @@ class OrbitStore:
                     offset += size
 
     def delete(self, context_key: Tuple[int, int]) -> None:
+        if self.append_only:
+            raise RuntimeError("append_only store cannot delete; run prune-and-compact instead")
         with self.lock:
-            if context_key in self.index:
-                del self.index[context_key]
-            # Optionally, could append a tombstone to the log for durability
+            self.index.pop(context_key, None)
 
     def close(self) -> None:
         with self.lock:
             if self.pending_writes:
                 self.commit()
-            # Wait for any pending fsync to finish before closing the file
             if hasattr(self, "_pending_fsync") and self._pending_fsync is not None:
                 try:
                     self._pending_fsync.result()
@@ -250,6 +289,15 @@ class OrbitStore:
         entries: Dict[Tuple[int, int], Any] = {}
         if not os.path.exists(self.log_path):
             return entries
+        if self.append_only:
+            # Read all entries from .mpk
+            with open(self.log_path, "rb") as f:
+                unpacker = msgpack.Unpacker(f, use_list=False, raw=False)
+                for entry in unpacker:
+                    if isinstance(entry, tuple) and len(entry) == 2:
+                        k, v = entry
+                        entries[tuple(k)] = v
+            return entries
         with open(self.log_path, "rb") as f:
             for context_key, (offset, size) in self.index.items():
                 f.seek(offset)
@@ -264,7 +312,8 @@ class OrbitStore:
             if self.log_file:
                 self.log_file.close()
             open(self.log_path, "wb").close()
-            self.index.clear()
+            if not self.append_only:
+                self.index.clear()
             self.log_file = open(self.log_path, "ab")
             self.pending_writes.clear()
             for k, v in data.items():
@@ -273,6 +322,18 @@ class OrbitStore:
 
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
         yielded = set()
+        if self.append_only:
+            if self._append_only_unpacker is None:
+                f = open(self.log_path, "rb")
+                self._append_only_unpacker = msgpack.Unpacker(f, use_list=False, raw=False)
+            unpacker = self._append_only_unpacker
+            if unpacker is not None:
+                for entry in unpacker:
+                    if isinstance(entry, tuple) and len(entry) == 2:
+                        k, v = entry
+                        yield tuple(k), v
+                        yielded.add(tuple(k))
+                return
         with self.lock:
             for k, v in self.pending_writes.items():
                 yield k, v
@@ -517,23 +578,19 @@ def merge_phenotype_maps(
 
     for path in resolved_sources:
         log_path = Path(str(path) + ".log")
-        if log_path.exists():
+        if log_path.exists() or path.endswith(".mpk"):
             try:
-                store = OrbitStore(path)  # will open <path>.log / .idx
+                if path.endswith(".mpk"):
+                    store = OrbitStore(path, append_only=True)
+                else:
+                    store = OrbitStore(path)
                 source_data = store.data  # dict
                 store.close()
             except Exception:
                 continue
         else:
-            # original gzip/pickle fallback
-            if not os.path.exists(path):
-                continue
-
-            try:
-                with gzip.open(path, "rb") as f:
-                    source_data = pickle.load(f)
-            except Exception:
-                continue
+            # Only support OrbitStore; skip unsupported files
+            continue
 
         for context_key, entry in source_data.items():
             total_entries += 1
@@ -574,7 +631,7 @@ def merge_phenotype_maps(
     # Save merged result
     os.makedirs(os.path.dirname(resolved_dest) or ".", exist_ok=True)
 
-    dest_store = OrbitStore(resolved_dest)
+    dest_store = OrbitStore(resolved_dest, append_only=resolved_dest.endswith(".mpk"))
     dest_store.set_data_dict(merged_data)
     dest_store.commit()
     dest_store.close()
@@ -626,7 +683,7 @@ def apply_global_confidence_decay(
             "elapsed_seconds": 0,
         }
 
-    store = OrbitStore(resolved_store_path)
+    store = OrbitStore(resolved_store_path, append_only=True)
     modified_count = 0
     processed_count = 0
     current_time = time.time()
@@ -693,7 +750,7 @@ def export_knowledge_statistics(store_path: str, output_path: str, base_path: Pa
             "elapsed_seconds": 0,
         }
 
-    store = OrbitStore(resolved_store_path)
+    store = OrbitStore(resolved_store_path, append_only=True)
     entries = list(store.data.values())
     store.close()
 
@@ -860,7 +917,7 @@ def prune_and_compact_store(
     resolved_archive_summary_path = _abs(archive_summary_path, base_path) if archive_summary_path is not None else None
 
     # Load source store
-    source_store = OrbitStore(resolved_store_path)
+    source_store = OrbitStore(resolved_store_path, append_only=True)
     total_entries = 0
     pruned_entries = 0
 
@@ -932,7 +989,7 @@ def prune_and_compact_store(
     else:
         # Write to new path
         source_store.close()
-        dest_store = OrbitStore(destination)
+        dest_store = OrbitStore(destination, append_only=True)
         dest_store.set_data_dict(keep)
         dest_store.commit()
         dest_store.close()

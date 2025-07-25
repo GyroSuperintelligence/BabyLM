@@ -76,8 +76,8 @@ class PreferencesConfig(TypedDict, total=False):
     """
 
     # Storage preferences
-    storage_backend: str  # "pickle", "sqlite", "rocksdb"
-    compression_level: int  # 1-9 for gzip
+    storage_backend: str  # "msgpack"
+    compression_level: int
     max_file_size_mb: int
 
     # Maintenance preferences

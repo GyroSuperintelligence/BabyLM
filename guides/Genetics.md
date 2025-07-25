@@ -508,250 +508,219 @@ This architecture guarantees that semantic knowledge is always indexed, updated,
 
 ### 6.4 S4/5: `intelligence.py` – Orchestration & API
 
-**Physical Principle:** Dual-phase (Ingress and Egress)
+**Physical Principle:** Dual-phase operation (Ingress and Egress cycles)
 
-The `intelligence.py` module defines the orchestration and protocol boundary for GyroSI. It implements all external and internal interfaces for agent operation, learning, regulation, and multi-agent management. All contracts are explicit and are referenced by their class or function names as implemented.
+The `intelligence.py` module defines the protocol and orchestration boundary for the GyroSI agent. It provides all interfaces for state evolution, agent learning, regulation, and multi-agent operation. Each contract is explicit, and every externally callable function or class is referenced by its canonical name.
 
-**Operational Contracts and Interface Points**
+#### IntelligenceEngine
 
-**1. IntelligenceEngine (class)**
+- `process_egress(input_byte: int) -> int`  
+  Transforms an external byte input into an internal intron using `governance.transcribe_byte`. Updates the agent’s physical state using either a precomputed epistemology (state transition table) or the native transformation, then tracks the resulting index.
 
-* **process\_egress(input\_byte: int) -> int**
-  Transcribes and applies an external input as an intron using `governance.transcribe_byte`, then updates the physical state using either `epistemology` (precomputed state transition table) or `governance.apply_gyration_and_transform`. State is indexed via `InformationEngine.get_index_from_state`.
-* **process\_ingress(last\_intron: int) -> int**
-  Integrates the effect of the previous intron, retrieves the phenotype by `InferenceEngine.get_phenotype`, and applies learning using `InferenceEngine.learn`. Executes all registered hooks (`post_cycle_hooks`) and triggers algedonic regulation and autonomic cycles as described below.
-* **batch\_learn(data: bytes) -> None**
-  Implements streaming batch learning using `governance.fold`, applying the Fold sequentially to all inputs, and learning only from the reduced intron. Memory use is O(1); path dependence is preserved.
-* **add\_hook(hook: CycleHookFunction) -> None**
-  Adds a monitoring or maintenance hook to `post_cycle_hooks`, called at the end of every agent cycle.
-* **get\_state\_info() -> Dict\[str, Any>**
-  Provides full reporting on agent state: includes agent id, cycle count, integer state, ontology index, angular divergence, and active hooks.
-* **reset\_to\_archetypal\_state() -> None**
-  Restores the agent to the canonical archetypal state as defined by `governance.GENE_Mac_S`.
+- `process_ingress(last_intron: int) -> int`  
+  Folds the current state with the last intron, queries for the phenotype via `InferenceEngine.get_phenotype`, and applies learning with `InferenceEngine.learn`. Triggers all registered post-cycle hooks, including algedonic regulation and autonomic cycles if required.
 
-**2. Algedonic Regulation and Autonomic Cycles**
+- `batch_learn(data: bytes) -> None`  
+  Implements streaming batch learning using the monodromic Fold; preserves full path dependence and applies learning only at the sequence endpoint.
 
-* **post\_cycle\_hooks (List\[CycleHookFunction])**
-  Must include a hook that calls the algedonic regulator after every egress/ingress cycle.
-* **Algedonic Regulation**
-  Implements a rolling mean of angular divergence (θ) via `self._θ_buf`. If θ > self.\_θ\_high, applies corrective introns (see `self._cool_introns`). If excursions persist, triggers an autonomic cycle using precomputed instructions in `self._autonomic_cycles` (loaded from phenomenology artifacts).
-* **run\_autonomic\_cycle()**
-  Executed when repeated divergence or pain is detected. Applies a stabilising sequence from the autonomic cycles list, directly resetting the agent to a viable state. All cycle actions guarantee state integrity checks post-execution.
+- `add_hook(hook: CycleHookFunction) -> None`  
+  Registers a monitoring or maintenance hook, which is called at the end of every cycle.
 
-**3. GyroSI (class)**
+- `get_state_info() -> dict`  
+  Returns a dictionary of current state information: agent id, cycle count, canonical integer, tensor index, angular divergence, and active hooks.
 
-* **ingest(data: bytes) -> None**
-  Calls `batch_learn` for batch learning using Monodromic Fold. Ensures all storage writes are committed (see `OrbitStore.commit`).
-* **respond(data: bytes) -> bytes**
-  For each input byte, applies the egress/ingress cycle via the above primitives. Output is constructed directly from agent state and learned knowledge; external response never exposes internal physics.
-* **get\_agent\_info() -> Dict\[str, Any]**
-  Exposes current agent state, configuration, knowledge statistics, and integrity.
-* **add\_monitoring\_hook(hook: CycleHookFunction) -> None**
+- `reset_to_archetypal_state() -> None`  
+  Resets the agent to the archetypal (canonical) state.
+
+**Algedonic Regulation and Autonomic Cycles**
+
+- `post_cycle_hooks`  
+  Contains all registered hooks, including the algedonic regulator.
+- The algedonic regulator computes a rolling mean of angular divergence. If the divergence exceeds a threshold, corrective introns are applied. Repeated excursions trigger a stabilising autonomic cycle using instructions from phenomenology data. All actions guarantee state integrity after execution.
+
+#### GyroSI
+
+- `ingest(data: bytes) -> None`  
+  Applies batch learning to the input sequence and commits all writes.
+
+- `respond(data: bytes) -> bytes`  
+  For each input byte, applies the egress/ingress cycle. Output is produced from learned knowledge; internal physics are never exposed.
+
+- `get_agent_info() -> dict`  
+  Reports full agent state, configuration, knowledge statistics, and integrity.
+
+- `add_monitoring_hook(hook: CycleHookFunction) -> None`  
   Registers additional hooks at the intelligence layer.
-* **apply\_maintenance(decay\_rate: float, confidence\_threshold: float) -> Dict\[str, Any]**
-  Applies confidence decay and pruning via the inference layer (`InferenceEngine.apply_confidence_decay`, `prune_low_confidence_entries`), with reporting.
 
-**4. AgentPool (class)**
+- `apply_maintenance(decay_rate: float, confidence_threshold: float) -> dict`  
+  Triggers maintenance operations on the store, including confidence decay and pruning, with structured reporting.
 
-* **get\_or\_create\_agent(agent\_id: str, role\_hint: Optional\[str]) -> GyroSI**
-  Returns a GyroSI agent, constructing overlays (public/private) and enforcing eviction via the configured policy (LRU, TTL, etc).
-* **remove\_agent(agent\_id: str) -> bool**, **get\_active\_agents() -> List\[str]**, **close\_all() -> None**
-  Standard contracts for multi-agent resource management.
+#### AgentPool
 
-**5. orchestrate\_turn(pool: AgentPool, user\_id: str, assistant\_id: str, user\_input: str) -> str**
+- `get_or_create_agent(agent_id: str, role_hint: Optional[str]) -> GyroSI`  
+  Returns or creates a GyroSI agent, ensuring overlay and eviction policy.
 
-* Implements the protocol interface for a conversational turn.
-  Maps external dialogue input to egress/ingress primitives by passing data sequentially through the `respond()` method of the user and assistant agents.
+- `remove_agent(agent_id: str) -> bool`  
+  Removes and closes the agent.
+
+- `get_active_agents() -> List[str]`  
+  Returns a list of active agent IDs.
+
+- `close_all() -> None`  
+  Shuts down and releases all agent resources.
+
+#### Orchestration
+
+- `orchestrate_turn(pool: AgentPool, user_id: str, assistant_id: str, user_input: str, tokenizer_name: str) -> str`  
+  Implements a complete conversational turn: encodes the user’s input, passes it through both user and assistant agents using `respond`, and decodes the assistant’s response.
 
 ---
 
-**Separation of Concerns and Enforcement**
+**Separation and Guarantees**
 
-* All learning, inference, and physical state changes are routed strictly through the methods above.
-* No protocol or orchestration code manipulates physical state, knowledge, or protocol buffers directly—only through absolute imports and the contracts defined here.
-* No part of the API exposes the packed state integer, intron values, or transformation masks to external callers. Only the canonical public reporting functions (`get_state_info`, `get_agent_info`) are permitted to export state.
-
-**Regulatory and Recovery Guarantees**
-
-* The algedonic regulation and autonomic cycles contracts (`post_cycle_hooks`, `run_autonomic_cycle`) are required to be enforced after every cycle. This ensures that the agent cannot be driven into runaway instability or pathological states.
-* Agent overlay storage (`OrbitStore`, `CanonicalView`, `OverlayView`) guarantees isolation and canonicalisation, with configuration autodection provided in `_create_default_store`.
+- All state evolution and learning are routed strictly through these methods.
+- No orchestration code directly manipulates state or store contents except via explicit contracts.
+- Physical state, intron values, or internal masks are never exposed; only public reporting interfaces export state.
+- Algedonic regulation and autonomic cycles are enforced after every cycle, preventing instability.
+- Agent overlay storage and canonicalisation are enforced at initialisation; runtime code cannot bypass these policies.
 
 **Extensibility and Maintenance**
 
-* All external monitoring, introspection, and maintenance operations must be registered via `add_hook` at the intelligence layer.
-* All storage, canonicalisation, and multi-agent overlay mechanisms are constructed at initialisation and cannot be bypassed by runtime code.
+- Monitoring and maintenance are always registered as hooks.
+- Storage and overlay mechanisms are immutable after construction.
 
-#### Automated Pruning Hook
+**Automated Pruning**
 
-A standard post-cycle hook `auto_prune_hook(engine)` MAY be registered to trigger periodic compaction:
-  - Every N cycles or when store size > threshold
-  - Calls `prune_and_compact_store()` (baby.policies)
-  - Uses age/confidence thresholds from PreferencesConfig (`decay_interval_hours`, `confidence_threshold`)
-
-This keeps disk usage bounded without losing aggregate knowledge (masks/confidence are merged).
+- Post-cycle hooks may be registered for automated pruning and compaction using configured thresholds. This ensures bounded resource use while preserving knowledge integrity.
 
 ---
 
 ## 6.5 Shared Contracts and Storage Policies
 
-This section establishes the explicit type contracts, interface protocols, and canonical storage primitives for all orchestration, policy, and maintenance operations in S4 (Intelligence) and S5 (Policy/Identity). All interface points are enforced as concrete class or function boundaries, with no "informal" API surfaces.
+This section defines all interface contracts, canonical storage primitives, and decorator layers for the orchestration, policy, and maintenance operations of the GyroSI S4/S5 system. All API boundaries are strictly enforced and have direct type correspondence in `baby.contracts`. No informal or ad hoc API surfaces exist.
 
 ### 6.5.1 Contracts: Protocols and Shared Types
 
-All type, storage, and hook contracts are declared in `baby.contracts`:
+All system-wide types, configuration, and maintenance protocols are declared in `baby.contracts`:
 
-* **PhenotypeEntry (TypedDict)**:
-  The atomic knowledge unit for all agent stores.
-  Required and optional fields (see `PhenotypeEntry` in code):
+- **PhenotypeEntry (TypedDict)**  
+  The atomic record of agent knowledge. Each entry represents a unique phenotype and includes:
+    - `phenotype: str`  
+    - `confidence: float`  
+    - `exon_mask: int`  
+    - `usage_count: int`  
+    - `last_updated: float`  
+    - `created_at: float`  
+    - `governance_signature: GovernanceSignature` (immutable tuple derived from `exon_mask`)
+    - `context_signature: Tuple[int, int]` (canonical index + intron)
+    - `_original_context: Optional[Tuple[int, int]]` (for decorator tracking)
 
-  * `phenotype: str`
-  * `confidence: float`
-  * `exon_mask: int`
-  * `usage_count: int`
-  * `last_updated: float`
-  * `created_at: float`
-  * `governance_signature: GovernanceSignature` — the computed, immutable signature of the 8‑bit exon_mask, used for all governance policies.
-  * `context_signature: Tuple[int, int]`
-  * `_original_context: Optional[Tuple[int, int]]` (tracking non-canonical context for canonicalised views)
+- **ManifoldData (TypedDict)**  
+  Structure of the physical ontology file (`ontology_map.json`):
+    - `schema_version: str`
+    - `ontology_map: Dict[int, int]`
+    - `endogenous_modulus: int`
+    - `ontology_diameter: int`
+    - `total_states: int`
+    - `build_timestamp: float`
 
-* **ManifoldData (TypedDict)**:
-  Ontology/graph structure of the physical state space.
+- **PhenomenologyData (TypedDict)**  
+  Structure of the phenomenology file (`phenomenology_map.json`):
+    - `schema_version: str`
+    - `phenomenology_map: list[int]`
+    - `orbit_sizes: dict[int, int]`
+    - `metadata: dict[str, Any]`
+    - `_diagnostics: Dict[str, Any]` (optional diagnostics)
 
-  * `schema_version: str`
-  * `ontology_map: Dict[int, int]`
-  * `endogenous_modulus: int`
-  * `ontology_diameter: int`
-  * `total_states: int`
-  * `build_timestamp: float`
+- **AgentConfig (TypedDict)**  
+  Agent runtime and environment configuration, including:
+    - `ontology_path: str`
+    - `knowledge_path: Optional[str]`
+    - `public_knowledge_path: Optional[str]`
+    - `private_knowledge_path: Optional[str]`
+    - `enable_phenomenology_storage: Optional[bool]`
+    - `phenomenology_map_path: Optional[str]`
+    - `learn_batch_size: Optional[int]`
+    - `agent_metadata: Optional[Dict[str, Any]]`
+    - `private_agents_base_path: Optional[str]`
+    - `base_path: Optional[str]`
 
-* **PhenomenologyData (TypedDict)**:
-  Canonical orbit mapping and diagnostic metadata.
+- **PreferencesConfig (TypedDict)**  
+  Global and pool-level storage, maintenance, and policy parameters, including:
+    - `storage_backend: str` (e.g. `"msgpack-v2"`)
+    - `compression_level: int`
+    - `max_file_size_mb: int`
+    - `enable_auto_decay: bool`
+    - `decay_interval_hours: float`
+    - `decay_factor: float`
+    - `confidence_threshold: float`
+    - `max_agents_in_memory: int`
+    - `agent_eviction_policy: str`
+    - `agent_ttl_minutes: int`
+    - `enable_profiling: bool`
+    - `write_batch_size: int`
+    - `cache_size_mb: int`
 
-  * `schema_version: str`
-  * `phenomenology_map: list`
-  * `orbit_sizes: dict`
-  * `metadata: dict`
-  * `_diagnostics: Dict[str, Any]`
+- **CycleHookFunction (Protocol)**  
+  Post-cycle hook for monitoring or maintenance, called with:
+    - `(engine, phenotype_entry, last_intron)`
 
-* **AgentConfig (TypedDict)**:
-  All configuration for a single GyroSI agent.
-  Keys include:
-
-  * `ontology_path: str`
-  * `knowledge_path: Optional[str]`
-  * `public_knowledge_path: Optional[str]`
-  * `private_knowledge_path: Optional[str]`
-  * `agent_metadata: Optional[Dict[str, Any]]`
-  * `max_memory_mb: Optional[int]`
-  * `enable_phenomenology_storage: Optional[bool]`
-  * `batch_size: Optional[int]`
-  * `phenomenology_map_path: Optional[str]`
-
-* **PreferencesConfig (TypedDict)**:
-  System-wide or pool-level storage, agent, and maintenance policies.
-  All keys as in code, e.g.:
-
-  * `storage_backend: str`
-  * `compression_level: int`
-  * `max_file_size_mb: int`
-  * `enable_auto_decay: bool`
-  * `decay_interval_hours: float`
-  * `decay_factor: float`
-  * `confidence_threshold: float`
-  * `max_agents_in_memory: int`
-  * `agent_eviction_policy: str`
-  * `agent_ttl_minutes: int`
-  * `enable_profiling: bool`
-  * `batch_size: int`
-  * `cache_size_mb: int`
-
-* **ValidationReport (TypedDict)**:
-  Structured validation results, e.g. from store or ontology checks.
-
-  * `total_entries: int`
-  * `average_confidence: float`
-  * `store_type: str`
-  * `modified_entries: Optional[int]`
-
-* **CycleHookFunction (Protocol)**:
-  Interface for post-cycle hooks:
-
-  ```
-  def __call__(engine, phenotype_entry, last_intron) -> None
-  ```
-
-* **MaintenanceReport (TypedDict)**:
-  Results from any maintenance, merge, or decay operation.
-
-  * `operation: str`
-  * `success: bool`
-  * `entries_processed: int`
-  * `entries_modified: int`
-  * `elapsed_seconds: float`
-
-All contracts above are imported by absolute path, and serve as the sole interface for communication between agents, stores, overlays, and maintenance utilities.
+- **MaintenanceReport (TypedDict)**  
+  Uniform result for all maintenance/compaction/merge operations:
+    - `operation: str`
+    - `success: bool`
+    - `entries_processed: int`
+    - `entries_modified: int`
+    - `elapsed_seconds: float`
 
 ---
 
 ### 6.5.2 Storage and Policy Layer
 
-The canonical store for all phenotype knowledge is the `OrbitStore` class (`baby.policies.OrbitStore`):
+The canonical knowledge store is **OrbitStore**, implemented as a single-file, append-only MsgPack stream (`.mpk`), supporting atomic get/put/close interfaces. It guarantees the following:
 
-* **OrbitStore**
-  Atomic, file-based storage for `PhenotypeEntry` values, keyed by `(tensor_index, intron)` tuples (the canonical context signature).
-  Contracts:
+- **Storage contract:**
+    - `get(context_key: Tuple[int, int]) -> Optional[Any]`
+    - `put(context_key: Tuple[int, int], entry: Any) -> None`
+    - `commit() -> None`  _(NO-OP in append-only mode, retained for compatibility)_
+    - `close() -> None`
+    - `data -> Dict[Tuple[int, int], Any]`  _(returns all entries, as reconstructed from `.mpk`)_
+    - `iter_entries() -> Iterator[Tuple[Tuple[int, int], Any]]`
 
-  * `get(context_key: Tuple[int, int]) -> Optional[Any]`
-  * `put(context_key: Tuple[int, int], entry: Any) -> None`
-  * `close() -> None`
-  * `data -> Dict[Tuple[int, int], Any]`
-  * `iter_entries() -> Iterator[Tuple[Tuple[int, int], Any]]`
-    Additional methods:
-  * `commit()`, `delete(context_key)`, `set_data_dict()`
+- **All mutations are streamed to the MsgPack file**. No `.log` or `.idx` sidecar files are written in append-only mode. **Deletion is not supported**; instead, call `prune_and_compact_store` to create a new file without old entries.
 
-* **CanonicalView**
-  Decorator that enforces canonicalisation on all storage operations, using a phenomenology map loaded at initialisation.
+- **CanonicalView** applies canonicalisation (using a phenomenology map) for all key lookups, so each unique operational orbit is consistently addressed regardless of its physical context. The original context is retained in `_original_context` for provenance.  
+  - All lookups and puts are transparently normalised.
 
-  * Canonicalises the first element of the context key (`tensor_index`) for every get/put.
-  * Writes also record `_original_context` for provenance.
-  * Used in multi-agent overlays and when "phenomenology storage" is enabled.
+- **OverlayView** composes private (agent) and public (shared) stores, always writing to the private overlay, and reading from private first, then public. Both overlays must implement the OrbitStore interface.
 
-* **OverlayView**
-  Composite overlay supporting public/private or shared knowledge:
-
-  * All writes go to the private overlay store.
-  * Reads check the private overlay first, then fall back to the public store.
-  * Both underlying stores must conform to the OrbitStore interface.
-
-* **ReadOnlyView**
-  Wraps any store, exposing only the read interface.
-  All writes raise errors; used for immutable public knowledge overlays.
+- **ReadOnlyView** wraps any store, disabling writes and allowing only retrieval and iteration.
 
 ---
 
 ### 6.5.3 Maintenance and Policy Utilities
 
-All policy functions operate on these storage contracts, use the canonical interfaces, and return a `MaintenanceReport`. Key functions (as implemented):
+All maintenance and compaction routines operate only on the above interfaces, always returning a `MaintenanceReport` as defined.
 
-* **merge\_phenotype\_maps(source\_paths, dest\_path, conflict\_resolution) -> MaintenanceReport**
-  Merges multiple OrbitStore or compatible knowledge files into one, resolving conflicts by confidence, recency, mask union, or weighted average.
+- **merge_phenotype_maps**: Merges multiple `.mpk` stores into one, resolving conflicts by highest confidence, bitwise OR, recency, or weighted average.
 
-* **apply\_global\_confidence\_decay(store\_path, decay\_factor, age\_threshold, time\_threshold\_days, dry\_run) -> MaintenanceReport**
-  Applies exponential confidence decay to all entries meeting the decay threshold, following the decay formula used by the agent engine. Supports dry-run for auditing.
+- **apply_global_confidence_decay**: Applies exponential decay to confidence values of all entries, using the same formula as the agent, based on time since update.
 
-* **export\_knowledge\_statistics(store\_path, output\_path) -> MaintenanceReport**
-  Calculates and exports statistics for a given store: entry counts, confidence metrics, memory utilisation, temporal statistics, phenotype diversity.
+- **export_knowledge_statistics**: Dumps summary statistics (counts, confidence, usage, creation/update times) to a JSON file.
 
-* **validate\_ontology\_integrity(ontology\_path, phenomenology\_map\_path) -> MaintenanceReport**
-  Validates that ontology and phenomenology files have the correct structure, required fields, and expected graph size (modulus, diameter, etc).
+- **validate_ontology_integrity**: Checks structure, key invariants, and phenomenology mappings in `ontology_map.json` and (optionally) `phenomenology_map.json`.
 
-All store, overlay, and decorator classes above support at least the standard interface:
+- **prune_and_compact_store**: Rewrites a `.mpk` file with only those entries passing age/confidence thresholds, discarding all others. This is the only way to "delete" entries in append-only mode.
 
-* `get`, `put`, `close`, `data`, `iter_entries`
+All file paths and stores may be sandboxed using `base_path` (for test isolation or containerised execution). All policy utilities are safe for concurrent use and support dry-run or auditing as required.
 
-All stores ensure atomicity and isolation for read/write. All overlays and decorators transparently compose these policies for complex agent or pool-level storage needs.
+**Note:**  
+All store/view objects must be explicitly closed by the user or registered with `atexit` to avoid resource leaks on process exit.
 
-All contracts, types, and policies in this section are definitive for any agent, orchestration, or system maintenance code in GyroSI. No alternative or informal interfaces are supported or documented.
+---
+
+**Summary:**  
+The entirety of GyroSI agent knowledge, for any configuration or deployment scale, is maintained through a strict, minimal API over a single append-only MsgPack file. All canonicalisation, overlays, pruning, and statistics are enforced through well-defined, testable decorator layers and contracts, never requiring runtime code to touch or interpret raw file content.
 
 ---
 

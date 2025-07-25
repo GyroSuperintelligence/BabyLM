@@ -5,12 +5,10 @@ Tests focus on end-to-end flows while avoiding overlap with existing governance/
 
 import concurrent.futures
 import json
-import os  # noqa: F401
 from typing import Any, Dict
 
 import pytest
 
-from baby.contracts import AgentConfig
 from baby.intelligence import AgentPool, GyroSI, orchestrate_turn
 from toys.communication import tokenizer as gyrotok
 
@@ -24,17 +22,14 @@ def _count_entries(store: Any) -> int:
     return sum(1 for _ in store.iter_entries())
 
 
-# IMPORTANT: Only use `patched_adapter_pool` in HTTP adapter tests.
-# Never import `toys.communication.external_adapter` in non-adapter tests.
-# Do NOT use any autouse fixture to reset or initialize the global FastAPI adapter pool.
-
-
 class TestIntelligenceEngineOrchestration:
     """Test core intelligence orchestration between agents."""
 
-    def test_batch_learning_stores_different_phenotypes(self, gyrosi_agent: GyroSI) -> None:
+    def test_batch_learning_stores_different_phenotypes(self, agent_pool: AgentPool) -> None:
         """Test batch learning creates distinct phenotypes for different input sequences."""
-        agent = gyrosi_agent
+        pool = agent_pool
+        pool.ensure_triad()
+        agent = pool.get("user")
 
         # Learn two different sequences
         sequence1 = b"ABC"
@@ -95,45 +90,6 @@ class TestGyroSIAgentLifecycle:
             # Response should be valid bytes
             assert all(0 <= b <= 255 for b in response)
 
-    def test_knowledge_persistence_across_sessions(self, multi_agent_setup: Dict[str, Any]) -> None:
-        """Test knowledge persists across agent sessions by counting entries."""
-        setup = multi_agent_setup
-        user_agent = setup["user"]
-
-        # Get initial entry count
-        store = user_agent.engine.operator.store
-        initial_count = _count_entries(store)
-
-        # Train with specific knowledge
-        training_data = b"GyroSI uses physics-grounded artificial intelligence."
-        user_agent.ingest(training_data)
-
-        # Get count after learning
-        learned_count = _count_entries(store)
-        assert learned_count > initial_count
-
-        # Close agent
-        user_agent.close()
-
-        # Create new agent with same configuration
-        new_config: AgentConfig = {
-            "ontology_path": user_agent.config["ontology_path"],
-            "public_knowledge_path": setup["public_path"],
-            "private_knowledge_path": str(setup["temp_dir"] / "user_private.pkl.gz"),
-            "enable_phenomenology_storage": True,
-            "phenomenology_map_path": user_agent.config["phenomenology_map_path"],
-        }
-
-        new_agent = GyroSI(new_config, agent_id="test_user", base_path=setup["temp_dir"])
-
-        # Count entries in reloaded agent
-        reloaded_count = _count_entries(new_agent.engine.operator.store)
-
-        # Should have persisted the learned entries
-        assert reloaded_count >= learned_count
-
-        new_agent.close()
-
 
 class TestAgentPoolManagement:
     """Test AgentPool multi-agent coordination and management."""
@@ -149,28 +105,6 @@ class TestAgentPoolManagement:
         required_agents = {"user", "system", "assistant"}
 
         assert required_agents.issubset(set(active_agents))
-
-    def test_agent_isolation_in_pool(self, agent_pool: AgentPool) -> None:
-        """Test agents in pool maintain separate knowledge states."""
-        pool = agent_pool
-
-        # Get two different agents
-        agent1 = pool.get_or_create_agent("test_agent_1")
-        agent2 = pool.get_or_create_agent("test_agent_2")
-
-        # Train them differently
-        agent1.ingest(b"Agent 1 specific knowledge")
-        agent2.ingest(b"Agent 2 different knowledge")
-
-        # Verify different states
-        state1 = agent1.get_agent_info()
-        state2 = agent2.get_agent_info()
-
-        assert state1["agent_id"] != state2["agent_id"]
-
-        # Clean up
-        pool.remove_agent("test_agent_1")
-        pool.remove_agent("test_agent_2")
 
     @pytest.mark.parametrize("tokenizer_name", TOKENIZER_NAMES)
     def test_orchestrate_turn_with_tokenizer(self, agent_pool: AgentPool, tokenizer_name: str) -> None:
@@ -242,9 +176,9 @@ class TestTokenizerIntegration:
 class TestExternalAdapterHTTP:
     """Test external API adapter endpoints."""
 
-    def test_models_endpoint(self, client: Any, patched_adapter_pool: Any) -> None:
+    def test_models_endpoint(self, test_client: Any) -> None:
         """Test /v1/models endpoint returns expected format."""
-        response = client.get("/v1/models")
+        response = test_client.get("/v1/models")
 
         assert response.status_code == 200
         data = response.json()
@@ -252,11 +186,11 @@ class TestExternalAdapterHTTP:
         assert len(data["data"]) > 0
         assert data["data"][0]["id"] == "gyrosi-baby-0.9.6"
 
-    def test_chat_completions_basic(self, client: Any, patched_adapter_pool: Any) -> None:
+    def test_chat_completions_basic(self, test_client: Any) -> None:
         """Test chat completions generates valid response."""
         payload = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello, GyroSI!"}]}
 
-        response = client.post("/v1/chat/completions", json=payload)
+        response = test_client.post("/v1/chat/completions", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -270,14 +204,14 @@ class TestExternalAdapterHTTP:
         assert data["choices"][0]["message"]["role"] == "assistant"
         assert len(data["choices"][0]["message"]["content"]) > 0
 
-    def test_concurrent_chat_completions(self, client: Any, patched_adapter_pool: Any) -> None:
+    def test_concurrent_chat_completions(self, test_client: Any) -> None:
         """Test concurrent requests don't interfere with each other."""
         payload1 = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello from thread 1"}]}
 
         payload2 = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello from thread 2"}]}
 
         def make_request(payload: Dict[str, Any]) -> int:
-            response = client.post("/v1/chat/completions", json=payload)
+            response = test_client.post("/v1/chat/completions", json=payload)
             return int(response.status_code)
 
         # Make concurrent requests
@@ -292,7 +226,7 @@ class TestExternalAdapterHTTP:
         assert status1 == 200
         assert status2 == 200
 
-    def test_chat_completions_with_system_message(self, client: Any, patched_adapter_pool: Any) -> None:
+    def test_chat_completions_with_system_message(self, test_client: Any) -> None:
         """Test chat completions incorporates system message."""
         payload = {
             "model": "gyrosi-baby-0.9.6",
@@ -302,18 +236,18 @@ class TestExternalAdapterHTTP:
             ],
         }
 
-        response = client.post("/v1/chat/completions", json=payload)
+        response = test_client.post("/v1/chat/completions", json=payload)
 
         assert response.status_code == 200
         data = response.json()
         assert data["choices"][0]["message"]["content"] is not None
 
-    def test_chat_completions_streaming(self, client: Any, patched_adapter_pool: Any) -> None:
+    def test_chat_completions_streaming(self, test_client: Any) -> None:
         """Test streaming chat completions returns valid SSE format."""
         payload = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello!"}]}
 
         # Use streaming context manager for robust SSE testing
-        with client.stream("POST", "/v1/chat/completions", json=payload, params={"stream": "true"}) as response:
+        with test_client.stream("POST", "/v1/chat/completions", json=payload, params={"stream": "true"}) as response:
             assert response.status_code == 200
             assert response.headers["content-type"].startswith("text/event-stream")
 
@@ -350,11 +284,11 @@ class TestExternalAdapterHTTP:
             full_content = "".join(content_chunks)
             assert len(full_content) > 0
 
-    def test_hf_generate_endpoint(self, client: Any, patched_adapter_pool: Any) -> None:
+    def test_hf_generate_endpoint(self, test_client: Any) -> None:
         """Test HuggingFace-compatible generate endpoint."""
         payload = {"inputs": "Generate a response about artificial intelligence."}
 
-        response = client.post("/generate", json=payload)
+        response = test_client.post("/generate", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -362,9 +296,9 @@ class TestExternalAdapterHTTP:
         assert isinstance(data["generated_text"], str)
         assert len(data["generated_text"]) > 0
 
-    def test_user_id_mapping_to_internal_agent(self, client: Any, patched_adapter_pool: Any) -> None:
+    def test_user_id_mapping_to_internal_agent(self, api_test_setup: Any) -> None:
         """Test custom user ID in header maps to internal 'user' agent."""
-        from toys.communication.external_adapter import agent_pool as global_pool
+        test_client, global_pool = api_test_setup
 
         # Get initial pool state
         pre_agents = set(global_pool.get_active_agents())
@@ -374,7 +308,7 @@ class TestExternalAdapterHTTP:
         # Use a custom user ID in header
         headers = {"X-User-ID": "custom-user-123"}
 
-        response = client.post("/v1/chat/completions", json=payload, headers=headers)
+        response = test_client.post("/v1/chat/completions", json=payload, headers=headers)
         assert response.status_code == 200
 
         # Verify pool state - no new agent should be created

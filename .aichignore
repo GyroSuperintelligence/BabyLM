@@ -102,4 +102,22 @@ memories/public/masks/__init__.py
 .pytest_cache/
 .venv/
 .vscode/
-_baby_095_backup/
+.ruff_cache
+pyi/
+.pytype
+.pyre
+.cursorignore
+.git
+.mypy_cache
+typings/
+__pycache__
+mypy.ini
+mypy_output.txt
+pyright_output.txt
+htmlcov/
+
+# Training Data
+toys/training/checkpoints
+toys/training/knowledge
+toys/training/logs
+toys/training/wikipedia_data

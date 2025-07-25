@@ -1,41 +1,55 @@
-.PHONY: help install test lint format clean run bootstrap
+# BabyLM Project Makefile
+
+# Variables
+PYTHON = python3
+VENV = .venv
+PIP = $(VENV)/bin/pip
+ACTIVATE = source $(VENV)/bin/activate
+
+# Use Homebrew LLVM for C/C++ compilation
+LLVM_PREFIX=$(shell brew --prefix llvm)
+export CC=$(LLVM_PREFIX)/bin/clang
+export CXX=$(LLVM_PREFIX)/bin/clang++
+
+.PHONY: help venv install system-deps setup clean run-wikipedia
 
 help:
-	@echo "Available commands:"
-	@echo "  install     Install dependencies"
-	@echo "  test        Run all tests"
-	@echo "  lint        Run flake8 linter"
-	@echo "  format      Format code with black and isort"
-	@echo "  clean       Remove Python and test artifacts"
-	@echo "  run         Run main.py"
-	@echo "  bootstrap   Initialize S2 structure and epigenome"
+	@echo "Available targets:"
+	@echo "  make venv         - Create a Python virtual environment"
+	@echo "  make install      - Install Python dependencies into venv"
+	@echo "  make system-deps  - Install system dependencies (Homebrew, llvm)"
+	@echo "  make setup        - Full setup: system deps + venv + install"
+	@echo "  make clean        - Remove __pycache__ and build artifacts"
+	@echo "  make run-wikipedia - Run the Wikipedia training script"
 
-install:
-	pip install -r requirements.txt
+venv:
+	$(PYTHON) -m venv $(VENV)
 
-test:
-	PYTHONPATH=. pytest scripts/tests/test_gyrosi.py
+install: venv
+	$(PIP) install --upgrade pip
+	$(PIP) install -r requirements.txt
 
-lint:
-	flake8 .
-	mypy .
+system-deps:
+	@echo "Installing system dependencies (requires Homebrew)..."
+	@if ! command -v brew >/dev/null 2>&1; then \
+	  echo 'Homebrew not found! Please install Homebrew first: https://brew.sh/'; \
+	  exit 1; \
+	fi
+	brew install llvm
 
-format:
-	black .
-	isort .
+setup: system-deps install
 
 clean:
-	find . -type d -name __pycache__ -delete
-	find . -type f -name "*.pyc" -delete
-	rm -rf build/ dist/ *.egg-info/
-	rm -rf .pytest_cache/ .coverage htmlcov/
-	rm -rf s2_information/agents/
-	rm -rf s2_information/agency/g1_information/
-	rm -rf s2_information/agency/g4_information/
-	rm -rf s2_information/agency/g5_information/
+	find . -type d -name '__pycache__' -exec rm -rf {} +
+	find . -type f -name '*.pyc' -delete
+	find . -type f -name '*.pyo' -delete
+	find . -type f -name '*.log' -delete
+	find . -type f -name '*.tmp' -delete
 
-run:
-	python main.py
-
-bootstrap:
-	python scripts/genesis.py
+run-wikipedia:
+	LLVM_PREFIX=$(shell brew --prefix llvm) && \
+	export CC=$$LLVM_PREFIX/bin/clang && \
+	export CXX=$$LLVM_PREFIX/bin/clang++ && \
+	export NUMBA_OPT=3 && \
+	export NUMBA_CACHE_DIR=$$HOME/.cache/numba && \
+	$(ACTIVATE) && $(PYTHON) toys/training/wikipedia_eng.py --manual-download

@@ -41,31 +41,25 @@ from baby.intelligence import AgentPool, orchestrate_turn
 from toys.communication import tokenizer as gyrotok
 
 # ---------------------------------------------------------------------
-# Configuration helpers – override with env-vars if you like
+# Load preferences from canonical JSON
 # ---------------------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parents[2]
-DEFAULT_ONT_PATH = os.getenv(
-    "GYROSI_ONTOLOGY_PATH",
-    str(BASE_DIR / "memories/public/meta/ontology_map.json"),
-)
-DEFAULT_KNOWLEDGE_PATH = os.getenv(
-    "GYROSI_PUBLIC_KNOWLEDGE",
-    str(BASE_DIR / "memories/public/meta/knowledge.pkl.gz"),
-)
-# Define the default tokenizer for this adapter
-DEFAULT_TOKENIZER = os.getenv("GYROSI_TOKENIZER", "bert-base-uncased")
+PREFERENCES_PATH = os.getenv("GYROSI_PREFERENCES_PATH", "memories/memory_preferences.json")
+with open(PREFERENCES_PATH) as f:
+    PREFERENCES = json.load(f)
 
-os.makedirs(os.path.dirname(DEFAULT_KNOWLEDGE_PATH), exist_ok=True)
+BASE_PATH = Path(PREFERENCES.get("base_path", Path(PREFERENCES_PATH).parent)).resolve()
 
 # ---------------------------------------------------------------------
 # One shared AgentPool for the whole process
 # ---------------------------------------------------------------------
 agent_pool = AgentPool(
-    DEFAULT_ONT_PATH,
-    DEFAULT_KNOWLEDGE_PATH,
-    allow_auto_create=False,
+    ontology_path=PREFERENCES["ontology"]["ontology_map_path"],
+    base_knowledge_path=PREFERENCES["public_knowledge"]["path"],
+    preferences=PREFERENCES,
     allowed_ids={"user", "system", "assistant"},
-    private_agents_base_path=str(BASE_DIR / "memories/private/agents"),
+    allow_auto_create=False,
+    private_agents_base_path=str(BASE_PATH / PREFERENCES["private_knowledge"]["base_path"]),
+    base_path=BASE_PATH,
 )
 agent_pool.ensure_triad()
 atexit.register(agent_pool.close_all)
@@ -171,7 +165,7 @@ async def chat_completions(
         if system_msgs:
             system_text = "\n".join(system_msgs)
             # Encode with tokenizer
-            stimulus = system_agent.respond(gyrotok.encode(system_text, name=DEFAULT_TOKENIZER))
+            stimulus = system_agent.respond(gyrotok.encode(system_text, name=PREFERENCES["tokenizer"]["name"]))
             # Feed that to assistant so its first cycles = system prompt
             assistant_agent.ingest(stimulus)
 
@@ -181,7 +175,7 @@ async def chat_completions(
     assistant_memories = [m.content for m in payload.messages if m.role == "assistant"]
     if assistant_memories:
         # Encode with tokenizer
-        memory_bytes = gyrotok.encode("\n".join(assistant_memories), name=DEFAULT_TOKENIZER)
+        memory_bytes = gyrotok.encode("\n".join(assistant_memories), name=PREFERENCES["tokenizer"]["name"])
         assistant_agent.ingest(memory_bytes)
 
     # --------------------------------------------------------------
@@ -190,16 +184,18 @@ async def chat_completions(
     last_user = next((m for m in reversed(payload.messages) if m.role == "user"), None)
     user_text = last_user.content if last_user else ""
     # Call orchestrate_turn with the tokenizer name
-    reply = orchestrate_turn(agent_pool, user_id, assistant_id, user_text, tokenizer_name=DEFAULT_TOKENIZER)
+    reply = orchestrate_turn(
+        agent_pool, user_id, assistant_id, user_text, tokenizer_name=PREFERENCES["tokenizer"]["name"]
+    )
 
     # Streaming support: if client sets stream=true, yield tokens as SSE
     if request.query_params.get("stream", "false").lower() == "true":
 
         def token_stream() -> Iterator[str]:
             # Encode the reply to bytes, then decode token by token
-            reply_bytes = gyrotok.encode(reply, name=DEFAULT_TOKENIZER)
+            reply_bytes = gyrotok.encode(reply, name=PREFERENCES["tokenizer"]["name"])
             ids = gyrotok._bytes_to_ids(reply_bytes)
-            tokenizer = gyrotok._load(DEFAULT_TOKENIZER)
+            tokenizer = gyrotok._load(PREFERENCES["tokenizer"]["name"])
             for i, token_id in enumerate(ids):
                 token_text = tokenizer.decode([token_id], skip_special_tokens=True)
                 # OpenAI-compatible SSE chunk
@@ -251,5 +247,7 @@ async def hf_generate(payload: HFGenerateRequest, request: Request) -> HFGenerat
     # Remove or comment out the assignment to 'system_id' at line 251
     # system_id = "system"
     # Call orchestrate_turn with the tokenizer name
-    reply = orchestrate_turn(agent_pool, user_id, assistant_id, payload.inputs, tokenizer_name=DEFAULT_TOKENIZER)
+    reply = orchestrate_turn(
+        agent_pool, user_id, assistant_id, payload.inputs, tokenizer_name=PREFERENCES["tokenizer"]["name"]
+    )
     return HFGenerateResponse(generated_text=reply)

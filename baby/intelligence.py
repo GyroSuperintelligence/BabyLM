@@ -1,8 +1,6 @@
 """
-S4/5: Intelligence - Orchestration & API
-
-This module provides the IntelligenceEngine and GyroSI classes responsible for
-orchestrating the complete system and providing the external API.
+S4/5: Intelligence – Orchestration & API
+…your module docstring…
 """
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ import time
 import uuid
 from collections import OrderedDict, deque
 from threading import RLock
-from typing import Any, Dict, List, Optional, TypedDict, cast, TYPE_CHECKING, Deque, Tuple
+from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple, TypedDict, cast
 
 import numpy as np
 from dataclasses import asdict, is_dataclass
@@ -25,6 +23,10 @@ from baby.inference import InferenceEngine
 from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
 
+try:
+    import numba as nb
+except ImportError:
+    nb = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     pass
@@ -45,6 +47,23 @@ def _abs(path: Optional[str], base: Path) -> str:
         raise ValueError("Path must not be None")
     p = Path(os.path.expanduser(str(path)))
     return str(p if p.is_absolute() else base / p)
+
+
+# --- JIT batch function for epistemology ---
+if nb is not None:
+
+    @nb.njit(cache=True, fastmath=True)
+    def _jit_batch_impl(epi: Any, state: Any, buf: Any) -> tuple[int, int]:
+        acc = 0
+        for i in range(buf.size):
+            intron = buf[i] ^ 0xAA  # transcribe inlined
+            state = epi[state, intron]  # fast C level lookup
+            acc ^= intron | (acc & (~intron & 0xFF))  # fold inlined
+        return state, acc
+
+    _jit_batch = _jit_batch_impl
+else:
+    raise ImportError("Numba is required for GyroSI; install it or set NUMBA_DISABLE_JIT=0.")
 
 
 class IntelligenceEngine:
@@ -193,13 +212,13 @@ class IntelligenceEngine:
         # Ingress: complete monodromic loop by folding with the same intron used for addressing.
         # This causes exon_mask to collapse (x → 0), expressing closure—not accumulation.
         # Phenotype metadata tracks recurrence; output is drawn from the stored value, not from the mask.
-        phenotype_entry = self.operator.get_phenotype(state_index, last_intron)
+        output_entry = self.operator.get_phenotype(state_index, last_intron)
 
         # S3: Learn through Monodromic Fold
-        self.operator.learn(phenotype_entry, last_intron)
+        self.operator.learn(output_entry, last_intron)
 
         # Buffer hook events and process hooks every N cycles, unless pain spike
-        self._hook_event_buffer.append((self, phenotype_entry, last_intron))
+        self._hook_event_buffer.append((self, output_entry, last_intron))
         process_hooks_now = False
         θ = np.mean(self._θ_buf) if self._θ_buf else 0.0  # Cache θ once
         if θ > self._θ_high or len(self._hook_event_buffer) >= self._hook_batch_interval:
@@ -211,8 +230,7 @@ class IntelligenceEngine:
             self._hook_event_buffer.clear()
 
         # Store original phenotype_entry for output
-        output_phenotype_entry = phenotype_entry
-
+        output_entry = output_entry
         # Algedonic decision at start (must run before output)
         # Use cached θ
         if θ > self._θ_high:
@@ -257,7 +275,7 @@ class IntelligenceEngine:
             self._pain_streak = 0
 
         # Generate response from original phenotype_entry (not cooling intron)
-        phenotype = output_phenotype_entry.get("phenotype")
+        phenotype = output_entry.get("phenotype")
         if isinstance(phenotype, str) and phenotype:
             return ord(phenotype[0])
         elif isinstance(phenotype, str):
@@ -293,40 +311,29 @@ class IntelligenceEngine:
             return False
 
     def batch_learn(self, data: bytes) -> None:
-        """
-        Learn from a batch of data using streaming Monodromic Fold.
-
-        This method allows efficient batch learning while preserving the
-        path-dependent nature of the Fold operation. Uses O(1) memory
-        by streaming the Fold instead of collecting all introns.
-
-        Args:
-            data: Batch of bytes to learn from
-        """
         if not data:
             return
 
-        # Streaming Fold: O(1) memory instead of O(N)
-        acc = 0
-        for byte in data:
-            # Use the optimized process_egress method (STT-aware)
-            intron = self.process_egress(byte)
-            acc = governance.fold(acc, intron)
-            # self.cycle_count is incremented in process_egress
+        if self.use_epistemology and nb is not None:
+            buf = np.frombuffer(data, dtype=np.uint8)
+            self.current_state_index, acc = _jit_batch(self.epistemology, np.uint32(self.current_state_index), buf)
+            self.cycle_count += buf.size
+        else:
+            acc = 0
+            for b in data:
+                intr = self.process_egress(b)
+                acc = governance.fold(acc, intr)
 
-        # Learn from the final accumulated intron
-        if acc != 0:
-            # Use the correct state index depending on STT
-            if self.use_epistemology:
-                state_index = self.current_state_index
-            else:
-                state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
-            phenotype_entry = self.operator.get_phenotype(state_index, acc)
-            self.operator.learn(phenotype_entry, acc)
-        # Ensure all writes are flushed/committed
-        store = self.operator.store
-        if hasattr(store, "commit"):
-            store.commit()
+        if acc:
+            state_idx = (
+                self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
+            )
+            phe = self.operator.get_phenotype(state_idx, acc)
+            self.operator.learn(phe, acc)
+
+        # flush
+        if hasattr(self.operator.store, "commit"):
+            self.operator.store.commit()
 
     def get_state_info(self) -> StateInfo:
         """
@@ -396,7 +403,8 @@ class IntelligenceEngine:
             from collections.abc import Mapping
 
             if isinstance(result, Mapping):
-                return bool(result.get("total_entries", 0) > 0)
+                # mypy requires the cast on the same line as .get
+                return bool(cast(Mapping[str, Any], result).get("total_entries", 0) > 0)
         except ImportError:
             pass
         return False
@@ -615,8 +623,19 @@ class GyroSI:
 
     def _create_default_store(self) -> Any:
         """Create default storage based on configuration."""
+        # --- Honor store_options for msgpack/append-only store ---
+        # cast self.config to a dict so .get is allowed
+        opts = cast(Dict[str, Any], self.config).get("store_options", {}) or {}
+        if opts.get("append_only"):
+            knowledge_path = cast(Dict[str, Any], self.config).get("knowledge_path")
+            if knowledge_path is None:
+                raise ValueError("knowledge_path must be set in config")
+            return OrbitStore(
+                knowledge_path,
+                append_only=opts.get("append_only", True),
+            )
         # Canonicalisation enablement consistency: autodetect if flag is None or missing
-        enable_phenomenology = self.config.get("enable_phenomenology_storage", None)
+        enable_phenomenology = cast(Dict[str, Any], self.config).get("enable_phenomenology_storage", None)
 
         # Create base store
         public_knowledge_path = self.config.get("public_knowledge_path")
@@ -631,7 +650,7 @@ class GyroSI:
             if private_path is None:
                 if private_root is None:
                     raise ValueError("private_agents_base_path must not be None")
-                private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.pkl.gz")
+                private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.mpk")
             # Multi-agent overlay using decorators
             public_store = ReadOnlyView(
                 OrbitStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
@@ -644,7 +663,7 @@ class GyroSI:
             knowledge_path = self.config.get("knowledge_path")
             if knowledge_path is None:
                 base_path = self.config.get("base_path") or str(self.base_path / "memories")
-                knowledge_path = os.path.join(base_path, "knowledge.pkl.gz")
+                knowledge_path = os.path.join(base_path, "knowledge.mpk")  # msgpack-based fallback path
             base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
 
             # CanonicalView: enable if flag is True, or autodetect if None and file exists
@@ -719,8 +738,9 @@ class AgentPool:
         self.ontology_path = _abs(ontology_path, self.base_path)
         self.base_knowledge_path = _abs(base_knowledge_path, self.base_path)
         self.preferences = preferences or {}
-        self.max_agents = self.preferences.get("max_agents_in_memory", 1000)
-        self.eviction_policy = self.preferences.get("agent_eviction_policy", "lru")
+        # cast preferences to a dict so .get is allowed
+        self.max_agents = cast(Dict[str, Any], self.preferences).get("max_agents_in_memory", 1000)
+        self.eviction_policy = cast(Dict[str, Any], self.preferences).get("agent_eviction_policy", "lru")
         self.allowed_ids = allowed_ids or {"user", "system", "assistant"}
         self.allow_auto_create = allow_auto_create
         self.agent_access_times: Dict[str, float] = {}
@@ -762,7 +782,7 @@ class AgentPool:
                     self._maybe_evict_agent(shard)
 
                 # Create private knowledge path
-                private_path_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.pkl.gz")
+                private_path_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.mpk")
                 private_path = _abs(private_path_rel, self.base_path)
                 os.makedirs(os.path.dirname(private_path), exist_ok=True)
 
@@ -813,7 +833,7 @@ class AgentPool:
     def create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
         onto = self.ontology_path
         phenomap = str(Path(onto).with_name("phenomenology_map.json"))
-        private_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.pkl.gz")
+        private_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.mpk")
         private_path = _abs(private_rel, self.base_path)
         config: AgentConfig = {
             "ontology_path": onto,
