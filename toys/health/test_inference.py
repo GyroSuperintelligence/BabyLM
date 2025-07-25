@@ -563,9 +563,10 @@ class TestPruningOperations:
             else:
                 raise
 
-    def test_prune_preserves_high_confidence(self, gyrosi_agent: GyroSI) -> None:
+    def test_prune_preserves_high_confidence(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
         """Test pruning preserves high confidence entries."""
-        engine = gyrosi_agent.engine.operator
+        agent = isolated_agent_factory(tmp_path)
+        engine = agent.engine.operator
         assert len(engine.s2.orbit_cardinality) > 0
 
         # Create high confidence entry
@@ -577,16 +578,11 @@ class TestPruningOperations:
         engine.store.put((100, 42), original_entry)
 
         # Prune with low threshold
-        try:
-            removed_count = engine.prune_low_confidence_entries(confidence_threshold=0.01)
-            # If we get here, it's not an append-only store
-            assert removed_count == 0
-        except RuntimeError as e:
-            if "append_only store cannot delete" in str(e):
-                # This is expected for append-only stores
-                pass
-            else:
-                raise
+        # For append-only stores, pruning will not actually remove entries
+        # but will return the count of entries that would be removed
+        removed_count = engine.prune_low_confidence_entries(confidence_threshold=0.01)
+        # Since our entry has confidence 0.5 > 0.01, it should not be marked for removal
+        assert removed_count == 0
 
         # Entry should still exist
         preserved_entry = engine.get_phenotype(100, 42)
