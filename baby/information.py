@@ -484,9 +484,11 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
     # Save canonical as .npy
     np.save(output_path, canonical.astype(np.int32))
     # Save orbit_sizes as orbit_sizes.npy
+    # Each state should have the cardinality of its orbit
     sizes = np.zeros(N, dtype=np.uint32)
-    for rep, sz in orbit_sizes.items():
-        sizes[rep] = sz
+    for i in range(N):
+        rep = canonical[i]  # Get the representative for this state
+        sizes[i] = orbit_sizes[rep]  # Set the cardinality of this state's orbit
     np.save(str(Path(output_path).with_name("orbit_sizes.npy")), sizes)
     print(f"\n✓ Saved canonical phenomenology to: {output_path}")
 

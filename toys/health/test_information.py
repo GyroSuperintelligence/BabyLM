@@ -247,7 +247,9 @@ class TestOrbitHandling:
         assert engine.orbit_cardinality is not None
         assert len(engine.orbit_cardinality) == len(cast(Sized, engine._keys))
         assert engine.orbit_cardinality.dtype == np.uint32
-        assert np.all(engine.orbit_cardinality >= 1)  # All orbits have at least 1 member
+        # All states should have non-zero orbit cardinality
+        # (each state belongs to an orbit with at least 1 member)
+        assert np.all(engine.orbit_cardinality > 0), "All states should have non-zero orbit cardinality"
 
     def test_get_orbit_cardinality(self, test_env: Dict[str, Any]) -> None:
         """Test individual orbit cardinality lookup."""
@@ -257,7 +259,7 @@ class TestOrbitHandling:
         theta = test_env["main_meta_files"]["theta"]
         engine = InformationEngine(keys, ep, pheno, theta)
 
-        # Test valid indices
+        # Test valid indices - all should have non-zero cardinality
         cardinality = engine.get_orbit_cardinality(0)
         assert isinstance(cardinality, int)
         assert cardinality >= 1
@@ -465,7 +467,8 @@ class TestIsolatedInformationEngine:
         engine = InformationEngine(keys, ep, pheno, theta)
         assert engine._keys is not None
         # All orbit cardinalities should be > 0
-        assert np.all(engine.orbit_cardinality > 0)
+        # (each state belongs to an orbit with at least 1 member)
+        assert np.all(engine.orbit_cardinality > 0), "All states should have non-zero orbit cardinality"
         assert engine._v_max == np.max(engine.orbit_cardinality)
 
     def test_isolated_tensor_operations(self, test_env: Dict[str, Any]) -> None:
