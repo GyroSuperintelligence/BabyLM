@@ -8,7 +8,6 @@ Based on the Common Governance Model (CGM) and gyrogroup algebra.
 from baby.contracts import (
     AgentConfig,
     CycleHookFunction,
-    ManifoldData,
     PhenotypeEntry,
     PreferencesConfig,
     ValidationReport,
@@ -28,7 +27,6 @@ from baby.policies import (
 __version__ = "0.9.6"
 __all__ = [
     "PhenotypeEntry",
-    "ManifoldData",
     "AgentConfig",
     "PreferencesConfig",
     "CycleHookFunction",

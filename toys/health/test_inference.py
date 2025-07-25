@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+import numpy as np
 
 from baby import governance
 from baby.contracts import PhenotypeEntry
@@ -58,7 +59,7 @@ class TestInferenceEngineInitialization:
         assert len(s2_engine._keys) > 0
 
         # Mock zero orbit cardinality
-        with patch.object(s2_engine, "orbit_cardinality", [0] * len(s2_engine._keys)):
+        with patch.object(s2_engine, "orbit_cardinality", np.zeros_like(s2_engine.orbit_cardinality)):
             with pytest.raises(ValueError, match="orbit cardinality cannot be zero"):
                 InferenceEngine(s2_engine, temp_store)
 
@@ -89,8 +90,7 @@ class TestPhenotypeOperations:
     def test_get_phenotype_creates_new_entry(self, gyrosi_agent: GyroSI) -> None:
         """Test get_phenotype creates new entry for unknown context."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         intron = 42
@@ -109,8 +109,7 @@ class TestPhenotypeOperations:
     def test_get_phenotype_retrieves_existing_entry(self, gyrosi_agent: GyroSI) -> None:
         """Test get_phenotype retrieves existing entry."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         intron = 42
@@ -135,8 +134,7 @@ class TestPhenotypeOperations:
     def test_phenotype_intron_masking(self, gyrosi_agent: GyroSI) -> None:
         """Test intron is properly masked to 8 bits."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         intron_large = 0x1FF  # 9 bits
@@ -151,8 +149,7 @@ class TestPhenotypeOperations:
     def test_phenotype_confidence_calculation(self, gyrosi_agent: GyroSI) -> None:
         """Test initial confidence is calculated based on orbit cardinality."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 0  # Use origin state
         intron = 42
@@ -168,8 +165,7 @@ class TestPhenotypeOperations:
     def test_governance_signature_calculation(self, gyrosi_agent: GyroSI) -> None:
         """Test governance signature is correctly computed."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         intron = 0b10101010  # Known pattern
@@ -189,12 +185,11 @@ class TestPhenotypeOperations:
     def test_canonical_index_assertion(self, gyrosi_agent: GyroSI) -> None:
         """Test that state_index must be canonical."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Invalid state index should trigger assertion
         with pytest.raises(AssertionError):
-            engine.get_phenotype(len(engine.s2._keys), 42)  # Out of range
+            engine.get_phenotype(len(engine.s2.orbit_cardinality), 42)  # Out of range
 
         with pytest.raises(AssertionError):
             engine.get_phenotype(-1, 42)  # Negative
@@ -206,8 +201,7 @@ class TestLearningOperations:
     def test_learn_by_key_creates_and_learns(self, gyrosi_agent: GyroSI) -> None:
         """Test learn_by_key creates entry and applies learning."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         intron = 42
@@ -256,8 +250,7 @@ class TestLearningOperations:
 
     def test_learn_no_change_optimization(self, gyrosi_agent: GyroSI) -> None:
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
         entry = engine.get_phenotype(100, 0)  # any intron, we'll tweak
         entry["exon_mask"] = 0
         old_last_updated = entry["last_updated"]
@@ -270,8 +263,7 @@ class TestLearningOperations:
     def test_learn_preserves_mask_range(self, gyrosi_agent: GyroSI) -> None:
         """Test learning always keeps exon_mask in valid range."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Test with various starting masks and introns
         for mask in [0, 1, 42, 128, 255]:
@@ -295,8 +287,7 @@ class TestLearningOperations:
     def test_learn_updates_governance_signature(self, gyrosi_agent: GyroSI, sample_phenotype: Dict[str, Any]) -> None:
         """Test governance signature is updated after learning."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         entry = cast(PhenotypeEntry, sample_phenotype.copy())
         entry["context_signature"] = (100, 42)
@@ -322,8 +313,7 @@ class TestBatchLearning:
     def test_batch_learn_empty_sequence(self, gyrosi_agent: GyroSI) -> None:
         """Test batch learning with empty intron sequence."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         result = engine.batch_learn(100, [])
         assert result is None
@@ -332,8 +322,7 @@ class TestBatchLearning:
         """Test batch learning with single intron (isolated agent)."""
         agent = isolated_agent_factory(tmp_path)
         engine = agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         intron = 42
@@ -347,8 +336,7 @@ class TestBatchLearning:
     def test_batch_learn_sequence_folding(self, gyrosi_agent: GyroSI) -> None:
         """Test batch learning folds sequence correctly."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         introns = [1, 2, 3]
@@ -363,8 +351,7 @@ class TestBatchLearning:
     def test_batch_learn_preserves_path_dependence(self, gyrosi_agent: GyroSI) -> None:
         """Test different orders give different results."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         introns1 = [1, 2, 3]
@@ -383,8 +370,7 @@ class TestBatchLearning:
     def test_batch_learn_intron_masking(self, gyrosi_agent: GyroSI) -> None:
         """Test introns are properly masked in batch learning."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         introns = [0x1FF, 0x200]  # Values > 255
@@ -407,8 +393,7 @@ class TestValidationAndMaintenance:
     ) -> None:
         agent = isolated_agent_factory(tmp_path)
         engine = agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         report = engine.validate_knowledge_integrity()
 
@@ -423,8 +408,7 @@ class TestValidationAndMaintenance:
     ) -> None:
         agent = isolated_agent_factory(tmp_path)
         engine = agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Add some valid entries
         for i in range(5):
@@ -441,8 +425,7 @@ class TestValidationAndMaintenance:
     ) -> None:
         agent = isolated_agent_factory(tmp_path)
         engine = agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Create problematic entry that might cause exceptions
         bad_entry: PhenotypeEntry = {
@@ -468,8 +451,7 @@ class TestValidationAndMaintenance:
     def test_validate_knowledge_integrity_context_signature_mismatch(self, gyrosi_agent: GyroSI) -> None:
         """Test validation detects context signature mismatches."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Create entry with mismatched context signature
         entry = {
@@ -507,8 +489,7 @@ class TestConfidenceAndDecay:
     ) -> None:
         agent = isolated_agent_factory(tmp_path)
         engine = agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Add a single entry
         engine.learn_by_key(100, 42)
@@ -520,8 +501,7 @@ class TestConfidenceAndDecay:
 
     def test_apply_confidence_decay_minimum_floor(self, gyrosi_agent: GyroSI) -> None:
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
         # Create entry and manually set very low confidence
         engine.learn_by_key(100, 42)
         entry = engine.get_phenotype(100, 42)
@@ -536,8 +516,7 @@ class TestConfidenceAndDecay:
 
     def test_apply_confidence_decay_exponential_formula(self, gyrosi_agent: GyroSI) -> None:
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
         # Create entry
         engine.learn_by_key(100, 42)
         entry = engine.get_phenotype(100, 42)
@@ -560,8 +539,7 @@ class TestPruningOperations:
     ) -> None:
         agent = isolated_agent_factory(tmp_path)
         engine = agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Add a low-confidence entry
         entry = engine.learn_by_key(100, 42)
@@ -575,8 +553,7 @@ class TestPruningOperations:
     def test_prune_preserves_high_confidence(self, gyrosi_agent: GyroSI) -> None:
         """Test pruning preserves high confidence entries."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Create high confidence entry
         engine.learn_by_key(100, 42)
@@ -599,8 +576,7 @@ class TestPrivateMethods:
     def test_compute_semantic_address(self, gyrosi_agent: GyroSI) -> None:
         """Test semantic address computation is deterministic."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         context_key = (100, 42)
 
@@ -609,13 +585,12 @@ class TestPrivateMethods:
         addr2 = engine._compute_semantic_address(context_key)
 
         assert addr1 == addr2
-        assert 0 <= addr1 < len(engine.s2._keys)
+        assert 0 <= addr1 < len(engine.s2.orbit_cardinality)
 
     def test_compute_semantic_address_different_contexts(self, gyrosi_agent: GyroSI) -> None:
         """Test different contexts give different addresses."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         addr1 = engine._compute_semantic_address((100, 42))
         addr2 = engine._compute_semantic_address((101, 42))
@@ -627,8 +602,7 @@ class TestPrivateMethods:
     def test_create_default_phenotype(self, gyrosi_agent: GyroSI) -> None:
         """Test default phenotype creation."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         context_key = (100, 42)
         entry = engine._create_default_phenotype(context_key)
@@ -658,8 +632,7 @@ class TestEdgeCases:
     def test_learn_with_missing_context_signature(self, gyrosi_agent: GyroSI) -> None:
         """Test error when phenotype entry lacks context_signature."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         bad_entry = {
             "phenotype": "bad",
@@ -679,14 +652,13 @@ class TestEdgeCases:
     def test_learn_with_invalid_state_index(self, gyrosi_agent: GyroSI) -> None:
         """Test assertion failure with invalid state index."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         bad_entry: PhenotypeEntry = {
             "phenotype": "bad",
             "exon_mask": 42,
             "confidence": 0.5,
-            "context_signature": (len(engine.s2._keys), 42),  # Out of range
+            "context_signature": (len(engine.s2.orbit_cardinality), 42),  # Out of range
             "usage_count": 0,
             "created_at": time.time(),
             "last_updated": time.time(),
@@ -700,8 +672,7 @@ class TestEdgeCases:
     def test_novelty_calculation_edge_cases(self, gyrosi_agent: GyroSI) -> None:
         """Test novelty calculation with edge cases."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Test identical masks (no novelty)
         entry: PhenotypeEntry = {
@@ -726,8 +697,7 @@ class TestEdgeCases:
     def test_learning_rate_calculation(self, gyrosi_agent: GyroSI) -> None:
         """Test learning rate depends on orbit cardinality."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Different state indices should have different learning rates
         # based on their orbit cardinalities
@@ -748,8 +718,7 @@ class TestEdgeCases:
     def test_confidence_boundary_conditions(self, gyrosi_agent: GyroSI) -> None:
         """Test confidence stays within [0, 1] bounds."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Test with extreme values
         entry: PhenotypeEntry = {
@@ -790,8 +759,7 @@ class TestEdgeCases:
     def test_validation_with_exception_handling(self, gyrosi_agent: GyroSI) -> None:
         """Test validation handles exceptions gracefully."""
         engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Create problematic entry that might cause exceptions
         bad_entry: PhenotypeEntry = {
@@ -817,39 +785,27 @@ class TestEdgeCases:
 class TestIntegrationWithStorage:
     """Test integration with different storage backends."""
 
-    def test_store_put_called_correctly(self, gyrosi_agent: GyroSI) -> None:
-        """Test that store.put is called with correct parameters."""
-        engine = gyrosi_agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
-
-        # Mock the store to verify calls
-        mock_store = Mock()
-        mock_store.get.return_value = None  # No existing entry
-        engine.store = mock_store
+    def test_store_put_called_correctly(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test that store.put creates an entry with correct parameters in the real store."""
+        agent = isolated_agent_factory(tmp_path)
+        engine = agent.engine.operator
+        assert len(engine.s2.orbit_cardinality) > 0
 
         state_index = 100
         intron = 42
 
         engine.learn_by_key(state_index, intron)
 
-        # Verify store.put was called
-        assert mock_store.put.called
-
-        # Check the call arguments
-        call_args = mock_store.put.call_args
-        context_key = call_args[0][0]
-        entry = call_args[0][1]
-
-        assert context_key == (state_index, intron)
-        assert entry.get("context_signature") is not None and (entry["context_signature"] == (state_index, intron))
+        # Retrieve the entry from the real store
+        entry = engine.store.get((state_index, intron))
+        assert entry is not None
+        assert entry.get("context_signature") == (state_index, intron)
 
     def test_iter_entries_integration(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
         """Test validation uses store.iter_entries correctly (isolated agent)."""
         agent = isolated_agent_factory(tmp_path)
         engine = agent.engine.operator
-        assert engine.s2._keys is not None
-        assert len(engine.s2._keys) > 0
+        assert len(engine.s2.orbit_cardinality) > 0
 
         # Add several entries
         for i in range(3):

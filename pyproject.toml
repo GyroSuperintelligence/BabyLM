@@ -30,8 +30,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "pytest-mock>=3.11.0",
     "black>=23.7.0",
     "flake8>=6.1.0",
     "mypy>=1.5.0",
@@ -40,8 +38,6 @@ dev = [
 
 test = [
     "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "pytest-mock>=3.11.0",
 ]
 
 [project.scripts]
@@ -62,9 +58,6 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
-    "--cov=baby",
-    "--cov-report=term-missing",
-    "--cov-report=html",
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')"

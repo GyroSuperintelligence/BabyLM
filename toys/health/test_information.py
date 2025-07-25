@@ -111,8 +111,8 @@ class TestTensorConversion:
 class TestStateIndexing:
     """Test state index lookup operations."""
 
-    def test_get_index_dict_mode(self, test_env: Dict[str, Any]) -> None:
-        """Test state index lookup in dictionary mode."""
+    def test_get_index_lookup(self, test_env: Dict[str, Any]) -> None:
+        """Test state index lookup."""
         keys = test_env["main_meta_files"]["ontology"]
         ep = test_env["main_meta_files"]["epistemology"]
         pheno = test_env["main_meta_files"]["phenomenology"]
@@ -127,23 +127,8 @@ class TestStateIndexing:
         assert isinstance(index, int)
         assert 0 <= index < len(engine._keys)
 
-    def test_get_index_array_mode(self, test_env: Dict[str, Any]) -> None:
-        """Test state index lookup in array mode."""
-        keys = test_env["main_meta_files"]["ontology"]
-        ep = test_env["main_meta_files"]["epistemology"]
-        pheno = test_env["main_meta_files"]["phenomenology"]
-        theta = test_env["main_meta_files"]["theta"]
-        engine = InformationEngine(keys, ep, pheno, theta)
-
-        origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
-        index = engine.get_index_from_state(origin_int)
-
-        assert engine._keys is not None
-        assert isinstance(index, int)
-        assert 0 <= index < len(engine._keys)
-
-    def test_get_state_from_index_dict_mode(self, test_env: Dict[str, Any]) -> None:
-        """Test state retrieval from index in dictionary mode."""
+    def test_get_state_from_index_lookup(self, test_env: Dict[str, Any]) -> None:
+        """Test state retrieval from index."""
         keys = test_env["main_meta_files"]["ontology"]
         ep = test_env["main_meta_files"]["epistemology"]
         pheno = test_env["main_meta_files"]["phenomenology"]
@@ -151,20 +136,6 @@ class TestStateIndexing:
         engine = InformationEngine(keys, ep, pheno, theta)
 
         # Test roundtrip: state → index → state
-        origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
-        index = engine.get_index_from_state(origin_int)
-        recovered_state = engine.get_state_from_index(index)
-
-        assert recovered_state == origin_int
-
-    def test_get_state_from_index_array_mode(self, test_env: Dict[str, Any]) -> None:
-        """Test state retrieval from index in array mode."""
-        keys = test_env["main_meta_files"]["ontology"]
-        ep = test_env["main_meta_files"]["epistemology"]
-        pheno = test_env["main_meta_files"]["phenomenology"]
-        theta = test_env["main_meta_files"]["theta"]
-        engine = InformationEngine(keys, ep, pheno, theta)
-
         origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
         index = engine.get_index_from_state(origin_int)
         recovered_state = engine.get_state_from_index(index)
@@ -195,10 +166,10 @@ class TestStateIndexing:
 
         assert engine._keys is not None
         # Use invalid indices
-        with pytest.raises(ValueError, match="Invalid index"):
+        with pytest.raises(ValueError, match="out of bounds for array indexing"):
             engine.get_state_from_index(-1)
 
-        with pytest.raises(ValueError, match="Invalid index"):
+        with pytest.raises(ValueError, match="out of bounds for array indexing"):
             engine.get_state_from_index(len(engine._keys))
 
 
@@ -299,12 +270,15 @@ class TestOrbitHandling:
         theta = test_env["main_meta_files"]["theta"]
         engine = InformationEngine(keys, ep, pheno, theta)
 
-        # Check if phenomenology map exists
-        pheno_path = Path(test_env["main_meta_files"]["ontology"]).parent / "phenomenology_map.npy"
-        if pheno_path.exists():
-            # Orbit cardinalities should be loaded from phenomenology data
-            unique_cardinalities = np.unique(engine.orbit_cardinality)
-            assert len(unique_cardinalities) > 1  # Should have varied orbit sizes
+        # Check if orbit_sizes.npy exists, otherwise skip test
+        from pathlib import Path
+        import pytest
+        sizes_path = Path(pheno).with_name("orbit_sizes.npy")
+        if not sizes_path.exists():
+            pytest.skip("orbit_sizes.npy not present; cannot test for varied orbit sizes.")
+
+        unique_cardinalities = np.unique(engine.orbit_cardinality)
+        assert len(unique_cardinalities) > 1  # Should have varied orbit sizes
 
 
 class TestProgressReporter:
