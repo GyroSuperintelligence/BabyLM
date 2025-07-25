@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from pathlib import Path
 
 from baby import governance
 
@@ -49,6 +50,7 @@ class InformationEngine:
 
     def __init__(self, keys_path: str, ep_path: str, phenomap_path: str, theta_path: str):
         import numpy as np
+        from pathlib import Path
         self._keys = np.load(keys_path, mmap_mode="r")
         self._inverse = self._keys
         self.ontology_map = None
@@ -57,11 +59,12 @@ class InformationEngine:
         self.ep = np.load(ep_path, mmap_mode="r")
         self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
         if phenomap_path:
-            try:
-                pheno = np.load(phenomap_path, mmap_mode="r")
-                # Optionally, set up any additional attributes if needed
-            except Exception:
-                pass
+            self.orbit_map = np.load(phenomap_path, mmap_mode="r")
+            sizes_path = Path(phenomap_path).with_name("orbit_sizes.npy")
+            if sizes_path.exists():
+                self.orbit_cardinality = np.load(sizes_path, mmap_mode="r")
+            else:
+                self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
         if theta_path:
             try:
                 self._theta_table = np.load(theta_path, mmap_mode="r")
@@ -453,7 +456,9 @@ def _compute_sccs(
     return canonical, orbit_sizes, reps
 
 
-def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> None:
+def build_phenomenology_map(
+    ep_path: str, keys_path: str, output_path: str
+) -> None:
     """
     Builds the canonical phenomenology map for GyroSI runtime operations.
     Args:
@@ -466,6 +471,7 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
     # Load data
     ep = np.load(ep_path, mmap_mode="r")
     keys = np.load(keys_path, mmap_mode="r")
+    N = ep.shape[0]
 
     # Build index→state lookup array
     idx_to_state = keys
@@ -473,10 +479,16 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
     # Core: Compute canonical phenomenology (all 256 introns)
     print("Computing canonical phenomenology (all 256 introns)...")
     all_introns = list(range(256))
-    canonical, _, _ = _compute_sccs(ep, idx_to_state, all_introns)
+    canonical, orbit_sizes, _ = _compute_sccs(ep, idx_to_state, all_introns)
     print(f"  Found {len(np.unique(canonical))} canonical orbits (expected 256)")
+
     # Save canonical as .npy
     np.save(output_path, canonical.astype(np.int32))
+    # Save orbit_sizes as orbit_sizes.npy
+    sizes = np.zeros(N, dtype=np.uint32)
+    for rep, sz in orbit_sizes.items():
+        sizes[rep] = sz
+    np.save(str(Path(output_path).with_name("orbit_sizes.npy")), sizes)
     print(f"\n✓ Saved canonical phenomenology to: {output_path}")
 
 

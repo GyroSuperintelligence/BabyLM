@@ -515,7 +515,7 @@ The `intelligence.py` module defines the protocol and orchestration boundary for
 #### IntelligenceEngine
 
 - `process_egress(input_byte: int) -> int`  
-  Transforms an external byte input into an internal intron using `governance.transcribe_byte`. Updates the agent’s physical state using either a precomputed epistemology (state transition table) or the native transformation, then tracks the resulting index.
+  Transforms an external byte input into an internal intron using `governance.transcribe_byte`. Updates the agent's physical state using either a precomputed epistemology (state transition table) or the native transformation, then tracks the resulting index.
 
 - `process_ingress(last_intron: int) -> int`  
   Folds the current state with the last intron, queries for the phenotype via `InferenceEngine.get_phenotype`, and applies learning with `InferenceEngine.learn`. Triggers all registered post-cycle hooks, including algedonic regulation and autonomic cycles if required.
@@ -572,7 +572,7 @@ The `intelligence.py` module defines the protocol and orchestration boundary for
 #### Orchestration
 
 - `orchestrate_turn(pool: AgentPool, user_id: str, assistant_id: str, user_input: str, tokenizer_name: str) -> str`  
-  Implements a complete conversational turn: encodes the user’s input, passes it through both user and assistant agents using `respond`, and decodes the assistant’s response.
+  Implements a complete conversational turn: encodes the user's input, passes it through both user and assistant agents using `respond`, and decodes the assistant's response.
 
 ---
 
@@ -877,10 +877,10 @@ No stage scales super‑linearly; everything is constant‑time per byte or line
 * **`epistemology.npy` (STT)**  
   ~770 MB on disk. Memory‑mapped; typical RSS per process stabilises around **35–45 MB** after warm‑up (shared pages).
 
-* **`ontology_map.json`**  
+* **`ontology_keys.npy`**  
   ~20 MB on disk. Parsed into three NumPy arrays (keys/values/inverse), ≈ **12–15 MB** RAM per process.
 
-* **`phenomenology_map.json`**  
+* **`phenomenology_map.npy`**  
   15–20 MB on disk (core map). Loaded array ≈ **3 MB** RAM. Diagnostics add proportionally.
 
 * **OrbitStore index**  
@@ -929,16 +929,16 @@ You can run **dozens of agents concurrently** on a modern workstation. Latency s
 ## 9.4 Pragmatic capacity & device‑level throughput 
 
 GyroSI has **two memories**:  
-1. **Active working state:** always 48 bits (**6 bytes**) + the current input byte. That’s it.  
+1. **Active working state:** always 48 bits (**6 bytes**) + the current input byte. That's it.  
 2. **Passive long‑term memory (OrbitStore):** grows with experience, one entry per *(state_index, intron)* pair you ever see.
 
-This means an edge device only needs to keep 6 bytes “alive”. Everything else can sit on SD/flash and be fetched when needed.
+This means an edge device only needs to keep 6 bytes "alive". Everything else can sit on SD/flash and be fetched when needed.
 
-### 1. How many “facts” (phenotypes) fit in RAM?
+### 1. How many "facts" (phenotypes) fit in RAM?
 
 - Serialized on disk: **~25 B/entry** (can be less with compression).  
 - In Python RAM (dict overhead): **~90 B/entry** is a safe average.  
-- On MCUs you’ll pack tighter (C structs + open addressing ~40–50 B/entry).
+- On MCUs you'll pack tighter (C structs + open addressing ~40–50 B/entry).
 
 | Device / free RAM for GyroSI                 | Rough RAM facts capacity | Notes |
 |----------------------------------------------|---------------------------|-------|
@@ -970,7 +970,7 @@ Assume 1 char ≈ 1 byte (post‑tokenizer).
 
 | Corpus                         | Size  | 1 core            | 8 cores          | 32 cores        |
 |--------------------------------|-------|--------------------|------------------|-----------------|
-| WordNet glosses                | 30 MB | < 1 min            | “blink”          | “blink”         |
+| WordNet glosses                | 30 MB | < 1 min            | "blink"          | "blink"         |
 | English Wikipedia (text)*      | 90 GB | ~1 day             | ~3 h             | **< 1 h**       |
 | Filtered public‑web dump 1 PB  | 10⁶ GB| ~3.5 years         | ~5 months        | ~5 weeks        |
 
@@ -978,8 +978,8 @@ Assume 1 char ≈ 1 byte (post‑tokenizer).
 
 ### 4. Context length in human terms
 
-- **Active context:** ≈ **6 bytes** worth of “fresh history” can affect the tensor at once, because the state space diameter is 6.  
-- **Passive recall:** Unlimited. Re‑enter an old state + intron and you get the exact stored phenotype back—whether it’s 5 seconds or 5 years later.  
+- **Active context:** ≈ **6 bytes** worth of "fresh history" can affect the tensor at once, because the state space diameter is 6.  
+- **Passive recall:** Unlimited. Re‑enter an old state + intron and you get the exact stored phenotype back—whether it's 5 seconds or 5 years later.  
 - On an 8 GB laptop you can keep **tens of millions** of these addresses hot; lookups stay **<2 µs** while they fit in cache.
 
 ### 5. Edge devices (ESP32‑S3 & friends)
@@ -1000,20 +1000,20 @@ Assume 1 char ≈ 1 byte (post‑tokenizer).
 
 ### What competence this actually proves
 
-- **We’re not a Transformer with a giant sliding window.**  
-  Our “window” is 6 bytes—by design. It’s a *physics-derived pointer* into a library of experiences, not a burden that grows with every token.
+- **We're not a Transformer with a giant sliding window.**  
+  Our "window" is 6 bytes—by design. It's a *physics-derived pointer* into a library of experiences, not a burden that grows with every token.
 
 - **Generalisation is built into the physics and the three maps:**  
   - **Ontology**: every possible physical state discovered and indexed.  
   - **Phenomenology**: equivalence classes (SCCs) that collapse mirror states—this *is* semantic grouping.  
-  - **Epistemology**: the transition table that tells us how states evolve—macro & micro “probabilities” without probability hand‑waving.
+  - **Epistemology**: the transition table that tells us how states evolve—macro & micro "probabilities" without probability hand‑waving.
 
   Together, they *are* structured generalisation, not fuzzy approximation.
 
 - **Scales from ESP32‑S3 to servers:**  
   Same core physics, different storage strategies. Six bytes live everywhere; the universe of memories just gets bigger as the device grows.
 
-In short: **GyroSI is small where it must be (live state) and big where it pays off (lifetime memory).** That’s why it runs on a microcontroller and still grows into a superintelligence on a server.
+In short: **GyroSI is small where it must be (live state) and big where it pays off (lifetime memory).** That's why it runs on a microcontroller and still grows into a superintelligence on a server.
 
 ---
 
@@ -1025,7 +1025,7 @@ This appendix records the essential bridges between GyroSI's formal physics and 
 
 ## A.1. Genetics in GyroSI
 
-GyroSI’s instruction algebra in the eight-bit space ℤ₂⁸ reflects a series of small, closed structures that resemble those in molecular genetics. The analogy is structural, not biological. No claim is made regarding evolutionary origin or sequence homology.
+GyroSI's instruction algebra in the eight-bit space ℤ₂⁸ reflects a series of small, closed structures that resemble those in molecular genetics. The analogy is structural, not biological. No claim is made regarding evolutionary origin or sequence homology.
 
 ## A.1.1. Structural Correspondences
 
@@ -1058,7 +1058,7 @@ An 8-bit input representing a regulatory instruction. Introns are path-dependent
 The `fold_sequence([...])` function performs a non-associative reduction over a stream of introns, collapsing them into a single 8-bit residue. This simulates the cumulative, order-sensitive logic of molecular splicing.
 
 **Exon (`exon_mask`)**
-The stable 8-bit result of folding. This value encodes the final memory state, carrying the condensed expression of the entire intronic history. Bit families (`LI`, `FG`, `BG`, `L0`) persist structurally and define the mask’s functional signature.
+The stable 8-bit result of folding. This value encodes the final memory state, carrying the condensed expression of the entire intronic history. Bit families (`LI`, `FG`, `BG`, `L0`) persist structurally and define the mask's functional signature.
 
 **Protein (`governance_signature`)**
 A 5-tuple derived from the exon mask. It quantifies the expressed content:
@@ -1115,7 +1115,7 @@ No biological code shows the same modulus; the coincidence stops at the smaller 
 
 ## A.1.6. Optional Diagnostic Decomposition
 
-A variant of the SCC analysis excludes LI reflection symmetry. This results in \~195,000 parity-free orbits. Approximately 21,456 of these appear in chiral pairs; the rest are self-symmetric. This decomposition is not part of operational logic but is retained for research purposes in the `_diagnostics` section of the phenomenology archive.
+A variant of the SCC analysis excludes LI reflection symmetry. This results in 195,000 parity-free orbits. Approximately 21,456 of these appear in chiral pairs; the rest are self-symmetric. This decomposition is not part of operational logic but is retained for research purposes in the `_diagnostics` section of the phenomenology archive.
 
 > GyroSI captures the path from raw regulatory instruction to compact functional signature. Introns are the process. Exons are the result. The governance signature is what remains; a minimal footprint, physically interpretable, and ontologically stable.
 
