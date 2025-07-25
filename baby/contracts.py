@@ -35,27 +35,6 @@ class PhenotypeEntry(TypedDict):
     _original_context: Optional[Tuple[int, int]]
 
 
-class ManifoldData(TypedDict):
-    """Structure of the discovered ontology data."""
-
-    schema_version: str
-    ontology_map: Dict[int, int]
-    endogenous_modulus: int
-    ontology_diameter: int
-    total_states: int
-    build_timestamp: float
-
-
-class PhenomenologyData(TypedDict, total=False):
-    """Structure of the phenomenology mapping data."""
-
-    schema_version: str
-    phenomenology_map: list[int]
-    orbit_sizes: dict[int, int]
-    metadata: dict[str, Any]
-    _diagnostics: Dict[str, Any]
-
-
 class AgentConfig(TypedDict, total=False):
     ontology_path: str
     knowledge_path: Optional[str]

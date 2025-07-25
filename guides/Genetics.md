@@ -615,29 +615,12 @@ All system-wide types, configuration, and maintenance protocols are declared in 
     - `context_signature: Tuple[int, int]` (canonical index + intron)
     - `_original_context: Optional[Tuple[int, int]]` (for decorator tracking)
 
-- **ManifoldData (TypedDict)**  
-  Structure of the physical ontology file (`ontology_map.json`):
-    - `schema_version: str`
-    - `ontology_map: Dict[int, int]`
-    - `endogenous_modulus: int`
-    - `ontology_diameter: int`
-    - `total_states: int`
-    - `build_timestamp: float`
-
-- **PhenomenologyData (TypedDict)**  
-  Structure of the phenomenology file (`phenomenology_map.json`):
-    - `schema_version: str`
-    - `phenomenology_map: list[int]`
-    - `orbit_sizes: dict[int, int]`
-    - `metadata: dict[str, Any]`
-    - `_diagnostics: Dict[str, Any]` (optional diagnostics)
-
 - **AgentConfig (TypedDict)**  
   Agent runtime and environment configuration, including:
     - `ontology_path: str`
     - `knowledge_path: Optional[str]`
-    - `public_knowledge_path: Optional[str]`
-    - `private_knowledge_path: Optional[str]`
+    - `public_knowledge_path: Optional[str]
+    - `private_knowledge_path: Optional[str]
     - `enable_phenomenology_storage: Optional[bool]`
     - `phenomenology_map_path: Optional[str]`
     - `learn_batch_size: Optional[int]`
@@ -875,13 +858,16 @@ No stage scales super‑linearly; everything is constant‑time per byte or line
 ### 9.2 Memory Requirements
 
 * **`epistemology.npy` (STT)**  
-  ~770 MB on disk. Memory‑mapped; typical RSS per process stabilises around **35–45 MB** after warm‑up (shared pages).
+  770 MB on disk. Memory‑mapped; typical RSS per process stabilises around **35–45 MB** after warm‑up (shared pages).
 
 * **`ontology_keys.npy`**  
-  ~20 MB on disk. Parsed into three NumPy arrays (keys/values/inverse), ≈ **12–15 MB** RAM per process.
+  6.0 MB on disk. Parsed into three NumPy arrays (keys/values/inverse), ≈ **12–15 MB** RAM per process.
 
 * **`phenomenology_map.npy`**  
-  15–20 MB on disk (core map). Loaded array ≈ **3 MB** RAM. Diagnostics add proportionally.
+  3.0 MB on disk (core map). Loaded array ≈ **3 MB** RAM. Diagnostics add proportionally.
+
+* **`theta.npy`**  
+  3.0 MB on disk. Used for ... (add a brief description if needed).
 
 * **OrbitStore index**  
   ~25 B serialized / **~90 B resident** per phenotype (dict + Python overhead).  

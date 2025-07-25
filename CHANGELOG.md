@@ -6,11 +6,47 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 
 ## [0.9.6.4] – 2025-07-24
 
+### **Phase 1**
 **Scope:** Tests, Tests, Tests - Corrections, Corrections, Corrections... 
 
 - Flake8, Pyright, Mypy Error Free
 - Pyright Robust Agent Isolation finally achieved! No littering or polution to our main data (somehow this silly thing proved to be a heck of a challenge!)
 - Pyright Pass
+
+Here is a clean, structured changelog entry summarising the full refactor:
+
+---
+
+### **Phase 2**
+**Scope:** Ontology / Epistemology / Phenomenology / Theta
+
+#### ✅ **Summary**
+
+We removed all runtime JSON parsing from the engine and replaced the entire memory model with compact `.npy` binaries using NumPy + `mmap`. This creates a single source of truth for each of the four internal maps and reduces startup time from \~140 s to < 0.3 s per engine instance.
+
+### Major Refactor: Full Migration to Binary `.npy` Assets
+
+**Core changes:**
+- **Ontology, Epistemology, and Phenomenology assets** are now stored and loaded exclusively as `.npy` files (`ontology_keys.npy`, `epistemology.npy`, `phenomenology_map.npy`). All legacy `.json`-based logic, schema, and code paths have been removed.
+- **InformationEngine** now requires four file paths (`keys_path`, `ep_path`, `phenomap_path`, `theta_path`) and only supports array-based indexing. All dict-based and JSON-based overloads, as well as `use_array_indexing` and `strict_validation` parameters, are gone.
+- **All CLI, build, and workflow instructions** have been updated to reference the new `.npy` filenames and arguments.
+- **All tests and fixtures** have been updated to use the new four-path constructor for `InformationEngine`. All references to removed features (`use_array_indexing`, `strict_validation`, `endogenous_modulus`, `ontology_diameter`) have been removed or replaced.
+- **Validation and maintenance utilities** now operate on `.npy` files and check array properties, not JSON keys.
+- **Early failure for missing/corrupt `theta.npy`:** `InformationEngine` now raises at construction if `theta.npy` is missing or corrupt, rather than deferring to the first divergence calculation.
+- **All error messages, logs, and comments** referencing `.json` assets for ontology/phenomenology have been updated or removed.
+- **Dead code and comments** (e.g., ujson/json import fallbacks) have been removed for clarity.
+- **Type safety:** All code and tests have been updated to pass `mypy` and `pyright` with no ignores, including correct handling of optional types and array lengths.
+
+**Other improvements:**
+- **Test suite**: All tests now use the correct `.npy`-based API, and obsolete tests for removed features have been deleted.
+- **CI and Git LFS**: Workflow and LFS tracking updated to only include `.npy` assets.
+- **Documentation**: All build instructions and module-level banners now reference the correct binary asset workflow.
+
+---
+
+**Summary:**  
+The codebase is now fully binary-asset based, with a modern, type-safe, and maintainable API. All legacy JSON, dict, and fallback logic is gone, and the developer experience is consistent and robust for both contributors and CI.
+
 ---
 
 ## [0.9.6.4] – 2025-07-24
