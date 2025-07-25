@@ -35,19 +35,6 @@ class PhenotypeEntry(TypedDict):
     _original_context: Optional[Tuple[int, int]]
 
 
-class AgentConfig(TypedDict, total=False):
-    ontology_path: str
-    knowledge_path: Optional[str]
-    public_knowledge_path: Optional[str]
-    private_knowledge_path: Optional[str]
-    enable_phenomenology_storage: Optional[bool]
-    phenomenology_map_path: Optional[str]
-    learn_batch_size: Optional[int]
-    agent_metadata: Optional[Dict[str, Any]]
-    private_agents_base_path: Optional[str]  # for test path overrides
-    base_path: Optional[str]  # for test path overrides
-
-
 class PreferencesConfig(TypedDict, total=False):
     """Preferences and settings configuration.
 
@@ -65,6 +52,9 @@ class PreferencesConfig(TypedDict, total=False):
     decay_factor: float
     confidence_threshold: float
 
+    # Pruning preferences
+    pruning: Dict[str, Any]  # Contains confidence_threshold, decay_factor, decay_interval_hours, enable_auto_decay
+
     # Agent pool preferences
     max_agents_in_memory: int
     agent_eviction_policy: str  # "lru", "lfu", "ttl"
@@ -76,6 +66,20 @@ class PreferencesConfig(TypedDict, total=False):
     enable_profiling: bool
     write_batch_size: int
     cache_size_mb: int
+
+
+class AgentConfig(TypedDict, total=False):
+    ontology_path: str
+    knowledge_path: Optional[str]
+    public_knowledge_path: Optional[str]
+    private_knowledge_path: Optional[str]
+    enable_phenomenology_storage: Optional[bool]
+    phenomenology_map_path: Optional[str]
+    learn_batch_size: Optional[int]
+    agent_metadata: Optional[Dict[str, Any]]
+    private_agents_base_path: Optional[str]  # for test path overrides
+    base_path: Optional[str]  # for test path overrides
+    preferences: Optional[PreferencesConfig]  # preferences for the agent
 
 
 class ValidationReport(TypedDict):
@@ -112,8 +116,6 @@ class MaintenanceReport(TypedDict):
 
 __all__ = [
     "PhenotypeEntry",
-    "ManifoldData",
-    "PhenomenologyData",
     "AgentConfig",
     "PreferencesConfig",
     "CycleHookFunction",

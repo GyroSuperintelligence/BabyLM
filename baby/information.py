@@ -51,6 +51,7 @@ class InformationEngine:
     def __init__(self, keys_path: str, ep_path: str, phenomap_path: str, theta_path: str):
         import numpy as np
         from pathlib import Path
+
         self._keys = np.load(keys_path, mmap_mode="r")
         self._inverse = self._keys
         self.ontology_map = None
@@ -456,9 +457,7 @@ def _compute_sccs(
     return canonical, orbit_sizes, reps
 
 
-def build_phenomenology_map(
-    ep_path: str, keys_path: str, output_path: str
-) -> None:
+def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> None:
     """
     Builds the canonical phenomenology map for GyroSI runtime operations.
     Args:

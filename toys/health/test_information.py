@@ -273,6 +273,7 @@ class TestOrbitHandling:
         # Check if orbit_sizes.npy exists, otherwise skip test
         from pathlib import Path
         import pytest
+
         sizes_path = Path(pheno).with_name("orbit_sizes.npy")
         if not sizes_path.exists():
             pytest.skip("orbit_sizes.npy not present; cannot test for varied orbit sizes.")

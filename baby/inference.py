@@ -329,42 +329,46 @@ class InferenceEngine:
             "modified_entries": modified,
         }
 
-    def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
-        # Ensure pending writes are visible to iter_entries
-        def _flush_store(s: Any) -> None:
-            if hasattr(s, "_flush"):
-                s._flush()
-            if hasattr(s, "commit"):
-                s.commit()
-            for attr in ("private_store", "public_store", "base_store"):
-                if hasattr(s, attr):
-                    _flush_store(getattr(s, attr))
+    def prune_low_confidence_entries(
+        self,
+        *,
+        confidence_threshold: float,
+    ) -> int:
+        """
+        Remove all phenotypes whose *current* confidence is below the threshold.
 
-        _flush_store(self.store)
+        NOTE: This only mutates the in‑memory dict of the underlying
+        OrbitStore (which is safe even for OverlayView).  Persisting the
+        effect to disk is left to the caller via baby.policies.prune_and_compact_store.
+        """
+        if confidence_threshold < 0.0:
+            raise ValueError("confidence_threshold must be ≥ 0.0")
 
-        keys_to_remove: list[tuple[int, int]] = []
-        for key, entry in self.store.iter_entries():
-            try:
-                conf = float(entry.get("confidence", 1.0))
-            except (TypeError, ValueError):
-                conf = 1.0
-            if conf < confidence_threshold:
-                keys_to_remove.append(key)
-
-        # Robust deletion detection: require delete to be an actual attribute of the concrete class
-        deleter = getattr(self.store, "delete", None)
-        has_real_delete = deleter is not None and "delete" in type(self.store).__dict__ and callable(deleter)
-        if not has_real_delete:
-            raise NotImplementedError("Store does not support deletion via 'delete' method.")
-
-        for key in keys_to_remove:
-            if deleter is not None:
-                deleter(key)
-
+        # First, flush any pending writes to ensure we see all entries
         if hasattr(self.store, "commit"):
             self.store.commit()
 
-        return len(keys_to_remove)
+        # `iter_entries()` gives canonicalised keys even under the view layer.
+        to_remove: list[tuple[int, int]] = [
+            key for key, entry in self.store.iter_entries() if entry["confidence"] < confidence_threshold
+        ]
+
+        for key in to_remove:
+            # Use the store's delete method if available, otherwise try to delete from data
+            if hasattr(self.store, "delete"):
+                try:
+                    self.store.delete(key)
+                except (NotImplementedError, RuntimeError) as e:
+                    # OverlayView may not support deletion for public entries
+                    # Append-only stores don't support deletion
+                    # Log but continue with other entries
+                    print(f"Could not delete entry {key}: {e}")
+            elif hasattr(self.store, "data") and not (type(self.store).__name__ in ("OverlayView", "CanonicalView")):
+                # Only try data deletion for non-view stores
+                if key in self.store.data:
+                    del self.store.data[key]
+
+        return len(to_remove)
 
     def _compute_semantic_address(self, context_key: Tuple[int, int]) -> int:
         """

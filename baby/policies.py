@@ -53,8 +53,7 @@ def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJEC
 
 class OrbitStore:
     """
-    Unified OrbitStore: supports both advanced (indexed, mmap, deletion) and append-only (msgpack, .mpk) modes.
-    Use append_only=True for append-only msgpack mode (V2 semantics).
+    If append_only=False, creates a .idx sidecar for fast key lookup. Most agents/tests use append_only=True (no .idx).
     """
 
     def __init__(
@@ -171,17 +170,24 @@ class OrbitStore:
                     self._last_remap_size = os.path.getsize(self.log_path)
         if self._pending_fsync:
             self._pending_fsync.result()
+        # In append_only mode, reset unpacker so iter_entries sees new records
+        if self.append_only:
+            self._append_only_unpacker = None
 
     def _flush(self) -> Optional[concurrent.futures.Future[Any]]:
         pending_fsync = None
         if not self.log_file or not self.pending_writes:
             return None
         for context_key, entry in self.pending_writes.items():
-            data: bytes = cast(bytes, msgpack.packb(to_native(entry), use_bin_type=True))
-            offset = self.log_file.tell()
-            size = len(data)
-            self.log_file.write(data)
-            if not self.append_only:
+            if self.append_only:
+                # Write (key, entry) as a tuple, clamp key to native ints
+                packed = msgpack.packb((tuple(int(x) for x in context_key), to_native(entry)), use_bin_type=True)
+                self.log_file.write(packed)
+            else:
+                data: bytes = cast(bytes, msgpack.packb(to_native(entry), use_bin_type=True))
+                offset = self.log_file.tell()
+                size = len(data)
+                self.log_file.write(data)
                 self.index[context_key] = (offset, size)
         self.log_file.flush()
         now = time.time()
@@ -317,17 +323,15 @@ class OrbitStore:
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
         yielded = set()
         if self.append_only:
-            if self._append_only_unpacker is None:
-                f = open(self.log_path, "rb")
-                self._append_only_unpacker = msgpack.Unpacker(f, use_list=False, raw=False)
-            unpacker = self._append_only_unpacker
-            if unpacker is not None:
+            # Always read from the start of the file for each call
+            with open(self.log_path, "rb") as f:
+                unpacker = msgpack.Unpacker(f, use_list=False, raw=False)
                 for entry in unpacker:
                     if isinstance(entry, tuple) and len(entry) == 2:
                         k, v = entry
                         yield tuple(k), v
                         yielded.add(tuple(k))
-                return
+            return
         with self.lock:
             for k, v in self.pending_writes.items():
                 yield k, v
@@ -384,6 +388,13 @@ class CanonicalView:
             e["context_signature"] = phen_key
             entry = e
         self.base_store.put(phen_key, entry)
+
+    def commit(self) -> None:
+        """Commit pending writes to the base store."""
+        if self.base_store is None:
+            raise RuntimeError("CanonicalView: base_store is closed or None")
+        if hasattr(self.base_store, "commit"):
+            self.base_store.commit()
 
     def delete(self, context_key: Tuple[int, int]) -> None:
         if self.base_store is None:

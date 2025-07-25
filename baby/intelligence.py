@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from baby import governance
-from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig
+from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig, PhenotypeEntry
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
@@ -83,12 +83,14 @@ class IntelligenceEngine:
         epistemology_path: Optional[str] = None,
         phenomenology_map_path: Optional[str] = None,
         base_path: Path = Path(__file__).resolve().parents[1],
+        preferences: Optional[PreferencesConfig] = None,
     ):
         """
         Initialize intelligence engine.
         All file paths are resolved with respect to base_path unless absolute.
         """
         self.base_path = base_path
+        self.preferences = preferences or {}
         self.ontology_path = _abs(
             ontology_path if ontology_path is not None else "memories/public/meta/ontology_keys.npy", self.base_path
         )
@@ -166,6 +168,9 @@ class IntelligenceEngine:
             self._autonomic_cycles = []
             self._autonomic_cycles_curated = {}
         self._pain_streak: int = 0
+
+        # Register auto-pruning hook if enabled
+        self._register_auto_prune_hook()
 
     def process_egress(self, input_byte: int) -> int:
         """
@@ -429,7 +434,67 @@ class IntelligenceEngine:
         Returns:
             Number of entries pruned
         """
-        return self.operator.prune_low_confidence_entries(confidence_threshold)
+        return self.operator.prune_low_confidence_entries(confidence_threshold=confidence_threshold)
+
+    def _register_auto_prune_hook(self) -> None:
+        """
+        Registers a post-cycle hook to automatically prune low-confidence entries
+        based on preferences configuration.
+        """
+        # Check if auto-pruning is enabled in preferences
+        pruning_cfg = self.preferences.get("pruning", {})
+        if pruning_cfg.get("enable_auto_decay", False):
+            self.add_hook(self._auto_prune_hook)
+
+    def _auto_prune_hook(self, engine: "IntelligenceEngine", phenotype_entry: PhenotypeEntry, last_intron: int) -> None:
+        """
+        Post-cycle hook to automatically prune low-confidence entries.
+
+        This hook is called after each cycle and removes entries below the confidence threshold.
+        If more than 10,000 entries are removed, it triggers background compaction.
+        """
+        # Get pruning configuration from preferences
+        pruning_cfg = self.preferences.get("pruning", {})
+        thr = pruning_cfg.get("confidence_threshold", 0.05)
+
+        # Prune low-confidence entries
+        try:
+            removed = self.operator.prune_low_confidence_entries(confidence_threshold=thr)
+        except RuntimeError as e:
+            if "append_only store cannot delete" in str(e):
+                # For append-only stores, we can't do in-memory pruning
+                # The pruning will happen during the next compaction cycle
+                removed = 0
+            else:
+                # Re-raise other RuntimeErrors
+                raise
+
+        # Optional: trigger background compaction if many entries vanished
+        if removed > 10_000:
+            # Get the store path for compaction
+            store_path = None
+            if hasattr(self.operator.store, "store_path"):
+                store_path = self.operator.store.store_path
+            elif hasattr(self.operator.store, "base_store") and hasattr(self.operator.store.base_store, "store_path"):
+                store_path = self.operator.store.base_store.store_path
+
+            if store_path:
+                try:
+                    # Import here to avoid circular imports
+                    from baby.policies import prune_and_compact_store
+
+                    prune_and_compact_store(
+                        store_path=store_path,
+                        output_path=None,  # in-place
+                        min_confidence=thr,
+                        dry_run=False,
+                    )
+                except Exception as e:
+                    # Log the error but don't fail the hook
+                    print(f"Auto-pruning compaction failed: {e}")
+
+        if removed > 0:
+            print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
 
 
 class GyroSI:
@@ -504,6 +569,10 @@ class GyroSI:
         self.agent_id = agent_id or str(uuid.uuid4())
         if phenotype_store is None:
             phenotype_store = self._create_default_store()
+
+        # Extract preferences from config
+        preferences = self.config.get("preferences", {})
+
         # Use local variables for extra paths
         onto = self.config.get("ontology_path")
         if onto is None:
@@ -517,6 +586,7 @@ class GyroSI:
             epistemology_path=epistemology_path,
             phenomenology_map_path=self.config["phenomenology_map_path"],
             base_path=self.base_path,
+            preferences=preferences,
         )
 
     def ingest(self, data: bytes) -> None:
@@ -651,9 +721,13 @@ class GyroSI:
                 private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.mpk")
             # Multi-agent overlay using decorators
             public_store = ReadOnlyView(
-                OrbitStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
+                OrbitStore(
+                    public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path, append_only=True
+                )
             )
-            private_store = OrbitStore(private_path, write_threshold=learn_batch_size, base_path=self.base_path)
+            private_store = OrbitStore(
+                private_path, write_threshold=learn_batch_size, base_path=self.base_path, append_only=True
+            )
             base_store: Any = OverlayView(public_store, private_store)
             phenomenology_map_path = self.config.get("phenomenology_map_path")
         else:
@@ -662,7 +736,9 @@ class GyroSI:
             if knowledge_path is None:
                 base_path = self.config.get("base_path") or str(self.base_path / "memories")
                 knowledge_path = os.path.join(base_path, "knowledge.mpk")  # msgpack-based fallback path
-            base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
+            base_store = OrbitStore(
+                knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path, append_only=True
+            )
 
             # CanonicalView: enable if flag is True, or autodetect if None and file exists
             phenomenology_map_path = self.config.get("phenomenology_map_path")
@@ -752,7 +828,7 @@ class AgentPool:
             else:
                 self._shards.append({"agents": OrderedDict(), "lock": RLock()})
         self._public_store: Optional[ReadOnlyView] = ReadOnlyView(
-            OrbitStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path)
+            OrbitStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path, append_only=True)
         )
 
     def _shard_index(self, agent_id: str) -> int:
@@ -788,7 +864,9 @@ class AgentPool:
 
                 # Multi-agent overlay using decorators, reuse cached public store
                 public_store = self._public_store
-                private_store = OrbitStore(private_path, write_threshold=100, base_path=self.base_path)
+                private_store = OrbitStore(
+                    private_path, write_threshold=100, base_path=self.base_path, append_only=True
+                )
                 base_store: Any = OverlayView(public_store, private_store)
 
                 # Create agent config
@@ -803,6 +881,7 @@ class AgentPool:
                     "private_agents_base_path": str(self.private_agents_base_path),
                     "base_path": str(self.base_path),
                     "enable_phenomenology_storage": bool(self.preferences.get("enable_phenomenology_storage", False)),
+                    "preferences": self.preferences,  # Pass preferences to the agent
                 }
 
                 # Add role hint to metadata if provided

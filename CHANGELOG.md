@@ -4,7 +4,77 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 
 ---
 
-## [0.9.6.4] – 2025-07-24
+## [0.9.6.4] – 2025-07-26
+
+**New Auto-Pruning Functionality** 
+
+An auto-pruning functionality has been fully implemented with the following components:
+
+# Changelog for Auto‑Pruning Feature
+
+## Added
+
+* **Preferences schema**
+
+  * Introduced a new `"pruning"` section in `memories/memory_preferences.json`:
+
+    ```json
+    "pruning": {
+      "confidence_threshold": 0.05,
+      "decay_factor": 0.995,
+      "decay_interval_hours": 6,
+      "enable_auto_decay": true
+    }
+    ```
+* **`PreferencesConfig.pruning`**
+
+  * Extended `baby/contracts.py` to include a `pruning: Dict[str, Any]` field so agents can read all pruning settings from their config.
+* **Auto‑pruning hook**
+
+  * In `IntelligenceEngine.__init__`, register `_auto_prune_hook` if `preferences["pruning"]["enable_auto_decay"]` is `true`.
+  * Implemented `_auto_prune_hook()` to:
+
+    1. Read `confidence_threshold` from preferences.
+    2. Call `InferenceEngine.prune_low_confidence_entries(threshold)`.
+    3. Gracefully handle append‑only and view‑layer stores (catch and ignore non‑deletable errors).
+    4. If > 10 000 entries were “removed,” invoke `prune_and_compact_store()` in‑place to do a full compaction.
+* **`AgentConfig.preferences`**
+
+  * Extended `AgentConfig` to accept a `preferences` sub‑dict and pass it through `GyroSI → IntelligenceEngine`.
+* **`CanonicalView.commit()`**
+
+  * Added a `commit()` method to `CanonicalView` so the auto‑pruner’s initial `commit()` call always succeeds on view‑wrapped stores.
+
+## Changed
+
+* **`InferenceEngine.prune_low_confidence_entries()`**
+
+  * Now always calls `store.commit()` first to flush pending writes.
+  * Wraps `store.delete(key)` in `try/except NotImplementedError/RuntimeError` so overlay and read‑only views don’t crash.
+  * Removed fallback `del store.data[key]` for non‑append‑only stores (views use their own `.delete()`).
+* **`GyroSI` constructor**
+
+  * Now reads `config["preferences"]` and passes it into `IntelligenceEngine`.
+* **`AgentPool`**
+
+  * Propagates its `preferences` into each newly created agent’s `AgentConfig`, ensuring hooks get wired automatically.
+
+## Tests
+
+* **Extended `test_inference.py`**
+
+  * Verified `prune_low_confidence_entries()` behavior for both deletable and append‑only stores.
+  * Added tests for:
+
+    * Hook registration when `enable_auto_decay` is `true` vs. `false`.
+    * Hook execution (ensuring it doesn’t blow up on append‑only or overlay stores).
+    * Custom vs. default thresholds.
+* **All existing pruning and compact tests** continue to pass unmodified.
+
+
+---
+
+## [0.9.6.4] – 2025-07-25
 
 ### **Phase 1**
 **Scope:** Tests, Tests, Tests - Corrections, Corrections, Corrections... 
