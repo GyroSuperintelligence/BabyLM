@@ -16,6 +16,9 @@ Incorporates all performance optimizations for MacBook Pro 2015:
 - Async checkpoint saving
 - Clean SIGINT handling
 - Conservative CPU usage
+
+PYTHONPATH=. python toys/training/wikipedia_eng.py
+
 """
 
 import argparse
@@ -41,7 +44,6 @@ from tqdm import tqdm
 
 from baby.intelligence import GyroSI
 from baby.contracts import AgentConfig
-from baby.policies import prune_and_compact_store
 from toys.communication import tokenizer as gyrotok
 
 # Add project root to path
@@ -132,6 +134,7 @@ def print_section(title: str) -> None:
 
 _GLOBAL_TOKENIZER: Optional[Tokenizer] = None
 _CHECKPOINT_POOL: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
+_ENCODING_POOL: Optional[ThreadPoolExecutor] = None
 
 
 def get_tokenizer(tokenizer_name: str) -> Tokenizer:
@@ -140,6 +143,14 @@ def get_tokenizer(tokenizer_name: str) -> Tokenizer:
     if _GLOBAL_TOKENIZER is None:
         _GLOBAL_TOKENIZER = gyrotok._load(tokenizer_name)
     return _GLOBAL_TOKENIZER
+
+
+def get_encoding_pool(workers: int) -> ThreadPoolExecutor:
+    """Get cached encoding thread pool."""
+    global _ENCODING_POOL
+    if _ENCODING_POOL is None:
+        _ENCODING_POOL = ThreadPoolExecutor(max_workers=workers)
+    return _ENCODING_POOL
 
 
 def encode_bytes_optimized(text: str, tokenizer_name: str) -> bytes:
@@ -177,13 +188,14 @@ class RobustTrainingConfig:
     dataset_name: str = "plaintext-wikipedia-full-english"
 
     # Model config
-    ontology_path: Path = PROJECT_ROOT / "memories/public/meta/ontology_map.npy"
+    ontology_path: Path = PROJECT_ROOT / "memories/public/meta/ontology_keys.npy"
+    phenomenology_path: Path = PROJECT_ROOT / "memories/public/meta/phenomenology_map.npy"
     # msgpack append‑only store lives in one .mpk file – NO .log/.idx any more
     knowledge_path: Path = training_dir / "knowledge/wikipedia_knowledge.mpk"
     tokenizer_name: str = "bert-base-uncased"
 
     # Optimized training params for MacBook Pro 2015
-    batch_size_bytes: int = 128 * 1024  # 128KB per batch (was too aggressive before)
+    batch_size_bytes: int = 512 * 1024  # 512KB per batch (4x bigger for JIT efficiency)
     max_memory_usage_percent: float = 80.0  # Trigger GC at 80%
     checkpoint_every_n_files: int = 50  # More frequent checkpoints
     max_files_per_session: Optional[int] = None
@@ -192,7 +204,7 @@ class RobustTrainingConfig:
     skip_short_articles: bool = True
     min_article_length: int = 256  # Skip very short articles
     max_article_length: int = 1_000_000
-    parallel_workers: int = 1  # Single-threaded for 2015 MBP
+    parallel_workers: int = 2  # The Wikipedia iterator is IO‑bound; one extra thread keeps the tokenizer busy
 
     # Memory management
     force_commit_every_n_batches: int = 10  # Force disk flush
@@ -205,7 +217,7 @@ class RobustTrainingConfig:
 
     # Debug settings
     debug_mode: bool = False
-    progress_update_interval: int = 5  # seconds
+    progress_update_interval: int = 10  # Fewer `tqdm` redraws when batches are bigger
 
 
 def setup_logging(config: RobustTrainingConfig) -> logging.Logger:
@@ -327,41 +339,6 @@ def iter_articles_from_file(file_path: Path, config: RobustTrainingConfig) -> It
         logging.getLogger("wikipedia_training").error(f"Failed to read {file_path}: {e}")
 
 
-# .mpk grows forever, so watch THAT file (no .log/.idx in append‑only mode)
-def check_log_size_and_maintain(agent: GyroSI, config: RobustTrainingConfig, logger: logging.Logger) -> None:
-    """Check log size and perform maintenance if needed."""
-    try:
-        log_path = config.knowledge_path  # wikipedia_knowledge.mpk
-
-        if log_path.exists():
-            log_size_gb = log_path.stat().st_size / (1024**3)
-
-            if log_size_gb > config.max_log_size_gb:
-                print(f"🔧 Log file size: {log_size_gb:.2f}GB - performing maintenance...")
-                logger.info(f"Log file size: {log_size_gb:.2f}GB - performing maintenance...")
-
-                # Apply confidence decay and pruning
-                maintenance_report = agent.apply_maintenance(
-                    decay_rate=config.maintenance_decay_rate,
-                    confidence_threshold=config.maintenance_confidence_threshold,
-                )
-
-                print(f"✅ Maintenance completed: {maintenance_report}")
-                logger.info(f"Maintenance completed: {maintenance_report}")
-
-                # Optional: Compact the store to rewrite log
-                try:
-                    prune_and_compact_store(str(config.knowledge_path), base_path=PROJECT_ROOT)
-                    print("✅ Store compacted successfully")
-                    logger.info("Store compacted successfully")
-                except Exception as e:
-                    print(f"⚠️  Store compaction failed: {e}")
-                    logger.warning(f"Store compaction failed: {e}")
-    except Exception as e:
-        print(f"⚠️  Maintenance check failed: {e}")
-        logger.warning(f"Maintenance check failed: {e}")
-
-
 def process_file_in_batches_robust(
     file_path: Path, agent: GyroSI, config: RobustTrainingConfig, logger: logging.Logger
 ) -> tuple[int, int]:
@@ -398,10 +375,6 @@ def process_file_in_batches_robust(
                         except Exception as e:
                             print(f"⚠️  Commit failed: {e}")
                             logger.warning(f"Commit failed: {e}")
-
-                        # Check if log maintenance is needed
-                        if batch_count % (config.force_commit_every_n_batches * 10) == 0:
-                            check_log_size_and_maintain(agent, config, logger)
 
                     # Memory guard rails
                     memory_usage = psutil.virtual_memory().percent
@@ -447,11 +420,20 @@ def process_article_batch_robust(
 ) -> int:
     """Process a batch of articles with error handling."""
     try:
-        # Combine articles into a single text
-        combined_text = "\n\n".join(articles)
-
-        # Use micro-optimized encoding
-        encoded_bytes = encode_bytes_optimized(combined_text, config.tokenizer_name)
+        # Use parallel encoding for multiple articles when workers > 1
+        if len(articles) > 1 and config.parallel_workers > 1:
+            # Encode articles in parallel
+            encoding_pool = get_encoding_pool(config.parallel_workers)
+            encoded_futures = [
+                encoding_pool.submit(encode_bytes_optimized, article, config.tokenizer_name) for article in articles
+            ]
+            # Combine encoded articles
+            encoded_parts = [future.result() for future in encoded_futures]
+            encoded_bytes = b"\n\n".join(encoded_parts)
+        else:
+            # Combine articles into a single text and encode
+            combined_text = "\n\n".join(articles)
+            encoded_bytes = encode_bytes_optimized(combined_text, config.tokenizer_name)
 
         # Learn using GyroSI's ingest method
         agent.ingest(encoded_bytes)
@@ -577,8 +559,10 @@ def create_training_agent(config: RobustTrainingConfig, logger: logging.Logger) 
 
         agent_config: AgentConfig = {
             "ontology_path": str(config.ontology_path),
+            "phenomenology_map_path": str(config.phenomenology_path),
             "knowledge_path": str(config.knowledge_path),  # already ends in .mpk
-            "learn_batch_size": 1000,
+            "learn_batch_size": 4000,  # see §2
+            "preferences": {"pruning": {"confidence_threshold": 0.05, "enable_auto_decay": True}},  # auto‑pruning
         }
 
         print(f"📍 Knowledge will be stored at: {config.knowledge_path}")
@@ -750,6 +734,11 @@ def run_training_robust(
             # Wait for any pending async checkpoints
             _CHECKPOINT_POOL.shutdown(wait=True)
 
+            # Shutdown encoding pool if it exists
+            if _ENCODING_POOL is not None:
+                _ENCODING_POOL.shutdown(wait=True)
+                print("🔒 Encoding pool closed cleanly")
+
             # Close agent properly
             if agent is not None:
                 agent.close()
@@ -794,7 +783,7 @@ def main() -> int:
         "--manual-download", action="store_true", help="Skip automatic download (use manually downloaded data)"
     )
     parser.add_argument("--max-files", type=int, help="Maximum files to process in this session")
-    parser.add_argument("--batch-size", type=int, default=128 * 1024, help="Batch size in bytes (default: 128KB)")
+    parser.add_argument("--batch-size", type=int, default=128 * 1024, help="Batch size in bytes (default: 512KB)")
     parser.add_argument(
         "--memory-limit", type=float, default=80.0, help="Memory usage percentage to trigger GC (default: 80)"
     )
