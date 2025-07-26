@@ -563,7 +563,9 @@ class TestPruningOperations:
             else:
                 raise
 
-    def test_prune_preserves_high_confidence(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+    def test_prune_preserves_high_confidence(
+        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
+    ) -> None:
         """Test pruning preserves high confidence entries."""
         agent = isolated_agent_factory(tmp_path)
         engine = agent.engine.operator
