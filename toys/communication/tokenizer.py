@@ -5,7 +5,7 @@ Provides reversible text↔bytes encoding using LEB128 to ensure all bytes ≤ 2
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, cast
+from typing import List, cast
 from tokenizers import Tokenizer
 import os
 
@@ -14,8 +14,8 @@ def get_tokenizer_root(base_path: Path = Path(__file__).resolve().parents[2]) ->
     return (base_path / "memories/public/tokenizers").resolve()
 
 
-# Module-level tokenizer cache keyed by (name, mtime)
-_tokenizer_cache: Dict[Any, Any] = {}
+# Module-level tokenizer cache keyed by (path, mtime)
+_tokenizer_cache: dict[tuple[str, float], Tokenizer] = {}
 
 
 def _load(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> Tokenizer:
@@ -30,7 +30,6 @@ def _load(name: str = "bert-base-uncased", base_path: Path = Path(__file__).reso
     if cache_key in _tokenizer_cache:
         return _tokenizer_cache[cache_key]
     tokenizer = Tokenizer.from_file(str(path))
-    _tokenizer_cache.clear()  # Only keep one loaded at a time (intentional)
     _tokenizer_cache[cache_key] = tokenizer
     return tokenizer
 
@@ -60,6 +59,8 @@ def _bytes_to_ids(blob: bytes) -> List[int]:
     ids, cur, shift = [], 0, 0
     for i, b in enumerate(blob):
         if shift > 28:  # Prevent overflow (32-bit token ID assumption)
+            print(f"[TOK-DBG] raw blob: {blob.hex()}")
+            print(f"[TOK-DBG] first 10 bytes: {[hex(b) for b in blob[:10]]}")
             raise ValueError(f"Token ID too large at byte {i}")
         cur |= (b & 0x7F) << shift
         if b & 0x80:
@@ -72,35 +73,59 @@ def _bytes_to_ids(blob: bytes) -> List[int]:
     return ids
 
 
+# ---------- helpers ----------
+
+# Mask / unmask one byte stream -----------------------------------
+_MASK = 0xAA
+
+
+def _apply_mask(buf: bytes) -> bytes:
+    """XOR every byte with 0xAA – vectorised & memory‑efficient."""
+    # bytes ↔ introns is a pure involution: f(f(x)) == x
+    return bytes(b ^ _MASK for b in buf)
+
+
 # ---------- Public API ----------
+
+
 def encode(text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> bytes:
     """Encode text to bytes via tokenizer + LEB128 (vectorized). Uses base_path for root."""
+    # 1. text → token IDs ----------------------------------------------------
     ids = _load(name, base_path).encode(text).ids
-    # Estimate max output size: each id can take up to 5 bytes (for 32-bit int)
-    out = bytearray(len(ids) * 5)
+
+    # 2. IDs → pure‑LEB128 intron stream ------------------------------------
+    introns = bytearray(len(ids) * 5)  # worst‑case pre‑alloc
     pos = 0
-    for i in ids:
-        val = i
+    for tid in ids:
+        val = tid
         while True:
-            b = val & 0x7F
+            byte = val & 0x7F
             val >>= 7
-            if val:
-                out[pos] = b | 0x80
-                pos += 1
-            else:
-                out[pos] = b
-                pos += 1
+            introns[pos] = byte | (0x80 if val else 0x00)
+            pos += 1
+            if not val:
                 break
-    return bytes(out[:pos])
+
+    # 3. intron stream → external masked bytes ------------------------------
+    return _apply_mask(bytes(introns[:pos]))
 
 
 def decode(blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> str:
     """Decode LEB128 bytes back to text via tokenizer. Uses base_path for root."""
+    # 0. Trim at EOS sentinel (remains valid after masking)
+    if 0x00 in blob:
+        blob = blob.split(b"\x00", 1)[0]
+
+    # 1. external bytes → intron stream -------------------------------------
+    introns = _apply_mask(blob)
+
+    # 2. intron stream → token IDs ------------------------------------------
     try:
-        ids = _bytes_to_ids(blob)
+        ids = _bytes_to_ids(introns)
+        # 3. IDs → text ------------------------------------------------------
         return cast(str, _load(name, base_path).decode(ids, skip_special_tokens=True))
     except Exception:
-        # Fallback to UTF-8 if tokenizer decode fails
+        # malformed stream fallback
         return blob.decode("utf-8", errors="replace")
 
 

@@ -410,6 +410,46 @@ class TestEdgeCases:
         assert len(signatures) > 10
 
 
+class TestExonProduct:
+    """Test exon_product_from_metadata function."""
+
+    def test_exon_product_from_metadata_basic(self) -> None:
+        """Test basic exon_product_from_metadata functionality."""
+        from baby.contracts import GovernanceSignature
+
+        # Test with a simple signature
+        sig: GovernanceSignature = {"neutral": 4, "li": 1, "fg": 1, "bg": 0, "dyn": 2}
+
+        confidence = 0.5
+        orbit_v = 100
+        v_max = 200
+
+        product = governance.exon_product_from_metadata(sig, confidence, orbit_v, v_max)
+
+        # Should return an 8-bit value
+        assert 0 <= product <= 255
+
+        # Test that fold(p, p) == 0 for the returned product
+        assert governance.fold(product, product) == 0
+
+    def test_exon_product_from_metadata_edge_cases(self) -> None:
+        """Test exon_product_from_metadata with edge cases."""
+        from baby.contracts import GovernanceSignature
+
+        # Test with zero confidence
+        sig: GovernanceSignature = {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0}
+
+        product = governance.exon_product_from_metadata(sig, 0.0, 100, 200)
+        assert product == 0
+
+        # Test with full confidence and maximum values
+        sig_full: GovernanceSignature = {"neutral": 0, "li": 2, "fg": 2, "bg": 2, "dyn": 6}
+
+        product = governance.exon_product_from_metadata(sig_full, 1.0, 200, 200)
+        assert 0 <= product <= 255
+        assert governance.fold(product, product) == 0
+
+
 class TestMathematicalProperties:
     """Test mathematical properties and invariants."""
 

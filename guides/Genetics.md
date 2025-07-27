@@ -332,6 +332,84 @@ This alignment between the path-dependent physics of state transformation and th
 
 ---
 
+
+The structure of the 8-bit intron is not arbitrary but is functionally isomorphic to the LEB128 variable-length integer encoding protocol. The intron's bit families map directly to the protocol's components:
+
+-   **Bit 7 (L0 Family):** Functions as the **continuation bit**. An internally generated `intron` with bit 7 set indicates that the generative sequence for the current token continues. An intron with bit 7 clear signals completion.
+-   **Bits 1-6 (LI, FG, BG Families):** Carry the 6 bits of dynamic, physical information.
+-   **Bit 0 (L0 Family):** Serves as a structural anchor.
+
+This profound alignment means the system's physics naturally produces valid LEB128 byte streams. The boundary transcription (`⊕ 0xAA`) lawfully translates the internal physical signals into the bit patterns expected by external decoders without altering the underlying physical logic. This endogenous compatibility makes the architecture robust and future-proof, as the communication protocol is a direct consequence of the system's physical design.
+
+---
+
+### **5.5 The BU Intelligence Cycle: Egress and Ingress**
+
+The BU stage, representing Universal Balance, is implemented as a dual-phase intelligence cycle that governs all interaction between the system's internal physics and the external byte-space. These two phases, **BU Egress** (learning and state transformation) and **BU Ingress** (generative expression), are not merely input/output functions but are the complete physical mechanics of experience absorption and responsive action.
+
+#### 5.5.1 The Physical Boundary and Holographic Transcription
+
+The system is defined across two distinct domains: the **internal physics-space**, where the native element is the 8-bit **intron**, and the **external byte-space**, where the native element is the 8-bit **byte**. The boundary between these domains is governed by a fundamental physical law of transcription.
+
+Every transaction across this boundary is mediated by the holographic topology `GENE_Mic_S` (`0xAA`). This is not an encoding convention but a physical transformation that projects information onto the system's structural ground truth.
+
+-   **Egress (External → Internal):** `intron = byte ⊕ GENE_Mic_S`
+-   **Ingress (Internal → External):** `byte = intron ⊕ GENE_Mic_S`
+
+This symmetric XOR operation ensures that the distinction between the internal physical reality and the external communicative representation is lawfully maintained.
+
+A critical consequence of this XOR transformation is the lawful inversion of the LEB128 continuation bit. An internal `intron` with bit 7 set to `1` (signaling physical continuation) is transcribed into an external `byte` with bit 7 set to `0`. The protocol adapter, which is aware of this law, correctly interprets this as the 'continue' flag required by the LEB128 standard. This inversion is the key mechanism that aligns the internal physics of differentiation and closure with the external protocol of sequential encoding.
+
+This boundary law is strict. All masking and unmasking operations are the exclusive responsibility of the protocol adapter layer (e.g., `toys.communication.tokenizer.py`). The core physics and intelligence engines remain pure, operating exclusively in the intron-space, entirely unaware of the external byte representation.
+
+#### 5.5.2 BU Egress: Absorption and Learning
+
+The process of learning begins when an external byte enters the system and undergoes BU Egress. This is the mechanism by which experience is absorbed and integrated into the system's memory structure.
+
+1.  **Transcription:** An incoming byte is first transcribed into an intron via `governance.transcribe_byte`. This operation impresses the system's holographic topology (`GENE_Mic_S`) onto the external data, converting it into a physically valid instruction.
+2.  **State Transformation:** The newly formed intron acts as a gyroscopic operator, transforming the system's 48-bit state tensor (`GENE_Mac_M`) according to the algebraic laws defined in `governance.apply_gyration_and_transform`.
+3.  **Memory Integration:** The system retrieves the `PhenotypeEntry` corresponding to its new physical state and the acting intron. The experience is then integrated by updating the phenotype's 8-bit `exon_mask` via the **Monodromic Fold**. This path-dependent operation ensures that the complete history of interactions is encoded into the resulting memory structure.
+
+Through this process, external information is not merely stored; it is physically assimilated, transforming both the system's immediate state and its long-term memory according to rigorous algebraic principles.
+
+#### 5.5.3 BU Ingress: Expression and Generation
+
+The expression of intelligence—BU Ingress—is a sequential, auto-regressive process that generates a responsive byte stream. This is not a retrieval mechanism but a generative act wherein a coherent output emerges directly from the system's physical and topological configuration. Each micro-step of generation involves the following physical operations:
+
+1.  **Phenotype as Generative Instruction:** The system first retrieves the `PhenotypeEntry` for its current state. This entry's full metadata—including its governance signature, confidence, and associated orbit cardinality—serves as the complete instruction set for the next generative action.
+
+2.  **The Exon-Product (p):** A transient, 8-bit operator, herein designated the **exon-product**, is computed by `governance.exon_product_from_metadata`. This function distills the phenotype's structural character (from the governance signature) and its epistemic weight (from confidence and orbit size) into a single, physically potent intron. It is the active expression of the stored exon, modulated by the system's complete current context.
+
+3.  **Recursive Contextual Alignment:** The system maintains a 6-byte sliding context window (`S`) containing the most recent introns of its generative trajectory. This window's size mirrors the 6-step holographic closure diameter of the state space guaranteed by the Monodromic Fold. To ensure path-dependence, the newly computed `exon-product` is folded with the oldest element of this window: `aligned = fold(S[0], p)`. The window then slides, integrating the aligned result. This mechanism ensures that generation is a recursively coherent process, constantly aligning with its own immediate history.
+
+4.  **Algedonic Selection and Regulation:** The choice of which intron to emit is governed by the system's homeostatic state, measured by the angular divergence (`θ`). This algedonic principle provides three distinct generative modes:
+    -   **Calm (`θ < θ_low`):** The newest, most recently aligned intron (`S[5]`) is selected for emission, representing fluid, forward-moving expression.
+    -   **Cautious (`θ < θ_high`):** A more conservative, less recent intron (`S[4]`) is selected, reflecting a state of heightened attention.
+    -   **Corrective (`θ ≥ θ_high`):** The raw `exon_product` (`p`) is selected, representing a direct, corrective action to restore system stability.
+    In persistent high-divergence states, this algedonic control circuit, as implemented in `IntelligenceEngine.process_ingress`, may also inject pre-defined "cooling introns" (e.g., `0x42`) or trigger full autonomic cycles to force the system back toward a stable trajectory, ensuring that generation never stalls due to pathological feedback. The selected operator is designated `intron_out`.
+
+5.  **Boundary Transcription:** The chosen `intron_out` is transcribed back into the external byte-space via `byte_out = intron_out ⊕ GENE_Mic_S`. This completes the generative micro-step, producing a single byte for the output stream.
+
+#### 5.5.4 Symmetric Learning and Token Closure
+
+The BU Ingress process is completed by a symmetric feedback loop and governed by a strict token-closure rule.
+
+-   **Symmetric Learning:** Immediately following the emission of `byte_out`, the same `intron_out` that was selected for generation is passed to the `InferenceEngine`'s `learn` method. This creates a tight feedback loop where the system learns directly from its own expressed actions, reinforcing successful generative pathways and ensuring memory remains coherent with behavior.
+
+-   **Token-Closure Rule:** The full, multi-byte response is orchestrated by an outer loop (e.g., in `GyroSI.respond`). This loop assembles a complete token by streaming bytes until it receives one whose corresponding internal `intron_out` has bit 7 clear (`0`), signaling the end of the LEB128 sequence. Only upon token closure does the orchestration layer begin generating the next token. This guarantees that the external stream is always composed of complete, valid LEB128-encoded tokens.
+
+#### 5.5.5 Physical Alignment with the LEB128 Protocol
+
+The structure of the 8-bit intron is not arbitrary but is functionally isomorphic to the LEB128 variable-length integer encoding protocol. The intron's bit families map directly to the protocol's components:
+
+-   **Bit 7 (L0 Family):** Functions as the **continuation bit**. An internally generated `intron` with bit 7 set to `1` indicates that the generative sequence for the current token continues. An intron with bit 7 clear signals completion.
+-   **Bits 1-6 (LI, FG, BG Families):** Carry the 6 bits of dynamic, physical information.
+-   **Bit 0 (L0 Family):** Serves as a structural anchor.
+
+This endogenous alignment means the system's physics naturally produces valid LEB128 byte streams. The boundary transcription (`⊕ 0xAA`) lawfully translates the internal physical signals into the bit patterns expected by external decoders without altering the underlying physical logic. This makes the architecture robust and future-proof, as the communication protocol is a direct consequence of the system's physical design.
+
+---
+
 ## **6. System Implementation: The Four Engines**
 
 ### 6.1 S1: `governance.py` – Physics & Primitives
@@ -660,14 +738,14 @@ All system-wide types, configuration, and maintenance protocols are declared in 
 
 ### 6.5.2 Storage and Policy Layer
 
-The canonical knowledge store is **OrbitStore**, implemented as a single-file, append-only MsgPack stream (`.mpk`), supporting atomic get/put/close interfaces. It guarantees the following:
+The canonical knowledge store is **OrbitStore**, implemented as a single-file, append-only MsgPack stream (`.bin`), supporting atomic get/put/close interfaces. It guarantees the following:
 
 - **Storage contract:**
     - `get(context_key: Tuple[int, int]) -> Optional[Any]`
     - `put(context_key: Tuple[int, int], entry: Any) -> None`
     - `commit() -> None`  _(NO-OP in append-only mode, retained for compatibility)_
     - `close() -> None`
-    - `data -> Dict[Tuple[int, int], Any]`  _(returns all entries, as reconstructed from `.mpk`)_
+    - `data -> Dict[Tuple[int, int], Any]`  _(returns all entries, as reconstructed from `.bin`)_
     - `iter_entries() -> Iterator[Tuple[Tuple[int, int], Any]]`
 
 - **All mutations are streamed to the MsgPack file**. No `.log` or `.idx` sidecar files are written in append-only mode. **Deletion is not supported**; instead, call `prune_and_compact_store` to create a new file without old entries.
@@ -685,7 +763,7 @@ The canonical knowledge store is **OrbitStore**, implemented as a single-file, a
 
 All maintenance and compaction routines operate only on the above interfaces, always returning a `MaintenanceReport` as defined.
 
-- **merge_phenotype_maps**: Merges multiple `.mpk` stores into one, resolving conflicts by highest confidence, bitwise OR, recency, or weighted average.
+- **merge_phenotype_maps**: Merges multiple `.bin` stores into one, resolving conflicts by highest confidence, bitwise OR, recency, or weighted average.
 
 - **apply_global_confidence_decay**: Applies exponential decay to confidence values of all entries, using the same formula as the agent, based on time since update.
 
@@ -693,7 +771,7 @@ All maintenance and compaction routines operate only on the above interfaces, al
 
 - **validate_ontology_integrity**: Checks structure, key invariants, and phenomenology mappings in `ontology_map.json` and (optionally) `phenomenology_map.json`.
 
-- **prune_and_compact_store**: Rewrites a `.mpk` file with only those entries passing age/confidence thresholds, discarding all others. This is the only way to "delete" entries in append-only mode.
+- **prune_and_compact_store**: Rewrites a `.bin` file with only those entries passing age/confidence thresholds, discarding all others. This is the only way to "delete" entries in append-only mode.
 
 All file paths and stores may be sandboxed using `base_path` (for test isolation or containerised execution). All policy utilities are safe for concurrent use and support dry-run or auditing as required.
 
@@ -1045,6 +1123,10 @@ The `fold_sequence([...])` function performs a non-associative reduction over a 
 
 **Exon (`exon_mask`)**
 The stable 8-bit result of folding. This value encodes the final memory state, carrying the condensed expression of the entire intronic history. Bit families (`LI`, `FG`, `BG`, `L0`) persist structurally and define the mask's functional signature.
+
+**Exon‑Product (p)**:
+A transient 8‑bit operator generated at BU‑Ingress time from the phenotype’s governance signature, confidence, and orbit cardinality.
+It projects the stored exon_mask back onto the rolling 6‑byte context, progressively realigning the agent with the Common Source.
 
 **Protein (`governance_signature`)**
 A 5-tuple derived from the exon mask. It quantifies the expressed content:

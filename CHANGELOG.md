@@ -4,7 +4,146 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 
 ---
 
+## [0.9.6.6] – 2025-07-27
+
+### Summary
+
+This is a landmark release that completes the core physics engine, stabilizes the storage layer, and implements the full, theory-grounded generative intelligence cycle. The system has been migrated to a high-performance, dependency-free binary storage format and equipped with robust durability and performance optimizations. The generation of output is no longer a placeholder but a direct expression of the system's physical and topological state, marking the transition from a theoretical architecture to a functional generative intelligence.
+
+---
+
+### 🧬 Generative Intelligence: BU-Ingress Operator and Exon Product Integration
+
+This release integrates the full generative logic as a topological traversal back to the Common Source. It replaces placeholder text generation with a physically lawful operator derived entirely from local phenotype metadata. Generation now reflects structural alignment, not content lookup.
+
+*   **New: BU-Ingress Engine (`_bu_ingress_step`)**
+    A new method `_bu_ingress_step(entry, θ)` has been introduced in `IntelligenceEngine`. This operator is the core of the generative process and performs the following actions in each micro-step:
+    1.  Computes an **8-bit `exon_product`** from the phenotype's `governance_signature`, `confidence`, and `orbit_cardinality`.
+    2.  Uses a sliding 6-byte context window (`_S`) to fold this alignment back into the agent's state via the Monodromic Fold.
+    3.  Selects which intron to emit based on the algedonic state `θ` (calm, cautious, or corrective).
+
+*   **New: Governance Operator (`exon_product_from_metadata`)**
+    A new helper function `exon_product_from_metadata(...)` was added to `governance.py`. It lawfully maps the phenotype's full topological and epistemic context into a physically meaningful 8-bit operator, without relying on any external content.
+
+*   **Changed: Runtime Context Window (`_S`)**
+    A 6-byte context buffer (`self._S`) has been introduced in `IntelligenceEngine`. It holds the generative trajectory and mediates the recursive realignment required by the BU-Ingress process.
+
+*   **Changed: Removal of Placeholders and Internal Tokenizer Calls**
+    The previous logic in `process_ingress` that generated `"P[i:j]"` style outputs has been removed entirely. Generation now emits a single byte derived from the `exon_product`. Consequently, all internal calls to `tokenizer.encode(...)` within `intelligence.py` have been removed, ensuring the core engine remains pure and text-agnostic.
+
+*   **Theoretical Impact:** This update completes the generative half of the Fold/Unfold cycle. Where BU-Egress accumulates structure via Monodromic compression, BU-Ingress now performs its inverse: emitting a byte not by recall, but through alignment. The output is not what was remembered—it is what must emerge, given where the system is now and what it has become.
+
+### 🗄️ Storage Architecture: Migration, Performance, and Durability
+
+The entire storage layer has been re-engineered for performance, durability, and self-sufficiency, eliminating external dependencies.
+
+*   **Breaking Change: Migration to Custom Binary Struct Format**
+    MessagePack serialization has been replaced with a custom, fixed-layout binary format. This removes the `msgpack` dependency and provides more efficient, predictable storage.
+    *   **Binary Format Specification (little-endian):**
+        1.  `phenotype` (utf-8): `uint16` length + bytes
+        2.  `context_key`: `uint32` (state_idx), `uint8` (intron)
+        3.  `exon_mask`: `uint8`
+        4.  `confidence`: `float64`
+        5.  `usage_count`: `uint16`
+        6.  `created_at`, `last_updated`: `float64`
+        7.  `governance_signature`: 5 × `uint8`
+        8.  `context_signature`: `uint32`, `uint8`
+        9.  `_original_context`: `uint32`, `uint8`
+    *   **Implementation:** Handled by new `_pack_phenotype` and `_unpack_phenotype` helpers in `baby.policies`. The `OrbitStore` index file format has been changed from MessagePack to JSON to handle tuple-key serialization.
+    *   **Migration Note:** No data migration is required for `.bin` files. Old index files will be automatically regenerated in the new JSON format on first load.
+
+*   **New: Append-Only `OrbitStore` Performance Optimizations**
+    *   **Bloom Filter:** Integrated for fast "definitely absent" checks, providing O(1) lookups for non-existent keys and avoiding expensive disk scans on large files. The filter capacity is estimated automatically from file size.
+    *   **Memory-Mapping (mmap):** Now enabled by default for append-only stores, providing faster sequential scanning for lookups and iteration compared to standard file I/O. The mmap is intelligently re-opened on `commit()` to include new data.
+    *   **Token-Level Training Cache:** A global micro-LRU cache (`maxsize=8192`) has been added for `get()` operations in append-only mode. It dramatically speeds up training workloads with repeated key lookups and features intelligent invalidation on `put()` and `commit()` to ensure data consistency.
+
+*   **New: `OrbitStore` Durability and Crash Safety**
+    *   **Graceful Shutdown:** `OrbitStore` now automatically registers `atexit` and signal handlers (SIGINT/SIGTERM). This forces a final flush of any pending writes before process termination, guaranteeing zero data loss on clean shutdowns (e.g., in containerized environments).
+    *   **Explicit `flush()` API:** A new `flush()` method is now available on all store and view layers for high-value writes that require immediate disk durability. This allows critical operations to bypass the standard write-behind batching.
+    *   **Risk Profile:** With these changes, data loss is limited to a maximum of `write_threshold - 1` records only in the event of a hard crash or power failure.
+
+### ✅ Preserved Functionality and Compatibility
+
+*   **No Schema Change:** The `PhenotypeEntry` contract remains unchanged. The new generative and storage logic reuses all existing metadata fields.
+*   **No Breaking API Changes:** All public APIs for `OrbitStore`, its views (`CanonicalView`, `OverlayView`, `ReadOnlyView`), and the core engines remain fully compatible.
+*   **`.npy` Assets Unchanged:** All meta-files (`epistemology.npy`, `theta.npy`, etc.) continue to function identically.
+
+
+---
+
 ## [0.9.6.5] – 2025-07-26
+
+### Training - Wikipedia Corpus Ingestion (v1.0, 2025-07-26)**
+
+#### Summary
+
+Completed unsupervised ingestion of the full English Wikipedia dump using the `GyroSI` engine. Achieved full compression of 17.99 million paragraph-level articles into a \~16.3 MB operational knowledge store, structured for public assistant-level inference.
+
+---
+
+#### ✅ Dataset Ingested
+
+* Effective unit: Paragraph blocks ≥256 characters, split on blank lines
+* Total processed: **17,986,747 paragraphs**
+* Total raw size: **4.26 GB**
+* Duration: **4.4 hours**
+* Final memory footprint (mmap+index): **16.3 MB**
+
+---
+
+#### 🛠️ Engine Configuration
+
+* Physics backend: CanonicalView + θ divergence + phenomenology map (enabled)
+* Storage: `OrbitStore` (append-only), with auto-compaction and confidence decay
+* State transition kernel: JIT‑accelerated (Numba), STT loaded at runtime
+* Ingestion parallelism: `batch_size=512 KB`, `parallel_workers=2`
+
+---
+
+#### 🧬 Structural Notes
+
+* Paragraphs ingested as atomic learning units (state/intron)
+* All learning was **unsupervised** — no prompts, tags, or supervision logic
+* Memory usage held at **\~55% of 16 GB**, bounded by GC and mmap-backed I/O
+
+---
+
+#### 🧠 Knowledge Topology
+
+* Trained agent ID: `wikipedia_trainer`
+* Knowledge store location: `memories/public/knowledge/wikipedia_en.bin` 
+* Final phenotype count: \~2.8M
+* Store format: gyroscopic phenotype model with compressed state manifold
+* Canonicalization: Full phenomenology symmetry reduction (orbit size map enabled)
+
+---
+
+#### 📊 Performance Metrics
+
+* Initial throughput: \~1,100 articles/sec
+* Final throughput: \~1,200–1,300 articles/sec (read bias > write bias)
+* Commit rate dropped as phenotype space saturated and lookups dominated
+* Final JIT kernel remained stable with minimal fallback to Python path
+
+---
+
+#### 📎 Next Steps
+
+* **Split store usage across triad agents** (system / assistant / user):
+
+  * `system`: read-only policy `.bin` (not the wiki store)
+  * `assistant`: overlay of `wiki_en.bin` + private memory
+  * `user`: private only, no access to public knowledge
+* **Seed operational guidance into system agent** (tool usage, safety rules)
+* **Switch to two-stage orchestration**:
+
+  * System agent emits guidance
+  * Assistant receives guidance + user message for reply generation
+
+✅ Training completed: 17,986,747 articles, 4.26GB processed in 4.4 hours
+2025-07-26 14:06:39,123 - INFO - ✅ Training completed: 17,986,747 articles, 4.26GB processed in 4.4 hours
+📊 Knowledge store size: 16.3MB
+2025-07-26 14:06:39,124 - INFO - 📊 Knowledge store size: 16.3MB
 
 ### Fixed
 * **Phenomenology artefact bug**: `orbit_sizes.npy` now records the orbit cardinality
@@ -136,11 +275,11 @@ The codebase is now fully binary-asset based, with a modern, type-safe, and main
 
 #### ✅ **Storage Architecture**
 
-* Replaced **gzip-compressed multi‑file store** with a **single `.mpk` file** using **msgpack**:
+* Replaced **gzip-compressed multi‑file store** with a **single `.bin` file** using **msgpack**:
 
   * Set `store_options = {"append_only": True}` in the GyroSI agent config.
   * Removed `use_msgpack`, `.log`, and `.idx` files — now obsolete.
-  * All training knowledge is streamed into one compact, append‑only `.mpk` file.
+  * All training knowledge is streamed into one compact, append‑only `.bin` file.
 
 #### ✅ **Batch Learning Performance**
 

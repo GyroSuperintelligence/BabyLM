@@ -1,20 +1,20 @@
 """
 Consolidated pytest configuration for the GyroSI test suite.
-Enforces canonical triad (user, system, assistant) and fixes msgpack tuple serialization.
+Enforces canonical triad (user, system, assistant) and fixes binary_struct tuple serialization.
 """
 
-import os
 import sys
 import json
-import shutil
-import uuid
+import os
 from pathlib import Path
-from typing import Any, Dict, Generator, Callable, Tuple, Set, TypedDict, cast, Literal
+from typing import Any, Dict, Generator, Callable, Tuple, TypedDict, cast, Literal
 import pytest
 from fastapi.testclient import TestClient
-from baby.contracts import AgentConfig, PreferencesConfig
+from baby.contracts import PreferencesConfig, AgentConfig
 from baby.intelligence import AgentPool, GyroSI
 from baby.policies import OrbitStore
+from contextlib import ExitStack
+import uuid
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -31,54 +31,6 @@ class TestEnvDict(TypedDict):
     preferences_path: str
     preferences: Dict[str, Any]
     main_meta_files: Dict[str, str]
-
-
-# =============================================================================
-# Fix msgpack tuple/list serialization issues
-# =============================================================================
-
-
-def _fix_context_signature_tuple(entry: Any) -> Any:
-    """Convert context_signature from list back to tuple if needed."""
-    if isinstance(entry, dict):
-        entry = entry.copy()  # Don't modify original
-        cs = entry.get("context_signature")
-        if isinstance(cs, list) and len(cs) == 2:
-            entry["context_signature"] = tuple(cs)
-        # Also fix _original_context if present
-        oc = entry.get("_original_context")
-        if isinstance(oc, list) and len(oc) == 2:
-            entry["_original_context"] = tuple(oc)
-    return entry
-
-
-@pytest.fixture(scope="session", autouse=True)
-def fix_orbit_store_tuple_serialization() -> Generator[None, None, None]:
-    """Fix OrbitStore tuple/list serialization for the entire test session."""
-    from baby.policies import OrbitStore
-
-    # Save original methods
-    original_get = OrbitStore.get
-    original_iter_entries = OrbitStore.iter_entries
-
-    def get_with_tuple_fix(self: OrbitStore, context_key: Any) -> Any:
-        result = original_get(self, context_key)
-        return _fix_context_signature_tuple(result)
-
-    def iter_entries_with_tuple_fix(self: OrbitStore) -> Any:
-        for key, entry in original_iter_entries(self):
-            yield key, _fix_context_signature_tuple(entry)
-
-    # Apply monkey patches using setattr to avoid mypy errors
-    setattr(OrbitStore, "get", get_with_tuple_fix)
-    setattr(OrbitStore, "iter_entries", iter_entries_with_tuple_fix)
-
-    try:
-        yield
-    finally:
-        # Restore original methods
-        setattr(OrbitStore, "get", original_get)
-        setattr(OrbitStore, "iter_entries", original_iter_entries)
 
 
 # =============================================================================
@@ -103,8 +55,12 @@ def test_env(tmp_path_factory: pytest.TempPathFactory) -> TestEnvDict:
     (public_dir / "meta").mkdir(parents=True)
     (private_dir / "agents").mkdir(parents=True)
 
-    # Copy tokenizers, which are needed at runtime
-    shutil.copytree(MAIN_TOKENIZERS / "bert-base-uncased", public_dir / "tokenizers" / "bert-base-uncased")
+    # Symlink tokenizers, which are needed at runtime (faster than copytree)
+    tokenizer_src = MAIN_TOKENIZERS / "bert-base-uncased"
+    tokenizer_dst = public_dir / "tokenizers" / "bert-base-uncased"
+    tokenizer_dst.parent.mkdir(parents=True, exist_ok=True)
+    if not tokenizer_dst.exists():
+        os.symlink(tokenizer_src, tokenizer_dst)
 
     # The main, read-only meta files
     main_meta_files: Dict[str, str] = {
@@ -118,13 +74,15 @@ def test_env(tmp_path_factory: pytest.TempPathFactory) -> TestEnvDict:
     prefs_path = memories_dir / "memory_preferences.json"
     test_preferences: Dict[str, Any] = {
         "base_path": str(memories_dir),
-        "public_knowledge": {"path": str(public_dir / "knowledge.mpk")},
+        "public_knowledge": {"path": str(public_dir / "knowledge.bin")},
         "private_knowledge": {"base_path": str(private_dir / "agents")},
         "ontology": {
             "ontology_map_path": main_meta_files["ontology"],
             "phenomenology_map_path": main_meta_files["phenomenology"],
         },
         "tokenizer": {"name": "bert-base-uncased"},
+        "write_threshold": 100,
+        "enable_auto_decay": False,
     }
     prefs_path.write_text(json.dumps(test_preferences, indent=2))
 
@@ -196,12 +154,6 @@ def system_agent(agent_pool: AgentPool) -> GyroSI:
     return agent_pool.get("system")
 
 
-@pytest.fixture
-def gyrosi_agent(assistant_agent: GyroSI) -> GyroSI:
-    """Legacy alias for assistant_agent for backward compatibility."""
-    return assistant_agent
-
-
 # =============================================================================
 # Agent factory for triad roles
 # =============================================================================
@@ -241,31 +193,29 @@ def multi_agent_scenario(user_agent: GyroSI, assistant_agent: GyroSI, test_env: 
 
 
 @pytest.fixture
-def isolated_agent_factory() -> Generator[Callable[[Path], GyroSI], None, None]:
-    """Factory for creating isolated agents outside the main pool."""
-    created_agents = []
+def isolated_agent_factory(tmp_path: Path) -> Generator[Callable[[Path], GyroSI], None, None]:
+    stack = ExitStack()
 
-    def _make_isolated_agent(tmp_path: Path) -> GyroSI:
-        """Create a completely isolated agent in tmp_path."""
-        agent_dir = tmp_path / "isolated_agent"
+    def _make_isolated_agent(agent_dir: Path) -> GyroSI:
         agent_dir.mkdir(parents=True, exist_ok=True)
-
         config: AgentConfig = {
             "ontology_path": str(MAIN_META / "ontology_keys.npy"),
             "phenomenology_map_path": str(MAIN_META / "phenomenology_map.npy"),
-            "knowledge_path": str(agent_dir / "knowledge.mpk"),
+            "knowledge_path": str(agent_dir / "knowledge.bin"),
             "base_path": str(tmp_path),
         }
-
         agent = GyroSI(config, agent_id=f"isolated_{uuid.uuid4().hex[:8]}", base_path=tmp_path)
-        created_agents.append(agent)
+        stack.callback(agent.close)
         return agent
 
     yield _make_isolated_agent
+    stack.close()
 
-    # Cleanup
-    for agent in created_agents:
-        agent.close()
+
+@pytest.fixture
+def gyrosi_agent(assistant_agent: GyroSI) -> GyroSI:
+    """Legacy alias for assistant_agent for backward compatibility."""
+    return assistant_agent
 
 
 # =============================================================================
@@ -274,30 +224,20 @@ def isolated_agent_factory() -> Generator[Callable[[Path], GyroSI], None, None]:
 
 
 @pytest.fixture
-def api_test_setup(test_env: TestEnvDict) -> Generator[Tuple[TestClient, AgentPool], None, None]:
-    """
-    Sets up the full environment for API testing.
-    """
-    # Point the adapter to our temporary, test-specific preferences file
+def api_test_setup(test_env: TestEnvDict, request: Any) -> Generator[Tuple[TestClient, AgentPool], None, None]:
     os.environ["GYROSI_PREFERENCES_PATH"] = test_env["preferences_path"]
-
-    # The API creates its own pool on import, so we must reload it
-    import importlib
     from toys.communication import external_adapter as ea
 
-    importlib.reload(ea)
-
-    # Ensure the triad exists for the API's pool
     ea.agent_pool.ensure_triad()
-
     client = TestClient(ea.app)
 
-    yield client, ea.agent_pool
+    def cleanup() -> None:
+        # Do NOT close the global agent_pool here; only remove env var
+        if "GYROSI_PREFERENCES_PATH" in os.environ:
+            del os.environ["GYROSI_PREFERENCES_PATH"]
 
-    # Cleanup
-    ea.agent_pool.close_all()
-    if "GYROSI_PREFERENCES_PATH" in os.environ:
-        del os.environ["GYROSI_PREFERENCES_PATH"]
+    request.addfinalizer(cleanup)
+    yield client, ea.agent_pool
 
 
 @pytest.fixture
@@ -325,39 +265,6 @@ def sample_phenotype() -> Dict[str, Any]:
         "governance_signature": {"neutral": 4, "li": 1, "fg": 1, "bg": 0, "dyn": 2},
         "_original_context": None,
     }
-
-
-# =============================================================================
-# Legacy fixtures for backward compatibility (deprecated)
-# =============================================================================
-
-
-@pytest.fixture
-def gyrosi_agent_factory() -> Callable[[Literal["user", "system", "assistant"]], GyroSI]:
-    """
-    DEPRECATED: Use agent_factory or specific agent fixtures instead.
-    This factory only works with canonical triad roles.
-    """
-
-    def _legacy_factory(role: Literal["user", "system", "assistant"], _unused_filename: str = "") -> GyroSI:
-        # Import here to avoid circular dependency
-        pytest.fail(
-            f"gyrosi_agent_factory is deprecated. Use 'agent_factory' or specific fixtures like '{role}_agent' instead."
-        )
-
-    return _legacy_factory
-
-
-@pytest.fixture
-def agent_pool_factory() -> Callable[[], AgentPool]:
-    """
-    DEPRECATED: Use the session-scoped 'agent_pool' fixture instead.
-    """
-
-    def _legacy_pool_factory(_unused_ids: Set[str] = set()) -> AgentPool:
-        pytest.fail("agent_pool_factory is deprecated. Use the session-scoped 'agent_pool' fixture instead.")
-
-    return _legacy_pool_factory
 
 
 # =============================================================================

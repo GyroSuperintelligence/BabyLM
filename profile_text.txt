@@ -1,280 +1,0 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 10
-[2KGIL: 80.00%, Active: 100.00%, Threads: 1
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K 40.00%  40.00%   0.040s    0.040s   get_data (<frozen importlib._bootstrap_exte
-[2K 20.00%  20.00%   0.020s    0.020s   _compile_bytecode (<frozen importlib._boots
-[2K 20.00% 100.00%   0.020s    0.100s   _call_with_frames_removed (<frozen importli
-[2K 10.00%  10.00%   0.010s    0.010s   namedtuple (collections/__init__.py)
-[2K 10.00%  10.00%   0.010s    0.010s   acquire (<frozen importlib._bootstrap>)
-[2K  0.00% 100.00%   0.000s    0.100s   <module> (_pytest/_code/__init__.py)
-[2K  0.00% 100.00%   0.000s    0.100s   <module> (_pytest/_code/code.py)
-[2K  0.00%  10.00%   0.000s    0.010s   __enter__ (<frozen importlib._bootstrap>)
-[2K  0.00%  50.00%   0.000s    0.050s   <module> (pygments/plugin.py)
-[2K  0.00%  50.00%   0.000s    0.050s   <module> (dataclasses.py)
-[2K  0.00%  50.00%   0.000s    0.050s   <module> (pygments/formatters/__init__.py)
-[2K  0.00%  40.00%   0.000s    0.040s   <module> (email/utils.py)
-[2K  0.00%  40.00%   0.000s    0.040s   <module> (email/message.py)
-[2K  0.00%  10.00%   0.000s    0.010s   <module> (csv.py)
-[2K  0.00% 100.00%   0.000s    0.100s   _run_module_as_main (runpy.py)
-[2K  0.00% 100.00%   0.000s    0.100s   exec_module (<frozen importlib._bootstrap_e
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 100
-[2KGIL: 85.56%, Active: 100.00%, Threads: 1
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K 10.00%  10.00%   0.130s    0.130s   get_data (<frozen importlib._bootstrap_exte
-[2K 13.33%  13.33%   0.120s    0.120s   _create_fn (dataclasses.py)
-[2K  6.67%   6.67%   0.080s    0.080s   _compile_bytecode (<frozen importlib._boots
-[2K  6.67%  83.33%   0.080s    0.850s   _call_with_frames_removed (<frozen importli
-[2K  3.33%   3.33%   0.040s    0.040s   namedtuple (collections/__init__.py)
-[2K  3.33%   3.33%   0.030s    0.030s   open (pathlib.py)
-[2K  3.33%   5.56%   0.030s    0.050s   <module> (pydantic_core/core_schema.py)
-[2K  3.33%   3.33%   0.030s    0.030s   _read_pyc (_pytest/assertion/rewrite.py)
-[2K  3.33%   3.33%   0.030s    0.030s   start (_pytest/capture.py)
-[2K  2.22%   2.22%   0.020s    0.020s   _optimize_charset (sre_compile.py)
-[2K  2.22%   2.22%   0.020s    0.030s   __enter__ (<frozen importlib._bootstrap>)
-[2K  2.22%   2.22%   0.020s    0.020s   helper (contextlib.py)
-[2K  2.22%   2.22%   0.020s    0.020s   _path_stat (<frozen importlib._bootstrap_ex
-[2K  2.22%  85.56%   0.020s    0.870s   _find_and_load (<frozen importlib._bootstra
-[2K  2.22%   5.56%   0.020s    0.050s   read_text (pathlib.py)
-[2K  0.00%   0.00%   0.010s    0.010s   acquire (<frozen importlib._bootstrap>)
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 200
-[2KGIL: 96.00%, Active: 100.00%, Threads: 1
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K 13.00%  13.00%   0.210s    0.210s   _compile_bytecode (<frozen importlib._boots
-[2K 18.00%  18.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  9.00%  98.00%   0.170s     1.83s   _call_with_frames_removed (<frozen importli
-[2K  2.00%   2.00%   0.150s    0.150s   get_data (<frozen importlib._bootstrap_exte
-[2K  1.00%   1.00%   0.130s    0.130s   _create_fn (dataclasses.py)
-[2K  1.00%   1.00%   0.050s    0.050s   namedtuple (collections/__init__.py)
-[2K  4.00%  29.00%   0.040s    0.370s   match_type (pydantic/_internal/_generate_sc
-[2K  0.00%   0.00%   0.030s    0.030s   open (pathlib.py)
-[2K  2.00%   2.00%   0.030s    0.030s   _eval_type (typing.py)
-[2K  1.00%   2.00%   0.030s    0.040s   _optimize_charset (sre_compile.py)
-[2K  0.00%   0.00%   0.030s    0.050s   <module> (pydantic_core/core_schema.py)
-[2K  3.00%   3.00%   0.030s    0.030s   filter_field_decorator_info_by_field (pydan
-[2K  0.00%   0.00%   0.030s    0.030s   _read_pyc (_pytest/assertion/rewrite.py)
-[2K  1.00%   1.00%   0.030s    0.030s   _path_stat (<frozen importlib._bootstrap_ex
-[2K  0.00%   0.00%   0.030s    0.030s   start (_pytest/capture.py)
-[2K  2.00%   2.00%   0.020s    0.020s   __init__ (numba/core/types/old_scalars.py)
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 300
-[2KGIL: 80.00%, Active: 88.00%, Threads: 1
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K  1.00%   1.00%   0.220s    0.220s   _compile_bytecode (<frozen importlib._boots
-[2K  3.00%  34.00%   0.200s     2.17s   _call_with_frames_removed (<frozen importli
-[2K  0.00%   0.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  3.00%   3.00%   0.160s    0.160s   _create_fn (dataclasses.py)
-[2K  0.00%   0.00%   0.150s    0.150s   get_data (<frozen importlib._bootstrap_exte
-[2K 14.00%  15.00%   0.140s    0.150s   _get_module_lock (<frozen importlib._bootst
-[2K  7.00%   7.00%   0.070s    0.070s   __getitem__ (numpy/_core/memmap.py)
-[2K  5.00%   5.00%   0.070s    0.080s   __new__ (abc.py)
-[2K  0.00%   0.00%   0.050s    0.050s   namedtuple (collections/__init__.py)
-[2K  0.00%   0.00%   0.040s    0.370s   match_type (pydantic/_internal/_generate_sc
-[2K  1.00%   1.00%   0.040s    0.040s   _read_pyc (_pytest/assertion/rewrite.py)
-[2K  4.00%  88.00%   0.040s     2.42s   _multicall (pluggy/_callers.py)
-[2K  1.00%   1.00%   0.030s    0.030s   __init__ (<string>)
-[2K  0.00%   0.00%   0.030s    0.030s   _eval_type (typing.py)
-[2K  0.00%   0.00%   0.030s    0.030s   open (pathlib.py)
-[2K  0.00%   0.00%   0.030s    0.050s   <module> (pydantic_core/core_schema.py)
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 400
-[2KGIL: 100.00%, Active: 100.00%, Threads: 1
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K 62.00%  62.00%   0.690s    0.690s   __getitem__ (numpy/_core/memmap.py)
-[2K 38.00% 100.00%   0.390s     1.08s   <dictcomp> (baby/policies.py)
-[2K  0.00%   0.00%   0.220s    0.220s   _compile_bytecode (<frozen importlib._boots
-[2K  0.00%   0.00%   0.200s     2.17s   _call_with_frames_removed (<frozen importli
-[2K  0.00%   0.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  0.00%   0.00%   0.160s    0.160s   _create_fn (dataclasses.py)
-[2K  0.00%   0.00%   0.150s    0.150s   get_data (<frozen importlib._bootstrap_exte
-[2K  0.00%   0.00%   0.140s    0.150s   _get_module_lock (<frozen importlib._bootst
-[2K  0.00%   0.00%   0.070s    0.080s   __new__ (abc.py)
-[2K  0.00%   0.00%   0.050s    0.050s   namedtuple (collections/__init__.py)
-[2K  0.00%   0.00%   0.040s    0.370s   match_type (pydantic/_internal/_generate_sc
-[2K  0.00%   0.00%   0.040s    0.040s   _read_pyc (_pytest/assertion/rewrite.py)
-[2K  0.00% 100.00%   0.040s     3.42s   _multicall (pluggy/_callers.py)
-[2K  0.00%   0.00%   0.030s    0.030s   __init__ (<string>)
-[2K  0.00%   0.00%   0.030s    0.030s   _eval_type (typing.py)
-[2K  0.00%   0.00%   0.030s    0.030s   open (pathlib.py)
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 500
-[2KGIL: 39.00%, Active: 57.00%, Threads: 2
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K  4.00%   4.00%   0.730s    0.730s   __getitem__ (numpy/_core/memmap.py)
-[2K  2.00%   6.00%   0.410s     1.14s   <dictcomp> (baby/policies.py)
-[2K 27.00%  27.00%   0.290s    0.290s   __new__ (numpy/_core/memmap.py)
-[2K  0.00%   0.00%   0.220s    0.220s   _compile_bytecode (<frozen importlib._boots
-[2K  0.00%   0.00%   0.200s     2.17s   _call_with_frames_removed (<frozen importli
-[2K  0.00%   0.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  0.00%   0.00%   0.160s    0.160s   _create_fn (dataclasses.py)
-[2K  0.00%   0.00%   0.150s    0.150s   get_data (<frozen importlib._bootstrap_exte
-[2K  0.00%   0.00%   0.140s    0.150s   _get_module_lock (<frozen importlib._bootst
-[2K  9.00%   9.00%   0.100s    0.100s   _wrapfunc (numpy/_core/fromnumeric.py)
-[2K  9.00%   9.00%   0.100s    0.100s   _amax (numpy/_core/_methods.py)
-[2K  0.00%   0.00%   0.070s    0.080s   __new__ (abc.py)
-[2K  0.00%   0.00%   0.050s    0.050s   namedtuple (collections/__init__.py)
-[2K  0.00%  57.00%   0.040s     3.99s   _multicall (pluggy/_callers.py)
-[2K  0.00%   0.00%   0.040s    0.040s   _read_pyc (_pytest/assertion/rewrite.py)
-[2K  0.00%   0.00%   0.040s    0.370s   match_type (pydantic/_internal/_generate_sc
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 600
-[2KGIL: 66.00%, Active: 84.00%, Threads: 2
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K  0.00%   0.00%   0.730s    0.730s   __getitem__ (numpy/_core/memmap.py)
-[2K  0.00%   0.00%   0.410s     1.14s   <dictcomp> (baby/policies.py)
-[2K 12.00%  12.00%   0.410s    0.410s   __new__ (numpy/_core/memmap.py)
-[2K  9.00%  21.00%   0.290s     2.38s   _call_with_frames_removed (<frozen importli
-[2K 26.00%  26.00%   0.260s    0.260s   test_ontology_map_consistency (toys/health/
-[2K  2.00%   2.00%   0.240s    0.240s   _compile_bytecode (<frozen importlib._boots
-[2K  0.00%   0.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  0.00%   0.00%   0.160s    0.160s   _create_fn (dataclasses.py)
-[2K  0.00%   0.00%   0.150s    0.150s   get_data (<frozen importlib._bootstrap_exte
-[2K  0.00%   0.00%   0.140s    0.150s   _get_module_lock (<frozen importlib._bootst
-[2K  4.00%   4.00%   0.140s    0.140s   _wrapfunc (numpy/_core/fromnumeric.py)
-[2K  1.00%   1.00%   0.110s    0.110s   _amax (numpy/_core/_methods.py)
-[2K  2.00%   2.00%   0.090s    0.100s   __new__ (abc.py)
-[2K  1.00%  84.00%   0.050s     4.83s   _multicall (pluggy/_callers.py)
-[2K  0.00%   0.00%   0.050s    0.050s   namedtuple (collections/__init__.py)
-[2K  2.00%   2.00%   0.050s    0.050s   open (pathlib.py)
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 700
-[2KGIL: 79.00%, Active: 100.00%, Threads: 3
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K  0.00%   0.00%   0.730s    0.730s   __getitem__ (numpy/_core/memmap.py)
-[2K 18.00%  18.00%   0.420s    0.420s   _compile_bytecode (<frozen importlib._boots
-[2K  1.00%   1.00%   0.420s    0.420s   __new__ (numpy/_core/memmap.py)
-[2K  0.00%   0.00%   0.410s     1.14s   <dictcomp> (baby/policies.py)
-[2K  7.00%  76.00%   0.360s     3.14s   _call_with_frames_removed (<frozen importli
-[2K 14.00%  14.00%   0.280s    0.280s   _wrapfunc (numpy/_core/fromnumeric.py)
-[2K  0.00%   0.00%   0.260s    0.260s   test_ontology_map_consistency (toys/health/
-[2K  0.00%   0.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  0.00%   0.00%   0.160s    0.160s   _create_fn (dataclasses.py)
-[2K  1.00%   1.00%   0.160s    0.160s   get_data (<frozen importlib._bootstrap_exte
-[2K  1.00%   2.00%   0.150s    0.170s   _get_module_lock (<frozen importlib._bootst
-[2K  5.00%   5.00%   0.140s    0.150s   __new__ (abc.py)
-[2K  0.00%   0.00%   0.110s    0.110s   _amax (numpy/_core/_methods.py)
-[2K  6.00%   6.00%   0.060s    0.060s   opengroup (sre_parse.py)
-[2K  3.00%   4.00%   0.060s    0.490s   open_memmap (numpy/lib/format.py)
-[2K  1.00%   1.00%   0.060s    0.060s   namedtuple (collections/__init__.py)
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 800
-[2KGIL: 33.00%, Active: 75.00%, Threads: 2
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K  0.00%   0.00%   0.730s    0.730s   __getitem__ (numpy/_core/memmap.py)
-[2K 32.00%  32.00%   0.600s    0.600s   _wrapfunc (numpy/_core/fromnumeric.py)
-[2K 10.00%  15.00%   0.520s    0.570s   __new__ (numpy/_core/memmap.py)
-[2K  0.00%   0.00%   0.420s    0.420s   _compile_bytecode (<frozen importlib._boots
-[2K  0.00%   0.00%   0.410s     1.14s   <dictcomp> (baby/policies.py)
-[2K  0.00%  27.00%   0.360s     3.41s   _call_with_frames_removed (<frozen importli
-[2K  0.00%   0.00%   0.260s    0.260s   test_ontology_map_consistency (toys/health/
-[2K  0.00%   0.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  6.00%   7.00%   0.170s    0.180s   _amax (numpy/_core/_methods.py)
-[2K  0.00%   0.00%   0.160s    0.160s   _create_fn (dataclasses.py)
-[2K  0.00%   0.00%   0.160s    0.160s   get_data (<frozen importlib._bootstrap_exte
-[2K  0.00%   0.00%   0.150s    0.170s   _get_module_lock (<frozen importlib._bootst
-[2K  0.00%   0.00%   0.140s    0.150s   __new__ (abc.py)
-[2K  0.00%   0.00%   0.060s    0.060s   opengroup (sre_parse.py)
-[2K  0.00%  17.00%   0.060s    0.660s   open_memmap (numpy/lib/format.py)
-[2K  0.00%   0.00%   0.060s    0.060s   namedtuple (collections/__init__.py)
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 900
-[2KGIL: 44.00%, Active: 91.00%, Threads: 2
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K 52.00%  52.00%    1.12s     1.12s   _wrapfunc (numpy/_core/fromnumeric.py)
-[2K  0.00%   0.00%   0.730s    0.730s   __getitem__ (numpy/_core/memmap.py)
-[2K 11.00%  11.00%   0.630s    0.680s   __new__ (numpy/_core/memmap.py)
-[2K  0.00%   0.00%   0.420s    0.420s   _compile_bytecode (<frozen importlib._boots
-[2K  0.00%   0.00%   0.410s     1.14s   <dictcomp> (baby/policies.py)
-[2K  0.00%  40.00%   0.360s     3.81s   _call_with_frames_removed (<frozen importli
-[2K  0.00%   0.00%   0.260s    0.260s   test_ontology_map_consistency (toys/health/
-[2K  7.00%   7.00%   0.240s    0.250s   _amax (numpy/_core/_methods.py)
-[2K  0.00%   0.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  0.00%   0.00%   0.160s    0.160s   _create_fn (dataclasses.py)
-[2K  0.00%   0.00%   0.160s    0.160s   get_data (<frozen importlib._bootstrap_exte
-[2K  0.00%   0.00%   0.150s    0.170s   _get_module_lock (<frozen importlib._bootst
-[2K  0.00%   0.00%   0.140s    0.150s   __new__ (abc.py)
-[2K  0.00%   0.00%   0.060s    0.060s   opengroup (sre_parse.py)
-[2K  0.00%  11.00%   0.060s    0.770s   open_memmap (numpy/lib/format.py)
-[2K  0.00%   0.00%   0.060s    0.060s   namedtuple (collections/__init__.py)
-[2K
-[2KPress Control-C to quit, or ? for help.
-[H[2KCollecting samples from '/usr/local/Cellar/python@3.10/3.10.18/Frameworks/Python.framework/Versions/3.10/Resources/Python.app/Contents/MacOS/Python -m pytest' (python v3.10.18)
-[2KTotal Samples 1000
-[2KGIL: 45.00%, Active: 81.00%, Threads: 1
-[2K
-[2K  %Own   %Total  OwnTime  TotalTime  Function (filename)                        
-[2K 33.00%  34.00%    1.45s     1.46s   _wrapfunc (numpy/_core/fromnumeric.py)
-[2K  0.00%   0.00%   0.730s    0.730s   __getitem__ (numpy/_core/memmap.py)
-[2K  7.00%   7.00%   0.700s    0.750s   __new__ (numpy/_core/memmap.py)
-[2K  0.00%   0.00%   0.420s    0.420s   _compile_bytecode (<frozen importlib._boots
-[2K  0.00%   0.00%   0.410s     1.14s   <dictcomp> (baby/policies.py)
-[2K  0.00%   7.00%   0.360s     3.88s   _call_with_frames_removed (<frozen importli
-[2K  4.00%   4.00%   0.280s    0.290s   _amax (numpy/_core/_methods.py)
-[2K 27.00%  27.00%   0.270s    0.270s   gc_collect_harder (_pytest/unraisableexcept
-[2K  0.00%   0.00%   0.260s    0.260s   test_ontology_map_consistency (toys/health/
-[2K  0.00%   0.00%   0.180s    0.180s   __eq__ (typing.py)
-[2K  0.00%   0.00%   0.160s    0.160s   _create_fn (dataclasses.py)
-[2K  0.00%   0.00%   0.160s    0.160s   get_data (<frozen importlib._bootstrap_exte
-[2K  0.00%   0.00%   0.150s    0.170s   _get_module_lock (<frozen importlib._bootst
-[2K  0.00%   0.00%   0.140s    0.150s   __new__ (abc.py)
-[2K  4.00%   4.00%   0.080s    0.120s   __init__ (typing.py)
-[2K  0.00%   0.00%   0.060s    0.060s   opengroup (sre_parse.py)
-[2K
-[2KPress Control-C to quit, or ? for help.
-
-process 3421 ended

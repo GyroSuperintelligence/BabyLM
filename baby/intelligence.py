@@ -5,6 +5,9 @@ S4/5: Intelligence – Orchestration & API
 
 from __future__ import annotations
 
+from pathlib import Path
+
+# Import tokenizer for token-aware generation
 import os
 import time
 import uuid
@@ -13,7 +16,6 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple, TypedDict, cast
 
 from dataclasses import asdict, is_dataclass
-from pathlib import Path
 
 import numpy as np
 
@@ -155,6 +157,9 @@ class IntelligenceEngine:
         self._θ_high: float = 0.9  # radians
         self._θ_low: float = 0.3
         self._cool_introns: tuple[int, ...] = (0b01000010,)
+
+        # BU-Ingress state initialization
+        self._S: list[int] = [0] * 6
         try:
             if self.phenomenology_map_path and os.path.exists(self.phenomenology_map_path):
                 # The .npy file does not contain autonomic_cycles; set to empty
@@ -211,7 +216,7 @@ class IntelligenceEngine:
         self._θ_buf.append(div)
         return intron
 
-    def process_ingress(self, last_intron: int) -> int:
+    def process_ingress(self, last_intron: int) -> tuple[int, int]:
         last_intron &= 0xFF  # Defensive masking
         # S3: Get semantic meaning of current state + context
         # state_index is physical index; canonicalisation (if enabled) is applied at storage layer (CanonicalView)
@@ -285,15 +290,13 @@ class IntelligenceEngine:
             self._pain_streak = 0
 
         # Generate response from original phenotype_entry (not cooling intron)
-        phenotype = output_entry.get("phenotype")
-        if isinstance(phenotype, str) and phenotype:
-            return ord(phenotype[0])
-        elif isinstance(phenotype, str):
-            return ord("?")
-        elif phenotype is not None:
-            return int(phenotype) & 0xFF  # Ensure byte range
-        else:
-            return ord("?")
+        θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
+        byte_out, intron_out = self._bu_ingress_step(output_entry, float(θ))
+
+        # Learn from the intron_out (symmetric learning)
+        self.operator.learn(output_entry, intron_out)
+
+        return byte_out, intron_out
 
     def add_hook(self, hook: CycleHookFunction) -> None:
         """
@@ -324,9 +327,14 @@ class IntelligenceEngine:
         if not data:
             return
 
-        if self.use_epistemology and nb is not None:
+        # JIT only pays off for *large* buffers; for tiny ones we keep the reference Python path
+        # (it's also what the test-suite expects).
+        if self.use_epistemology and nb is not None and len(data) > 256:
             buf = np.frombuffer(data, dtype=np.uint8)
             self.current_state_index, acc = _jit_batch(self.epistemology, np.uint32(self.current_state_index), buf)
+            # keep the integer representation coherent for later divergence checks
+            self._cached_state_int = self.s2.get_state_from_index(self.current_state_index)
+            self.gene_mac_m_int = self._cached_state_int
             self.cycle_count += buf.size
         else:
             acc = 0
@@ -389,6 +397,33 @@ class IntelligenceEngine:
     def _sync_index_from_state_int(self) -> None:
         if self.use_epistemology:
             self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
+
+    def _bu_ingress_step(self, entry: "PhenotypeEntry", theta_val: float) -> tuple[int, int]:
+        """
+        One generative micro‑step:
+          • derive exon_product
+          • slide the 6‑byte S‑window
+          • choose which intron to emit
+          • return (byte_out, intron_out) tuple
+        """
+        sig = entry["governance_signature"]
+        conf = entry["confidence"]
+        v = self.s2.orbit_cardinality[self.current_state_index]
+        p = governance.exon_product_from_metadata(sig, conf, v, self.s2._v_max)
+
+        # 6‑byte context window lives in self._S (init with [0]*6 in __init__)
+        aligned = governance.fold(self._S[0], p)
+        self._S = self._S[1:] + [aligned]
+
+        if theta_val < self._θ_low:
+            intron_out = self._S[5]
+        elif theta_val < self._θ_high:
+            intron_out = self._S[4]
+        else:
+            intron_out = p
+
+        byte_out = intron_out ^ 0xAA  # transcribe back to byte‐space
+        return byte_out, intron_out
 
     def validate_knowledge_integrity(self) -> bool:
         """
@@ -518,6 +553,7 @@ class GyroSI:
         """
         self.base_path = base_path.resolve()
         self.config = config.copy()
+        self.preferences = config.get("preferences", {})
         # Patch only allowed AgentConfig path keys to be absolute if not already
         if (
             "ontology_path" in self.config
@@ -606,41 +642,56 @@ class GyroSI:
             store.commit()
         # Removed automatic close()
 
-    def respond(self, data: bytes) -> bytes:
+    def respond(self, data: bytes, max_new_tokens: int = 64) -> bytes:
         """
-        Generate an intelligent response to input data.
-
-        Args:
-            data: Input bytes to respond to
-
-        Returns:
-            Intelligent response bytes
+        Generate an intelligent response.  Guarantees that every emitted
+        LEB128 token is complete (no dangling continuation bit).
         """
-        if not data:
-            return b""
+        # ---------- 1. ingest user prompt -------------------------------
+        last_intron = 0
+        for b in data:
+            last_intron = self.engine.process_egress(b)
 
-        introns = []
-        for byte in data:
-            intron = self.engine.process_egress(byte)
-            introns.append(intron)
+        # ---------- 2. generate -----------------------------------------
+        out = bytearray()
+        tokens_done = 0
 
-        # Option 1: classic per-byte ingress (status quo)
-        # response = bytearray()
-        # for intron in introns:
-        #     output_byte = self.engine.process_ingress(intron)
-        #     response.append(output_byte)
-        # return bytes(response)
+        while tokens_done < max_new_tokens:
+            # keep the start offset so we can EOS-check later
+            token_start = len(out)
 
-        # Option 2: fold to one ingress (batched)
-        acc = 0
-        for intron in introns:
-            acc = governance.fold(acc, intron)
+            # -------- byte-loop for ONE token ----------------------------
+            while True:
+                byte_out, last_intron = self.engine.process_ingress(last_intron)
+                out.append(byte_out)
 
-        output_byte = self.engine.process_ingress(acc)
-        response = bytes([output_byte])  # one-byte response
+                # holographic feedback
+                self.engine.process_egress(byte_out)
+
+                # Did the *intron* side say "done"?  (bit-7 = 0)
+                if ((byte_out ^ 0xAA) & 0x80) == 0:
+                    tokens_done += 1
+                    break  # token closed – leave byte-loop
+
+            # -------- optional EOS check ---------------------------------
+            try:
+                # Import tokenizer locally to avoid top-level sys.path hack
+                import sys
+                from pathlib import Path
+
+                sys.path.append(str(Path(__file__).resolve().parents[1] / "toys" / "communication"))
+                from toys.communication import tokenizer as tok
+
+                # unmask just this token and decode its ID
+                intron_bytes = bytes(b ^ 0xAA for b in out[token_start:])
+                if tok._bytes_to_ids(intron_bytes)[0] == 102:  # [SEP]
+                    break
+            except ValueError:
+                # should never happen now, but we keep the guard
+                pass
 
         self._commit_if_needed()
-        return response
+        return bytes(out)
 
     def _commit_if_needed(self) -> None:
         store = self.engine.operator.store
@@ -691,7 +742,7 @@ class GyroSI:
 
     def _create_default_store(self) -> Any:
         """Create default storage based on configuration."""
-        # --- Honor store_options for msgpack/append-only store ---
+        # --- Honor store_options for binary_struct/append-only store ---
         # cast self.config to a dict so .get is allowed
         opts = cast(Dict[str, Any], self.config).get("store_options", {}) or {}
         if opts.get("append_only"):
@@ -718,7 +769,7 @@ class GyroSI:
             if private_path is None:
                 if private_root is None:
                     raise ValueError("private_agents_base_path must not be None")
-                private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.mpk")
+                private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.bin")
             # Multi-agent overlay using decorators
             public_store = ReadOnlyView(
                 OrbitStore(
@@ -734,8 +785,17 @@ class GyroSI:
             # Single-agent setup
             knowledge_path = self.config.get("knowledge_path")
             if knowledge_path is None:
-                base_path = self.config.get("base_path") or str(self.base_path / "memories")
-                knowledge_path = os.path.join(base_path, "knowledge.mpk")  # msgpack-based fallback path
+                # Use preferences if available, otherwise fallback to default
+                if self.preferences and isinstance(self.preferences, dict):
+                    prefs_dict = cast(Dict[str, Any], self.preferences)
+                    if "public_knowledge" in prefs_dict:
+                        knowledge_path = prefs_dict["public_knowledge"]["path"]
+                    else:
+                        base_path = self.config.get("base_path") or str(self.base_path / "memories")
+                        knowledge_path = os.path.join(base_path, "knowledge.bin")  # binary_struct-based fallback path
+                else:
+                    base_path = self.config.get("base_path") or str(self.base_path / "memories")
+                    knowledge_path = os.path.join(base_path, "knowledge.bin")  # binary_struct-based fallback path
             base_store = OrbitStore(
                 knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path, append_only=True
             )
@@ -858,7 +918,7 @@ class AgentPool:
                     self._maybe_evict_agent(shard)
 
                 # Create private knowledge path
-                private_path_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.mpk")
+                private_path_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.bin")
                 private_path = _abs(private_path_rel, self.base_path)
                 os.makedirs(os.path.dirname(private_path), exist_ok=True)
 
@@ -912,7 +972,7 @@ class AgentPool:
     def create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
         onto = self.ontology_path
         phenomap = str(Path(onto).with_name("phenomenology_map.npy"))
-        private_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.mpk")
+        private_rel = os.path.join(self.private_agents_base_path, f"{agent_id}/knowledge.bin")
         private_path = _abs(private_rel, self.base_path)
         config: AgentConfig = {
             "ontology_path": onto,

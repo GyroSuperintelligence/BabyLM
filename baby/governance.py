@@ -6,11 +6,15 @@ the physical laws of the GyroSI system. No engine class is needed here;
 all operations are stateless functions.
 """
 
+import math
 from functools import reduce
-from typing import List, Tuple, cast
+from typing import List, Tuple, cast, TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from baby.contracts import GovernanceSignature
 
 # Core genetic constants - Section 4.1 & 4.2
 GENE_Mic_S = 0xAA  # 10101010 binary, stateless constant
@@ -227,6 +231,22 @@ def dual(x: int) -> int:
     It reflects a state through the origin, enabling the return path.
     """
     return (x ^ 0xFF) & MASK
+
+
+def exon_product_from_metadata(sig: "GovernanceSignature", confidence: float, orbit_v: int, v_max: int) -> int:
+    """
+    Compress the rich metadata into an 8‑bit exon‑product.
+
+    Returns an 8‑bit int using the same LI/FG/BG family layout
+    as exon_mask but **never persisted**.
+    """
+    li, fg, bg, neutral = sig["li"], sig["fg"], sig["bg"], sig["neutral"]
+    tau = li - bg
+    eta = fg - neutral
+    scale = confidence * math.sqrt(orbit_v / v_max)
+    A = int(round(tau * scale)) & 0x0F  # high nibble
+    B = int(round(eta * scale)) & 0x0F  # low  nibble
+    return ((A << 4) | B) & 0xFF
 
 
 def validate_tensor_consistency() -> bool:

@@ -190,8 +190,8 @@ class RobustTrainingConfig:
     # Model config
     ontology_path: Path = PROJECT_ROOT / "memories/public/meta/ontology_keys.npy"
     phenomenology_path: Path = PROJECT_ROOT / "memories/public/meta/phenomenology_map.npy"
-    # msgpack append‑only store lives in one .mpk file – NO .log/.idx any more
-    knowledge_path: Path = training_dir / "knowledge/wikipedia_knowledge.mpk"
+    # binary_struct append‑only store lives in one .bin file – NO .log/.idx any more
+    knowledge_path: Path = training_dir / "knowledge/wikipedia_knowledge.bin"
     tokenizer_name: str = "bert-base-uncased"
 
     # Optimized training params for MacBook Pro 2015
@@ -560,7 +560,7 @@ def create_training_agent(config: RobustTrainingConfig, logger: logging.Logger) 
         agent_config: AgentConfig = {
             "ontology_path": str(config.ontology_path),
             "phenomenology_map_path": str(config.phenomenology_path),
-            "knowledge_path": str(config.knowledge_path),  # already ends in .mpk
+            "knowledge_path": str(config.knowledge_path),  # already ends in .bin
             "learn_batch_size": 4000,  # see §2
             "preferences": {"pruning": {"confidence_threshold": 0.05, "enable_auto_decay": True}},  # auto‑pruning
         }
@@ -630,7 +630,7 @@ def run_training_robust(
 
         print("\n📊 Training Configuration:")
         print(f"   • Files to process: {len(remaining_files):,}")
-        print(f"   • Batch size: {config.batch_size_bytes//1024}KB")
+        print(f"   • Batch size: {config.batch_size_bytes // 1024}KB")
         print(f"   • Memory limit: {config.max_memory_usage_percent}%")
         print(f"   • Min article length: {config.min_article_length} chars")
         print(f"   • Log rotation: {config.max_log_size_gb}GB")
@@ -687,7 +687,7 @@ def run_training_robust(
                     mb_rate = (checkpoint.total_bytes_processed / (1024 * 1024)) / elapsed if elapsed > 0 else 0
 
                     checkpoint_msg = (
-                        f"📊 Checkpoint {(i+1)//config.checkpoint_every_n_files}: "
+                        f"📊 Checkpoint {(i + 1) // config.checkpoint_every_n_files}: "
                         f"{checkpoint.total_articles:,} articles, "
                         f"{gb_processed:.2f}GB processed, "
                         f"{rate:.1f} articles/sec, {mb_rate:.2f} MB/sec"
@@ -701,7 +701,7 @@ def run_training_robust(
                     last_progress_update = now
                     if config.debug_mode:
                         print(
-                            f"📈 Progress: {i+1}/{len(remaining_files)} files, "
+                            f"📈 Progress: {i + 1}/{len(remaining_files)} files, "
                             f"{checkpoint.total_articles:,} articles, "
                             f"{memory_pct:.1f}% memory"
                         )
@@ -751,7 +751,7 @@ def run_training_robust(
 
                 final_msg = (
                     f"✅ Training completed: {checkpoint.total_articles:,} articles, "
-                    f"{gb_total:.2f}GB processed in {elapsed/3600:.1f} hours"
+                    f"{gb_total:.2f}GB processed in {elapsed / 3600:.1f} hours"
                 )
                 print(f"\n{final_msg}")
                 logger.info(final_msg)

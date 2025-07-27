@@ -42,7 +42,7 @@ class PreferencesConfig(TypedDict, total=False):
     """
 
     # Storage preferences
-    storage_backend: str  # "msgpack"
+    storage_backend: str  # "binary_struct"
     compression_level: int
     max_file_size_mb: int
 

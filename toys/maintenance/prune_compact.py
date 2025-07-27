@@ -5,13 +5,13 @@ Usage examples:
 ---------------
 # In-place: remove entries older than 30 days or confidence < 0.05
 python toys/maintenance/prune_compact.py \
-    --store memories/public/meta/knowledge.mpk \
+    --store memories/public/meta/knowledge.bin \
     --max-age-days 30 --min-confidence 0.05
 
 # Write compacted copy to a new file (safety) and keep archive summary
 python toys/maintenance/prune_compact.py \
-    --store memories/public/meta/knowledge.mpk \
-    --output memories/public/meta/knowledge_compacted.mpk \
+    --store memories/public/meta/knowledge.bin \
+    --output memories/public/meta/knowledge_compacted.bin \
     --max-age-days 60 \
     --archive memories/public/meta/pruned_summary.json
 """
@@ -37,7 +37,7 @@ def main() -> None:
     # Refuse to run on pickle blobs
     for path in (args.store, args.output):
         if path and (path.endswith(".pkl") or path.endswith(".pkl.gz")):
-            print(f"ERROR: This script only supports msgpack-based stores (.mpk). Refusing to run on: {path}")
+            print(f"ERROR: This script only supports binary_struct-based stores (.bin). Refusing to run on: {path}")
             exit(1)
     report = prune_and_compact_store(
         store_path=args.store,

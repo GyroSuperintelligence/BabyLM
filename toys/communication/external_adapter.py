@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import signal
 from typing import List, Any, Iterator
 from pathlib import Path
 import atexit
@@ -48,6 +49,20 @@ with open(PREFERENCES_PATH) as f:
     PREFERENCES = json.load(f)
 
 BASE_PATH = Path(PREFERENCES.get("base_path", Path(PREFERENCES_PATH).parent)).resolve()
+
+
+# ---------------------------------------------------------------------
+# Signal handling for graceful shutdown
+# ---------------------------------------------------------------------
+def signal_handler(signum: int, frame: Any) -> None:
+    """Handle SIGTERM for graceful shutdown."""
+    print(f"Received signal {signum}, shutting down gracefully...")
+    agent_pool.close_all()
+    exit(0)
+
+
+# Register signal handler for SIGTERM
+signal.signal(signal.SIGTERM, signal_handler)
 
 # ---------------------------------------------------------------------
 # One shared AgentPool for the whole process
@@ -194,8 +209,11 @@ async def chat_completions(
         def token_stream() -> Iterator[str]:
             # Encode the reply to bytes, then decode token by token
             reply_bytes = gyrotok.encode(reply, name=PREFERENCES["tokenizer"]["name"])
-            ids = gyrotok._bytes_to_ids(reply_bytes)
+            # Use the public decode function to get token IDs, then decode each token individually
             tokenizer = gyrotok._load(PREFERENCES["tokenizer"]["name"])
+            # Unmask the reply_bytes (encode() returns masked bytes, _apply_mask is an involution)
+            unmasked_bytes = gyrotok._apply_mask(reply_bytes)
+            ids = gyrotok._bytes_to_ids(unmasked_bytes)
             for i, token_id in enumerate(ids):
                 token_text = tokenizer.decode([token_id], skip_special_tokens=True)
                 # OpenAI-compatible SSE chunk
@@ -244,10 +262,11 @@ async def hf_generate(payload: HFGenerateRequest, request: Request) -> HFGenerat
     # map all external users → internal "user"
     user_id = "user"
     assistant_id = "assistant"
-    # Remove or comment out the assignment to 'system_id' at line 251
-    # system_id = "system"
+    # system_id = "system"  # (stale, do not reinstate)
     # Call orchestrate_turn with the tokenizer name
     reply = orchestrate_turn(
         agent_pool, user_id, assistant_id, payload.inputs, tokenizer_name=PREFERENCES["tokenizer"]["name"]
     )
+    # Ensure output is in the tokenizer's alphabet (lowercase for bert-base-uncased)
+    reply = reply.lower()
     return HFGenerateResponse(generated_text=reply)
