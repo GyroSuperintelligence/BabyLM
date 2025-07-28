@@ -16,3 +16,4 @@ venv/ linguist-vendored
 #*.yourfile binary
 *.npy filter=lfs diff=lfs merge=lfs -text
 *.json filter=lfs diff=lfs merge=lfs -text
+toys/training/wikipedia_simple_data/** filter=lfs diff=lfs merge=lfs -text

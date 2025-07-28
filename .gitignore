@@ -77,10 +77,10 @@ coverage.xml
 toys/health/memories/
 toys/health/htmlcov/
 
-toys/training/wikipedia_data
-toys/training/knowledge
-toys/training/checkpoints
-toys/training/logs
+toys/training/wikipedia_full_data/
+toys/training/knowledge/
+toys/training/checkpoints/
+toys/training/logs/
 
 # Documentation builds
 guides/build/
