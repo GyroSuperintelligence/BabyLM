@@ -36,36 +36,63 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Iterator, cast, Any
 
-import psutil
-from tokenizers import Tokenizer
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
-from tqdm import tqdm
+try:
+    from tokenizers import Tokenizer
+except ImportError:
+    Tokenizer = None
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
 
 from baby.intelligence import GyroSI
 from baby.contracts import AgentConfig
 from toys.communication import tokenizer as gyrotok
 
+import re
+
+_SENT_RE = re.compile(
+    r"""          # very cheap rule‑based splitter
+    (?<=[.!?])    #  … after terminal punctuation
+    ["')\]]*      #  … that may be followed by quotes / parens
+    \s+           #  … and some whitespace
+    (?=[A-Z])     #  … before the next capital letter
+    """,
+    re.VERBOSE,
+)
+
+def iter_sentences(text: str):
+    """Yield naïvely split sentences (≈95 % precision on wiki)."""
+    for s in _SENT_RE.split(text):
+        s = s.strip()
+        if s:
+            yield s
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+SHUTDOWN_REQUESTED = False
 
-def _get_raw_store(store: object) -> Optional[object]:
-    """
-    Return the first wrapped store that actually implements .commit().
-    Works for CanonicalView ▸ OverlayView ▸ OrbitStore, etc.
-    """
-    while store is not None:
-        if hasattr(store, "commit"):
-            return store
-        store = getattr(store, "base_store", None) or getattr(store, "private_store", None)
-    return None
+def handle_sigint(signum, frame):
+    global SHUTDOWN_REQUESTED
+    SHUTDOWN_REQUESTED = True
+    print("\nShutdown requested (Ctrl+C pressed). Will exit after current checkpoint.")
 
-
-def safe_commit(agent: object) -> None:
-    raw = _get_raw_store(getattr(getattr(getattr(agent, "engine", None), "operator", None), "store", None))
-    if raw is not None and hasattr(raw, "commit"):
-        cast(Any, raw).commit()
-
+# Helper for progress bar updates
+def update_progress_bar(progress, rss_pct, file_path):
+    if progress is not None:
+        progress.set_postfix({
+            "mem": f"{rss_pct:.1f}%",
+            "file": file_path.name[:12],
+        })
+        progress.update(0)
 
 # ========================================================================================
 # Progress Indicators and Better Logging
@@ -131,6 +158,9 @@ _CHECKPOINT_POOL: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1, thread_
 
 def get_tokenizer(tokenizer_name: str) -> Tokenizer:
     """Get cached tokenizer instance."""
+    if Tokenizer is None:
+        raise ImportError("tokenizers module not available")
+    
     global _GLOBAL_TOKENIZER
     if _GLOBAL_TOKENIZER is None:
         _GLOBAL_TOKENIZER = gyrotok._load(tokenizer_name)
@@ -151,7 +181,7 @@ def encode_bytes_optimized(text: str, tokenizer_name: str) -> bytes:
 class RobustTrainingConfig:
     # Paths
     training_dir: Path = PROJECT_ROOT / "toys/training"
-    data_dir: Path = training_dir / "wikipedia_data"
+    data_dir: Path = training_dir / "wikipedia_full_data"
     checkpoints_dir: Path = training_dir / "checkpoints"
     logs_dir: Path = training_dir / "logs"
 
@@ -221,13 +251,16 @@ def check_system_requirements(config: RobustTrainingConfig, logger: logging.Logg
 
     try:
         # Check available memory
-        memory = psutil.virtual_memory()
-        available_gb = memory.available / (1024**3)
+        if psutil is not None:
+            memory = psutil.virtual_memory()
+            available_gb = memory.available / (1024**3)
 
-        if available_gb < 4.0:
-            print(f"❌ Insufficient memory: {available_gb:.1f}GB available, need at least 4GB")
-            return False
-        print(f"✅ Memory: {available_gb:.1f}GB available")
+            if available_gb < 4.0:
+                print(f"❌ Insufficient memory: {available_gb:.1f}GB available, need at least 4GB")
+                return False
+            print(f"✅ Memory: {available_gb:.1f}GB available")
+        else:
+            print("⚠️  psutil not available - skipping memory check")
 
         # Check available disk space
         free_space = shutil.disk_usage(config.training_dir.parent).free / (1024**3)
@@ -285,118 +318,52 @@ def iter_articles_from_file(file_path: Path, config: RobustTrainingConfig) -> It
                 yield article
 
 
-def process_file_in_batches_robust(
-    file_path: Path, agent: GyroSI, config: RobustTrainingConfig, logger: logging.Logger
+def train_on_file_content(
+    file_path: Path, agent: GyroSI, config: RobustTrainingConfig, logger: logging.Logger, progress=None
 ) -> tuple[int, int]:
-    """Stream/process articles one by one, encode with gyrotok, and perform true sequential learning."""
-    articles_processed: int = 0
+    import time
+    sentences_processed: int = 0
     bytes_processed: int = 0
     tokens_processed: int = 0
-    token_commit_threshold = 1_000_000  # 1M tokens
-    commit_time_threshold = 120  # seconds
-    last_commit_time = time.time()
-    last_decay_time = 0.0
+    inner_update_every = 10_000      # Bytes
     tok = get_tokenizer(config.tokenizer_name)
     min_token_count = config.min_token_count
     sep_bytes = gyrotok.bytes_from_ids([102])
-    process = psutil.Process()
-    total_mem = psutil.virtual_memory().total
+    if psutil is not None:
+        process = psutil.Process()
+        total_mem = psutil.virtual_memory().total
+    else:
+        process = None
+        total_mem = None
+    start_time = time.time()
 
-    try:
-        for article in iter_articles_from_file(file_path, config):
-            ids = tok.encode(article, add_special_tokens=False).ids
+    from tqdm import tqdm as tqdm_lib
+    article_list = list(iter_articles_from_file(file_path, config))
+    article_progress = tqdm_lib(article_list, desc=f"Articles in {file_path.name}", unit="article", leave=False)
+
+    byte_counter_in_file = 0
+    for article in article_progress:
+        for sent in iter_sentences(article):
+            ids = tok.encode(sent, add_special_tokens=False).ids
             if len(ids) < min_token_count:
-                logger.warning(f"Skipping article with too few tokens: {len(ids)} tokens")
                 continue
-            encoded_bytes = gyrotok.bytes_from_ids(ids)
-            last_intron = 0
-            for byte in encoded_bytes:
-                last_intron = agent.engine.process_egress(byte)
-                agent.engine.process_ingress(last_intron)
-            for byte in sep_bytes:
-                last_intron = agent.engine.process_egress(byte)
-                agent.engine.process_ingress(last_intron)
+            encoded = gyrotok.bytes_from_ids(ids) + sep_bytes
+            agent.engine.batch_learn(encoded)
+            # progress bookkeeping -------------
+            byte_counter_in_file += len(encoded)
+            if byte_counter_in_file % inner_update_every == 0:
+                if process is not None and total_mem is not None:
+                    rss_pct = process.memory_info().rss / total_mem * 100
+                    update_progress_bar(progress, rss_pct, file_path)
             tokens_processed += len(ids)
-            articles_processed += 1
-            bytes_processed += len(encoded_bytes) + len(sep_bytes)
-
-            # Token-based or time-based commit
-            now = time.time()
-            do_commit = False
-            if tokens_processed >= token_commit_threshold or (now - last_commit_time) >= commit_time_threshold:
-                do_commit = True
-            if do_commit:
-                try:
-                    safe_commit(agent)
-                    store_size_gb = config.knowledge_path.stat().st_size / (1024**3)
-                    if store_size_gb > 2 and (last_decay_time < now - 3600):
-                        agent.apply_maintenance(
-                            decay_rate=config.maintenance_decay_rate,
-                            confidence_threshold=config.maintenance_confidence_threshold,
-                        )
-                        last_decay_time = now
-                    if config.debug_mode:
-                        print(f"💾 Commit at {tokens_processed} tokens or {now - last_commit_time:.1f}s")
-                    tokens_processed = 0
-                    last_commit_time = now
-                except Exception as e:
-                    print(f"⚠️  Commit/maintenance failed: {e}")
-                    logger.warning(f"Commit/maintenance failed: {e}")
-
-            # Memory guard rails (process RSS vs total system memory)
-            rss = process.memory_info().rss / total_mem * 100
-            if rss > config.max_memory_usage_percent:
-                print(f"⚠️  High process memory usage: {rss:.1f}%. Forcing cleanup.")
-                logger.warning(f"High process memory usage: {rss:.1f}%. Forcing cleanup.")
-                safe_commit(agent)
-                # Maintenance pass only if store >2GB and at least 1hr since last decay
-                store_size_gb = config.knowledge_path.stat().st_size / (1024**3)
-                if store_size_gb > 2 and (last_decay_time < now - 3600):
-                    agent.apply_maintenance(
-                        decay_rate=config.maintenance_decay_rate,
-                        confidence_threshold=config.maintenance_confidence_threshold,
-                    )
-                    last_decay_time = now
-                gc.collect()
-                time.sleep(config.gc_sleep_duration)
-
-        # Final commit/maintenance
-        if tokens_processed > 0:
-            try:
-                safe_commit(agent)
-                store_size_gb = config.knowledge_path.stat().st_size / (1024**3)
-                if store_size_gb > 2 and (last_decay_time < time.time() - 3600):
-                    agent.apply_maintenance(
-                        decay_rate=config.maintenance_decay_rate,
-                        confidence_threshold=config.maintenance_confidence_threshold,
-                    )
-                    last_decay_time = time.time()
-                if config.debug_mode:
-                    print(f"💾 Final commit at {tokens_processed} tokens")
-            except Exception as e:
-                print(f"⚠️  Final commit/maintenance failed: {e}")
-                logger.warning(f"Final commit/maintenance failed: {e}")
-
-        # Force commit at end of file
-        try:
-            safe_commit(agent)
-            store_size_gb = config.knowledge_path.stat().st_size / (1024**3)
-            if store_size_gb > 2 and (last_decay_time < time.time() - 3600):
-                agent.apply_maintenance(
-                    decay_rate=config.maintenance_decay_rate,
-                    confidence_threshold=config.maintenance_confidence_threshold,
-                )
-                last_decay_time = time.time()
-        except Exception as e:
-            print(f"⚠️  Final commit/maintenance failed: {e}")
-            logger.warning(f"Final commit/maintenance failed: {e}")
-
-        return articles_processed, bytes_processed
-
-    except Exception as e:
-        print(f"❌ File processing failed for {file_path}: {e}")
-        logger.error(f"File processing failed for {file_path}: {e}")
-        return articles_processed, bytes_processed
+            sentences_processed += 1
+            bytes_processed += len(encoded)
+        # After each article, force a progress bar update
+        rss_pct = process.memory_info().rss / total_mem * 100
+        update_progress_bar(progress, rss_pct, file_path)
+    elapsed = time.time() - start_time
+    print(f"Shard took {elapsed:.1f}s")
+    return sentences_processed, bytes_processed
 
 
 # ========================================================================================
@@ -490,6 +457,12 @@ def find_wikipedia_files(config: RobustTrainingConfig, logger: logging.Logger) -
             print(f"   {config.data_dir}")
             print("   Expected structure: fullEnglish/XX/wiki_YY or direct wiki_* files")
 
+        if hasattr(config, "_test_file") and config._test_file.exists():
+            return [config._test_file]
+        
+        if hasattr(config, "_simple_file") and config._simple_file.exists():
+            return [config._simple_file]
+
         return files
 
     except Exception as e:
@@ -510,13 +483,38 @@ def create_training_agent(config: RobustTrainingConfig, logger: logging.Logger) 
     try:
         config.knowledge_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Use a private store for training; public knowledge is only for read-only reference
         agent_config: AgentConfig = {
             "ontology_path": str(config.ontology_path),
             "phenomenology_map_path": str(config.phenomenology_path),
-            "knowledge_path": str(config.knowledge_path),
-            "learn_batch_size": 4000,
-            "preferences": {"pruning": {"confidence_threshold": 0.05, "enable_auto_decay": True}},
+            "public_knowledge_path": str(config.training_dir / "dummy_public_knowledge.bin"),  # dummy file to avoid fallback
+            "private_knowledge_path": str(config.knowledge_path),
+            "learn_batch_size": 4000,  # see §2
+            "preferences": {
+                "pruning": {
+                    "confidence_threshold": 0.05,
+                    "enable_auto_decay": True  # live pruning
+                }
+            },
         }
+
+        # SAFETY CHECK: Ensure knowledge_path is a file path, not a directory
+        knowledge_path = agent_config["private_knowledge_path"]
+        if os.path.isdir(knowledge_path):
+            print(f"❌ ERROR: The knowledge path '{knowledge_path}' is a directory, not a file. Please remove or rename this directory, or set knowledge_path to a file.")
+            logger.error(f"Knowledge path '{knowledge_path}' is a directory, not a file.")
+            return None
+        if knowledge_path == str(config.training_dir.parent) or knowledge_path == str(config.training_dir):
+            print(f"❌ ERROR: The knowledge path '{knowledge_path}' is set to the project or training directory. Please set it to a file path, e.g., 'toys/training/knowledge/wikipedia_knowledge.bin'.")
+            logger.error(f"Knowledge path '{knowledge_path}' is set to a directory.")
+            return None
+
+        # DEBUG: Print the exact config being passed to GyroSI
+        print(f"🔍 DEBUG: Agent config paths:")
+        print(f"   • ontology_path: {agent_config['ontology_path']}")
+        print(f"   • phenomenology_map_path: {agent_config['phenomenology_map_path']}")
+        print(f"   • public_knowledge_path: '{agent_config['public_knowledge_path']}'")
+        print(f"   • private_knowledge_path: {agent_config['private_knowledge_path']}")
 
         print(f"📍 Knowledge will be stored at: {config.knowledge_path}")
 
@@ -544,7 +542,7 @@ def run_training_robust(
         logger = setup_logging(config)
 
     # Set up clean SIGINT handling
-    signal.signal(signal.SIGINT, signal.default_int_handler)
+    signal.signal(signal.SIGINT, handle_sigint)
 
     print_section("Starting Wikipedia Training")
 
@@ -604,6 +602,12 @@ def run_training_robust(
         total_mem = psutil.virtual_memory().total
 
         for i, file_path in enumerate(progress):
+            # Check for shutdown request
+            if SHUTDOWN_REQUESTED:
+                print("\n🛑 Training interrupted by user (Ctrl+C pressed). Exiting gracefully.")
+                logger.info("Training interrupted by user (Ctrl+C pressed). Exiting gracefully.")
+                break
+
             try:
                 # Check if we've hit max files limit
                 if config.max_files_per_session is not None and i >= config.max_files_per_session:
@@ -612,7 +616,7 @@ def run_training_robust(
                     break
 
                 # Process the file with robust error handling
-                articles, bytes_processed = process_file_in_batches_robust(file_path, agent, config, logger)
+                articles, bytes_processed = train_on_file_content(file_path, agent, config, logger, progress)
 
                 # Update checkpoint
                 checkpoint.processed_files.append(str(file_path))
@@ -722,12 +726,7 @@ def run_training_robust(
                 agent.close()
                 print("🔒 Agent closed cleanly")
                 # Only compact after agent is closed
-                if need_compact:
-                    from baby.policies import prune_and_compact_store
-
-                    logger.info("Pruning and compacting knowledge store (post-close)...")
-                    prune_and_compact_store(str(config.knowledge_path), dry_run=False)
-                    print("🧹 Knowledge store compacted after training.")
+                # Only live pruning is used during training; after training, the file can be moved/copied to the public area.
 
             # Final statistics
             if checkpoint is not None:
@@ -772,9 +771,8 @@ def main() -> int:
     parser.add_argument(
         "--memory-limit", type=float, default=80.0, help="Process memory usage percentage to trigger GC (default: 80)"
     )
-    parser.add_argument(
-        "--test-aa", action="store_true", help="Test only on the AA Wikipedia shard (for quick validation)"
-    )
+    parser.add_argument("--test-aa", action="store_true", help="Test only on the wiki_test file (for quick validation)")
+    parser.add_argument("--simple-data", action="store_true", help="Train on the simple AllCombined.txt file instead of full Wikipedia data")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
 
     # Remove --batch-size, but error if user supplies it
@@ -795,7 +793,21 @@ def main() -> int:
     config.checkpoint_every_n_files = args.checkpoint_every_files
     config.max_memory_usage_percent = args.memory_limit
     if args.test_aa:
-        config.data_dir = config.training_dir / "wikipedia_data/AA"
+        # Set data_dir to the directory containing wiki_test and restrict to that file
+        from pathlib import Path
+        config.data_dir = Path(__file__).parent  # toys/training/
+        config._test_file = config.data_dir / "wiki_test"
+        # Use a separate test knowledge file to avoid conflicts
+        config.knowledge_path = config.training_dir / "knowledge/test_knowledge.bin"
+
+    if args.simple_data:
+        # Set data_dir to the simple data directory and use AllCombined.txt
+        from pathlib import Path
+        config.data_dir = Path(__file__).parent / "wikipedia_simple_data"
+        config._simple_file = config.data_dir / "AllCombined.txt"
+        # Use a separate simple data knowledge file
+        config.knowledge_path = config.training_dir / "knowledge/simple_knowledge.bin"
+
     if args.debug:
         config.debug_mode = True
 

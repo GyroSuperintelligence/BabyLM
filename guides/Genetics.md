@@ -408,6 +408,12 @@ The structure of the 8-bit intron is not arbitrary but is functionally isomorphi
 
 This endogenous alignment means the system's physics naturally produces valid LEB128 byte streams. The boundary transcription (`⊕ 0xAA`) lawfully translates the internal physical signals into the bit patterns expected by external decoders without altering the underlying physical logic. This makes the architecture robust and future-proof, as the communication protocol is a direct consequence of the system's physical design.
 
+**Connecting the Dots: Why This Works**
+Phenotype as a Gravitational Well: The sentence-level phenotype does not contain the words. It acts like a gravitational well in the state space. When the agent's trajectory brings it near this "semantic checkpoint," the high confidence and specific exon_mask of that phenotype will strongly influence the exon_product calculations for the next several steps. It will guide the auto-regressive generation process to produce a sequence of bytes that correspond to a logical continuation of that sentence.
+
+**Generation is Emergent, Not Retrieved:** The agent is not "reading" the next words from the phenotype. It is reconstructing the most likely next sequence by following the physical gradients established during training. The sentence-level phenotype provides the "big picture" context, and the byte-by-byte _bu_ingress_step provides the "fine-grained" motor control to speak the words.
+
+**The Tokenizer is Just a Dumb Codec:** The BERT tokenizer's only job is to translate between the world of human words and the world of LEB128 byte streams. The intelligence is not in the tokenizer; it's in the engine's ability to generate the correct byte stream.
 ---
 
 ## **6. System Implementation: The Four Engines**
