@@ -262,12 +262,22 @@ def check_system_requirements(config: RobustTrainingConfig, logger: logging.Logg
         else:
             print("⚠️  psutil not available - skipping memory check")
 
-        # Check available disk space
+        # Check available disk space - reduced requirement for simple training
         free_space = shutil.disk_usage(config.training_dir.parent).free / (1024**3)
-        if free_space < 25.0:
-            print(f"❌ Insufficient disk space: {free_space:.1f}GB available, need at least 25GB")
+        
+        # Determine required space based on training mode
+        required_space = 5.0  # Default for simple training
+        if hasattr(config, '_test_file') or hasattr(config, '_simple_file'):
+            # Simple training mode - much smaller requirement
+            required_space = 2.0
+        elif config.data_dir.name == "wikipedia_full_data":
+            # Full Wikipedia training - original requirement
+            required_space = 25.0
+            
+        if free_space < required_space:
+            print(f"❌ Insufficient disk space: {free_space:.1f}GB available, need at least {required_space:.1f}GB")
             return False
-        print(f"✅ Disk space: {free_space:.1f}GB available")
+        print(f"✅ Disk space: {free_space:.1f}GB available (required: {required_space:.1f}GB)")
 
         # Check if ontology exists
         if not config.ontology_path.exists():

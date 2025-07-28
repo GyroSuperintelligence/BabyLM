@@ -1,7 +1,7 @@
 # Python 3.12 required (see Numba/llvmlite compatibility)
 
 # Core dependencies
-numpy==2.2.6
+numpy>=1.26.0,<2.0.0
 ujson>=5.7.0
 
 # Extra features
@@ -20,8 +20,8 @@ transformers>=4.30.0
 
 # Storage & JIT
 # msgpack removed - replaced with fixed-length binary struct
-numba==0.61.2         # Compatible with llvmlite 0.44.0 and Python 3.12
-llvmlite==0.44.*      # compatible with Python 3.12
+numba>=0.59.1,<0.61.0
+llvmlite>=0.43.0,<0.45.0
 
 # Development
 black>=23.7.0
