@@ -362,7 +362,8 @@ class InferenceEngine:
                     # OverlayView may not support deletion for public entries
                     # Append-only stores don't support deletion
                     # Log but continue with other entries
-                    print(f"Could not delete entry {key}: {e}")
+                    if getattr(self, "debug_mode", False):
+                        print(f"Could not delete entry {key}: {e}")
             elif hasattr(self.store, "data") and not (type(self.store).__name__ in ("OverlayView", "CanonicalView")):
                 # Only try data deletion for non-view stores
                 if key in self.store.data:

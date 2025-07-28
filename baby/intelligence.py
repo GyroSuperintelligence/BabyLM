@@ -529,7 +529,11 @@ class IntelligenceEngine:
                     print(f"Auto-pruning compaction failed: {e}")
 
         if removed > 0:
-            print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
+            # Only print this message if in debug mode
+            # print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
+            if getattr(self, "debug_mode", False):
+                print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
+            # else: suppress in normal operation
 
 
 class GyroSI:
