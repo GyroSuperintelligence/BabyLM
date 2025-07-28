@@ -4,6 +4,24 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 
 ---
 
+## [0.9.6.6] – 2025-07-28
+
+### Wikipedia Training Pipeline Overhaul
+
+- **Robust article splitting:** Now splits articles only at three or more consecutive blank lines, matching Wikipedia dump format and preventing topic bleed-through.
+- **Token-based filtering:** Only articles with at least `min_token_count` tokens are included, skipping empty or trivial stubs.
+- **Efficient single-pass tokenization:** Each article is tokenized once, with no double-tokenization or unnecessary allocations.
+- **Sequential byte-level learning:** Each byte is processed in egress/ingress cycles for true path-dependent training, not batch summarization.
+- **Frequent and safe checkpointing:** Checkpoints are saved every 1M tokens, every 120 seconds, or every N files, with async thread pool and rare backlog flush safeguard.
+- **Process-specific memory guard:** Uses process RSS (not system-wide percent) to trigger GC and checkpointing.
+- **Automatic store maintenance:** Pruning/decay runs only when needed (store >2GB and at least 1hr since last decay), and compaction is deferred until after agent close for safety.
+- **Safe post-close compaction:** Knowledge store is compacted only after the agent and mmap are closed, preventing file corruption.
+- **Progress bar improvements:** Now shows process memory usage (RSS) for accurate resource tracking.
+- **Test mode:** Added `--test-aa` flag to restrict training to the AA shard for quick validation before full runs.
+- **CLI clarity:** Removed legacy/unused options, improved help strings, and made checkpointing and memory limits explicit.
+
+---
+
 ## [0.9.6.6] – 2025-07-27
 
 ### Summary

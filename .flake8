@@ -1,4 +1,3 @@
 [flake8]
-exclude = codebase-mcp, data, logs, .venv, s2_information/g1_s2_information.dat, .gitignore
-max-line-length = 120
-ignore = E203, W503 
+exclude = .git,__pycache__,.mypy_cache,.pytest_cache,.venv,.cache,toys/training/wikipedia_data
+max-line-length = 120 

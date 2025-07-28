@@ -32,21 +32,19 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Iterator, cast, Any
 
 import psutil
 from tokenizers import Tokenizer
 
-# requests is unused – safe to drop
 from tqdm import tqdm
 
 from baby.intelligence import GyroSI
 from baby.contracts import AgentConfig
 from toys.communication import tokenizer as gyrotok
 
-# Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -59,16 +57,11 @@ def _get_raw_store(store: object) -> Optional[object]:
     while store is not None:
         if hasattr(store, "commit"):
             return store
-        # CanonicalView     → .base_store
-        # OverlayView       → .private_store   (writes go there)
-        # ReadOnlyView      → no commit → break
         store = getattr(store, "base_store", None) or getattr(store, "private_store", None)
     return None
 
 
 def safe_commit(agent: object) -> None:
-    # mypy: ignore-errors
-    # This is a dynamic attribute access pattern
     raw = _get_raw_store(getattr(getattr(getattr(agent, "engine", None), "operator", None), "store", None))
     if raw is not None and hasattr(raw, "commit"):
         cast(Any, raw).commit()
@@ -129,12 +122,11 @@ def print_section(title: str) -> None:
 
 
 # ========================================================================================
-# Global Tokenizer Instance + Micro-Optimized Encoding
+# Global Tokenizer Instance + Physics-Aware Encoding
 # ========================================================================================
 
 _GLOBAL_TOKENIZER: Optional[Tokenizer] = None
-_CHECKPOINT_POOL: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
-_ENCODING_POOL: Optional[ThreadPoolExecutor] = None
+_CHECKPOINT_POOL: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ckpt")
 
 
 def get_tokenizer(tokenizer_name: str) -> Tokenizer:
@@ -145,29 +137,9 @@ def get_tokenizer(tokenizer_name: str) -> Tokenizer:
     return _GLOBAL_TOKENIZER
 
 
-def get_encoding_pool(workers: int) -> ThreadPoolExecutor:
-    """Get cached encoding thread pool."""
-    global _ENCODING_POOL
-    if _ENCODING_POOL is None:
-        _ENCODING_POOL = ThreadPoolExecutor(max_workers=workers)
-    return _ENCODING_POOL
-
-
 def encode_bytes_optimized(text: str, tokenizer_name: str) -> bytes:
-    """Micro-optimized encoding with tokenizer reuse and fast LEB128."""
-    tok = get_tokenizer(tokenizer_name)
-    ids = tok.encode(text).ids
-
-    # Pre-size exactly and use local binding for ~7% speed boost
-    out = bytearray()
-    append = out.append  # Local binding avoids attribute lookup
-
-    for _id in ids:
-        while _id > 0x7F:
-            append((_id & 0x7F) | 0x80)
-            _id >>= 7
-        append(_id)
-    return bytes(out)
+    """Physics-aware encoding that applies the mandatory 0xAA mask."""
+    return gyrotok.encode(text, name=tokenizer_name)
 
 
 # ========================================================================================
@@ -190,25 +162,19 @@ class RobustTrainingConfig:
     # Model config
     ontology_path: Path = PROJECT_ROOT / "memories/public/meta/ontology_keys.npy"
     phenomenology_path: Path = PROJECT_ROOT / "memories/public/meta/phenomenology_map.npy"
-    # binary_struct append‑only store lives in one .bin file – NO .log/.idx any more
     knowledge_path: Path = training_dir / "knowledge/wikipedia_knowledge.bin"
     tokenizer_name: str = "bert-base-uncased"
 
     # Optimized training params for MacBook Pro 2015
-    batch_size_bytes: int = 512 * 1024  # 512KB per batch (4x bigger for JIT efficiency)
-    max_memory_usage_percent: float = 80.0  # Trigger GC at 80%
     checkpoint_every_n_files: int = 50  # More frequent checkpoints
     max_files_per_session: Optional[int] = None
 
-    # Processing optimizations
-    skip_short_articles: bool = True
-    min_article_length: int = 256  # Skip very short articles
-    max_article_length: int = 1_000_000
-    parallel_workers: int = 2  # The Wikipedia iterator is IO‑bound; one extra thread keeps the tokenizer busy
+    # Processing optimizations - now CPU-bound (tokenization) not IO-bound
+    min_token_count = 4
 
     # Memory management
-    force_commit_every_n_batches: int = 10  # Force disk flush
     gc_sleep_duration: float = 0.2  # Brief pause for OS page reclaim
+    max_memory_usage_percent: float = 80.0  # Memory limit is now 80%
 
     # Log rotation and maintenance
     max_log_size_gb: float = 3.0  # Rotate/compact at 3GB
@@ -297,115 +263,133 @@ def check_system_requirements(config: RobustTrainingConfig, logger: logging.Logg
 
 
 def iter_articles_from_file(file_path: Path, config: RobustTrainingConfig) -> Iterator[str]:
-    """Stream articles from file without loading entire file into memory."""
+    """Split articles by three or more blank lines (robust for Wikipedia dumps)."""
     article_buffer: list[str] = []
-    articles_yielded = 0
-
-    try:
-        with file_path.open(encoding="utf-8") as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.rstrip("\n")
-
-                if line.strip():
-                    article_buffer.append(line)
-                    continue
-
-                # Blank line → possible article boundary
-                if article_buffer:
+    blank_streak = 0
+    with file_path.open(encoding="utf-8") as f:
+        for raw_line in f:
+            if raw_line.strip() == "":
+                blank_streak += 1
+            else:
+                if blank_streak >= 3 and article_buffer:
                     article = "\n".join(article_buffer).strip()
+                    if article:
+                        yield article
                     article_buffer.clear()
-
-                    # Apply length filters
-                    if config.skip_short_articles and len(article) < config.min_article_length:
-                        continue
-                    if len(article) > config.max_article_length:
-                        continue
-
-                    articles_yielded += 1
-                    yield article
-
-            # Handle final article if file doesn't end with blank line
-            if article_buffer:
-                article = "\n".join(article_buffer).strip()
-                if config.min_article_length <= len(article) <= config.max_article_length:
-                    articles_yielded += 1
-                    yield article
-
-        if config.debug_mode:
-            print(f"📄 {file_path.name}: extracted {articles_yielded} articles")
-
-    except Exception as e:
-        print(f"❌ Failed to read {file_path}: {e}")
-        logging.getLogger("wikipedia_training").error(f"Failed to read {file_path}: {e}")
+                blank_streak = 0
+                article_buffer.append(raw_line.rstrip("\n"))
+        # Emit the last article if present and non-empty
+        if article_buffer and any(line.strip() for line in article_buffer):
+            article = "\n".join(article_buffer).strip()
+            if article:
+                yield article
 
 
 def process_file_in_batches_robust(
     file_path: Path, agent: GyroSI, config: RobustTrainingConfig, logger: logging.Logger
 ) -> tuple[int, int]:
-    """Robust file processing with better error handling and progress."""
+    """Stream/process articles one by one, encode with gyrotok, and perform true sequential learning."""
     articles_processed: int = 0
     bytes_processed: int = 0
-    current_batch: list[str] = []
-    current_batch_size: int = 0
-    batch_count: int = 0
+    tokens_processed: int = 0
+    token_commit_threshold = 1_000_000  # 1M tokens
+    commit_time_threshold = 120  # seconds
+    last_commit_time = time.time()
+    last_decay_time = 0.0
+    tok = get_tokenizer(config.tokenizer_name)
+    min_token_count = config.min_token_count
+    sep_bytes = gyrotok.bytes_from_ids([102])
+    process = psutil.Process()
+    total_mem = psutil.virtual_memory().total
 
     try:
         for article in iter_articles_from_file(file_path, config):
-            current_batch.append(article)
-            current_batch_size += len(article)
+            ids = tok.encode(article, add_special_tokens=False).ids
+            if len(ids) < min_token_count:
+                logger.warning(f"Skipping article with too few tokens: {len(ids)} tokens")
+                continue
+            encoded_bytes = gyrotok.bytes_from_ids(ids)
+            last_intron = 0
+            for byte in encoded_bytes:
+                last_intron = agent.engine.process_egress(byte)
+                agent.engine.process_ingress(last_intron)
+            for byte in sep_bytes:
+                last_intron = agent.engine.process_egress(byte)
+                agent.engine.process_ingress(last_intron)
+            tokens_processed += len(ids)
+            articles_processed += 1
+            bytes_processed += len(encoded_bytes) + len(sep_bytes)
 
-            # Process batch when it reaches target size
-            if current_batch_size >= config.batch_size_bytes:
+            # Token-based or time-based commit
+            now = time.time()
+            do_commit = False
+            if tokens_processed >= token_commit_threshold or (now - last_commit_time) >= commit_time_threshold:
+                do_commit = True
+            if do_commit:
                 try:
-                    batch_bytes = process_article_batch_robust(current_batch, agent, config, logger)
-                    bytes_processed += batch_bytes
-                    articles_processed += len(current_batch)
-                    batch_count += 1
-
-                    # Reset batch
-                    current_batch = []
-                    current_batch_size = 0
-
-                    # Explicit commit every N batches
-                    if batch_count % config.force_commit_every_n_batches == 0:
-                        try:
-                            safe_commit(agent)
-                            if config.debug_mode:
-                                print(f"💾 Committed batch {batch_count}")
-                        except Exception as e:
-                            print(f"⚠️  Commit failed: {e}")
-                            logger.warning(f"Commit failed: {e}")
-
-                    # Memory guard rails
-                    memory_usage = psutil.virtual_memory().percent
-                    if memory_usage > config.max_memory_usage_percent:
-                        print(f"⚠️  High memory usage: {memory_usage:.1f}%. Forcing cleanup.")
-                        logger.warning(f"High memory usage: {memory_usage:.1f}%. Forcing cleanup.")
-                        safe_commit(agent)
-                        gc.collect()
-                        time.sleep(config.gc_sleep_duration)
-
+                    safe_commit(agent)
+                    store_size_gb = config.knowledge_path.stat().st_size / (1024**3)
+                    if store_size_gb > 2 and (last_decay_time < now - 3600):
+                        agent.apply_maintenance(
+                            decay_rate=config.maintenance_decay_rate,
+                            confidence_threshold=config.maintenance_confidence_threshold,
+                        )
+                        last_decay_time = now
+                    if config.debug_mode:
+                        print(f"💾 Commit at {tokens_processed} tokens or {now - last_commit_time:.1f}s")
+                    tokens_processed = 0
+                    last_commit_time = now
                 except Exception as e:
-                    print(f"❌ Batch processing failed: {e}")
-                    logger.error(f"Batch processing failed: {e}")
-                    continue  # Skip this batch and continue
+                    print(f"⚠️  Commit/maintenance failed: {e}")
+                    logger.warning(f"Commit/maintenance failed: {e}")
 
-        # Process remaining articles
-        if current_batch:
+            # Memory guard rails (process RSS vs total system memory)
+            rss = process.memory_info().rss / total_mem * 100
+            if rss > config.max_memory_usage_percent:
+                print(f"⚠️  High process memory usage: {rss:.1f}%. Forcing cleanup.")
+                logger.warning(f"High process memory usage: {rss:.1f}%. Forcing cleanup.")
+                safe_commit(agent)
+                # Maintenance pass only if store >2GB and at least 1hr since last decay
+                store_size_gb = config.knowledge_path.stat().st_size / (1024**3)
+                if store_size_gb > 2 and (last_decay_time < now - 3600):
+                    agent.apply_maintenance(
+                        decay_rate=config.maintenance_decay_rate,
+                        confidence_threshold=config.maintenance_confidence_threshold,
+                    )
+                    last_decay_time = now
+                gc.collect()
+                time.sleep(config.gc_sleep_duration)
+
+        # Final commit/maintenance
+        if tokens_processed > 0:
             try:
-                batch_bytes = process_article_batch_robust(current_batch, agent, config, logger)
-                bytes_processed += batch_bytes
-                articles_processed += len(current_batch)
+                safe_commit(agent)
+                store_size_gb = config.knowledge_path.stat().st_size / (1024**3)
+                if store_size_gb > 2 and (last_decay_time < time.time() - 3600):
+                    agent.apply_maintenance(
+                        decay_rate=config.maintenance_decay_rate,
+                        confidence_threshold=config.maintenance_confidence_threshold,
+                    )
+                    last_decay_time = time.time()
+                if config.debug_mode:
+                    print(f"💾 Final commit at {tokens_processed} tokens")
             except Exception as e:
-                print(f"❌ Final batch processing failed: {e}")
-                logger.error(f"Final batch processing failed: {e}")
+                print(f"⚠️  Final commit/maintenance failed: {e}")
+                logger.warning(f"Final commit/maintenance failed: {e}")
 
         # Force commit at end of file
         try:
             safe_commit(agent)
+            store_size_gb = config.knowledge_path.stat().st_size / (1024**3)
+            if store_size_gb > 2 and (last_decay_time < time.time() - 3600):
+                agent.apply_maintenance(
+                    decay_rate=config.maintenance_decay_rate,
+                    confidence_threshold=config.maintenance_confidence_threshold,
+                )
+                last_decay_time = time.time()
         except Exception as e:
-            print(f"⚠️  Final commit failed: {e}")
-            logger.warning(f"Final commit failed: {e}")
+            print(f"⚠️  Final commit/maintenance failed: {e}")
+            logger.warning(f"Final commit/maintenance failed: {e}")
 
         return articles_processed, bytes_processed
 
@@ -413,37 +397,6 @@ def process_file_in_batches_robust(
         print(f"❌ File processing failed for {file_path}: {e}")
         logger.error(f"File processing failed for {file_path}: {e}")
         return articles_processed, bytes_processed
-
-
-def process_article_batch_robust(
-    articles: list[str], agent: GyroSI, config: RobustTrainingConfig, logger: logging.Logger
-) -> int:
-    """Process a batch of articles with error handling."""
-    try:
-        # Use parallel encoding for multiple articles when workers > 1
-        if len(articles) > 1 and config.parallel_workers > 1:
-            # Encode articles in parallel
-            encoding_pool = get_encoding_pool(config.parallel_workers)
-            encoded_futures = [
-                encoding_pool.submit(encode_bytes_optimized, article, config.tokenizer_name) for article in articles
-            ]
-            # Combine encoded articles
-            encoded_parts = [future.result() for future in encoded_futures]
-            encoded_bytes = b"\n\n".join(encoded_parts)
-        else:
-            # Combine articles into a single text and encode
-            combined_text = "\n\n".join(articles)
-            encoded_bytes = encode_bytes_optimized(combined_text, config.tokenizer_name)
-
-        # Learn using GyroSI's ingest method
-        agent.ingest(encoded_bytes)
-
-        return len(encoded_bytes)
-
-    except Exception as e:
-        print(f"❌ Failed to process batch of {len(articles)} articles: {e}")
-        logger.error(f"Failed to process batch of {len(articles)} articles: {e}")
-        return 0
 
 
 # ========================================================================================
@@ -470,7 +423,7 @@ def save_checkpoint_atomic(checkpoint: TrainingCheckpoint, config: RobustTrainin
         # Atomic write with fsync for laptop sleep-wake safety
         tmp_path = checkpoint_path.with_suffix(".tmp")
         with tmp_path.open("w") as f:
-            json.dump(asdict(checkpoint), f, indent=2)
+            json.dump(checkpoint.__dict__, f, indent=2)
             f.flush()
             os.fsync(f.fileno())  # Ensure it's on disk before rename
         tmp_path.replace(checkpoint_path)  # Atomic rename
@@ -560,9 +513,9 @@ def create_training_agent(config: RobustTrainingConfig, logger: logging.Logger) 
         agent_config: AgentConfig = {
             "ontology_path": str(config.ontology_path),
             "phenomenology_map_path": str(config.phenomenology_path),
-            "knowledge_path": str(config.knowledge_path),  # already ends in .bin
-            "learn_batch_size": 4000,  # see §2
-            "preferences": {"pruning": {"confidence_threshold": 0.05, "enable_auto_decay": True}},  # auto‑pruning
+            "knowledge_path": str(config.knowledge_path),
+            "learn_batch_size": 4000,
+            "preferences": {"pruning": {"confidence_threshold": 0.05, "enable_auto_decay": True}},
         }
 
         print(f"📍 Knowledge will be stored at: {config.knowledge_path}")
@@ -597,6 +550,7 @@ def run_training_robust(
 
     checkpoint: Optional[TrainingCheckpoint] = None
     agent: Optional[GyroSI] = None
+    need_compact = False  # Flag for post-training compaction
 
     try:
         # Load or create checkpoint
@@ -630,9 +584,9 @@ def run_training_robust(
 
         print("\n📊 Training Configuration:")
         print(f"   • Files to process: {len(remaining_files):,}")
-        print(f"   • Batch size: {config.batch_size_bytes // 1024}KB")
-        print(f"   • Memory limit: {config.max_memory_usage_percent}%")
-        print(f"   • Min article length: {config.min_article_length} chars")
+        print(f"   • Batch size: {config.checkpoint_every_n_files} files")  # Batch size is now files
+        print(f"   • Memory limit: {config.max_memory_usage_percent}%")  # Memory limit is now 80%
+        print(f"   • Min article length: {config.min_token_count} tokens")
         print(f"   • Log rotation: {config.max_log_size_gb}GB")
 
         # Create training agent
@@ -646,6 +600,8 @@ def run_training_robust(
         # Process files with progress bar
         progress = tqdm(remaining_files, desc="Processing files", unit="files")
         last_progress_update = time.time()
+        process = psutil.Process()
+        total_mem = psutil.virtual_memory().total
 
         for i, file_path in enumerate(progress):
             try:
@@ -665,13 +621,13 @@ def run_training_robust(
                 checkpoint.last_file_index = i
 
                 # Update progress bar with detailed stats
-                memory_pct = psutil.virtual_memory().percent
+                rss_pct = process.memory_info().rss / total_mem * 100
                 gb_processed = checkpoint.total_bytes_processed / (1024**3)
                 progress.set_postfix(
                     {
                         "articles": f"{checkpoint.total_articles:,}",
                         "GB": f"{gb_processed:.2f}",
-                        "mem": f"{memory_pct:.1f}%",
+                        "mem": f"{rss_pct:.1f}%",
                         "file": file_path.name[:12],  # Truncate long filenames
                     }
                 )
@@ -703,13 +659,40 @@ def run_training_robust(
                         print(
                             f"📈 Progress: {i + 1}/{len(remaining_files)} files, "
                             f"{checkpoint.total_articles:,} articles, "
-                            f"{memory_pct:.1f}% memory"
+                            f"{rss_pct:.1f}% memory"
                         )
                     print(
                         "\n\U0001f4c8 Progress: {}/{} files, {:,} articles, {:.1f}% memory".format(
-                            i + 1, len(remaining_files), checkpoint.total_articles, memory_pct
+                            i + 1, len(remaining_files), checkpoint.total_articles, rss_pct
                         )
                     )
+
+                # After each file, check if compaction is needed
+                if (
+                    config.knowledge_path.exists()
+                    and config.knowledge_path.stat().st_size > config.max_log_size_gb * 1024**3
+                ):
+                    need_compact = True
+
+                # Minor safeguard: flush checkpoint thread pool backlog every 200 files if needed
+                if (i + 1) % 200 == 0:
+                    try:
+                        if (
+                            hasattr(_CHECKPOINT_POOL, "_work_queue")
+                            and getattr(_CHECKPOINT_POOL._work_queue, "qsize", lambda: 0)() > 1
+                        ):
+                            logger.info(
+                                "Flushing checkpoint thread pool backlog (rare safeguard for slow filesystems)..."
+                            )
+                            _CHECKPOINT_POOL.shutdown(wait=True)
+                            # Recreate the pool for future checkpoints
+                            import concurrent.futures
+
+                            globals()["_CHECKPOINT_POOL"] = concurrent.futures.ThreadPoolExecutor(
+                                max_workers=1, thread_name_prefix="ckpt"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Checkpoint pool backlog flush failed: {e}")
 
             except Exception as e:
                 print(f"\n❌ Error processing {file_path}: {e}")
@@ -734,15 +717,17 @@ def run_training_robust(
             # Wait for any pending async checkpoints
             _CHECKPOINT_POOL.shutdown(wait=True)
 
-            # Shutdown encoding pool if it exists
-            if _ENCODING_POOL is not None:
-                _ENCODING_POOL.shutdown(wait=True)
-                print("🔒 Encoding pool closed cleanly")
-
             # Close agent properly
             if agent is not None:
                 agent.close()
                 print("🔒 Agent closed cleanly")
+                # Only compact after agent is closed
+                if need_compact:
+                    from baby.policies import prune_and_compact_store
+
+                    logger.info("Pruning and compacting knowledge store (post-close)...")
+                    prune_and_compact_store(str(config.knowledge_path), dry_run=False)
+                    print("🧹 Knowledge store compacted after training.")
 
             # Final statistics
             if checkpoint is not None:
@@ -783,11 +768,20 @@ def main() -> int:
         "--manual-download", action="store_true", help="Skip automatic download (use manually downloaded data)"
     )
     parser.add_argument("--max-files", type=int, help="Maximum files to process in this session")
-    parser.add_argument("--batch-size", type=int, default=128 * 1024, help="Batch size in bytes (default: 512KB)")
+    parser.add_argument("--checkpoint-every-files", type=int, default=50, help="Checkpoint every N files (default: 50)")
     parser.add_argument(
-        "--memory-limit", type=float, default=80.0, help="Memory usage percentage to trigger GC (default: 80)"
+        "--memory-limit", type=float, default=80.0, help="Process memory usage percentage to trigger GC (default: 80)"
+    )
+    parser.add_argument(
+        "--test-aa", action="store_true", help="Test only on the AA Wikipedia shard (for quick validation)"
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose output")
+
+    # Remove --batch-size, but error if user supplies it
+    import sys
+
+    if any(arg.startswith("--batch-size") for arg in sys.argv):
+        parser.error("--batch-size is no longer supported. Use --checkpoint-every-files instead.")
 
     args = parser.parse_args()
 
@@ -798,10 +792,10 @@ def main() -> int:
     config = RobustTrainingConfig()
     if args.max_files:
         config.max_files_per_session = args.max_files
-    if args.batch_size:
-        config.batch_size_bytes = args.batch_size
-    if args.memory_limit:
-        config.max_memory_usage_percent = args.memory_limit
+    config.checkpoint_every_n_files = args.checkpoint_every_files
+    config.max_memory_usage_percent = args.memory_limit
+    if args.test_aa:
+        config.data_dir = config.training_dir / "wikipedia_data/AA"
     if args.debug:
         config.debug_mode = True
 

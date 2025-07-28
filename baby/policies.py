@@ -12,6 +12,7 @@ import json
 import struct
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable
 import sys
@@ -28,11 +29,12 @@ _phenomenology_map_lock = threading.Lock()
 # Add at module top (after imports)
 _Sentinel = object()
 _append_only_cache_global: dict[tuple[int, int, str], Optional[Any]] = {}
-_append_only_cache_order: list[tuple[int, int, str]] = []
+_append_only_cache_order: deque[tuple[int, int, str]] = deque()
 _append_only_cache_maxsize = 8192
 
 
 def _abs(path: Optional[str], base: Path) -> str:
+    """Return absolute path, expanding user and joining with base if needed."""
     if path is None:
         raise ValueError("Path must not be None")
     p = Path(os.path.expanduser(str(path)))
@@ -42,6 +44,7 @@ def _abs(path: Optional[str], base: Path) -> str:
 def _get_append_only_cached_static(
     store_id: str, context_key: tuple[int, int], uncached_fn: Callable[[tuple[int, int]], Optional[Any]]
 ) -> Optional[Any]:
+    """Get value from append-only cache or compute and store it if missing. Maintains LRU order and evicts oldest if over capacity."""
     cache_key = (context_key[0], context_key[1], store_id)
     cached = _append_only_cache_global.get(cache_key, _Sentinel)
     if cached is not _Sentinel:
@@ -55,7 +58,7 @@ def _get_append_only_cached_static(
     _append_only_cache_global[cache_key] = result
     _append_only_cache_order.append(cache_key)
     if len(_append_only_cache_global) > _append_only_cache_maxsize:
-        oldest = _append_only_cache_order.pop(0)
+        oldest = _append_only_cache_order.popleft()
         del _append_only_cache_global[oldest]
     return result
 
@@ -417,7 +420,8 @@ class OrbitStore:
             if self.pending_writes is not None and len(self.pending_writes) >= self.write_threshold:
                 pending_fsync = self._flush()
         if pending_fsync:
-            pending_fsync.result()
+            # No blocking wait on fsync here; state will be updated asynchronously
+            pass
 
     def commit(self) -> None:
         with self.lock:
@@ -446,9 +450,7 @@ class OrbitStore:
                 # touch only affected items instead of nuking whole cache
                 for k in pending_keys:
                     self._cache_pop(k)
-
-        if self._pending_fsync:
-            self._pending_fsync.result()
+        # No blocking wait on fsync here; state will be updated asynchronously
 
     def _flush(self) -> Optional[concurrent.futures.Future[Any]]:
         pending_fsync = None
@@ -467,7 +469,16 @@ class OrbitStore:
         self.log_file.flush()
         now = time.time()
         if now - self._last_fsync > self._fsync_interval:
-            self._pending_fsync = self._fsync_executor.submit(os.fsync, self.log_file.fileno())
+            future = self._fsync_executor.submit(os.fsync, self.log_file.fileno())
+            self._pending_fsync = future
+
+            def _on_fsync_done(fut: concurrent.futures.Future[Any]) -> None:
+                # Clear the pending fsync when done
+                self._pending_fsync = None
+                # Optionally log completion
+                # logger.info("Async fsync completed")
+
+            future.add_done_callback(_on_fsync_done)
             self._last_fsync = now
         if self._pending_fsync:
             pending_fsync = self._pending_fsync
@@ -565,10 +576,8 @@ class OrbitStore:
             if self.pending_writes:
                 self.commit()
             if hasattr(self, "_pending_fsync") and self._pending_fsync is not None:
-                try:
-                    self._pending_fsync.result()
-                except Exception as e:
-                    logger.warning("Deferred fsync failed: %s", e)
+                # No blocking wait on fsync here; state will be updated asynchronously
+                pass
             if self._mmap:
                 self._mmap.close()
                 self._mmap = None
@@ -585,7 +594,9 @@ class OrbitStore:
             to_remove = [k for k in _append_only_cache_global if k[2] == self.store_path]
             for k in to_remove:
                 del _append_only_cache_global[k]
-            _append_only_cache_order[:] = [k for k in _append_only_cache_order if k[2] != self.store_path]
+            # Mutate the global deque in place
+            global _append_only_cache_order
+            _append_only_cache_order = deque(k for k in _append_only_cache_order if k[2] != self.store_path)
 
     def _register_shutdown_handlers(self) -> None:
         """Register graceful shutdown handlers for atexit and signals."""
@@ -631,8 +642,7 @@ class OrbitStore:
                 pending_keys = list(self.pending_writes.keys()) if self.append_only else []
 
                 self._flush()
-                if self._pending_fsync:
-                    self._pending_fsync.result()  # Wait for fsync to complete
+                # No blocking wait on fsync here; state will be updated asynchronously
 
                 # Update bloom filter for append-only mode
                 if self.append_only and self._bloom_filter:
@@ -1104,6 +1114,7 @@ def apply_global_confidence_decay(
     current_time = time.time()
 
     for key, entry in store.iter_entries():
+        processed_count += 1
         # ∆t in **days** since last update
         age_days = (current_time - entry.get("last_updated", current_time)) / (24 * 3600)
         new_conf = entry.get("confidence", 0.0) * math.exp(-decay_factor * age_days)
@@ -1116,7 +1127,6 @@ def apply_global_confidence_decay(
             e["context_key"] = key
             e["context_signature"] = key
             store.put(key, e)
-            store.commit()
             # Invalidate cache for this key if possible
             if hasattr(store, "_cache_pop"):
                 store._cache_pop(key)
@@ -1448,16 +1458,20 @@ class BloomFilter:
         self.count = 0
 
     def _optimal_size(self, n: int, p: float) -> int:
-        """Calculate optimal bit array size."""
+        """Calculate optimal bit array size using textbook formula: m = -n * ln(p) / (ln(2))^2."""
         if n <= 0 or p <= 0 or p >= 1:
             return 1000  # Default size for invalid parameters
-        return max(1000, int(-n * (p**0.5) / (0.4804530139182014**2)))
+        import math
+
+        return max(1000, int(-n * math.log(p) / (math.log(2) ** 2)))
 
     def _optimal_hash_count(self, m: int, n: int) -> int:
-        """Calculate optimal number of hash functions."""
+        """Calculate optimal number of hash functions using textbook formula: k = (m/n) * ln(2)."""
         if m <= 0 or n <= 0:
             return 7  # Default hash count for invalid parameters
-        return max(1, int(m / n * 0.6931471805599453))
+        import math
+
+        return max(1, int((m / n) * math.log(2)))
 
     def _hash_functions(self, item: Tuple[int, int]) -> List[int]:
         """Generate multiple hash values for the item."""

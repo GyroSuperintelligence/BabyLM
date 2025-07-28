@@ -132,3 +132,19 @@ def decode(blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(
 def vocab_size(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> int:
     """Get vocabulary size of a tokenizer. Uses base_path for root."""
     return int(_load(name, base_path).get_vocab_size())
+
+
+def bytes_from_ids(ids: list[int]) -> bytes:
+    """Encode a list of token IDs to bytes via LEB128 and apply the 0xAA mask."""
+    introns = bytearray(len(ids) * 5)  # worst-case pre-alloc
+    pos = 0
+    for tid in ids:
+        val = tid
+        while True:
+            byte = val & 0x7F
+            val >>= 7
+            introns[pos] = byte | (0x80 if val else 0x00)
+            pos += 1
+            if not val:
+                break
+    return _apply_mask(bytes(introns[:pos]))
