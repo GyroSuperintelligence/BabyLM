@@ -25,10 +25,13 @@ from baby.inference import InferenceEngine
 from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
 
+numba_module: Optional[Any] = None
 try:
     import numba as nb
+
+    numba_module = nb
 except ImportError:
-    nb = None  # type: ignore[assignment]
+    pass
 
 if TYPE_CHECKING:
     pass
@@ -52,9 +55,9 @@ def _abs(path: Optional[str], base: Path) -> str:
 
 
 # --- JIT batch function for epistemology ---
-if nb is not None:
+if numba_module is not None:
 
-    @nb.njit(cache=True, fastmath=True)
+    @numba_module.njit(cache=True, fastmath=True)  # type: ignore[misc]
     def _jit_batch_impl(epi: Any, state: Any, buf: Any) -> tuple[int, int]:
         acc = 0
         for i in range(buf.size):
@@ -327,9 +330,9 @@ class IntelligenceEngine:
         if not data:
             return
 
-        # JIT only pays off for *large* buffers; for tiny ones we keep the reference Python path
-        # (it's also what the test-suite expects).
-        if self.use_epistemology and nb is not None and len(data) > 256:
+        # Force the reliable path so *every* call learns exactly once
+        # (long sentences included, runs fast enough in CPython)
+        if False and self.use_epistemology and numba_module is not None and len(data) > 256:
             buf = np.frombuffer(data, dtype=np.uint8)
             self.current_state_index, acc = _jit_batch(self.epistemology, np.uint32(self.current_state_index), buf)
             # keep the integer representation coherent for later divergence checks
@@ -342,12 +345,12 @@ class IntelligenceEngine:
                 intr = self.process_egress(b)
                 acc = governance.fold(acc, intr)
 
-        if acc:
-            state_idx = (
-                self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
-            )
-            phe = self.operator.get_phenotype(state_idx, acc)
-            self.operator.learn(phe, acc)
+        # Always learn at the end, even if acc is 0 (FIXED: was causing tiny knowledge files)
+        state_idx = (
+            self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
+        )
+        phe = self.operator.get_phenotype(state_idx, acc)
+        self.operator.learn(phe, acc)
 
         # flush
         if hasattr(self.operator.store, "commit"):

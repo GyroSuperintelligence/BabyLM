@@ -148,3 +148,14 @@ def bytes_from_ids(ids: list[int]) -> bytes:
             if not val:
                 break
     return _apply_mask(bytes(introns[:pos]))
+
+# SEP token constant
+SEP_ID = 102
+
+def sep_bytes(count: int = 1) -> bytes:
+    """Generate SEP token bytes for sentence/article boundaries."""
+    return bytes_from_ids([SEP_ID] * count)
+
+def encode_with_sep(text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> bytes:
+    """Encode text and append a single SEP token."""
+    return encode(text, name, base_path) + sep_bytes()

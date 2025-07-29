@@ -44,7 +44,9 @@ def _abs(path: Optional[str], base: Path) -> str:
 def _get_append_only_cached_static(
     store_id: str, context_key: tuple[int, int], uncached_fn: Callable[[tuple[int, int]], Optional[Any]]
 ) -> Optional[Any]:
-    """Get value from append-only cache or compute and store it if missing. Maintains LRU order and evicts oldest if over capacity."""
+    """Get value from append-only cache or compute and store it if missing.
+    Maintains LRU order and evicts oldest if over capacity.
+    """
     cache_key = (context_key[0], context_key[1], store_id)
     cached = _append_only_cache_global.get(cache_key, _Sentinel)
     if cached is not _Sentinel:
@@ -88,94 +90,102 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _pack_phenotype(entry: Dict[str, Any]) -> bytes:
-    # Ensure context_key is present (use context_signature as fallback)
-    if "context_key" not in entry and "context_signature" in entry:
-        entry = entry.copy()
-        entry["context_key"] = entry["context_signature"]
+    try:
+        # Ensure context_key is present (use context_signature as fallback)
+        if "context_key" not in entry and "context_signature" in entry:
+            entry = entry.copy()
+            entry["context_key"] = entry["context_signature"]
 
-    # Handle None _original_context
-    if entry.get("_original_context") is None:
-        entry = entry.copy()
-        entry["_original_context"] = entry["context_signature"]
+        # Handle None _original_context
+        if entry.get("_original_context") is None:
+            entry = entry.copy()
+            entry["_original_context"] = entry["context_signature"]
 
-    # Convert governance_signature from dict to tuple if needed
-    if isinstance(entry.get("governance_signature"), dict):
+        # Convert governance_signature from dict to tuple if needed
+        if isinstance(entry.get("governance_signature"), dict):
+            entry = entry.copy()
+            gov_sig = entry["governance_signature"]
+            entry["governance_signature"] = (
+                gov_sig.get("neutral", 0),
+                gov_sig.get("li", 0),
+                gov_sig.get("fg", 0),
+                gov_sig.get("bg", 0),
+                gov_sig.get("dyn", 0),
+            )
+
+        # Ensure all required fields are present and have correct types
+        required_fields = {
+            "phenotype": str,
+            "context_key": tuple,
+            "exon_mask": int,
+            "confidence": (int, float),
+            "usage_count": int,
+            "created_at": (int, float),
+            "last_updated": (int, float),
+            "governance_signature": tuple,
+            "context_signature": tuple,
+            "_original_context": tuple,
+        }
+        for field, expected_type in required_fields.items():
+            if field not in entry:
+                print(f"[pack_phenotype] Missing required field: {field} in entry: {entry}")
+                import logging; logging.error(f"[pack_phenotype] Missing required field: {field} in entry: {entry}")
+                raise ValueError(f"Missing required field: {field}")
+            value = entry[field]
+            if not isinstance(value, expected_type):  # type: ignore[arg-type]
+                print(f"[pack_phenotype] Field {field} has wrong type: {type(value)}, expected {expected_type} in entry: {entry}")
+                import logging; logging.error(f"[pack_phenotype] Field {field} has wrong type: {type(value)}, expected {expected_type} in entry: {entry}")
+                raise ValueError(f"Field {field} has wrong type: {type(value)}, expected {expected_type}")
+
+        # Clamp uint8 fields to valid range
         entry = entry.copy()
-        gov_sig = entry["governance_signature"]
-        entry["governance_signature"] = (
-            gov_sig.get("neutral", 0),
-            gov_sig.get("li", 0),
-            gov_sig.get("fg", 0),
-            gov_sig.get("bg", 0),
-            gov_sig.get("dyn", 0),
+        entry["exon_mask"] = max(0, min(255, entry["exon_mask"]))
+
+        # Clamp context_key[1] to valid range
+        context_key = list(entry["context_key"])
+        context_key[1] = max(0, min(255, context_key[1]))
+        entry["context_key"] = tuple(context_key)
+
+        # Clamp context_signature[1] to valid range
+        context_sig = list(entry["context_signature"])
+        context_sig[1] = max(0, min(255, context_sig[1]))
+        entry["context_signature"] = tuple(context_sig)
+
+        # Clamp _original_context[1] to valid range
+        orig_context = list(entry["_original_context"])
+        orig_context[1] = max(0, min(255, orig_context[1]))
+        entry["_original_context"] = tuple(orig_context)
+
+        # Clamp governance signature values
+        gov_sig = list(entry["governance_signature"])
+        for i in range(len(gov_sig)):
+            gov_sig[i] = max(0, min(255, gov_sig[i]))
+        entry["governance_signature"] = tuple(gov_sig)
+
+        ph = entry["phenotype"].encode("utf-8")
+        length = len(ph)
+        fmt = f"<H{length}sIBBdHdd5BIBIB"
+        return struct.pack(
+            fmt,
+            length,
+            ph,
+            entry["context_key"][0],
+            entry["context_key"][1],
+            entry["exon_mask"],
+            entry["confidence"],
+            entry["usage_count"],
+            entry["created_at"],
+            entry["last_updated"],
+            *entry["governance_signature"],
+            entry["context_signature"][0],
+            entry["context_signature"][1],
+            entry["_original_context"][0],
+            entry["_original_context"][1],
         )
-
-    # Ensure all required fields are present and have correct types
-    required_fields = {
-        "phenotype": str,
-        "context_key": tuple,
-        "exon_mask": int,
-        "confidence": (int, float),
-        "usage_count": int,
-        "created_at": (int, float),
-        "last_updated": (int, float),
-        "governance_signature": tuple,
-        "context_signature": tuple,
-        "_original_context": tuple,
-    }
-
-    for field, expected_type in required_fields.items():
-        if field not in entry:
-            raise ValueError(f"Missing required field: {field}")
-        value = entry[field]
-        if not isinstance(value, expected_type):  # type: ignore[arg-type]
-            raise ValueError(f"Field {field} has wrong type: {type(value)}, expected {expected_type}")
-
-    # Clamp uint8 fields to valid range
-    entry = entry.copy()
-    entry["exon_mask"] = max(0, min(255, entry["exon_mask"]))
-
-    # Clamp context_key[1] to valid range
-    context_key = list(entry["context_key"])
-    context_key[1] = max(0, min(255, context_key[1]))
-    entry["context_key"] = tuple(context_key)
-
-    # Clamp context_signature[1] to valid range
-    context_sig = list(entry["context_signature"])
-    context_sig[1] = max(0, min(255, context_sig[1]))
-    entry["context_signature"] = tuple(context_sig)
-
-    # Clamp _original_context[1] to valid range
-    orig_context = list(entry["_original_context"])
-    orig_context[1] = max(0, min(255, orig_context[1]))
-    entry["_original_context"] = tuple(orig_context)
-
-    # Clamp governance signature values
-    gov_sig = list(entry["governance_signature"])
-    for i in range(len(gov_sig)):
-        gov_sig[i] = max(0, min(255, gov_sig[i]))
-    entry["governance_signature"] = tuple(gov_sig)
-
-    ph = entry["phenotype"].encode("utf-8")
-    length = len(ph)
-    fmt = f"<H{length}sIBBdHdd5BIBIB"
-    return struct.pack(
-        fmt,
-        length,
-        ph,
-        entry["context_key"][0],
-        entry["context_key"][1],
-        entry["exon_mask"],
-        entry["confidence"],
-        entry["usage_count"],
-        entry["created_at"],
-        entry["last_updated"],
-        *entry["governance_signature"],
-        entry["context_signature"][0],
-        entry["context_signature"][1],
-        entry["_original_context"][0],
-        entry["_original_context"][1],
-    )
+    except Exception as e:
+        print(f"[pack_phenotype] Exception: {e} for entry: {entry}")
+        import logging; logging.error(f"[pack_phenotype] Exception: {e} for entry: {entry}")
+        raise
 
 
 def _unpack_phenotype(buf: memoryview, offset: int = 0) -> tuple[Dict[str, Any], int]:
@@ -343,7 +353,7 @@ class OrbitStore:
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
-                    entry_buf = self._mmap[offset : offset + size]
+                    entry_buf = self._mmap[offset:offset + size]
                 else:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)

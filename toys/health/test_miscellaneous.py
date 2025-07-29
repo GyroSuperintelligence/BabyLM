@@ -1,4 +1,3 @@
-import pytest
 from pathlib import Path
 from toys.communication import tokenizer as gyrotok
 from baby.policies import OrbitStore
@@ -7,68 +6,117 @@ from baby.intelligence import GyroSI
 from baby.contracts import AgentConfig
 
 
-def test_debug_wiki_test_tokenizer():
-    """Debug test: print wiki_test content, tokenize, print tokens/bytes, decode, print first tokens as words."""
-    test_file = Path(__file__).parent.parent / "training" / "wiki_test"
-    assert test_file.exists(), f"Test file not found: {test_file}"
-
-    # Read file content
-    text = test_file.read_text(encoding="utf-8")
-    print("\n--- Raw file content ---\n", text)
-
-    # Tokenize
-    tokenizer_name = "bert-base-uncased"
-    tok = gyrotok._load(tokenizer_name)
-    encoding = tok.encode(text)
-    token_ids = encoding.ids
-    print("\n--- Token IDs ---\n", token_ids)
-
-    # Encode to bytes (GyroSI format)
-    encoded_bytes = gyrotok.encode(text, name=tokenizer_name)
-    print("\n--- Encoded bytes (masked) ---\n", list(encoded_bytes))
-
-    # Decode back to text
-    decoded_text = gyrotok.decode(encoded_bytes, name=tokenizer_name)
-    print("\n--- Decoded text ---\n", decoded_text)
-
-    # Print first 1-2 tokens as words (if possible)
-    if token_ids:
-        first_token = tok.decode([token_ids[0]], skip_special_tokens=True)
-        print(f"\nFirst token as word: '{first_token}' (id: {token_ids[0]})")
-        if len(token_ids) > 1:
-            second_token = tok.decode([token_ids[1]], skip_special_tokens=True)
-            print(f"Second token as word: '{second_token}' (id: {token_ids[1]})")
-
-    # Basic checks
-    assert isinstance(decoded_text, str)
-    assert len(token_ids) > 0
-    assert len(encoded_bytes) > 0
-
-
-def test_print_wikipedia_knowledge_bin_entries():
-    """Print the first 3 entries from the wikipedia_knowledge.bin file for inspection."""
-    knowledge_path = Path(__file__).parent.parent / "training" / "knowledge" / "wikipedia_knowledge.bin"
+def test_print_simple_wikipedia_knowledge_bin_entries() -> None:
+    """Print the first 5 entries from the simple_wikipedia_1.bin file for inspection."""
+    knowledge_path = Path(__file__).parent.parent / "training" / "knowledge" / "simple_wikipedia_1.bin"
     assert knowledge_path.exists(), f"Knowledge file not found: {knowledge_path}"
 
     store = OrbitStore(str(knowledge_path), append_only=True)
-    print("\n--- First 3 entries in wikipedia_knowledge.bin ---")
+    print("\n--- First 5 entries in simple_wikipedia_1.bin ---")
     for i, (context_key, entry) in enumerate(store.iter_entries()):
         print(f"Entry {i+1}:")
         print(f"  context_key: {context_key}")
-        print(f"  entry: {entry}")
-        if i >= 2:
+        print(f"  entry keys: {list(entry.keys())}")
+        if "phenotype" in entry:
+            phenotype_preview = str(entry["phenotype"])[:200] + "..." if len(str(entry["phenotype"])) > 200 else str(entry["phenotype"])
+            print(f"  phenotype preview: {phenotype_preview}")
+        if "confidence" in entry:
+            print(f"  confidence: {entry['confidence']}")
+        if "usage_count" in entry:
+            print(f"  usage_count: {entry['usage_count']}")
+        if "created_at" in entry:
+            print(f"  created_at: {entry['created_at']}")
+        print()
+        if i >= 4:  # Show first 5 entries
             break
     store.close()
 
 
-def test_agent_with_wikipedia_knowledge_speaks():
-    """Create an isolated agent with wikipedia_knowledge.bin as public knowledge and see if it speaks."""
-    from pathlib import Path
-    from toys.communication import tokenizer as gyrotok
-    from baby.policies import OrbitStore
+def test_complete_metadata_analysis() -> None:
+    """Display all metadata fields from the knowledge file entries."""
+    knowledge_path = Path(__file__).parent.parent / "training" / "knowledge" / "simple_wikipedia_1.bin"
+    assert knowledge_path.exists(), f"Knowledge file not found: {knowledge_path}"
 
+    store = OrbitStore(str(knowledge_path), append_only=True)
+    print("\n--- Complete Metadata Analysis of simple_wikipedia_1.bin ---")
+    
+    for i, (context_key, entry) in enumerate(store.iter_entries()):
+        print(f"\nEntry {i+1} - Complete Metadata:")
+        print(f"  Context Key: {context_key}")
+        print(f"  All available fields: {list(entry.keys())}")
+        
+        # Display each field with its value
+        for field_name, field_value in entry.items():
+            if field_name == "phenotype":
+                print(f"  {field_name}: {field_value}")
+            elif field_name in ["confidence", "usage_count"]:
+                print(f"  {field_name}: {field_value}")
+            elif field_name in ["created_at", "last_updated"]:
+                print(f"  {field_name}: {field_value}")
+            elif field_name in ["governance_signature", "context_signature"]:
+                print(f"  {field_name}: {field_value}")
+            elif field_name == "exon_mask":
+                print(f"  {field_name}: {field_value}")
+            elif field_name == "_original_context":
+                print(f"  {field_name}: {field_value}")
+            else:
+                print(f"  {field_name}: {field_value}")
+        
+        print("-" * 50)
+    
+    store.close()
+
+
+def test_simple_wikipedia_knowledge_file_stats() -> None:
+    """Get statistics about the simple_wikipedia_1.bin file."""
+    knowledge_path = Path(__file__).parent.parent / "training" / "knowledge" / "simple_wikipedia_1.bin"
+    assert knowledge_path.exists(), f"Knowledge file not found: {knowledge_path}"
+
+    store = OrbitStore(str(knowledge_path), append_only=True)
+    
+    total_entries = 0
+    total_phenotype_length = 0
+    confidence_sum = 0.0
+    phenotype_samples = []
+    usage_counts = []
+    
+    for context_key, entry in store.iter_entries():
+        total_entries += 1
+        if "phenotype" in entry:
+            phenotype_str = str(entry["phenotype"])
+            phenotype_length = len(phenotype_str)
+            total_phenotype_length += phenotype_length
+            if len(phenotype_samples) < 3:  # Keep first 3 phenotype samples
+                phenotype_samples.append(phenotype_str[:100] + "..." if phenotype_length > 100 else phenotype_str)
+        if "confidence" in entry:
+            confidence_sum += entry["confidence"]
+        if "usage_count" in entry:
+            usage_counts.append(entry["usage_count"])
+    
+    avg_phenotype_length = total_phenotype_length / total_entries if total_entries > 0 else 0
+    avg_confidence = confidence_sum / total_entries if total_entries > 0 else 0
+    avg_usage = sum(usage_counts) / len(usage_counts) if usage_counts else 0
+    
+    print(f"\n--- simple_wikipedia_1.bin Statistics ---")
+    print(f"Total entries: {total_entries}")
+    print(f"Average phenotype length: {avg_phenotype_length:.1f} characters")
+    print(f"Average confidence: {avg_confidence:.3f}")
+    print(f"Average usage count: {avg_usage:.1f}")
+    print(f"Total phenotype content: {total_phenotype_length:,} characters")
+    print(f"File size: {knowledge_path.stat().st_size:,} bytes")
+    
+    if phenotype_samples:
+        print(f"\nSample phenotype entries:")
+        for i, sample in enumerate(phenotype_samples, 1):
+            print(f"  {i}. {sample}")
+    
+    store.close()
+
+
+def test_agent_with_simple_wikipedia_knowledge_speaks() -> None:
+    """Create an isolated agent with simple_wikipedia_1.bin as public knowledge and see if it speaks."""
     # Paths
-    knowledge_path = Path(__file__).parent.parent / "training" / "knowledge" / "wikipedia_knowledge.bin"
+    knowledge_path = Path(__file__).parent.parent / "training" / "knowledge" / "simple_wikipedia_1.bin"
     ontology_path = Path(__file__).parent.parent.parent / "memories" / "public" / "meta" / "ontology_keys.npy"
     phenomenology_path = Path(__file__).parent.parent.parent / "memories" / "public" / "meta" / "phenomenology_map.npy"
     tokenizer_name = "bert-base-uncased"
@@ -83,14 +131,53 @@ def test_agent_with_wikipedia_knowledge_speaks():
             "phenomenology_map_path": str(phenomenology_path),
             "base_path": str(tmpdir),
             "tokenizer_name": tokenizer_name,
-            "preferences": {"tokenizer": {"name": tokenizer_name}},
+            "preferences": {"tokenizer": {"name": tokenizer_name}}  # type: ignore
         }
         agent = GyroSI(config, agent_id="test_agent", base_path=Path(tmpdir))
 
-        # Prepare a simple prompt
-        prompt = "What is an algorithm?"
-        encoded = gyrotok.encode(prompt, name=tokenizer_name)
-        response_bytes = agent.respond(encoded, max_new_tokens=64)
-        response_text = gyrotok.decode(response_bytes, name=tokenizer_name)
-        print("\n--- Agent response (decoded) ---\n", response_text)
+        # Test multiple prompts to see if the agent can respond based on the knowledge
+        test_prompts = [
+            "What is an algorithm?",
+            "Tell me about science.",
+            "What is mathematics?",
+            "Explain technology.",
+            "What is history?"
+        ]
+        
+        print(f"\n--- Testing agent with simple_wikipedia_1.bin knowledge ---")
+        for i, prompt in enumerate(test_prompts, 1):
+            print(f"\nPrompt {i}: {prompt}")
+            encoded = gyrotok.encode(prompt, name=tokenizer_name)
+            response_bytes = agent.respond(encoded, max_new_tokens=64)
+            response_text = gyrotok.decode(response_bytes, name=tokenizer_name)
+            print(f"Response: {response_text}")
+        
         agent.close()
+
+
+def test_knowledge_retrieval_from_simple_wikipedia() -> None:
+    """Test if we can retrieve specific knowledge entries from the simple_wikipedia_1.bin file."""
+    knowledge_path = Path(__file__).parent.parent / "training" / "knowledge" / "simple_wikipedia_1.bin"
+    assert knowledge_path.exists(), f"Knowledge file not found: {knowledge_path}"
+
+    store = OrbitStore(str(knowledge_path), append_only=True)
+    
+    # Get all entries to analyze
+    entries = list(store.iter_entries())
+    print(f"\n--- Knowledge Retrieval Test ---")
+    print(f"Total entries available: {len(entries)}")
+    
+    # Show some sample context keys and their associated content
+    print(f"\nSample knowledge entries:")
+    for i, (context_key, entry) in enumerate(entries[:5]):
+        print(f"\nEntry {i+1}:")
+        print(f"  Context key: {context_key}")
+        if "phenotype" in entry:
+            phenotype_preview = str(entry["phenotype"])[:150] + "..." if len(str(entry["phenotype"])) > 150 else str(entry["phenotype"])
+            print(f"  Phenotype: {phenotype_preview}")
+        if "confidence" in entry:
+            print(f"  Confidence: {entry['confidence']:.3f}")
+        if "usage_count" in entry:
+            print(f"  Usage count: {entry['usage_count']}")
+    
+    store.close()

@@ -40,3 +40,4 @@ typing-extensions>=4.7.0
 types-psutil
 
 gradio>=3.50.0
+rich
