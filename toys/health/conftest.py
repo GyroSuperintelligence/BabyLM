@@ -81,13 +81,16 @@ def test_env(tmp_path_factory: pytest.TempPathFactory) -> TestEnvDict:
             "phenomenology_map_path": main_meta_files["phenomenology"],
         },
         "tokenizer": {"name": "bert-base-uncased"},
+        "pruning": {"enable_auto_decay": False, "confidence_threshold": 0.05},
         "write_threshold": 100,
-        "enable_auto_decay": False,
     }
     prefs_path.write_text(json.dumps(test_preferences, indent=2))
 
     # Initialize the public knowledge file so it exists
-    OrbitStore(test_preferences["public_knowledge"]["path"], append_only=True).close()
+    store = OrbitStore(
+        test_preferences["public_knowledge"]["path"], append_only=True, base_path=Path(test_preferences["base_path"])
+    )
+    store.close()
 
     return {
         "memories_dir": memories_dir,
@@ -110,7 +113,8 @@ def agent_pool(test_env: TestEnvDict) -> Generator[AgentPool, None, None]:
 
     # Initialize empty public store
     public_path = prefs["public_knowledge"]["path"]
-    OrbitStore(public_path, append_only=True).close()
+    store = OrbitStore(public_path, append_only=True, base_path=Path(prefs["base_path"]))
+    store.close()
 
     pool = AgentPool(
         ontology_path=main_meta_files["ontology"],
@@ -193,14 +197,14 @@ def multi_agent_scenario(user_agent: GyroSI, assistant_agent: GyroSI, test_env: 
 
 
 @pytest.fixture
-def isolated_agent_factory(tmp_path: Path) -> Generator[Callable[[Path], GyroSI], None, None]:
+def isolated_agent_factory(tmp_path: Path, test_env: TestEnvDict) -> Generator[Callable[[Path], GyroSI], None, None]:
     stack = ExitStack()
 
     def _make_isolated_agent(agent_dir: Path) -> GyroSI:
         agent_dir.mkdir(parents=True, exist_ok=True)
         config: AgentConfig = {
-            "ontology_path": str(MAIN_META / "ontology_keys.npy"),
-            "phenomenology_map_path": str(MAIN_META / "phenomenology_map.npy"),
+            "ontology_path": test_env["main_meta_files"]["ontology"],
+            "phenomenology_map_path": test_env["main_meta_files"]["phenomenology"],
             "knowledge_path": str(agent_dir / "knowledge.bin"),
             "base_path": str(tmp_path),
         }
@@ -255,15 +259,9 @@ def test_client(api_test_setup: Tuple[TestClient, AgentPool]) -> TestClient:
 def sample_phenotype() -> Dict[str, Any]:
     """Sample phenotype entry for testing."""
     return {
-        "phenotype": "P[100:42]",
-        "exon_mask": 0b10101010,
-        "confidence": 0.75,
-        "context_signature": (100, 42),  # Always a tuple
-        "usage_count": 5,
-        "created_at": 1234567890.0,
-        "last_updated": 1234567890.0,
-        "governance_signature": {"neutral": 4, "li": 1, "fg": 1, "bg": 0, "dyn": 2},
-        "_original_context": None,
+        "key": (100, 42),  # (state_index, token_id)
+        "mask": 0b10101010,
+        "conf": 0.75,
     }
 
 
@@ -274,20 +272,13 @@ def sample_phenotype() -> Dict[str, Any]:
 
 def assert_phenotype_valid(entry: Dict[str, Any]) -> None:
     """Validate phenotype entry structure."""
-    required_fields = [
-        "phenotype",
-        "exon_mask",
-        "confidence",
-        "context_signature",
-        "usage_count",
-        "governance_signature",
-    ]
-    for field in required_fields:
-        assert field in entry, f"Missing field: {field}"
-
-    assert 0 <= entry["exon_mask"] <= 255
-    assert 0 <= entry["confidence"] <= 1.0
-    assert len(entry["context_signature"]) == 2
+    for fld in ("key", "mask", "conf"):
+        assert fld in entry, f"Missing field: {fld}"
+    s_idx, tok_id = entry["key"]
+    assert 0 <= s_idx < 788_986
+    assert tok_id >= 0
+    assert 0 <= entry["mask"] <= 255
+    assert 0.0 <= entry["conf"] <= 1.0
 
 
 def assert_ontology_valid(data: Dict[str, Any]) -> None:

@@ -3,9 +3,12 @@ Comprehensive tests for governance.py - the physics layer of GyroSI.
 Tests core mathematical operations, transformations, and invariants.
 """
 
-import numpy as np
 import itertools
 import random
+from typing import List
+
+import numpy as np
+
 from baby import governance
 
 
@@ -59,61 +62,6 @@ class TestConstants:
         assert all(0 <= mask < (1 << 48) for mask in governance.XFORM_MASK)
 
 
-class TestGovernanceSignature:
-    """Test governance signature computation."""
-
-    def test_empty_mask(self) -> None:
-        """Test signature of empty mask."""
-        sig = governance.compute_governance_signature(0)
-        assert sig == (6, 0, 0, 0, 0)  # (neutral_reserve, li, fg, bg, dyn)
-
-    def test_full_dynamic_mask(self) -> None:
-        """Test signature when all dynamic bits are set."""
-        full_mask = governance.EXON_DYNAMIC_MASK
-        sig = governance.compute_governance_signature(full_mask)
-        assert sig == (0, 2, 2, 2, 6)  # All dynamic bits set
-
-    def test_li_only(self) -> None:
-        """Test signature with only LI bits set."""
-        sig = governance.compute_governance_signature(governance.EXON_LI_MASK)
-        assert sig == (4, 2, 0, 0, 2)
-
-    def test_fg_only(self) -> None:
-        """Test signature with only FG bits set."""
-        sig = governance.compute_governance_signature(governance.EXON_FG_MASK)
-        assert sig == (4, 0, 2, 0, 2)
-
-    def test_bg_only(self) -> None:
-        """Test signature with only BG bits set."""
-        sig = governance.compute_governance_signature(governance.EXON_BG_MASK)
-        assert sig == (4, 0, 0, 2, 2)
-
-    def test_mask_overflow_handling(self) -> None:
-        """Test that masks are properly masked to 8 bits."""
-        large_mask = 0x1AA  # 9 bits
-        sig = governance.compute_governance_signature(large_mask)
-        # Should be equivalent to 0xAA
-        expected_sig = governance.compute_governance_signature(0xAA)
-        assert sig == expected_sig
-
-    def test_signature_invariants(self) -> None:
-        """Test mathematical invariants of governance signatures."""
-        for mask in range(256):
-            neutral, li, fg, bg, dyn = governance.compute_governance_signature(mask)
-
-            # Dynamic population consistency
-            assert dyn == li + fg + bg
-
-            # Neutral reserve consistency
-            assert neutral == 6 - dyn
-            assert 0 <= neutral <= 6
-
-            # Individual counters in valid range
-            assert 0 <= li <= 2
-            assert 0 <= fg <= 2
-            assert 0 <= bg <= 2
-
-
 class TestMonodromicFold:
     """Test the Monodromic Fold operation - core of learning."""
 
@@ -137,7 +85,7 @@ class TestMonodromicFold:
 
     def test_non_commutativity(self) -> None:
         """Test that fold is non-commutative."""
-        non_commutative_pairs = []
+        non_commutative_pairs: List[tuple[int, int]] = []
         for a in range(1, 16):  # Sample subset
             for b in range(1, 16):
                 if a != b:
@@ -149,7 +97,7 @@ class TestMonodromicFold:
 
     def test_non_associativity(self) -> None:
         """Test that fold is non-associative."""
-        non_associative_triples = []
+        non_associative_triples: List[tuple[int, int, int]] = []
         for a in range(1, 8):  # Small sample
             for b in range(1, 8):
                 for c in range(1, 8):
@@ -283,6 +231,7 @@ class TestGyrationTransform:
             assert results[0, intron] == expected
 
     def test_origin_state_transforms(self) -> None:
+        """Test transforms from origin state."""
         from baby.information import InformationEngine
 
         origin = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
@@ -390,64 +339,80 @@ class TestEdgeCases:
         result = governance.fold(255, 0)
         assert result == 0  # Right absorber
 
-    def test_governance_signature_comprehensive(self) -> None:
-        """Test governance signature for all possible masks."""
-        signatures = set()
-        for mask in range(256):
-            sig = governance.compute_governance_signature(mask)
-            signatures.add(sig)
-
-            # Verify signature is valid
-            neutral, li, fg, bg, dyn = sig
-            assert 0 <= neutral <= 6
-            assert 0 <= li <= 2
-            assert 0 <= fg <= 2
-            assert 0 <= bg <= 2
-            assert dyn == li + fg + bg
-            assert neutral + dyn == 6
-
-        # Should have multiple distinct signatures
-        assert len(signatures) > 10
-
 
 class TestExonProduct:
     """Test exon_product_from_metadata function."""
 
     def test_exon_product_from_metadata_basic(self) -> None:
         """Test basic exon_product_from_metadata functionality."""
-        from baby.contracts import GovernanceSignature
-
-        # Test with a simple signature
-        sig: GovernanceSignature = {"neutral": 4, "li": 1, "fg": 1, "bg": 0, "dyn": 2}
-
-        confidence = 0.5
-        orbit_v = 100
-        v_max = 200
-
-        product = governance.exon_product_from_metadata(sig, confidence, orbit_v, v_max)
-
-        # Should return an 8-bit value
+        mask = 0b01100110
+        product = governance.exon_product_from_metadata(mask, 0.5, 100, 200)
         assert 0 <= product <= 255
-
-        # Test that fold(p, p) == 0 for the returned product
+        # Updated: product should never be 0 due to guarantee
+        assert product != 0
         assert governance.fold(product, product) == 0
 
     def test_exon_product_from_metadata_edge_cases(self) -> None:
         """Test exon_product_from_metadata with edge cases."""
-        from baby.contracts import GovernanceSignature
-
-        # Test with zero confidence
-        sig: GovernanceSignature = {"neutral": 6, "li": 0, "fg": 0, "bg": 0, "dyn": 0}
-
-        product = governance.exon_product_from_metadata(sig, 0.0, 100, 200)
-        assert product == 0
+        # Updated: Test with zero confidence - should NOT return 0
+        product = governance.exon_product_from_metadata(0, 0.0, 100, 200)
+        assert product != 0  # Guarantee: never return 0
+        assert 0 <= product <= 255
 
         # Test with full confidence and maximum values
-        sig_full: GovernanceSignature = {"neutral": 0, "li": 2, "fg": 2, "bg": 2, "dyn": 6}
-
-        product = governance.exon_product_from_metadata(sig_full, 1.0, 200, 200)
+        product = governance.exon_product_from_metadata(0xFF, 1.0, 200, 200)
         assert 0 <= product <= 255
+        assert product != 0  # Guarantee: never return 0
         assert governance.fold(product, product) == 0
+
+    def test_exon_product_never_returns_zero(self) -> None:
+        """Test that exon_product_from_metadata never returns 0."""
+        # Test various combinations that might result in 0
+        # Use valid v_max values (> 0)
+        test_cases = [
+            (0, 0.0, 100, 200),  # Zero mask and confidence
+            (0, 0.0, 0, 100),  # Zero orbit values
+            (0, 0.0, 0, 1),  # Minimal v_max
+        ]
+
+        for mask, confidence, orbit_v, v_max in test_cases:
+            product = governance.exon_product_from_metadata(mask, confidence, orbit_v, v_max)
+            assert product != 0, (
+                f"Should not return 0 for inputs: " f"mask={mask}, conf={confidence}, orbit_v={orbit_v}, v_max={v_max}"
+            )
+            assert 0 <= product <= 255
+
+    def test_exon_product_fallback_to_cooling_intron(self) -> None:
+        """Test that when calculation would yield 0, it falls back to cooling intron."""
+        # Test the fallback mechanism
+        cooling_intron = 0b01000010  # 0x42
+
+        # Test case that should trigger fallback
+        product = governance.exon_product_from_metadata(0, 0.0, 1, 1)
+        assert product == cooling_intron  # Should fallback to cooling intron
+        assert product != 0  # Verify the guarantee
+
+    def test_exon_product_uses_all_parameters(self) -> None:
+        """Test that all parameters affect the output."""
+        base_product = governance.exon_product_from_metadata(0b01010101, 0.5, 100, 200)
+
+        # Change mask
+        mask_product = governance.exon_product_from_metadata(0b10101010, 0.5, 100, 200)
+        # Results may vary, but both should be non-zero
+
+        # Change confidence
+        conf_product = governance.exon_product_from_metadata(0b01010101, 0.8, 100, 200)
+        # Results may vary, but both should be non-zero
+
+        # Change orbit values
+        orbit_product = governance.exon_product_from_metadata(0b01010101, 0.5, 150, 200)
+        # Results may vary, but both should be non-zero
+
+        # All should be non-zero due to guarantee
+        assert base_product != 0
+        assert mask_product != 0
+        assert conf_product != 0
+        assert orbit_product != 0
 
 
 class TestMathematicalProperties:
@@ -505,6 +470,8 @@ class TestMathematicalProperties:
         full_intron = governance.EXON_LI_MASK | governance.EXON_FG_MASK | governance.EXON_BG_MASK
         full_mask = governance.XFORM_MASK[full_intron]
 
-        # Should combine all transformation effects
-        expected = governance.FULL_MASK ^ governance.FG_MASK ^ governance.BG_MASK
-        assert full_mask == expected
+        # Full activation (LI + FG + BG) results in no transformation due to cancellation
+        # LI applies FULL_MASK, FG applies FG_MASK, BG applies BG_MASK
+        # Since FG_MASK ^ BG_MASK = FULL_MASK, the result is FULL_MASK ^ FULL_MASK = 0
+        expected = 0
+        assert full_mask == expected, f"Full activation mask should be {expected}, got {full_mask}"

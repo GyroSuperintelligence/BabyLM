@@ -2,37 +2,21 @@
 Shared contracts (protocols and type definitions) for the GyroSI S4 system.
 """
 
-from typing import Any, Dict, Optional, Protocol, Tuple, TypedDict
-
-
-class GovernanceSignature(TypedDict):
-    neutral: int  # 0‑6
-    li: int  # 0‑2
-    fg: int  # 0‑2
-    bg: int  # 0‑2
-    dyn: int  # 0‑6
+from typing import Any, Dict, Optional, Protocol, TypedDict
 
 
 class PhenotypeEntry(TypedDict):
     """
-    Structure of a phenotype entry in the knowledge store.
-
-    - context_signature MAY be canonical; if canonicalisation is applied (e.g.,
-      via CanonicalView), the original physical context is stored in
-      _original_context.
-    - exon_mask is immutable under decay (decay only affects confidence, not
-      exon_mask).
+    Minimal phenotype record.
+      mask  : 8-bit Monodromic-Fold residue  (0-255)
+      conf  : epistemic confidence           (0.0-1.0)  – monotone ↑ / decay ↓
+      key   : composite key (state_idx, token_id)
+    Everything else is derivable on-the-fly.
     """
 
-    phenotype: str
-    confidence: float
-    exon_mask: int
-    usage_count: int
-    last_updated: float
-    created_at: float
-    governance_signature: GovernanceSignature
-    context_signature: Tuple[int, int]
-    _original_context: Optional[Tuple[int, int]]
+    mask: int  # uint8   (exon_mask)
+    conf: float  # float32
+    key: tuple[int, int]  # composite key
 
 
 class PreferencesConfig(TypedDict, total=False):
@@ -98,7 +82,7 @@ class CycleHookFunction(Protocol):
         self,
         engine: Any,  # Would be IntelligenceEngine but avoiding circular import
         phenotype_entry: PhenotypeEntry,
-        last_intron: int,
+        last_token_byte: int,
     ) -> None:
         """Post-cycle hook callback."""
         ...

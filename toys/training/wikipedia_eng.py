@@ -17,6 +17,7 @@ Key optimizations for 1000+ articles/second:
 
 from toys.communication import tokenizer as gyrotok
 from baby.intelligence import GyroSI
+from baby.contracts import AgentConfig
 import sys
 from pathlib import Path
 import argparse
@@ -29,7 +30,7 @@ import time
 import zlib
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from logging.handlers import RotatingFileHandler
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any
 
 # Project setup
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -49,12 +50,14 @@ os.environ["NUMBA_NUM_THREADS"] = "16"  # For JIT optimization
 
 try:
     import psutil
+
     HAVE_PSUTIL = True
 except ImportError:
     HAVE_PSUTIL = False
 
 try:
     from tqdm import tqdm
+
     HAVE_TQDM = True
 except ImportError:
     HAVE_TQDM = False
@@ -90,7 +93,7 @@ def setup_logging(log_dir: Path) -> logging.Logger:
 
     # Rotating file handler
     log_file = log_dir / f"training_{int(time.time())}.log"
-    file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
+    file_handler = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5)
     file_handler.setLevel(logging.INFO)
 
     # Console handler
@@ -98,7 +101,7 @@ def setup_logging(log_dir: Path) -> logging.Logger:
     console_handler.setLevel(logging.INFO)
 
     # Formatter
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
 
@@ -126,14 +129,10 @@ def robust_sentence_split(text: str) -> List[str]:
     Handles abbreviations and common edge cases.
     """
     # Handle common abbreviations
-    text = re.sub(r'\b(Dr|Mr|Mrs|Ms|Prof|Sr|Jr|vs|etc|i\.e|e\.g)\.\s*',
-                  r'\1<PERIOD>', text, flags=re.IGNORECASE)
-    text = re.sub(r'\b(Inc|Ltd|Corp|Co|LLC)\.\s*',
-                  r'\1<PERIOD>', text, flags=re.IGNORECASE)
-    text = re.sub(r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.\s*',
-                  r'\1<PERIOD>', text, flags=re.IGNORECASE)
-    text = re.sub(r'\b(BC|AD)\.\s*',
-                  r'\1<PERIOD>', text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(Dr|Mr|Mrs|Ms|Prof|Sr|Jr|vs|etc|i\.e|e\.g)\.\s*", r"\1<PERIOD>", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(Inc|Ltd|Corp|Co|LLC)\.\s*", r"\1<PERIOD>", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.\s*", r"\1<PERIOD>", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(BC|AD)\.\s*", r"\1<PERIOD>", text, flags=re.IGNORECASE)
 
     # Split using regex
     sentences = SENT_RE.split(text)
@@ -141,7 +140,7 @@ def robust_sentence_split(text: str) -> List[str]:
     # Clean up and restore periods
     result = []
     for sentence in sentences:
-        sentence = sentence.replace('<PERIOD>', '.').strip()
+        sentence = sentence.replace("<PERIOD>", ".").strip()
         if sentence and len(sentence) > 10:
             result.append(sentence)
 
@@ -165,8 +164,7 @@ def preprocess_article(article_text: str) -> Optional[List[str]]:
 
 
 def preprocess_articles_parallel(
-    articles: List[Tuple[int, str]],
-    max_workers: int = None
+    articles: List[Tuple[int, str]], max_workers: Optional[int] = None
 ) -> List[Tuple[int, List[str]]]:
     """
     Preprocess articles in parallel, return (article_idx, sentences) pairs.
@@ -177,10 +175,7 @@ def preprocess_articles_parallel(
     results = []
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        future_to_idx = {
-            executor.submit(preprocess_article, text): idx
-            for idx, text in articles
-        }
+        future_to_idx = {executor.submit(preprocess_article, text): idx for idx, text in articles}
 
         for future in as_completed(future_to_idx):
             if shutdown_requested:
@@ -213,22 +208,16 @@ def create_agent(knowledge_path: Path) -> GyroSI:
         with open(prefs_path) as f:
             preferences = json.load(f)
     else:
-        preferences = {
-            "pruning": {
-                "confidence_threshold": 0.05,
-                "enable_auto_decay": True,
-                "decay_factor": 0.995
-            }
-        }
+        preferences = {"pruning": {"confidence_threshold": 0.05, "enable_auto_decay": True, "decay_factor": 0.995}}
 
     # Use explicit paths that match your project structure
-    config = {
+    config: AgentConfig = {
         "ontology_path": str(PROJECT_ROOT / "memories/public/meta/ontology_keys.npy"),
         "phenomenology_map_path": str(PROJECT_ROOT / "memories/public/meta/phenomenology_map.npy"),
         "public_knowledge_path": str(dummy_public),
         "private_knowledge_path": str(knowledge_path),
         "learn_batch_size": 1000,
-        "preferences": preferences.get("pruning", {})
+        "preferences": preferences.get("pruning", {}),
     }
 
     return GyroSI(config, agent_id="wikipedia_trainer")
@@ -236,7 +225,7 @@ def create_agent(knowledge_path: Path) -> GyroSI:
 
 def save_checkpoint_atomic(checkpoint_data: Dict[str, Any], checkpoint_path: Path) -> None:
     """Save checkpoint atomically with CRC validation. FIXED: no longer mutates input dict."""
-    tmp_path = checkpoint_path.with_suffix('.tmp')
+    tmp_path = checkpoint_path.with_suffix(".tmp")
 
     try:
         # Create a deep copy to avoid mutating the original stats dict
@@ -248,7 +237,7 @@ def save_checkpoint_atomic(checkpoint_data: Dict[str, Any], checkpoint_path: Pat
         data_to_write["crc32"] = crc32
 
         # Write to temp file
-        with open(tmp_path, 'w') as f:
+        with open(tmp_path, "w") as f:
             json.dump(data_to_write, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
@@ -292,7 +281,7 @@ def get_knowledge_entry_count(knowledge_path: Path) -> int:
 
     try:
         # Read file and count entries (expensive operation)
-        with open(knowledge_path, 'rb') as f:
+        with open(knowledge_path, "rb") as f:
             data = f.read()
         return len(data) // 1024  # Rough estimate
     except Exception:
@@ -301,16 +290,16 @@ def get_knowledge_entry_count(knowledge_path: Path) -> int:
 
 def stream_articles(file_path: Path):
     """Stream articles one at a time from disk."""
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
         article_lines = []
         for line in f:
             if line.strip():
                 article_lines.append(line)
             elif article_lines:  # Empty line = article boundary
-                yield ''.join(article_lines)
+                yield "".join(article_lines)
                 article_lines = []
         if article_lines:  # Don't forget the last one
-            yield ''.join(article_lines)
+            yield "".join(article_lines)
 
 
 def train_with_batch_learn(
@@ -319,8 +308,8 @@ def train_with_batch_learn(
     checkpoint_path: Path,
     knowledge_path: Path,
     logger: logging.Logger,
-    max_workers: int = None,
-    max_articles: Optional[int] = None
+    max_workers: Optional[int] = None,
+    max_articles: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Train using batch_learn with proper state evolution.
@@ -329,14 +318,14 @@ def train_with_batch_learn(
     if max_workers is None:
         max_workers = os.cpu_count() or 16
 
-    stats = {
+    stats: Dict[str, Any] = {
         "articles_processed": 0,
         "articles_skipped": 0,
         "sentences_processed": 0,
         "batches_processed": 0,
         "start_time": time.time(),
         "unique_states_count": 0,  # Just count, don't store
-        "last_seen_states": set()  # Keep only last 1000 for sampling
+        "last_seen_states": set(),  # Keep only last 1000 for sampling
     }
 
     # Process and system monitoring
@@ -395,11 +384,12 @@ def train_with_batch_learn(
         article_chunk = articles_to_process[chunk_start:chunk_end]
 
         # Create indexed articles for preprocessing
-        indexed_articles = [(start_article + chunk_start + i, article)
-                            for i, article in enumerate(article_chunk)]
+        indexed_articles = [(start_article + chunk_start + i, article) for i, article in enumerate(article_chunk)]
 
-        logger.info(f"Preprocessing articles {chunk_start + start_article} to "
-                    f"{chunk_end + start_article} ({len(indexed_articles)} articles)")
+        logger.info(
+            f"Preprocessing articles {chunk_start + start_article} to "
+            f"{chunk_end + start_article} ({len(indexed_articles)} articles)"
+        )
 
         # Preprocess in parallel
         preprocessed = preprocess_articles_parallel(indexed_articles, max_workers)
@@ -427,12 +417,12 @@ def train_with_batch_learn(
                         sentence_buffer.extend(sep_bytes)
                         sentence_count += 1
                         stats["sentences_processed"] += 1
-                        
+
                         if sentence_count >= SENTENCES_PER_LEARN:
-                            agent.engine.batch_learn(bytes(sentence_buffer))
+                            agent.ingest(bytes(sentence_buffer))
                             sentence_buffer = bytearray()
                             sentence_count = 0
-                            
+
                     except Exception as e:
                         logger.warning(f"Failed to encode sentence: {e}")
 
@@ -455,21 +445,23 @@ def train_with_batch_learn(
                         temp_list = list(stats["last_seen_states"])
                         temp_list.pop(0)
                         stats["last_seen_states"] = set(temp_list)
-                    logger.info(f"State evolution check - Current state: {current_state}, "
-                                f"Unique states seen: {stats['unique_states_count']}")
-                
+                    logger.info(
+                        f"State evolution check - Current state: {current_state}, "
+                        f"Unique states seen: {stats['unique_states_count']}"
+                    )
+
                 # Commit less frequently
                 if articles_since_commit >= ARTICLES_PER_COMMIT:
-                    if hasattr(agent.engine.operator.store, 'commit'):
+                    if hasattr(agent.engine.operator.store, "commit"):
                         agent.engine.operator.store.commit()
                     articles_since_commit = 0
 
             # Don't forget the final buffer
             if sentence_buffer:
-                agent.engine.batch_learn(bytes(sentence_buffer))
+                agent.ingest(bytes(sentence_buffer))
 
             # Commit once per batch (20 articles) instead of per article
-            if hasattr(agent.engine.operator.store, 'commit'):
+            if hasattr(agent.engine.operator.store, "commit"):
                 agent.engine.operator.store.commit()
 
             stats["batches_processed"] += 1
@@ -509,8 +501,7 @@ def train_with_batch_learn(
                 logger.info(message)
 
             # Checkpoint periodically
-            if (time.time() - last_checkpoint_time > 300 or
-                    stats["articles_processed"] % CHECKPOINT_INTERVAL == 0):
+            if time.time() - last_checkpoint_time > 300 or stats["articles_processed"] % CHECKPOINT_INTERVAL == 0:
 
                 # Save checkpoint (stats won't be mutated anymore)
                 checkpoint_data = {
@@ -521,9 +512,9 @@ def train_with_batch_learn(
                         "sentences_processed": stats["sentences_processed"],
                         "batches_processed": stats["batches_processed"],
                         "start_time": stats["start_time"],
-                        "last_seen_states": list(stats["last_seen_states"])
+                        "last_seen_states": list(stats["last_seen_states"]),
                     },
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
                 }
 
                 save_checkpoint_atomic(checkpoint_data, checkpoint_path)
@@ -531,8 +522,10 @@ def train_with_batch_learn(
                 # Log checkpoint
                 file_size = knowledge_path.stat().st_size if knowledge_path.exists() else 0
                 # entry_count = get_knowledge_entry_count(knowledge_path)  # REMOVE THIS - too expensive
-                message = (f"Checkpoint saved at article {stats['articles_processed']}, "
-                           f"knowledge: {format_size(file_size)}")  # No entry count
+                message = (
+                    f"Checkpoint saved at article {stats['articles_processed']}, "
+                    f"knowledge: {format_size(file_size)}"
+                )  # No entry count
                 print(f"💾 {message}")
                 logger.info(message)
 
@@ -563,8 +556,8 @@ def train_with_streaming(
     checkpoint_path: Path,
     knowledge_path: Path,
     logger: logging.Logger,
-    max_workers: int = None,
-    max_articles: Optional[int] = None
+    max_workers: Optional[int] = None,
+    max_articles: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     High-performance streaming training that processes articles one at a time.
@@ -577,7 +570,7 @@ def train_with_streaming(
         "batches_processed": 0,
         "start_time": time.time(),
         "unique_states_count": 0,
-        "last_seen_states": set()
+        "last_seen_states": set(),
     }
 
     # Process and system monitoring
@@ -651,12 +644,12 @@ def train_with_streaming(
                     sentence_buffer.extend(sep_bytes)
                     sentence_count += 1
                     stats["sentences_processed"] += 1
-                    
+
                     if sentence_count >= SENTENCES_PER_LEARN:
-                        agent.engine.batch_learn(bytes(sentence_buffer))
+                        agent.ingest(bytes(sentence_buffer))
                         sentence_buffer = bytearray()
                         sentence_count = 0
-                        
+
                 except Exception as e:
                     logger.warning(f"Failed to encode sentence: {e}")
 
@@ -677,12 +670,14 @@ def train_with_streaming(
                     temp_list = list(stats["last_seen_states"])
                     temp_list.pop(0)
                     stats["last_seen_states"] = set(temp_list)
-                logger.info(f"State evolution check - Current state: {current_state}, "
-                            f"Unique states seen: {stats['unique_states_count']}")
+                logger.info(
+                    f"State evolution check - Current state: {current_state}, "
+                    f"Unique states seen: {stats['unique_states_count']}"
+                )
 
             # Commit less frequently
             if articles_since_commit >= ARTICLES_PER_COMMIT:
-                if hasattr(agent.engine.operator.store, 'commit'):
+                if hasattr(agent.engine.operator.store, "commit"):
                     agent.engine.operator.store.commit()
                 articles_since_commit = 0
 
@@ -720,8 +715,7 @@ def train_with_streaming(
                 logger.info(message)
 
             # Checkpoint periodically
-            if (time.time() - last_checkpoint_time > 300 or
-                    stats["articles_processed"] % CHECKPOINT_INTERVAL == 0):
+            if time.time() - last_checkpoint_time > 300 or stats["articles_processed"] % CHECKPOINT_INTERVAL == 0:
 
                 checkpoint_data = {
                     "last_article_index": stats["articles_processed"],
@@ -731,17 +725,19 @@ def train_with_streaming(
                         "sentences_processed": stats["sentences_processed"],
                         "batches_processed": stats["batches_processed"],
                         "start_time": stats["start_time"],
-                        "last_seen_states": list(stats["last_seen_states"])
+                        "last_seen_states": list(stats["last_seen_states"]),
                     },
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
                 }
 
                 save_checkpoint_atomic(checkpoint_data, checkpoint_path)
 
                 # Log checkpoint
                 file_size = knowledge_path.stat().st_size if knowledge_path.exists() else 0
-                message = (f"Checkpoint saved at article {stats['articles_processed']}, "
-                           f"knowledge: {format_size(file_size)}")
+                message = (
+                    f"Checkpoint saved at article {stats['articles_processed']}, "
+                    f"knowledge: {format_size(file_size)}"
+                )
                 print(f"💾 {message}")
                 logger.info(message)
 
@@ -749,10 +745,10 @@ def train_with_streaming(
 
     # Don't forget the final buffer
     if sentence_buffer:
-        agent.engine.batch_learn(bytes(sentence_buffer))
+        agent.ingest(bytes(sentence_buffer))
 
     # Final commit
-    if hasattr(agent.engine.operator.store, 'commit'):
+    if hasattr(agent.engine.operator.store, "commit"):
         agent.engine.operator.store.commit()
 
     stats["batches_processed"] += 1
@@ -822,8 +818,7 @@ def main() -> int:
         if knowledge_files:
             # Sort by creation time (newest first)
             knowledge_path = max(
-                knowledge_files,
-                key=lambda p: int(p.stem.split('_')[-1]) if p.stem.split('_')[-1].isdigit() else 0
+                knowledge_files, key=lambda p: int(p.stem.split("_")[-1]) if p.stem.split("_")[-1].isdigit() else 0
             )
             logger.info(f"Resuming with knowledge file: {knowledge_path}")
         else:
@@ -836,7 +831,7 @@ def main() -> int:
             # Find highest run number
             for path in existing:
                 try:
-                    num = int(path.stem.split('_')[-1])
+                    num = int(path.stem.split("_")[-1])
                     run_num = max(run_num, num + 1)
                 except (ValueError, IndexError):
                     pass
@@ -844,7 +839,7 @@ def main() -> int:
         knowledge_path = knowledge_dir / f"{dataset_type}_wikipedia_{run_num}.bin"
         logger.info(f"Starting new run: {knowledge_path}")
 
-    checkpoint_path = knowledge_path.with_suffix('.checkpoint.json')
+    checkpoint_path = knowledge_path.with_suffix(".checkpoint.json")
 
     # Create agent
     agent = None
@@ -870,13 +865,7 @@ def main() -> int:
 
         # Use streaming training for maximum performance (1000+ articles/second)
         stats = train_with_streaming(
-            agent,
-            files,
-            checkpoint_path,
-            knowledge_path,
-            logger,
-            max_workers=workers,
-            max_articles=args.max_articles
+            agent, files, checkpoint_path, knowledge_path, logger, max_workers=workers, max_articles=args.max_articles
         )
 
         # Final stats
@@ -893,7 +882,7 @@ def main() -> int:
             # entry_count = get_knowledge_entry_count(knowledge_path)  # REMOVE THIS - too expensive
 
             logger.info(f"Final knowledge file: {format_size(size)}")
-            print(f"\n📊 Final Results:")
+            print("\n📊 Final Results:")
             print(f"  • Knowledge file: {format_size(size)}")
             print(f"  • Articles processed: {stats['articles_processed']:,}")
             print(f"  • Unique states: {stats['unique_states_count']}")
@@ -933,4 +922,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

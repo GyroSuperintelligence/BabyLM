@@ -326,6 +326,14 @@ def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.
     keys = np.array(sorted(discovered), dtype=np.uint64)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     np.save(output_path, keys)
+    # --- DOCUMENTATION: Archetypal state index ---
+    # The archetypal state (GENE_Mac_S) is included in the ontology, but its index is determined by its
+    # integer value after sorting all discovered states. It is NOT guaranteed to be at index 0.
+    # To find its index:
+    #   archetypal_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
+    #   archetypal_index = np.where(keys == archetypal_int)[0][0]
+    # Example (current ontology):
+    #   Archetypal state (GENE_Mac_S) is at index 549871 in the sorted ontology (position 549872 of 788986).
     print(f"✓ Saved ontology keys to: {output_path}")
 
     return keys

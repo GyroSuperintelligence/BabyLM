@@ -2,10 +2,11 @@
 Write/policy logic for GyroSI (S5): OrbitStore and storage decorators.
 """
 
+from __future__ import annotations
+
 import concurrent.futures
 import hashlib
 import logging
-import math
 import mmap
 import os
 import json
@@ -31,6 +32,57 @@ _Sentinel = object()
 _append_only_cache_global: dict[tuple[int, int, str], Optional[Any]] = {}
 _append_only_cache_order: deque[tuple[int, int, str]] = deque()
 _append_only_cache_maxsize = 8192
+
+# Confidence normalization constants
+_CONFIDENCE_PRECISION = 1e-4  # Tolerance for float16 precision differences
+_CONFIDENCE_ROUNDING_DIGITS = 4  # Round to 4 decimal places for consistency
+
+
+def normalize_confidence(confidence: float) -> float:
+    """
+    Normalize confidence values to ensure consistent decision-making.
+
+    This function rounds confidence values to a consistent precision to avoid
+    issues with float16 precision differences when making decisions between
+    thousands of phenotypes.
+
+    Args:
+        confidence: Raw confidence value (0.0 to 1.0)
+
+    Returns:
+        Normalized confidence value with consistent precision
+    """
+    # Clamp to valid range
+    confidence = max(0.0, min(1.0, confidence))
+
+    # Round to consistent precision to avoid float16 artifacts
+    return round(confidence, _CONFIDENCE_ROUNDING_DIGITS)
+
+
+def confidence_equals(a: float, b: float, tolerance: float = _CONFIDENCE_PRECISION) -> bool:
+    """
+    Compare confidence values with tolerance for float16 precision differences.
+
+    Args:
+        a: First confidence value
+        b: Second confidence value
+        tolerance: Tolerance for comparison
+
+    Returns:
+        True if values are effectively equal
+    """
+    return abs(a - b) < tolerance
+
+
+# ---------- NEW PACK / UNPACK (12-byte fixed) --------------------
+# struct layout:  <I I B H x   (x = 1-byte pad)
+#   I  state_idx    (uint32)
+#   I  token_id     (uint32)
+#   B  mask         (uint8)
+#   H  conf_f16     (uint16)   # reinterpret float16
+#   x  pad          (uint8)    # keep 4-byte alignment
+_STRUCT_FMT = "<IIBHx"
+_STRUCT_SIZE = struct.calcsize(_STRUCT_FMT)  # = 12
 
 
 def _abs(path: Optional[str], base: Path) -> str:
@@ -69,169 +121,45 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 # ------------------------------------------------------------
-# Binary serialisation helpers – 1 phenotype per entry
-# ------------------------------------------------------------
 # Field order and types are **fixed**; do not alter.
-#   1. phenotype (utf‑8)  : uint16 length + bytes
-#   2. context_key[0]     : uint32
-#   3. context_key[1]     : uint8
-#   4. exon_mask          : uint8
-#   5. confidence         : float64
-#   6. usage_count        : uint16
-#   7. created_at         : float64
-#   8. last_updated       : float64
-#   9. governance_signature (5×uint8)
-#  10. context_signature  : uint32, uint8
-#  11. _original_context  : uint32, uint8
+# New 12-byte fixed structure: <I I B H x
+#   1. state_idx        : uint32
+#   2. token_id         : uint32
+#   3. mask             : uint8
+#   4. conf_f16         : uint16 (reinterpret float16)
+#   5. pad              : uint8 (4-byte alignment)
 #
-# Deterministic layout with variable-length phenotype field.
+# Deterministic layout with fixed-size entries.
 # Returned dict contains exactly the same keys that already
 # exist elsewhere in the codebase – no additions.
 
 
 def _pack_phenotype(entry: Dict[str, Any]) -> bytes:
-    try:
-        # Ensure context_key is present (use context_signature as fallback)
-        if "context_key" not in entry and "context_signature" in entry:
-            entry = entry.copy()
-            entry["context_key"] = entry["context_signature"]
-
-        # Handle None _original_context
-        if entry.get("_original_context") is None:
-            entry = entry.copy()
-            entry["_original_context"] = entry["context_signature"]
-
-        # Convert governance_signature from dict to tuple if needed
-        if isinstance(entry.get("governance_signature"), dict):
-            entry = entry.copy()
-            gov_sig = entry["governance_signature"]
-            entry["governance_signature"] = (
-                gov_sig.get("neutral", 0),
-                gov_sig.get("li", 0),
-                gov_sig.get("fg", 0),
-                gov_sig.get("bg", 0),
-                gov_sig.get("dyn", 0),
-            )
-
-        # Ensure all required fields are present and have correct types
-        required_fields = {
-            "phenotype": str,
-            "context_key": tuple,
-            "exon_mask": int,
-            "confidence": (int, float),
-            "usage_count": int,
-            "created_at": (int, float),
-            "last_updated": (int, float),
-            "governance_signature": tuple,
-            "context_signature": tuple,
-            "_original_context": tuple,
-        }
-        for field, expected_type in required_fields.items():
-            if field not in entry:
-                print(f"[pack_phenotype] Missing required field: {field} in entry: {entry}")
-                import logging; logging.error(f"[pack_phenotype] Missing required field: {field} in entry: {entry}")
-                raise ValueError(f"Missing required field: {field}")
-            value = entry[field]
-            if not isinstance(value, expected_type):  # type: ignore[arg-type]
-                print(f"[pack_phenotype] Field {field} has wrong type: {type(value)}, expected {expected_type} in entry: {entry}")
-                import logging; logging.error(f"[pack_phenotype] Field {field} has wrong type: {type(value)}, expected {expected_type} in entry: {entry}")
-                raise ValueError(f"Field {field} has wrong type: {type(value)}, expected {expected_type}")
-
-        # Clamp uint8 fields to valid range
-        entry = entry.copy()
-        entry["exon_mask"] = max(0, min(255, entry["exon_mask"]))
-
-        # Clamp context_key[1] to valid range
-        context_key = list(entry["context_key"])
-        context_key[1] = max(0, min(255, context_key[1]))
-        entry["context_key"] = tuple(context_key)
-
-        # Clamp context_signature[1] to valid range
-        context_sig = list(entry["context_signature"])
-        context_sig[1] = max(0, min(255, context_sig[1]))
-        entry["context_signature"] = tuple(context_sig)
-
-        # Clamp _original_context[1] to valid range
-        orig_context = list(entry["_original_context"])
-        orig_context[1] = max(0, min(255, orig_context[1]))
-        entry["_original_context"] = tuple(orig_context)
-
-        # Clamp governance signature values
-        gov_sig = list(entry["governance_signature"])
-        for i in range(len(gov_sig)):
-            gov_sig[i] = max(0, min(255, gov_sig[i]))
-        entry["governance_signature"] = tuple(gov_sig)
-
-        ph = entry["phenotype"].encode("utf-8")
-        length = len(ph)
-        fmt = f"<H{length}sIBBdHdd5BIBIB"
-        return struct.pack(
-            fmt,
-            length,
-            ph,
-            entry["context_key"][0],
-            entry["context_key"][1],
-            entry["exon_mask"],
-            entry["confidence"],
-            entry["usage_count"],
-            entry["created_at"],
-            entry["last_updated"],
-            *entry["governance_signature"],
-            entry["context_signature"][0],
-            entry["context_signature"][1],
-            entry["_original_context"][0],
-            entry["_original_context"][1],
-        )
-    except Exception as e:
-        print(f"[pack_phenotype] Exception: {e} for entry: {entry}")
-        import logging; logging.error(f"[pack_phenotype] Exception: {e} for entry: {entry}")
-        raise
+    if "key" not in entry:
+        raise KeyError("Entry must have 'key' field")
+    state_idx, token_id = entry["key"]  # renamed upstream
+    mask = entry["mask"] & 0xFF
+    conf = float(entry["conf"])
+    # Convert to float16 and then to uint16 for storage
+    conf_f16 = np.float16(conf)
+    conf_u16 = conf_f16.view(np.uint16).item()
+    return struct.pack(_STRUCT_FMT, state_idx, token_id, mask, conf_u16)
 
 
 def _unpack_phenotype(buf: memoryview, offset: int = 0) -> tuple[Dict[str, Any], int]:
-    # read utf‑8 length first
-    length = struct.unpack_from("<H", buf, offset)[0]
-    offset += 2
-    ph_bytes = struct.unpack_from(f"<{length}s", buf, offset)[0]
-    offset += length
-    (
-        state_idx,
-        intron,
-        exon_mask,
-        conf,
-        usage,
-        created,
-        last_updated,
-        n,
-        li,
-        fg,
-        bg,
-        dyn,
-        ctx_state,
-        ctx_intr,
-        orig_state,
-        orig_intr,
-    ) = struct.unpack_from("<IBBdHdd5BIBIB", buf, offset)
-    offset += struct.calcsize("<IBBdHdd5BIBIB")
+    state_idx, token_id, mask, conf_u16 = struct.unpack_from(_STRUCT_FMT, buf, offset)
+    # Convert from uint16 back to float16 and then to float
+    conf_f16 = np.uint16(conf_u16).view(np.float16)
+    raw_conf = float(conf_f16.item())
+    # Normalize confidence to ensure consistent decision-making
+    normalized_conf = normalize_confidence(raw_conf)
     entry = {
-        "phenotype": ph_bytes.decode("utf-8"),
-        "context_key": (state_idx, intron),
-        "exon_mask": exon_mask,
-        "confidence": conf,
-        "usage_count": usage,
-        "created_at": created,
-        "last_updated": last_updated,
-        "governance_signature": {
-            "neutral": n,
-            "li": li,
-            "fg": fg,
-            "bg": bg,
-            "dyn": dyn,
-        },
-        "context_signature": (ctx_state, ctx_intr),
-        "_original_context": (orig_state, orig_intr),
+        "mask": mask,
+        "conf": normalized_conf,
+        # expose composite key for callers
+        "key": (state_idx, token_id),
     }
-    return entry, offset
+    return entry, offset + _STRUCT_SIZE
 
 
 def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJECT_ROOT) -> Dict[int, int]:
@@ -407,7 +335,7 @@ class OrbitStore:
         for offset in reversed(offsets):
             try:
                 entry, _ = _unpack_phenotype(buf, offset)
-                key = tuple(entry["context_key"])
+                key = tuple(entry["key"])
                 if key == context_key:
                     found.append(entry)
             except Exception:
@@ -421,10 +349,11 @@ class OrbitStore:
         with self.lock:
             # Always copy the entry before mutating or storing
             entry = dict(entry)  # ensure a new dict, not just a shallow copy
-            if "context_signature" not in entry:
-                entry["context_signature"] = context_key
+            # Ensure the entry has the key field
+            if "key" not in entry:
+                entry["key"] = context_key
             self.pending_writes[context_key] = dict(entry)  # store a new dict
-            # Fine‑grain invalidation – just drop the key we’re overwriting
+            # Fine‑grain invalidation – just drop the key we're overwriting
             if self.append_only:
                 self._cache_pop(context_key)
             if self.pending_writes is not None and len(self.pending_writes) >= self.write_threshold:
@@ -534,8 +463,8 @@ class OrbitStore:
                     raise TypeError(f"Invalid key type in index: {type(k)}. All keys must be strings.")
                 # Parse tuple string format back to tuple
                 try:
-                    state, intron = map(int, k.strip("()").split(", "))
-                    key_tuple = (state, intron)
+                    state, token_id = map(int, k.strip("()").split(", "))
+                    key_tuple = (state, token_id)
                     self.index[key_tuple] = tuple(v)
                 except (ValueError, IndexError) as e:
                     raise TypeError(f"Invalid key format in index: {k}") from e
@@ -551,8 +480,8 @@ class OrbitStore:
                         while offset < len(buf):
                             try:
                                 entry, new_offset = _unpack_phenotype(buf, offset)
-                                if "context_key" in entry:
-                                    context_key = tuple(entry["context_key"])
+                                if "key" in entry:
+                                    context_key = tuple(entry["key"])
                                     self._bloom_filter.add(context_key)
                                 offset = new_offset
                             except struct.error:
@@ -570,8 +499,8 @@ class OrbitStore:
             while offset < len(buf):
                 entry, new_offset = _unpack_phenotype(buf, offset)
                 size = new_offset - offset
-                if "context_signature" in entry:
-                    context_key = entry["context_signature"]
+                if "key" in entry:
+                    context_key = tuple(entry["key"])
                     self.index[context_key] = (offset, size)
                 offset = new_offset
 
@@ -671,7 +600,7 @@ class OrbitStore:
                 offset = 0
                 while offset < len(buf):
                     entry, new_offset = _unpack_phenotype(buf, offset)
-                    key = tuple(entry["context_key"])
+                    key = tuple(entry["key"])
                     entries[key] = entry
                     offset = new_offset
             return entries
@@ -714,7 +643,7 @@ class OrbitStore:
                 while offset < len(buf):
                     try:
                         entry, new_offset = _unpack_phenotype(buf, offset)
-                        key = tuple(entry["context_key"])
+                        key = tuple(entry["key"])
                         latest_entries[key] = entry  # Keep the latest version
                         offset = new_offset
                     except struct.error:
@@ -761,33 +690,23 @@ class CanonicalView:
         self.phen_map = load_phenomenology_map(self.phenomenology_map_path, base_path)
 
     def _get_phenomenology_key(self, context_key: Tuple[int, int]) -> Tuple[int, int]:
-        tensor_index, intron = context_key
+        tensor_index, token_id = context_key
         phenomenology_index = self.phen_map.get(tensor_index, tensor_index)
-        return (phenomenology_index, intron)
+        return (phenomenology_index, token_id)
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
         if self.base_store is None:
             raise RuntimeError("CanonicalView: base_store is closed or None")
         phenomenology_key = self._get_phenomenology_key(context_key)
         entry = self.base_store.get(phenomenology_key)
-        if entry and "_original_context" in entry:
-            # Strip metadata added by put() method
-            clean_entry = entry.copy()
-            orig_ctx = clean_entry.pop("_original_context", None)
-            if orig_ctx is not None:
-                clean_entry["context_signature"] = orig_ctx
-            return clean_entry
+        # For minimal phenotype, just return the entry as-is
         return entry
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
         if self.base_store is None:
             raise RuntimeError("CanonicalView: base_store is closed or None")
         phen_key = self._get_phenomenology_key(context_key)
-        if entry.get("context_signature") != phen_key:
-            e = entry.copy()
-            e["_original_context"] = context_key
-            e["context_signature"] = phen_key
-            entry = e
+        # For minimal phenotype, just store with the phenomenology key
         self.base_store.put(phen_key, entry)
 
     def commit(self) -> None:
@@ -831,20 +750,12 @@ class CanonicalView:
 
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
         """
-        Yield entries keyed by their original context (if present), ensuring a single logical
-        entry per phenotype. Also strip _original_context from the yielded entry.
+        Yield entries keyed by their phenomenology key.
         """
         if self.base_store is None:
             raise RuntimeError("CanonicalView: base_store is closed or None")
         for phen_key, entry in self.base_store.iter_entries():
-            orig = entry.get("_original_context")
-            if orig is not None:
-                clean = entry.copy()
-                clean.pop("_original_context", None)
-                clean["context_signature"] = orig
-                yield orig, clean
-            else:
-                yield phen_key, entry
+            yield phen_key, entry
 
 
 class OverlayView:
@@ -1037,31 +948,35 @@ def merge_phenotype_maps(
                 existing = merged_data[context_key]
 
                 if conflict_resolution == "highest_confidence":
-                    if entry.get("confidence", 0) > existing.get("confidence", 0):
+                    # Use normalized comparison to avoid float16 precision issues
+                    entry_conf = normalize_confidence(entry.get("conf", 0))
+                    existing_conf = normalize_confidence(existing.get("conf", 0))
+                    if entry_conf > existing_conf:
                         merged_data[context_key] = entry.copy()
 
                 elif conflict_resolution == "OR_masks":
-                    existing["exon_mask"] |= entry.get("exon_mask", 0)
-                    existing["usage_count"] += entry.get("usage_count", 0)
-                    existing["confidence"] = max(existing.get("confidence", 0), entry.get("confidence", 0))
-                    existing["last_updated"] = max(existing.get("last_updated", 0), entry.get("last_updated", 0))
+                    existing["mask"] |= entry.get("mask", 0)
+                    # Normalize confidence values for consistent comparison
+                    existing["conf"] = normalize_confidence(max(existing.get("conf", 0), entry.get("conf", 0)))
 
                 elif conflict_resolution == "newest":
-                    if entry.get("last_updated", 0) > existing.get("last_updated", 0):
+                    # For minimal phenotype, use conf as proxy for "newest"
+                    # Use normalized comparison to avoid float16 precision issues
+                    entry_conf = normalize_confidence(entry.get("conf", 0))
+                    existing_conf = normalize_confidence(existing.get("conf", 0))
+                    if entry_conf > existing_conf:
                         merged_data[context_key] = entry.copy()
 
                 elif conflict_resolution == "weighted_average":
-                    # Weighted average based on usage count
-                    w1 = existing.get("usage_count", 1)
-                    w2 = entry.get("usage_count", 1)
+                    # Weighted average based on confidence
+                    w1 = normalize_confidence(existing.get("conf", 0.1))
+                    w2 = normalize_confidence(entry.get("conf", 0.1))
                     total_weight = w1 + w2
 
-                    existing["confidence"] = (
-                        existing.get("confidence", 0) * w1 + entry.get("confidence", 0) * w2
-                    ) / total_weight
-                    existing["exon_mask"] |= entry.get("exon_mask", 0)
-                    existing["usage_count"] = total_weight
-                    existing["last_updated"] = max(existing.get("last_updated", 0), entry.get("last_updated", 0))
+                    # Calculate weighted average and normalize result
+                    weighted_conf = (existing.get("conf", 0) * w1 + entry.get("conf", 0) * w2) / total_weight
+                    existing["conf"] = normalize_confidence(weighted_conf)
+                    existing["mask"] |= entry.get("mask", 0)
 
     # Save merged result
     os.makedirs(os.path.dirname(resolved_dest) or ".", exist_ok=True)
@@ -1121,26 +1036,25 @@ def apply_global_confidence_decay(
     store = OrbitStore(resolved_store_path, append_only=True)
     modified_count = 0
     processed_count = 0
-    current_time = time.time()
 
     for key, entry in store.iter_entries():
         processed_count += 1
-        # ∆t in **days** since last update
-        age_days = (current_time - entry.get("last_updated", current_time)) / (24 * 3600)
-        new_conf = entry.get("confidence", 0.0) * math.exp(-decay_factor * age_days)
+        # For minimal phenotype, we don't have timestamps, so skip age-based decay
+        # Just apply a simple decay factor
+        old_conf = entry.get("conf", 0.0)
+        new_conf = old_conf * decay_factor
         if new_conf < 0.01:  # same floor the tests use
             new_conf = 0.01
 
-        if not dry_run:
-            e = entry.copy()
-            e["confidence"] = new_conf
-            e["context_key"] = key
-            e["context_signature"] = key
-            store.put(key, e)
-            # Invalidate cache for this key if possible
-            if hasattr(store, "_cache_pop"):
-                store._cache_pop(key)
-        modified_count += 1
+        # Normalize confidence for consistent comparison
+        normalized_new_conf = normalize_confidence(new_conf)
+        normalized_old_conf = normalize_confidence(old_conf)
+        if normalized_new_conf != normalized_old_conf:
+            modified_count += 1
+            if not dry_run:
+                entry["conf"] = new_conf  # Keep original precision for storage
+                e = {"key": key, "mask": entry.get("mask", 0), "conf": new_conf}
+                store.put(key, e)
 
     if modified_count > 0 and not dry_run:
         store.commit()
@@ -1189,10 +1103,10 @@ def export_knowledge_statistics(store_path: str, output_path: str, base_path: Pa
 
     stats_data = {
         "total_entries": len(entries),
-        "confidence": [float(e.get("confidence", 0.0)) for e in entries],
-        "memory": [int(e.get("usage_count", 0)) for e in entries],
-        "created_at": [float(e.get("created_at", 0.0)) for e in entries],
-        "last_updated": [float(e.get("last_updated", 0.0)) for e in entries],
+        "state_indices": [int(e.get("key", (0, 0))[0]) for e in entries],
+        "token_ids": [int(e.get("key", (0, 0))[1]) for e in entries],
+        "masks": [int(e.get("mask", 0)) for e in entries],
+        "confidence": [float(e.get("conf", 0.0)) for e in entries],
     }
 
     # Save statistics
@@ -1292,8 +1206,8 @@ def validate_ontology_integrity(
 def prune_and_compact_store(
     store_path: str,
     output_path: Optional[str] = None,
-    max_age_days: Optional[float] = None,
     min_confidence: Optional[float] = None,
+    max_age_days: Optional[float] = None,
     dry_run: bool = False,
     archive_summary_path: Optional[str] = None,
     base_path: Path = PROJECT_ROOT,
@@ -1301,14 +1215,12 @@ def prune_and_compact_store(
     """
     Prune and compact an OrbitStore in one pass.
 
-    This removes phenotypes that are older than `max_age_days` and/or below
-    `min_confidence`, then rewrites the log with only retained entries so
-    stale historical versions are discarded.
+    This removes phenotypes that are below `min_confidence`, then rewrites the log
+    with only retained entries so stale historical versions are discarded.
 
     Args:
         store_path: Base path of the OrbitStore (same value passed to OrbitStore()).
         output_path: Optional destination path. If None, compacts in-place.
-        max_age_days: Remove entries whose last_updated is older than now - max_age_days.
         min_confidence: Remove entries with confidence < min_confidence.
         dry_run: If True, only report what would be removed.
         archive_summary_path: If provided, write JSON summary of pruned entries.
@@ -1333,7 +1245,6 @@ def prune_and_compact_store(
     archive_summary: Dict[str, Any] = {
         "pruned": [],
         "criteria": {
-            "max_age_days": max_age_days,
             "min_confidence": min_confidence,
         },
         "generated_at": now,
@@ -1341,20 +1252,12 @@ def prune_and_compact_store(
         "output_path": destination,
     }
 
-    # Thresholds
-    age_cutoff_ts: Optional[float] = None
-    if max_age_days is not None and max_age_days > 0:
-        age_cutoff_ts = now - (max_age_days * 24 * 3600)
-
     for key, entry in source_store.iter_entries():
         total_entries += 1
-        conf = entry.get("confidence", 0.0)
-        last_updated = entry.get("last_updated", now)
+        conf = entry.get("conf", 0.0)
 
         remove = False
         if min_confidence is not None and conf < min_confidence:
-            remove = True
-        if age_cutoff_ts is not None and last_updated < age_cutoff_ts:
             remove = True
 
         if remove:
@@ -1364,8 +1267,7 @@ def prune_and_compact_store(
                     {
                         "key": list(key),
                         "confidence": float(conf),
-                        "last_updated": float(last_updated),
-                        "usage_count": int(entry.get("usage_count", 0)),
+                        "mask": int(entry.get("mask", 0)),
                     }
                 )
         else:

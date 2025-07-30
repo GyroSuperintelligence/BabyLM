@@ -149,13 +149,51 @@ def bytes_from_ids(ids: list[int]) -> bytes:
                 break
     return _apply_mask(bytes(introns[:pos]))
 
+
+def id_to_bytes(tok_id: int) -> bytes:
+    """Convert a single token ID to bytes via LEB128 and apply the 0xAA mask."""
+    return bytes_from_ids([tok_id])
+
+
+def bytes_to_id(bs: bytes) -> int:
+    """Convert bytes back to a single token ID. Assumes complete token."""
+    # First unmask the bytes, then decode
+    unmasked = _apply_mask(bs)
+    return _bytes_to_ids(unmasked)[0]
+
+
+def bytes_to_ids(bs: bytes) -> List[int]:
+    """Convert bytes back to multiple token IDs. Assumes complete tokens."""
+    # First unmask the bytes, then decode
+    unmasked = _apply_mask(bs)
+    return _bytes_to_ids(unmasked)
+
+
 # SEP token constant
 SEP_ID = 102
+
 
 def sep_bytes(count: int = 1) -> bytes:
     """Generate SEP token bytes for sentence/article boundaries."""
     return bytes_from_ids([SEP_ID] * count)
 
-def encode_with_sep(text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]) -> bytes:
+
+def encode_with_sep(
+    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[2]
+) -> bytes:
     """Encode text and append a single SEP token."""
     return encode(text, name, base_path) + sep_bytes()
+
+
+__all__ = [
+    "encode",
+    "decode",
+    "vocab_size",
+    "id_to_bytes",
+    "bytes_to_id",
+    "bytes_to_ids",
+    "bytes_from_ids",
+    "SEP_ID",
+    "sep_bytes",
+    "encode_with_sep",
+]

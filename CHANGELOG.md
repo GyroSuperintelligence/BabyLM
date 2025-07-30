@@ -4,6 +4,134 @@ Here is a focused and accurate **changelog summary** of all critical changes and
 
 ---
 
+## [0.9.6.7] – 2025-07-30
+
+### 🧠 Token-Aware Minimal Phenotype Architecture: Complete Refactoring
+
+This release implements a fundamental architectural shift from byte-fragment-level learning to whole-token learning, redefining "knowledge" within the system to be token-aware and minimal. The system now leverages the BERT tokenizer's existing knowledge base as an "active internal decoder" rather than just a passive I/O adapter.
+
+#### 🔄 Core Architecture Changes
+
+*   **Breaking Change: Phenotype Key Structure**
+    *   **Old:** `(state_index, intron)` - byte-level learning
+    *   **New:** `(state_index, token_id)` - token-aware learning
+    *   **Impact:** All knowledge is now organized by meaningful token boundaries, eliminating inference overlaps and improving coherent output generation.
+
+*   **Breaking Change: Minimal PhenotypeEntry Structure**
+    *   **Removed:** `phenotype`, `usage_count`, `last_updated`, `created_at`, `governance_signature`, `context_signature`, `_original_context`
+    *   **Kept:** `mask` (uint8), `conf` (float32, stored as float16)
+    *   **Added:** `key` (tuple[int, int]) - ensures consistent key presence
+    *   **Impact:** Dramatically reduced memory footprint and simplified data model.
+
+*   **New: Tokenizer Integration as Active Decoder**
+    *   **Public API:** Added `id_to_bytes`, `bytes_to_id`, `bytes_to_ids` functions to `tokenizer.py`
+    *   **Internal Bridge:** `_TokBridge` class in `intelligence.py` provides seamless tokenizer integration
+    *   **Impact:** Tokenizer now serves as "latent symbolic map" for token IDs, not just protocol adapter.
+
+#### 🧬 Intelligence Engine Overhaul
+
+*   **Removed: Batch Learning Methods**
+    *   Eliminated `batch_learn()` and `learn_by_key()` methods from both `IntelligenceEngine` and `InferenceEngine`
+    *   **Rationale:** Learning now happens automatically per token during egress/ingress cycles
+    *   **Impact:** Simplified API, eliminated redundant learning pathways
+
+*   **Changed: Egress/Ingress Cycle**
+    *   **Egress:** Now learns once per complete token instead of per byte
+    *   **Ingress:** Generates one token at a time with proper token boundaries
+    *   **Impact:** Aligns learning and generation with meaningful token boundaries
+
+*   **New: Token-Aware Learning Logic**
+    *   `process_egress()`: Accumulates bytes until complete token, then learns
+    *   `process_ingress()`: Generates one complete token at a time
+    *   `_choose_intron()`: Now accepts `state_index` parameter for proper context
+
+*   **Fixed: Confidence Calculation Bug**
+    *   **Critical Fix:** Resolved float16 conversion bug that was causing confidence values like `8480.0` instead of proper 0-1 range
+    *   **Default Confidence:** Set to `0.1` for new entries, consistent with learning logic
+    *   **Impact:** Proper confidence values now ensure correct pruning and decay behavior
+
+*   **Fixed: Critical Token Buffer Issue**
+    *   **Critical Fix:** Added robust error handling for incomplete token sequences in `process_egress()`
+    *   **Buffer Protection:** Added `MAX_TOKEN_BYTES = 10` limit to prevent runaway buffer growth
+    *   **Error Recovery:** Implemented try/except/finally block with guaranteed buffer cleanup
+    *   **Stream Reset:** Added `reset_token_buffer()` method for explicit stream resets
+    *   **Impact:** Prevents memory leaks, incorrect token boundaries, and system errors when streams end with incomplete tokens
+
+*   **Fixed: External Adapter Token-Aware Integration**
+    *   **Tokenizer API:** Replaced private `gyrotok._load()` with public `gyrotok.id_to_bytes()` and `gyrotok.decode()`
+    *   **Streaming Logic:** Updated to use proper token-aware decoding for individual tokens
+    *   **Model Version:** Updated to 0.9.6.7 to reflect token-aware architecture
+    *   **Impact:** External adapter now properly aligned with token-aware architecture and uses public APIs
+
+#### 🔧 Inference Engine Updates
+
+*   **Changed: Method Signatures**
+    *   `learn(phenotype_entry, last_intron, state_index)` - renamed parameter for clarity
+    *   `get_phenotype(state_index, token_id)` - now uses token_id instead of intron
+    *   **Impact:** Clearer parameter naming reflects actual functionality
+
+*   **New: Persistence Logic**
+    *   `learn()` method now automatically persists mutations via `self.store.put(key, phenotype_entry)`
+    *   **Impact:** Ensures learning changes are immediately saved to storage
+
+*   **Fixed: Default Phenotype Creation**
+    *   `_create_default_phenotype()` now uses reasonable default confidence (0.1)
+    *   **Impact:** New entries start with proper confidence values
+
+#### 🗄️ Storage Layer Improvements
+
+*   **Updated: Binary Format for Minimal Phenotypes**
+    *   **New Format:** `_STRUCT_FMT = "<IIBHx"` - 12-byte fixed structure
+    *   **Fields:** `state_idx` (uint32), `token_id` (uint32), `mask` (uint8), `conf` (float16)
+    *   **Impact:** Optimized storage for minimal phenotype structure
+
+*   **Fixed: Store Operations**
+    *   Updated `put()`, `merge_phenotype_maps()`, `apply_global_confidence_decay()` for new structure
+    *   Removed `max_age_days` logic (no longer relevant)
+    *   **Impact:** Storage operations now work correctly with minimal phenotypes
+
+#### 🧪 Test Suite Overhaul
+
+*   **Comprehensive Test Updates**
+    *   Updated all tests to use new `(state_index, token_id)` keying
+    *   Replaced `learn_by_key()` calls with two-step `get_phenotype()` + `learn()` process
+    *   Updated phenotype field references: `"confidence"` → `"conf"`, `"exon_mask"` → `"mask"`
+    *   Added "key" field to test entries where required
+
+*   **Fixed: Test Assertions**
+    *   Updated pruning tests to work with append-only stores
+    *   Fixed confidence decay test assertions to match actual return keys
+    *   Updated validation tests to reflect new minimal structure
+
+*   **Removed: Obsolete Tests**
+    *   Deleted `TestBUIngress` class and related tests
+    *   Removed `test_batch_learning_stores_different_phenotypes` (replaced with token-aware version)
+    *   **Impact:** Test suite now accurately reflects current architecture
+
+#### 🔧 Governance Updates
+
+*   **Removed: Governance Signature**
+    *   Eliminated `compute_governance_signature()` function
+    *   Removed `GovernanceSignature` TypedDict
+    *   **Impact:** Simplified governance layer, removed unused complexity
+
+*   **Updated: Exon Product Function**
+    *   `exon_product_from_metadata()` now accepts `mask` and `confidence` parameters
+    *   **Impact:** Aligned with minimal phenotype structure
+
+#### 🎯 Theoretical Impact
+
+This refactoring represents a fundamental shift in how the system understands and processes knowledge:
+
+*   **Token-Aware Learning:** Knowledge is now organized by meaningful linguistic units rather than arbitrary byte fragments
+*   **Minimal Phenotypes:** Reduced complexity allows for more efficient storage and processing
+*   **Active Tokenizer Integration:** The tokenizer serves as an internal decoder, not just an I/O adapter
+*   **Improved Coherence:** Generation and learning are now aligned with token boundaries, reducing inference overlaps
+
+The system now operates on a more linguistically meaningful level while maintaining the core GyroSI physics and Monodromic Fold operations.
+
+---
+
 ## [0.9.6.6] – 2025-07-28
 
 ### Wikipedia Training Pipeline Overhaul

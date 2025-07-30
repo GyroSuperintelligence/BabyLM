@@ -1,20 +1,19 @@
 """
-S1: Governance - Physics & Primitives
+Governance operations for GyroSI - the core physics of recursive structural alignment.
 
-This module contains the fundamental constants and pure functions that define
-the physical laws of the GyroSI system. No engine class is needed here;
-all operations are stateless functions.
+This module implements the fundamental operations of the Common Governance Model (CGM):
+- Monodromic Fold (path-dependent learning)
+- Gyration operations (LI, FG, BG)
+- Exon product computation
+- Byte transcription and transformation
 """
 
 import math
 from functools import reduce
-from typing import List, Tuple, cast, TYPE_CHECKING
+from typing import List, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
-
-if TYPE_CHECKING:
-    from baby.contracts import GovernanceSignature
 
 # Core genetic constants - Section 4.1 & 4.2
 GENE_Mic_S = 0xAA  # 10101010 binary, stateless constant
@@ -42,26 +41,6 @@ EXON_BG_MASK = 0b00011000  # BU‑Eg bits (Backward Gyration)
 EXON_DYNAMIC_MASK = EXON_LI_MASK | EXON_FG_MASK | EXON_BG_MASK  # All active bits
 
 EXON_BROADCAST_MASKS = {"li": EXON_LI_MASK, "fg": EXON_FG_MASK, "bg": EXON_BG_MASK, "dynamic": EXON_DYNAMIC_MASK}
-
-
-def compute_governance_signature(mask: int) -> tuple[int, int, int, int, int]:
-    """
-    Returns an immutable 5‑tuple:
-
-      (neutral_reserve, li_bits, fg_bits, bg_bits, dynamic_population)
-
-    – neutral_reserve : 6 − (# set dynamic bits)
-    – li_bits         : # set bits in LI group   (0‑2)
-    – fg_bits         : # set bits in FG group   (0‑2)
-    – bg_bits         : # set bits in BG group   (0‑2)
-    – dynamic_population = li_bits + fg_bits + bg_bits  (0‑6)
-    """
-    m = mask & 0xFF
-    li = (m & EXON_LI_MASK).bit_count()
-    fg = (m & EXON_FG_MASK).bit_count()
-    bg = (m & EXON_BG_MASK).bit_count()
-    dyn = li + fg + bg
-    return (6 - dyn, li, fg, bg, dyn)
 
 
 def build_masks_and_constants() -> Tuple[int, int, int, List[int]]:
@@ -117,6 +96,10 @@ for i in range(256):
         m ^= BG_MASK
     XFORM_MASK[i] = m
 
+# Note: Full activation (LI + FG + BG) results in mask = 0 due to cancellation:
+# LI applies FULL_MASK, FG applies FG_MASK, BG applies BG_MASK
+# Since FG_MASK ^ BG_MASK = FULL_MASK, the result is FULL_MASK ^ FULL_MASK = 0
+
 
 def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     """
@@ -144,6 +127,9 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     intron_pattern = int(INTRON_BROADCAST_MASKS[intron])
     gyration = temp_state & intron_pattern
     final_state = temp_state ^ gyration
+
+    # Ensure result stays within 48-bit limit
+    final_state &= (1 << 48) - 1
 
     return final_state
 
@@ -233,20 +219,39 @@ def dual(x: int) -> int:
     return (x ^ 0xFF) & MASK
 
 
-def exon_product_from_metadata(sig: "GovernanceSignature", confidence: float, orbit_v: int, v_max: int) -> int:
+def exon_product_from_metadata(mask: int, confidence: float, orbit_v: int, v_max: int) -> int:
     """
-    Compress the rich metadata into an 8‑bit exon‑product.
+    Compress the minimal phenotype metadata into an 8‑bit exon‑product.
 
     Returns an 8‑bit int using the same LI/FG/BG family layout
     as exon_mask but **never persisted**.
+
+    Guarantee: never return 0 so that PAD is not emitted spuriously.
     """
-    li, fg, bg, neutral = sig["li"], sig["fg"], sig["bg"], sig["neutral"]
+    # Extract LI/FG/BG components from the mask
+    li = (mask >> 6) & 0x03  # bits 6-7
+    fg = (mask >> 4) & 0x03  # bits 4-5
+    bg = (mask >> 2) & 0x03  # bits 2-3
+    neutral = mask & 0x03  # bits 0-1
+
     tau = li - bg
     eta = fg - neutral
+
+    # v_max must be positive (it's the maximum orbit size)
+    if v_max <= 0:
+        raise ValueError("v_max must be positive")
+
     scale = confidence * math.sqrt(orbit_v / v_max)
+
     A = int(round(tau * scale)) & 0x0F  # high nibble
     B = int(round(eta * scale)) & 0x0F  # low  nibble
-    return ((A << 4) | B) & 0xFF
+    p = ((A << 4) | B) & 0xFF
+
+    # Fallback: inject minimal chirality if result would be 0
+    if p == 0:
+        p = 0b01000010  # LI bits set (0x42) == cooling intron
+
+    return p
 
 
 def validate_tensor_consistency() -> bool:

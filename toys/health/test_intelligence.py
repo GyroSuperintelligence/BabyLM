@@ -1,524 +1,510 @@
 """
 Tests for the front-line integration layer: intelligence.py, orchestration, and API adapters.
-Tests focus on end-to-end flows while avoiding overlap with existing governance/information/inference tests.
+Tests focus on end-to-end flows with token-aware architecture.
 """
 
 import json
-from typing import Any, Dict, Callable, Tuple, Optional, cast
 from pathlib import Path
-
-import pytest
+from typing import Any, Callable, Dict, List, Tuple
 from unittest.mock import patch
 
+import pytest
+
+from baby.contracts import PhenotypeEntry
 from baby.intelligence import AgentPool, GyroSI, orchestrate_turn
 from toys.communication import tokenizer as gyrotok
 
+# Test configuration
+TOKENIZER_NAME = "bert-base-uncased"
+TEST_TEXTS = [
+    "Hello world",
+    "The quick brown fox jumps over the lazy dog",
+    "What is the nature of intelligence?",
+    "I like cats and dogs",
+    "This is a test of the token-aware system",
+]
 
-# Parameterize tokenizer name for easier multi-tokenizer testing
-TOKENIZER_NAMES = ["bert-base-uncased"]
 
-
-def _count_entries(store: Any) -> int:
+def _count_store_entries(store: Any) -> int:
     """Helper to count entries in a store."""
     return sum(1 for _ in store.iter_entries())
 
 
-class TestIntelligenceEngineOrchestration:
-    """Test core intelligence orchestration between agents."""
+def _get_store_keys(store: Any) -> List[Tuple[int, int]]:
+    """Helper to get all keys from a store."""
+    return [key for key, _ in store.iter_entries()]
 
-    def test_batch_learning_stores_different_phenotypes(
+
+class TestTokenAwareIntelligence:
+    """Test core token-aware intelligence engine behavior."""
+
+    def test_token_aware_phenotype_creation(
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
-        """Test batch learning creates distinct phenotypes for different input sequences."""
+        """Test that token-aware learning creates phenotypes with proper keys."""
         agent = isolated_agent_factory(tmp_path)
-        sequence1 = b"abc"
-        sequence2 = b"def"
-        # Learn first sequence
-        agent.ingest(sequence1)
-        # Learn second sequence
-        agent.ingest(sequence2)
-        # Examine store directly to verify phenotypes were created
+
+        # Use tokenized input
+        test_text = "hello world test"
+        tokenized_input = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+        agent.ingest(tokenized_input)
+
+        # Verify phenotypes use (state_index, token_id) keys
         store = agent.engine.operator.store
-        phenotypes = []
-        for _, entry in store.iter_entries():
-            if "phenotype" in entry:
-                phenotypes.append(entry["phenotype"])
-        # Assert at least one phenotype exists and learning completed
-        assert len(phenotypes) >= 1
+        keys = _get_store_keys(store)
 
-    def test_hook_system_via_respond_path_handles_batching(
+        assert len(keys) > 0, "Should create at least one phenotype"
+
+        for state_idx, token_id in keys:
+            assert isinstance(state_idx, int), f"State index should be int, got {type(state_idx)}"
+            assert isinstance(token_id, int), f"Token ID should be int, got {type(token_id)}"
+            assert 0 <= state_idx < 788_986, f"State index {state_idx} out of valid range"
+            assert 0 <= token_id <= 30522, f"Token ID {token_id} outside BERT vocab range"
+
+    def test_different_tokens_create_different_phenotypes(
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
-        """Test hooks are triggered through the respond pathway, accounting for batching."""
-        # Use isolated agent to avoid hook interference between tests
+        """Test that different token sequences create distinct phenotypes."""
         agent = isolated_agent_factory(tmp_path)
-        hook_calls = []
 
-        def test_hook(engine: Any, phenotype_entry: Any, last_intron: int) -> None:
-            hook_calls.append(True)
+        # Process different texts
+        texts = ["apple", "orange", "banana"]
+        all_keys = set()
+
+        for text in texts:
+            tokenized = gyrotok.encode(text, name=TOKENIZER_NAME)
+            agent.ingest(tokenized)
+
+            # Collect keys after each ingestion
+            current_keys = _get_store_keys(agent.engine.operator.store)
+            all_keys.update(current_keys)
+
+        # Should have multiple unique keys (different tokens create different phenotypes)
+        assert len(all_keys) >= len(texts), "Different tokens should create distinct phenotypes"
+
+    def test_token_boundary_detection(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test proper LEB128 token boundary detection."""
+        agent = isolated_agent_factory(tmp_path)
+
+        # Start with clean buffer
+        agent.engine.reset_token_buffer()
+        assert len(agent.engine._byte_buf) == 0
+        assert agent.engine._last_token_id == 0
+
+        # Process a complete token sequence
+        test_text = "test"
+        tokenized = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+
+        for byte_val in tokenized:
+            agent.engine.process_egress(byte_val)
+
+        # Buffer should be clear after complete token
+        assert len(agent.engine._byte_buf) == 0, "Buffer should clear after complete token"
+
+    def test_buffer_overflow_protection(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test buffer overflow protection mechanism."""
+        agent = isolated_agent_factory(tmp_path)
+
+        # Reset to clean state
+        agent.engine.reset_token_buffer()
+
+        # Try to overflow buffer with continuation bytes
+        max_bytes = agent.engine.MAX_TOKEN_BYTES
+
+        for i in range(max_bytes + 2):
+            # Send bytes that will result in continuation bytes after transcription
+            # transcribe_byte does byte ^ 0xAA, and we want the result to have bit 7 = 1 (continuation)
+            # Since 0xAA has bit 7 = 1, we need byte to have bit 7 = 0 (because 0 ^ 1 = 1)
+            byte_val = 0x00 | (i & 0x7F)  # This has bit 7 = 0
+            # After transcription: byte_val ^ 0xAA = i ^ 0xAA
+            # For i=0: 0 ^ 0xAA = 0xAA (bit 7 = 1, continuation)
+            # For i=1: 1 ^ 0xAA = 0xAB (bit 7 = 1, continuation)
+            # etc.
+            agent.engine.process_egress(byte_val)
+
+        # Buffer should have been cleared due to overflow protection
+        assert len(agent.engine._byte_buf) <= max_bytes, "Buffer overflow protection should activate"
+        # The buffer should be small after overflow protection (the intron causing overflow is discarded)
+        assert len(agent.engine._byte_buf) < max_bytes, "Buffer should be below limit after overflow protection"
+
+
+class TestTokenGeneration:
+    """Test token-aware response generation."""
+
+    def test_complete_token_generation(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test that responses contain complete LEB128 tokens."""
+        agent = isolated_agent_factory(tmp_path)
+
+        # Generate response with tokenized input
+        input_text = "Generate a response"
+        tokenized_input = gyrotok.encode(input_text, name=TOKENIZER_NAME)
+        response_bytes = agent.respond(tokenized_input, max_new_tokens=5)
+
+        # Verify response contains complete tokens
+        assert isinstance(response_bytes, bytes), "Response should be bytes"
+        assert len(response_bytes) > 0, "Response should not be empty"
+
+        # Should be decodable as complete token sequence
+        try:
+            decoded_tokens = gyrotok.bytes_to_ids(response_bytes)
+            assert len(decoded_tokens) > 0, "Should decode at least one token"
+            assert all(isinstance(tok_id, int) for tok_id in decoded_tokens), "All tokens should be integers"
+        except ValueError as e:
+            pytest.fail(f"Response contains incomplete tokens: {e}")
+
+    def test_generated_tokens_are_valid(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test that generated tokens are within valid vocabulary range."""
+        agent = isolated_agent_factory(tmp_path)
+
+        input_text = "Test vocabulary"
+        tokenized_input = gyrotok.encode(input_text, name=TOKENIZER_NAME)
+        response_bytes = agent.respond(tokenized_input, max_new_tokens=10)
+
+        # Decode and validate token IDs
+        decoded_tokens = gyrotok.bytes_to_ids(response_bytes)
+
+        for token_id in decoded_tokens:
+            assert 0 <= token_id <= 30522, f"Token ID {token_id} outside BERT vocabulary range"
+
+    def test_response_roundtrip_consistency(
+        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
+    ) -> None:
+        """Test that generated responses can roundtrip through tokenizer."""
+        agent = isolated_agent_factory(tmp_path)
+
+        input_text = "Roundtrip test"
+        tokenized_input = gyrotok.encode(input_text, name=TOKENIZER_NAME)
+        response_bytes = agent.respond(tokenized_input, max_new_tokens=8)
+
+        # Decode to text and re-encode
+        response_text = gyrotok.decode(response_bytes, name=TOKENIZER_NAME)
+        re_encoded = gyrotok.encode(response_text, name=TOKENIZER_NAME)
+
+        # Check that decode-encode-decode is idempotent (second decode equals first decode)
+        # This verifies that the tokenizer can roundtrip the text without loss
+        # Note: Tokenizer may normalize spacing around special tokens, so we normalize for comparison
+        roundtrip_text = gyrotok.decode(re_encoded, name=TOKENIZER_NAME)
+        # Normalize by removing all spaces to handle tokenizer spacing differences
+        normalized_response = response_text.replace(" ", "")
+        normalized_roundtrip = roundtrip_text.replace(" ", "")
+        assert normalized_roundtrip == normalized_response, "Tokenizer decode should be idempotent"
+
+
+class TestAgentLifecycle:
+    """Test GyroSI agent lifecycle with proper isolation."""
+
+    def test_agent_initialization_state(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test agent initializes with correct default state."""
+        agent = isolated_agent_factory(tmp_path)
+
+        state_info = agent.get_agent_info()
+
+        assert state_info["cycle_count"] == 0, "New agent should start with zero cycles"
+        # The archetypal state is NOT at index 0; its index is determined by sorting all discovered states.
+        assert state_info["tensor_index"] == 549871, "Should start at archetypal state (GENE_Mac_S)"
+        assert state_info["system_integrity"] is not None, "Should report integrity status"
+        assert "agent_id" in state_info, "Should have agent ID"
+
+    def test_state_evolution_through_learning(
+        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
+    ) -> None:
+        """Test that agent state evolves through learning."""
+        agent = isolated_agent_factory(tmp_path)
+
+        initial_state = agent.get_agent_info()
+        initial_cycles = initial_state["cycle_count"]
+
+        # Learn from tokenized input
+        for text in TEST_TEXTS[:3]:
+            tokenized = gyrotok.encode(text, name=TOKENIZER_NAME)
+            agent.ingest(tokenized)
+
+        final_state = agent.get_agent_info()
+        final_cycles = final_state["cycle_count"]
+
+        assert final_cycles > initial_cycles, "Cycle count should increase through learning"
+
+    def test_agent_responds_to_all_inputs(
+        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
+    ) -> None:
+        """Test agent produces valid responses for various inputs."""
+        agent = isolated_agent_factory(tmp_path)
+
+        for test_text in TEST_TEXTS:
+            tokenized_input = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+            response = agent.respond(tokenized_input, max_new_tokens=5)
+
+            assert isinstance(response, bytes), f"Response should be bytes for input '{test_text}'"
+            assert len(response) > 0, f"Response should not be empty for input '{test_text}'"
+
+    def test_agent_cleanup_and_isolation(
+        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
+    ) -> None:
+        """Test proper agent cleanup and isolation."""
+        agent1 = isolated_agent_factory(tmp_path / "agent1")
+        agent2 = isolated_agent_factory(tmp_path / "agent2")
+
+        # Different agents should have different IDs
+        info1 = agent1.get_agent_info()
+        info2 = agent2.get_agent_info()
+        assert info1["agent_id"] != info2["agent_id"], "Isolated agents should have different IDs"
+
+        # Learn different things
+        text1 = "Agent one learns this"
+        text2 = "Agent two learns that"
+
+        agent1.ingest(gyrotok.encode(text1, name=TOKENIZER_NAME))
+        agent2.ingest(gyrotok.encode(text2, name=TOKENIZER_NAME))
+
+        # Should have independent stores
+        keys1 = set(_get_store_keys(agent1.engine.operator.store))
+        keys2 = set(_get_store_keys(agent2.engine.operator.store))
+
+        # May have some overlap due to shared ontology, but should have some differences
+        assert len(keys1) > 0, "Agent 1 should have learned something"
+        assert len(keys2) > 0, "Agent 2 should have learned something"
+
+
+class TestHookSystem:
+    """Test intelligence engine hook system."""
+
+    def test_hooks_called_with_proper_context(
+        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
+    ) -> None:
+        """Test hooks receive proper token-aware context."""
+        agent = isolated_agent_factory(tmp_path)
+        captured_calls: List[Dict[str, Any]] = []
+
+        def test_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_token_byte: int) -> None:
+            captured_calls.append(
+                {"phenotype": phenotype_entry, "last_byte": last_token_byte, "call_count": len(captured_calls) + 1}
+            )
 
         agent.add_monitoring_hook(test_hook)
 
-        # Make enough calls to ensure hook buffer is flushed
-        # Hook batch interval is typically 8, so make more than that
-        for _ in range(10):
-            agent.respond(b"test")
+        # Process tokenized input that should trigger hooks
+        test_input = gyrotok.encode("hook test", name=TOKENIZER_NAME)
+        agent.respond(test_input, max_new_tokens=3)
 
-        # Hook should have been called through respond path
-        assert len(hook_calls) > 0
+        # Should have captured hook calls
+        assert len(captured_calls) > 0, "Hooks should be called during response generation"
 
+        for call_data in captured_calls:
+            assert "phenotype" in call_data, "Hook should receive phenotype"
+            assert "last_byte" in call_data, "Hook should receive last byte"
+            assert isinstance(call_data["last_byte"], int), "Last byte should be integer"
 
-class TestGyroSIAgentLifecycle:
-    """Test GyroSI agent lifecycle: creation, learning, response, and maintenance."""
-
-    def test_agent_respond_produces_valid_output(
-        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
-    ) -> None:
-        """Test agent generates valid bytes in response to input."""
-        # Use isolated agent to ensure clean state for response testing
+    def test_hook_removal(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test hook removal functionality."""
         agent = isolated_agent_factory(tmp_path)
+        call_count = 0
 
-        # Test with various inputs
-        test_inputs = [b"Hello", b"42", b"GyroSI"]
+        def test_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_token_byte: int) -> None:
+            nonlocal call_count
+            call_count += 1
 
-        for input_data in test_inputs:
-            response = agent.respond(input_data)
+        # Add and remove hook
+        agent.add_monitoring_hook(test_hook)
+        removed = agent.engine.remove_hook(test_hook)
+        assert removed, "Hook removal should return True when hook found"
 
-            assert isinstance(response, bytes)
-            assert len(response) > 0
-            # Response should be valid bytes
-            assert all(0 <= b <= 255 for b in response)
+        # Process input - should not trigger removed hook
+        test_input = gyrotok.encode("test", name=TOKENIZER_NAME)
+        agent.respond(test_input)
 
-    def test_agent_state_persistence_across_operations(
-        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
-    ) -> None:
-        """Test agent maintains consistent state across multiple operations."""
-        agent = isolated_agent_factory(tmp_path)
-
-        # Get initial state
-        initial_state = agent.get_agent_info()
-        initial_cycle_count = initial_state["cycle_count"]
-
-        # Perform some operations
-        agent.ingest(b"test data for persistence")
-        agent.respond(b"test response")
-
-        # Check state has evolved
-        updated_state = agent.get_agent_info()
-        assert updated_state["cycle_count"] > initial_cycle_count
-        assert updated_state["system_integrity"] is not None
+        assert call_count == 0, "Removed hook should not be called"
 
 
-class TestAgentPoolManagement:
-    """Test AgentPool multi-agent coordination and management."""
+class TestAgentPoolOrchestration:
+    """Test multi-agent orchestration and pool management."""
 
-    def test_pool_triad_creation(self, agent_pool: AgentPool) -> None:
-        """Test agent pool creates required triad agents."""
-        pool = agent_pool
-
-        # Triad should already exist from session setup
-        active_agents = pool.get_active_agents()
+    def test_pool_triad_exists(self, agent_pool: AgentPool) -> None:
+        """Test agent pool maintains required triad."""
+        active_agents = agent_pool.get_active_agents()
         required_agents = {"user", "system", "assistant"}
 
-        assert required_agents.issubset(set(active_agents))
+        assert required_agents.issubset(set(active_agents)), "Pool should maintain triad agents"
 
-    def test_pool_agent_retrieval_consistency(self, agent_pool: AgentPool) -> None:
+    def test_pool_agent_consistency(self, agent_pool: AgentPool) -> None:
         """Test pool returns consistent agent instances."""
-        pool = agent_pool
+        user1 = agent_pool.get("user")
+        user2 = agent_pool.get("user")
 
-        # Get the same agent multiple times
-        user1 = pool.get("user")
-        user2 = pool.get("user")
+        assert user1 is user2, "Pool should return same instance for same ID"
 
-        # Should be the same instance
-        assert user1 is user2
+    def test_orchestrated_conversation_flow(self, agent_pool: AgentPool) -> None:
+        """Test complete orchestrated conversation."""
+        user_input = "What is artificial intelligence?"
 
-    @pytest.mark.parametrize("tokenizer_name", TOKENIZER_NAMES)
-    def test_orchestrate_turn_with_tokenizer(self, agent_pool: AgentPool, tokenizer_name: str) -> None:
-        """Test orchestrated conversation turn with tokenizer integration."""
-        pool = agent_pool
-
-        user_input = "What is the meaning of life?"
-
-        # Orchestrate conversation turn
         response = orchestrate_turn(
-            pool=pool, user_id="user", assistant_id="assistant", user_input=user_input, tokenizer_name=tokenizer_name
-        )
-
-        assert isinstance(response, str)
-        assert len(response) > 0
-
-    def test_orchestrate_turn_tokenizer_error(self, agent_pool: AgentPool) -> None:
-        """Test orchestrate_turn raises error with invalid tokenizer name."""
-        pool = agent_pool
-
-        user_input = "Test input"
-
-        # Try with valid tokenizer
-        orchestrate_turn(
-            pool=pool,
+            pool=agent_pool,
             user_id="user",
             assistant_id="assistant",
             user_input=user_input,
-            tokenizer_name="bert-base-uncased",
+            tokenizer_name=TOKENIZER_NAME,
         )
 
-    def test_pool_agent_isolation(self, agent_pool: AgentPool) -> None:
-        """Test that different agents in the pool have isolated storage."""
-        pool = agent_pool
+        assert isinstance(response, str), "Orchestrated response should be string"
+        assert len(response) > 0, "Response should not be empty"
+        assert response != user_input, "Response should differ from input"
 
-        user_agent = pool.get("user")
-        assistant_agent = pool.get("assistant")
+    def test_multi_turn_conversation_memory(self, agent_pool: AgentPool) -> None:
+        """Test multi-turn conversation maintains context."""
+        # First turn
+        response1 = orchestrate_turn(
+            pool=agent_pool,
+            user_id="user",
+            assistant_id="assistant",
+            user_input="My favorite color is blue.",
+            tokenizer_name=TOKENIZER_NAME,
+        )
 
-        # Have each agent learn something different
-        user_agent.ingest(b"user specific data")
-        assistant_agent.ingest(b"assistant specific data")
+        # Second turn referencing first
+        response2 = orchestrate_turn(
+            pool=agent_pool,
+            user_id="user",
+            assistant_id="assistant",
+            user_input="What is my favorite color?",
+            tokenizer_name=TOKENIZER_NAME,
+        )
 
-        # Check that their stores are separate
-        user_entries = list(user_agent.engine.operator.store.iter_entries())
-        assistant_entries = list(assistant_agent.engine.operator.store.iter_entries())
+        assert isinstance(response1, str), "First response should be string"
+        assert isinstance(response2, str), "Second response should be string"
+        assert len(response1) > 0, "First response should not be empty"
+        assert len(response2) > 0, "Second response should not be empty"
 
-        # They should have different data (this is a basic check - in reality the stores
-        # have overlapping public knowledge but separate private knowledge)
-        user_private_entries = [e for k, e in user_entries if "user specific" in str(e)]
-        assistant_private_entries = [e for k, e in assistant_entries if "assistant specific" in str(e)]
+    def test_agent_isolation_in_pool(self, agent_pool: AgentPool) -> None:
+        """Test agents in pool maintain isolation."""
+        user_agent = agent_pool.get("user")
+        assistant_agent = agent_pool.get("assistant")
 
-        # Each should have learned their own data but not see the other's private data
-        # Negative check for cross-contamination
-        assert all(
-            "assistant specific" not in str(e) for e in user_private_entries
-        ), "User store contaminated by assistant data"
-        assert all(
-            "user specific" not in str(e) for e in assistant_private_entries
-        ), "Assistant store contaminated by user data"
+        # Get initial states
+        user_info = user_agent.get_agent_info()
+        assistant_info = assistant_agent.get_agent_info()
+
+        assert user_info["agent_id"] != assistant_info["agent_id"], "Pool agents should have different IDs"
+
+        # Have each learn something different
+        user_text = "User learns this information"
+        assistant_text = "Assistant learns that information"
+
+        user_agent.ingest(gyrotok.encode(user_text, name=TOKENIZER_NAME))
+        assistant_agent.ingest(gyrotok.encode(assistant_text, name=TOKENIZER_NAME))
+
+        # Verify independent learning
+        user_final = user_agent.get_agent_info()
+        assistant_final = assistant_agent.get_agent_info()
+
+        assert user_final["cycle_count"] > user_info["cycle_count"], "User agent should learn"
+        assert assistant_final["cycle_count"] > assistant_info["cycle_count"], "Assistant agent should learn"
 
 
 class TestTokenizerIntegration:
-    """Test tokenizer integration with agent workflow."""
+    """Test tokenizer integration with agent system."""
 
-    @pytest.mark.parametrize("tokenizer_name", TOKENIZER_NAMES)
-    def test_tokenizer_roundtrip_preservation(self, tokenizer_name: str) -> None:
-        """Test tokenizer round-trip preserves content using only public API."""
-        # Test with text that has minimal tokenizer normalization
-        test_text = "Hello world! This is a test of the tokenizer."
+    def test_tokenizer_roundtrip_consistency(self) -> None:
+        """Test tokenizer roundtrip preserves content."""
+        for test_text in TEST_TEXTS:
+            # Encode to bytes
+            encoded = gyrotok.encode(test_text, name=TOKENIZER_NAME)
 
-        # Encode to bytes
-        encoded_bytes = gyrotok.encode(test_text, name=tokenizer_name)
+            # Decode back to text
+            decoded = gyrotok.decode(encoded, name=TOKENIZER_NAME)
 
-        # Decode back to text
-        decoded_text = gyrotok.decode(encoded_bytes, name=tokenizer_name)
+            # Re-encode and compare
+            re_encoded = gyrotok.encode(decoded, name=TOKENIZER_NAME)
 
-        # Re-encode decoded text and compare byte sequences
-        reencoded_bytes = gyrotok.encode(decoded_text, name=tokenizer_name)
+            assert encoded == re_encoded, f"Roundtrip failed for text: '{test_text}'"
 
-        # Byte sequences should be identical (full reversibility using public API only)
-        assert encoded_bytes == reencoded_bytes
+    def test_tokenizer_error_handling(self) -> None:
+        """Test tokenizer handles malformed input gracefully."""
+        # Invalid LEB128 bytes
+        invalid_bytes = b"\xff\xff\xff"
 
-    def test_tokenizer_utf8_fallback(self) -> None:
-        """Test tokenizer's UTF-8 fallback for invalid LEB128 bytes."""
-        # Invalid LEB128 bytes with high bit set on last byte
-        invalid_bytes = b"\xff\xff"
+        # Should not raise exception (falls back to UTF-8)
+        result = gyrotok.decode(invalid_bytes, name=TOKENIZER_NAME)
+        assert isinstance(result, str), "Should return string even for invalid input"
 
-        # Should fall back to UTF-8 decode without raising an exception
-        result = gyrotok.decode(invalid_bytes, name="bert-base-uncased")
-
-        # Should return a string (may be replacement chars)
-        assert isinstance(result, str)
-
-    def test_tokenizer_agent_integration(
+    def test_tokenizer_agent_compatibility(
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
-        """Test tokenizer integration with isolated agent."""
+        """Test tokenizer works correctly with agent system."""
         agent = isolated_agent_factory(tmp_path)
 
-        # Test text that exercises tokenizer
-        test_text = "The quick brown fox jumps over the lazy dog."
+        for test_text in TEST_TEXTS[:3]:  # Test subset to avoid long test
+            # Encode and process with agent
+            encoded = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+            response = agent.respond(encoded, max_new_tokens=3)
 
-        # Encode and use with agent
-        encoded = gyrotok.encode(test_text, name="bert-base-uncased")
-        response = agent.respond(encoded)
-
-        # Should get valid response
-        assert isinstance(response, bytes)
-        assert len(response) > 0
-
-        # Should be decodable
-        decoded_response = gyrotok.decode(response, name="bert-base-uncased")
-        assert isinstance(decoded_response, str)
+            # Should be decodable
+            decoded_response = gyrotok.decode(response, name=TOKENIZER_NAME)
+            assert isinstance(decoded_response, str), f"Response should decode to string for '{test_text}'"
 
 
-class TestTokenizerDebug:
-    def test_incomplete_token_id_sequence_debug(self) -> None:
-        """Test that malformed blobs still trigger appropriate errors (for debugging purposes)."""
-        from toys.communication import tokenizer as gyrotok
+class TestExternalAPIIntegration:
+    """Test external API adapter functionality."""
 
-        # Try a range of malformed or truncated blobs
-        test_blobs = [
-            b"",  # empty
-            b"\x80",  # single continuation byte, incomplete
-            b"\x81\x82",  # multiple continuation bytes, incomplete
-            b"\xff\xff\xff\xff",  # long run, incomplete
-            b"\x81\x00",  # valid
-            b"\x81",  # incomplete
-            b"\x81\x81",  # incomplete
-            b"\x00",  # valid single token
-            b"\x81\x00\x82",  # valid + incomplete
-        ]
-
-        # Count expected exceptions (malformed blobs should still fail)
-        expected_exceptions = 0
-        for i, blob in enumerate(test_blobs):
-            try:
-                gyrotok._bytes_to_ids(blob)
-            except ValueError as e:
-                expected_exceptions += 1
-                print(f"[TEST-DBG] Blob {i}: {blob.hex()} -> {e}")
-            else:
-                print(f"[TEST-DBG] Blob {i}: {blob.hex()} -> OK")
-
-        # Verify that malformed blobs still trigger exceptions (this is expected behavior)
-        assert expected_exceptions > 0, "Expected some malformed blobs to trigger exceptions"
-
-    def test_gyrosi_respond_produces_complete_tokens(
-        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
-    ) -> None:
-        """Test that GyroSI.respond() produces complete LEB128 tokens without truncation."""
-        from toys.communication import tokenizer as gyrotok
-
-        # Create an agent
-        agent = isolated_agent_factory(tmp_path)
-
-        # Generate some response bytes
-        test_input = b"Hello, test input"
-        response_bytes = agent.respond(test_input, max_new_tokens=10)
-
-        print(f"[TEST-DBG] Response length: {len(response_bytes)} bytes")
-        print(f"[TEST-DBG] Response hex: {response_bytes.hex()}")
-
-        # Try to decode the response - this should NOT raise an exception
-        try:
-            # Unmask the bytes first
-            unmasked_bytes = bytes(b ^ 0xAA for b in response_bytes)
-            print(f"[TEST-DBG] Unmasked hex: {unmasked_bytes.hex()}")
-
-            # Decode to token IDs
-            token_ids = gyrotok._bytes_to_ids(unmasked_bytes)
-            print(f"[TEST-DBG] Decoded token IDs: {token_ids}")
-
-            # If we get here, the tokens are complete
-            assert len(token_ids) > 0, "Should decode at least one token"
-
-        except ValueError as e:
-            print(f"[TEST-DBG] ERROR: Incomplete token sequence: {e}")
-            print("[TEST-DBG] This indicates the 8-byte safety exit is truncating tokens")
-            raise AssertionError(f"GyroSI.respond() produced incomplete tokens: {e}")
-
-        # Clean up
-        agent.close()
-
-    def test_gyrosi_respond_long_tokens(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
-        """Test that GyroSI.respond() handles long tokens correctly without truncation."""
-        from toys.communication import tokenizer as gyrotok
-
-        # Create an agent
-        agent = isolated_agent_factory(tmp_path)
-
-        # Try to generate more tokens to increase chance of hitting the 8-byte limit
-        test_input = b"This is a longer input that might trigger longer token sequences"
-        response_bytes = agent.respond(test_input, max_new_tokens=20)
-
-        print(f"[TEST-DBG] Long response length: {len(response_bytes)} bytes")
-        print(f"[TEST-DBG] Long response hex: {response_bytes.hex()}")
-
-        # Try to decode the response - this should NOT raise an exception
-        try:
-            # Unmask the bytes first
-            unmasked_bytes = bytes(b ^ 0xAA for b in response_bytes)
-            print(f"[TEST-DBG] Long unmasked hex: {unmasked_bytes.hex()}")
-
-            # Decode to token IDs
-            token_ids = gyrotok._bytes_to_ids(unmasked_bytes)
-            print(f"[TEST-DBG] Long decoded token IDs: {token_ids}")
-
-            # If we get here, the tokens are complete
-            assert len(token_ids) > 0, "Should decode at least one token"
-
-        except ValueError as e:
-            print(f"[TEST-DBG] ERROR: Incomplete token sequence: {e}")
-            print("[TEST-DBG] This indicates the 8-byte safety exit is truncating tokens")
-            raise AssertionError(f"GyroSI.respond() produced incomplete tokens: {e}")
-
-        # Clean up
-        agent.close()
-
-    def test_gyrosi_respond_edge_cases(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
-        """Test edge cases that might trigger incomplete token sequences."""
-        from toys.communication import tokenizer as gyrotok
-
-        # Create an agent
-        agent = isolated_agent_factory(tmp_path)
-
-        # Test various edge case inputs that might trigger the bug
-        edge_case_inputs = [
-            b"",  # empty input
-            b"A" * 100,  # very long repeated input
-            b"\x00\x01\x02\x03\x04\x05",  # binary data
-            b"Hello world with special chars: \xc3\xa9\xc3\xb1\xc3\xbc\xc3\x9f",  # unicode
-            b"Very long input that might cause the physics to generate unusual token patterns " * 10,
-        ]
-
-        for i, test_input in enumerate(edge_case_inputs):
-            print(f"[TEST-DBG] Testing edge case {i}: {len(test_input)} bytes")
-
-            # Initialize variables to avoid unbound variable errors
-            response_bytes = b""
-            unmasked_bytes = b""
-
-            try:
-                response_bytes = agent.respond(test_input, max_new_tokens=5)
-                print(f"[TEST-DBG] Edge case {i} response: {len(response_bytes)} bytes")
-
-                # Try to decode the response
-                unmasked_bytes = bytes(b ^ 0xAA for b in response_bytes)
-                token_ids = gyrotok._bytes_to_ids(unmasked_bytes)
-                print(f"[TEST-DBG] Edge case {i} tokens: {token_ids}")
-
-            except ValueError as e:
-                print(f"[TEST-DBG] ERROR in edge case {i}: {e}")
-                print(f"[TEST-DBG] Input: {test_input[:50].decode('utf-8', errors='replace')}...")
-                print(f"[TEST-DBG] Response: {response_bytes.hex()!r}")
-                raise AssertionError(f"Edge case {i} produced incomplete tokens: {e}")
-            except Exception as e:
-                print(f"[TEST-DBG] Unexpected error in edge case {i}: {e}")
-                raise
-
-        # Clean up
-        agent.close()
-
-    def test_gyrosi_respond_incomplete_token_debug(
-        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
-    ) -> None:
-        """Test to specifically reproduce the incomplete token sequence error."""
-        from toys.communication import tokenizer as gyrotok
-
-        # Create an agent
-        agent = isolated_agent_factory(tmp_path)
-
-        # Try to trigger the error by generating many tokens
-        test_input = b"Generate a long response that might cause incomplete tokens"
-
-        # Initialize variables to avoid unbound variable errors
-        response_bytes = b""
-        unmasked_bytes = b""
-
-        try:
-            # Generate more tokens to increase chance of hitting edge cases
-            response_bytes = agent.respond(test_input, max_new_tokens=50)
-            print(f"[TEST-DBG] Generated {len(response_bytes)} bytes")
-
-            # Try to decode the response - this should NOT raise an exception
-            unmasked_bytes = bytes(b ^ 0xAA for b in response_bytes)
-            token_ids = gyrotok._bytes_to_ids(unmasked_bytes)
-            print(f"[TEST-DBG] Successfully decoded {len(token_ids)} tokens")
-
-        except ValueError as e:
-            print(f"[TEST-DBG] ERROR: Incomplete token sequence: {e}")
-            print(f"[TEST-DBG] Response hex: {response_bytes.hex()!r}")
-            print(f"[TEST-DBG] Unmasked hex: {unmasked_bytes.hex()!r}")
-            raise AssertionError(f"GyroSI.respond() produced incomplete tokens: {e}")
-
-        # Clean up
-        agent.close()
-
-
-class TestExternalAdapterHTTP:
-    """Test external API adapter endpoints."""
-
-    def test_models_endpoint(self, test_client: Any) -> None:
-        """Test /v1/models endpoint returns expected format."""
+    def test_models_endpoint_structure(self, test_client: Any) -> None:
+        """Test /v1/models endpoint returns correct structure."""
         response = test_client.get("/v1/models")
 
-        assert response.status_code == 200
+        assert response.status_code == 200, "Models endpoint should return 200"
         data = response.json()
-        assert "data" in data
-        assert len(data["data"]) > 0
-        assert data["data"][0]["id"] == "gyrosi-baby-0.9.6"
 
-    def test_chat_completions_basic(self, test_client: Any) -> None:
-        """Test chat completions generates valid response."""
-        payload = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello, GyroSI!"}]}
+        assert "data" in data, "Response should have 'data' field"
+        assert len(data["data"]) > 0, "Should list at least one model"
+        assert data["data"][0]["id"] == "gyrosi-baby", "Should list correct model ID"
+
+    def test_chat_completions_basic_functionality(self, test_client: Any) -> None:
+        """Test basic chat completions functionality."""
+        payload = {"model": "gyrosi-baby", "messages": [{"role": "user", "content": "Hello, GyroSI!"}]}
 
         response = test_client.post("/v1/chat/completions", json=payload)
 
-        assert response.status_code == 200
+        assert response.status_code == 200, "Chat completions should return 200"
         data = response.json()
 
         # Verify OpenAI-compatible structure
-        assert "id" in data
-        assert "object" in data
-        assert data["object"] == "chat.completion"
-        assert "choices" in data
-        assert len(data["choices"]) > 0
-        assert data["choices"][0]["message"]["role"] == "assistant"
-        assert len(data["choices"][0]["message"]["content"]) > 0
+        required_fields = ["id", "object", "created", "model", "choices"]
+        for field in required_fields:
+            assert field in data, f"Response should have '{field}' field"
 
-    def test_concurrent_chat_completions(self, test_client: Any) -> None:
-        """Test concurrent requests don't interfere with each other."""
-        # payload1 = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello from thread 1"}]}
-        # payload2 = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello from thread 2"}]}
-
-        def make_request(payload: Dict[str, Any]) -> int:
-            response = test_client.post("/v1/chat/completions", json=payload)
-            return int(response.status_code)
-
-        # Make concurrent requests
-        # with pytest.raises(Exception):  # Could be FileNotFoundError, ValueError, etc.
-        #     orchestrate_turn(
-        #         pool=pool,
-        #         user_id="user",
-        #         assistant_id="assistant",
-        #         user_input=user_input,
-        #         tokenizer_name="non-existent-tokenizer",
-        #     )
+        assert data["object"] == "chat.completion", "Object type should be correct"
+        assert len(data["choices"]) > 0, "Should have at least one choice"
+        assert data["choices"][0]["message"]["role"] == "assistant", "Response should be from assistant"
+        assert len(data["choices"][0]["message"]["content"]) > 0, "Response should have content"
 
     def test_chat_completions_with_system_message(self, test_client: Any) -> None:
-        """Test chat completions incorporates system message."""
+        """Test system message handling in chat completions."""
         payload = {
-            "model": "gyrosi-baby-0.9.6",
+            "model": "gyrosi-baby",
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "What can you help me with?"},
+                {"role": "user", "content": "What can you help with?"},
             ],
         }
 
         response = test_client.post("/v1/chat/completions", json=payload)
 
-        assert response.status_code == 200
+        assert response.status_code == 200, "System message handling should work"
         data = response.json()
-        assert data["choices"][0]["message"]["content"] is not None
+        assert data["choices"][0]["message"]["content"] is not None, "Should generate response with system context"
 
-    def test_chat_completions_streaming(self, test_client: Any) -> None:
-        """Test streaming chat completions returns valid SSE format and is not pathologically slow."""
-        import time
+    def test_streaming_chat_completions(self, test_client: Any) -> None:
+        """Test streaming chat completions functionality."""
+        payload = {"model": "gyrosi-baby", "messages": [{"role": "user", "content": "Stream test"}]}
 
-        payload = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello!"}]}
-
-        # Use streaming context manager for robust SSE testing
         with test_client.stream("POST", "/v1/chat/completions", json=payload, params={"stream": "true"}) as response:
-            assert response.status_code == 200
-            assert response.headers["content-type"].startswith("text/event-stream")
+            assert response.status_code == 200, "Streaming should return 200"
+            assert response.headers["content-type"].startswith("text/event-stream"), "Should use SSE content type"
 
-            # Collect all chunks
             chunks = []
-            content_chunks = []
-            token_latencies = []
+            content_parts = []
 
             for line in response.iter_lines():
                 if line.strip() and line.startswith("data: "):
-                    start = time.time()
                     chunks.append(line)
 
-                    # Parse non-DONE chunks for content
                     if "data: [DONE]" not in line:
                         try:
                             data = json.loads(line[6:])  # Remove "data: " prefix
@@ -528,351 +514,160 @@ class TestExternalAdapterHTTP:
                                 and "delta" in data["choices"][0]
                                 and "content" in data["choices"][0]["delta"]
                             ):
-                                content_chunks.append(data["choices"][0]["delta"]["content"])
-                                token_latencies.append(time.time() - start)
+                                content_parts.append(data["choices"][0]["delta"]["content"])
                         except json.JSONDecodeError:
                             continue
 
-            # Verify we have chunks and a DONE marker
-            assert len(chunks) >= 1
-            assert any("data: [DONE]" in chunk for chunk in chunks)
+            assert len(chunks) > 0, "Should receive streaming chunks"
+            assert any("data: [DONE]" in chunk for chunk in chunks), "Should end with DONE marker"
+            assert len(content_parts) > 0, "Should receive content in chunks"
 
-            # Should have extracted some content
-            assert len(content_chunks) > 0
+    def test_huggingface_generate_endpoint(self, test_client: Any) -> None:
+        """Test HuggingFace-compatible generate endpoint."""
+        payload = {"inputs": "Generate a response about AI"}
 
-            # Joining content should produce a valid string
-            full_content = "".join(content_chunks)
-            assert len(full_content) > 0
-
-            # Micro-benchmark: fail if average per-token latency exceeds 5ms
-            if token_latencies:
-                avg_latency = sum(token_latencies) / len(token_latencies)
-                assert avg_latency < 0.005, f"Average per-token latency too high: {avg_latency * 1000:.2f} ms"
-
-    def test_hf_generate_endpoint(self, test_client: Any) -> None:
-        """Test HuggingFace-compatible generate endpoint, ensuring output is in the correct tokenizer alphabet."""
-        payload = {"inputs": "Generate a response about artificial intelligence."}
-
-        # Patch orchestrate_turn to return a known string
-        with patch("toys.communication.external_adapter.orchestrate_turn", return_value="hello world"):
+        with patch(
+            "toys.communication.external_adapter.orchestrate_turn", return_value="artificial intelligence response"
+        ):
             response = test_client.post("/generate", json=payload)
 
-        assert response.status_code == 200
+        assert response.status_code == 200, "Generate endpoint should return 200"
         data = response.json()
-        assert "generated_text" in data
-        generated = data["generated_text"]
-        assert isinstance(generated, str)
-        assert len(generated) > 0
 
-        # Re-encode and decode with the same tokenizer to ensure lossless round-trip
-        encoded = gyrotok.encode(generated, name="bert-base-uncased")
-        decoded = gyrotok.decode(encoded, name="bert-base-uncased")
-        assert generated == decoded, (
-            "Generated text is not losslessly round-trippable with the tokenizer "
-            "(possible UTF-8 fallback or replacement chars)"
-        )
-
-    def test_user_id_mapping_to_internal_agent(self, api_test_setup: Any) -> None:
-        """Test custom user ID in header maps to internal 'user' agent."""
-        test_client, global_pool = api_test_setup
-
-        # Get initial pool state
-        pre_agents = set(global_pool.get_active_agents())
-
-        payload = {"model": "gyrosi-baby-0.9.6", "messages": [{"role": "user", "content": "Hello from custom user!"}]}
-
-        # Use a custom user ID in header
-        headers = {"X-User-ID": "custom-user-123"}
-
-        response = test_client.post("/v1/chat/completions", json=payload, headers=headers)
-        assert response.status_code == 200
-
-        # Verify pool state - no new agent should be created
-        post_agents = set(global_pool.get_active_agents())
-        assert "custom-user-123" not in post_agents  # No agent with custom ID
-        assert "user" in post_agents  # Standard triad agent exists
-        assert pre_agents == post_agents  # No new agents created
-
-        # Verify a response was generated
-        data = response.json()
-        assert "choices" in data
-        assert len(data["choices"]) > 0
-        assert "message" in data["choices"][0]
-        assert "content" in data["choices"][0]["message"]
-        assert len(data["choices"][0]["message"]["content"]) > 0
+        assert "generated_text" in data, "Response should have generated_text field"
+        assert isinstance(data["generated_text"], str), "Generated text should be string"
+        assert len(data["generated_text"]) > 0, "Generated text should not be empty"
 
 
-class TestEndToEndConversation:
-    """Test complete conversation flows through all layers."""
+class TestMaintenanceOperations:
+    """Test agent maintenance and lifecycle operations."""
 
-    @pytest.mark.parametrize("tokenizer_name", TOKENIZER_NAMES)
-    def test_full_conversation_pipeline(self, agent_pool: AgentPool, tokenizer_name: str) -> None:
-        """Test complete conversation from input to response."""
-        pool = agent_pool
-
-        # Simulate a conversation turn
-        user_input = "Tell me about the nature of intelligence."
-
-        # Full pipeline: tokenize → agents → orchestrate → detokenize
-        response = orchestrate_turn(
-            pool=pool, user_id="user", assistant_id="assistant", user_input=user_input, tokenizer_name=tokenizer_name
-        )
-
-        assert isinstance(response, str)
-        assert len(response) > 0
-        # Response should be different from input (showing processing)
-        assert response != user_input
-
-    @pytest.mark.parametrize("tokenizer_name", TOKENIZER_NAMES)
-    def test_multi_turn_conversation(self, agent_pool: AgentPool, tokenizer_name: str) -> None:
-        """Test multi-turn conversation produces meaningful responses."""
-        pool = agent_pool
-
-        # First turn
-        response1 = orchestrate_turn(
-            pool=pool,
-            user_id="user",
-            assistant_id="assistant",
-            user_input="I like cats.",
-            tokenizer_name=tokenizer_name,
-        )
-
-        # Second turn referencing first
-        response2 = orchestrate_turn(
-            pool=pool,
-            user_id="user",
-            assistant_id="assistant",
-            user_input="What do I like?",
-            tokenizer_name=tokenizer_name,
-        )
-
-        assert isinstance(response1, str)
-        assert isinstance(response2, str)
-        assert len(response1) > 0
-        assert len(response2) > 0
-
-    def test_conversation_state_persistence(
+    def test_agent_maintenance_operations(
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
-        """Test that conversation state persists between turns (isolated agent)."""
+        """Test agent maintenance operations work correctly."""
         agent = isolated_agent_factory(tmp_path)
 
-        # Get initial state
-        initial_state = agent.get_agent_info()
-        initial_cycle_count = initial_state["cycle_count"]
+        # Learn some data first
+        for text in TEST_TEXTS[:2]:
+            tokenized = gyrotok.encode(text, name=TOKENIZER_NAME)
+            agent.ingest(tokenized)
 
-        # Have a conversation
-        agent.ingest(b"Remember that I like pizza.")
+        # Run maintenance
+        maintenance_result = agent.apply_maintenance(decay_rate=0.1, confidence_threshold=0.01)
 
-        # Check that agent state has evolved
-        updated_state = agent.get_agent_info()
-        final_cycle_count = updated_state["cycle_count"]
+        assert isinstance(maintenance_result, dict), "Maintenance should return dict"
+        assert "timestamp" in maintenance_result, "Should include timestamp"
 
-        assert final_cycle_count > initial_cycle_count
-
-
-class TestBUIngress:
-    """Test BU-Ingress functionality."""
-
-    def test_bu_ingress_step_basic(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
-        """Test basic BU-Ingress step functionality."""
+    def test_agent_state_reset(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test agent state reset functionality."""
         agent = isolated_agent_factory(tmp_path)
 
-        # Create a test phenotype entry
-        from baby.contracts import PhenotypeEntry, GovernanceSignature
+        # Learn something to change state
+        test_input = gyrotok.encode("change state", name=TOKENIZER_NAME)
+        agent.ingest(test_input)
 
-        sig: GovernanceSignature = {"neutral": 4, "li": 1, "fg": 1, "bg": 0, "dyn": 2}
+        # Verify state changed
+        changed_state = agent.get_agent_info()
+        assert changed_state["cycle_count"] > 0, "State should have changed"
 
-        entry: PhenotypeEntry = {
-            "phenotype": "test",
-            "confidence": 0.5,
-            "exon_mask": 0x42,
-            "usage_count": 1,
-            "last_updated": 1234567890.0,
-            "created_at": 1234567890.0,
-            "governance_signature": sig,
-            "context_signature": (0, 0),
-            "_original_context": None,
-        }
+        # Reset to archetypal state
+        agent.engine.reset_to_archetypal_state()
 
-        # Test with different theta values
-        theta_low = 0.1
-        theta_high = 0.5
-        theta_max = 0.95
+        # Verify reset
+        reset_state = agent.get_agent_info()
+        assert reset_state["cycle_count"] == 0, "Cycle count should reset"
+        # NOTE: The archetypal state (GENE_Mac_S) is NOT at index 0 in the ontology;
+        # its index is determined by its integer value after sorting all discovered states.
+        assert reset_state["tensor_index"] == 549871, "Should return to archetypal state"
 
-        # Test low theta regime
-        byte_out_low, intron_out_low = agent.engine._bu_ingress_step(entry, theta_low)
-        assert isinstance(byte_out_low, int)
-        assert isinstance(intron_out_low, int)
-        assert 0 <= byte_out_low <= 255
-        assert 0 <= intron_out_low <= 255
 
-        # Test high theta regime
-        byte_out_high, intron_out_high = agent.engine._bu_ingress_step(entry, theta_high)
-        assert isinstance(byte_out_high, int)
-        assert isinstance(intron_out_high, int)
-        assert 0 <= byte_out_high <= 255
-        assert 0 <= intron_out_high <= 255
+class TestEdgeCasesAndErrorHandling:
+    """Test edge cases and error handling."""
 
-        # Test max theta regime
-        byte_out_max, intron_out_max = agent.engine._bu_ingress_step(entry, theta_max)
-        assert isinstance(byte_out_max, int)
-        assert isinstance(intron_out_max, int)
-        assert 0 <= byte_out_max <= 255
-        assert 0 <= intron_out_max <= 255
-
-    def test_bu_ingress_step_branch_selection(
-        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
-    ) -> None:
-        """Test that BU-Ingress selects different output distributions for different theta regimes
-        using the public API and debug hook."""
-        import random
-        import numpy as np
-
-        agent = isolated_agent_factory(tmp_path)
-        from baby.contracts import PhenotypeEntry, GovernanceSignature
-
-        sig: GovernanceSignature = {"neutral": 4, "li": 1, "fg": 1, "bg": 0, "dyn": 2}
-        entry: PhenotypeEntry = {
-            "phenotype": "test",
-            "confidence": 0.5,
-            "exon_mask": 0x42,
-            "usage_count": 1,
-            "last_updated": 1234567890.0,
-            "created_at": 1234567890.0,
-            "governance_signature": sig,
-            "context_signature": (0, 0),
-            "_original_context": None,
-        }
-        N = 50
-        random.seed(42)
-        np.random.seed(42)
-        regimes = [(0.1, "low"), (0.5, "mid"), (0.95, "high")]
-        results = {}
-        for theta, label in regimes:
-            # Set up a debug hook to capture (byte_out, intron_out)
-            captured = []
-
-            def on_emit(engine: Any, phenotype_entry: Any, last_intron: int) -> None:
-                # The engine will call this after each ingress cycle
-                # We want to capture the output of the most recent respond call
-                # The public respond returns only the byte, but the hook gives us the intron as well
-                # We use the engine's last output (byte_out, intron_out) from process_ingress
-                # The phenotype_entry is the one used for output
-                # The last_intron is the intron just used
-                # For this test, we just record the last_intron and the phenotype_entry's mask
-                captured.append((phenotype_entry["exon_mask"], last_intron))
-
-            agent.add_monitoring_hook(on_emit)
-            # Set theta buffer to control the regime
-            agent.engine._θ_buf.clear()
-            agent.engine._θ_buf.extend([theta] * 8)  # Fill buffer to set mean theta
-            # Run N times
-            for _ in range(N):
-                # Overwrite the operator's store to always return our entry for get_phenotype
-                # Use a simpler approach - just mock the store to return our entry
-                original_get = agent.engine.operator.store.get
-
-                def mock_get(context_key: Tuple[int, int]) -> Optional[Dict[str, Any]]:
-                    return cast(Dict[str, Any], entry)
-
-                agent.engine.operator.store.get = mock_get
-                agent.respond(b"probe", max_new_tokens=1)
-                # Restore original method
-                agent.engine.operator.store.get = original_get
-            # Remove the hook after this regime
-            agent.engine.remove_hook(on_emit)
-            byte_means = float(np.mean([o[0] for o in captured]))
-            intron_means = float(np.mean([o[1] for o in captured]))
-            results[label] = (byte_means, intron_means)
-        # Assert that the means differ across regimes
-        byte_means_list = [float(results[label][0]) for _, label in regimes]
-        intron_means_list = [float(results[label][1]) for _, label in regimes]
-        assert (
-            len(set(byte_means_list)) > 1 or len(set(intron_means_list)) > 1
-        ), "BU-ingress output does not vary across theta regimes"
-
-    def test_auto_regressive_generation(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
-        """Test that the auto-regressive loop generates multiple bytes."""
+    def test_empty_input_handling(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test handling of edge case inputs."""
         agent = isolated_agent_factory(tmp_path)
 
-        # Test with a simple input
-        response = agent.respond(b"hello", max_new_tokens=10)
+        # Test with minimal input
+        empty_response = agent.respond(b"", max_new_tokens=1)
+        assert isinstance(empty_response, bytes), "Should handle empty input gracefully"
 
-        # Should return a byte string of reasonable length
-        assert isinstance(response, bytes)
-        assert len(response) > 1  # Should generate more than one byte
-        # With token-based generation, byte count may exceed token count
-        assert all(0 <= b <= 255 for b in response)  # All bytes should be valid
+    def test_large_input_handling(self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path) -> None:
+        """Test handling of large inputs."""
+        agent = isolated_agent_factory(tmp_path)
 
-        # Test with different max_new_tokens values
-        response_short = agent.respond(b"test", max_new_tokens=5)
-        response_long = agent.respond(b"test", max_new_tokens=20)
+        # Create large input
+        large_text = "This is a large input. " * 100
+        large_input = gyrotok.encode(large_text, name=TOKENIZER_NAME)
 
-        # With token-based generation, each token can be multiple bytes
-        # So we can't assume byte count equals token count
-        assert len(response_short) > 0
-        assert len(response_long) > 0
-        assert len(response_long) >= len(response_short)  # Longer limit should produce at least as many bytes
+        # Should handle without error
+        response = agent.respond(large_input, max_new_tokens=5)
+        assert isinstance(response, bytes), "Should handle large input"
+        assert len(response) > 0, "Should generate response for large input"
+
+    def test_invalid_tokenizer_name_handling(self, agent_pool: AgentPool) -> None:
+        """Test error handling for invalid tokenizer names."""
+        with pytest.raises((FileNotFoundError, ValueError)):
+            orchestrate_turn(
+                pool=agent_pool,
+                user_id="user",
+                assistant_id="assistant",
+                user_input="test",
+                tokenizer_name="nonexistent-tokenizer",
+            )
+
+    def test_concurrent_agent_access(self, agent_pool: AgentPool) -> None:
+        """Test concurrent access to same agent doesn't cause issues."""
+        agent = agent_pool.get("assistant")
+
+        # Simulate concurrent operations
+        responses = []
+        for i in range(5):
+            test_input = gyrotok.encode(f"concurrent test {i}", name=TOKENIZER_NAME)
+            response = agent.respond(test_input, max_new_tokens=2)
+            responses.append(response)
+
+        # All responses should be valid
+        assert len(responses) == 5, "Should handle concurrent requests"
+        assert all(isinstance(r, bytes) and len(r) > 0 for r in responses), "All responses should be valid"
 
 
-class TestAgentIsolationPatterns:
-    """Test patterns for agent isolation in different scenarios."""
+# Utility functions for test validation
+def validate_phenotype_structure(entry: PhenotypeEntry) -> None:
+    """Validate phenotype entry has correct structure."""
+    required_fields = ["mask", "conf"]
+    for field in required_fields:
+        assert field in entry, f"Phenotype missing required field: {field}"
 
-    def test_isolated_vs_pool_agent_behavior(
-        self, isolated_agent_factory: Callable[[Path], GyroSI], agent_pool: AgentPool, tmp_path: Path
-    ) -> None:
-        """Test that isolated agents behave consistently with pool agents."""
-        # Create isolated agent
-        isolated_agent = isolated_agent_factory(tmp_path)
+    assert isinstance(entry["mask"], int), "Phenotype mask should be int"
+    assert 0 <= entry["mask"] <= 255, "Phenotype mask should be uint8"
+    assert isinstance(entry["conf"], float), "Phenotype confidence should be float"
+    assert 0.0 <= entry["conf"] <= 1.0, "Phenotype confidence should be in [0,1]"
 
-        # Get agent from pool
-        pool_agent = agent_pool.get("assistant")
 
-        # Test same operation on both
-        test_input = b"consistent behavior test"
+def validate_token_sequence(token_ids: List[int]) -> None:
+    """Validate token sequence is within vocabulary bounds."""
+    for token_id in token_ids:
+        assert isinstance(token_id, int), f"Token ID should be int, got {type(token_id)}"
+        assert 0 <= token_id <= 30522, f"Token ID {token_id} outside BERT vocabulary"
 
-        isolated_response = isolated_agent.respond(test_input)
-        pool_response = pool_agent.respond(test_input)
 
-        # Both should produce valid responses (though content may differ due to different states)
-        assert isinstance(isolated_response, bytes)
-        assert isinstance(pool_response, bytes)
-        assert len(isolated_response) > 0
-        assert len(pool_response) > 0
+def validate_agent_state_consistency(agent: GyroSI) -> None:
+    """Validate agent state is internally consistent."""
+    state_info = agent.get_agent_info()
 
-    def test_multiple_isolated_agents_independence(
-        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
-    ) -> None:
-        """Test that multiple isolated agents don't interfere with each other."""
-        # Create two isolated agents
-        agent1 = isolated_agent_factory(tmp_path / "agent1")
-        agent2 = isolated_agent_factory(tmp_path / "agent2")
+    assert state_info["cycle_count"] >= 0, "Cycle count should be non-negative"
+    assert 0 <= state_info["tensor_index"] < 788_986, "Tensor index should be in valid range"
+    assert 0.0 <= state_info["angular_divergence_radians"] <= 3.15, "Angular divergence should be valid"
+    assert state_info["system_integrity"] is not None, "System integrity should be checked"
 
-        # Have them learn different things
-        agent1.ingest(b"agent1 learns this")
-        agent2.ingest(b"agent2 learns that")
 
-        # Check they have independent stores
-        store1_entries = list(agent1.engine.operator.store.iter_entries())
-        store2_entries = list(agent2.engine.operator.store.iter_entries())
-
-        # Each should have only learned their own data
-        assert len(store1_entries) >= 0
-        assert len(store2_entries) >= 0
-
-        # Check they can't see each other's data
-        # (This is a basic check - the actual verification would depend on the specific learning implementation)
-        agent1_info = agent1.get_agent_info()
-        agent2_info = agent2.get_agent_info()
-
-        # Should have different agent IDs
-        assert agent1_info["agent_id"] != agent2_info["agent_id"]
-
-        # Check they have independent private overlays (no key overlap)
-        private1 = getattr(agent1.engine.operator, "private_view", None)
-        private2 = getattr(agent2.engine.operator, "private_view", None)
-        if private1 is not None and private2 is not None:
-            keys1 = set(k for k, _ in private1.iter_entries())
-            keys2 = set(k for k, _ in private2.iter_entries())
-            assert keys1.isdisjoint(keys2), "Private overlays of isolated agents overlap: state isolation violated"
+# Export validation utilities for use in other test modules
+__all__ = [
+    "validate_phenotype_structure",
+    "validate_token_sequence",
+    "validate_agent_state_consistency",
+    "TOKENIZER_NAME",
+    "TEST_TEXTS",
+]

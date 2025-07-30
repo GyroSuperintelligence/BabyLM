@@ -84,8 +84,8 @@ atexit.register(agent_pool.close_all)
 # ---------------------------------------------------------------------
 app = FastAPI(
     title="GyroSI Baby External Adapter",
-    version="0.9.6",
-    summary="OpenAI & HuggingFace compatible REST facade for GyroSI-Baby",
+    version="0.9.6.7",
+    summary="OpenAI & HuggingFace compatible REST facade for GyroSI-Baby (Token-Aware)",
 )
 
 # ---------------------------------------------------------------------
@@ -141,7 +141,7 @@ def list_models() -> dict[str, Any]:
     return {
         "data": [
             {
-                "id": "gyrosi-baby-0.9.6",
+                "id": "gyrosi-baby",
                 "object": "model",
                 "created": 0,
                 "owned_by": "gyro",
@@ -209,19 +209,20 @@ async def chat_completions(
         def token_stream() -> Iterator[str]:
             # Encode the reply to bytes, then decode token by token
             reply_bytes = gyrotok.encode(reply, name=PREFERENCES["tokenizer"]["name"])
-            # Use the public decode function to get token IDs, then decode each token individually
-            tokenizer = gyrotok._load(PREFERENCES["tokenizer"]["name"])
-            # Unmask the reply_bytes (encode() returns masked bytes, _apply_mask is an involution)
-            unmasked_bytes = gyrotok._apply_mask(reply_bytes)
-            ids = gyrotok._bytes_to_ids(unmasked_bytes)
+            # Get individual token IDs using public API
+            ids = gyrotok.bytes_to_ids(reply_bytes)
+
             for i, token_id in enumerate(ids):
-                token_text = tokenizer.decode([token_id], skip_special_tokens=True)
+                # Decode single token using public API
+                token_bytes = gyrotok.id_to_bytes(token_id)
+                token_text = gyrotok.decode(token_bytes, name=PREFERENCES["tokenizer"]["name"])
+
                 # OpenAI-compatible SSE chunk
                 chunk = {
                     "id": "chatcmpl-stream",
                     "object": "chat.completion.chunk",
                     "created": int(time.time()),
-                    "model": "gyrosi-baby-0.9.6",
+                    "model": "gyrosi-baby",
                     "choices": [
                         {
                             "index": 0,
@@ -240,7 +241,7 @@ async def chat_completions(
         id=f"chatcmpl-{uuid.uuid4().hex[:24]}",
         object="chat.completion",
         created=int(time.time()),
-        model="gyrosi-baby-0.9.6",
+        model="gyrosi-baby",
         choices=[
             OAChatChoice(
                 index=0,

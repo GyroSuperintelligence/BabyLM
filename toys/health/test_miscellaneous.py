@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import List
 from toys.communication import tokenizer as gyrotok
 from baby.policies import OrbitStore
 import tempfile
@@ -13,19 +14,16 @@ def test_print_simple_wikipedia_knowledge_bin_entries() -> None:
 
     store = OrbitStore(str(knowledge_path), append_only=True)
     print("\n--- First 5 entries in simple_wikipedia_1.bin ---")
-    for i, (context_key, entry) in enumerate(store.iter_entries()):
+    for i, (key, entry) in enumerate(store.iter_entries()):
         print(f"Entry {i+1}:")
-        print(f"  context_key: {context_key}")
+        print(f"  key: {key}")  # key is (state_index, token_id)
         print(f"  entry keys: {list(entry.keys())}")
-        if "phenotype" in entry:
-            phenotype_preview = str(entry["phenotype"])[:200] + "..." if len(str(entry["phenotype"])) > 200 else str(entry["phenotype"])
-            print(f"  phenotype preview: {phenotype_preview}")
-        if "confidence" in entry:
-            print(f"  confidence: {entry['confidence']}")
-        if "usage_count" in entry:
-            print(f"  usage_count: {entry['usage_count']}")
-        if "created_at" in entry:
-            print(f"  created_at: {entry['created_at']}")
+        if "key" in entry:
+            print(f"  key: {entry['key']}")
+        if "mask" in entry:
+            print(f"  mask: {entry['mask']}")
+        if "conf" in entry:
+            print(f"  conf: {entry['conf']}")
         print()
         if i >= 4:  # Show first 5 entries
             break
@@ -39,31 +37,21 @@ def test_complete_metadata_analysis() -> None:
 
     store = OrbitStore(str(knowledge_path), append_only=True)
     print("\n--- Complete Metadata Analysis of simple_wikipedia_1.bin ---")
-    
-    for i, (context_key, entry) in enumerate(store.iter_entries()):
+
+    for i, (key, entry) in enumerate(store.iter_entries()):
         print(f"\nEntry {i+1} - Complete Metadata:")
-        print(f"  Context Key: {context_key}")
+        print(f"  Key: {key}")  # key is (state_index, token_id)
         print(f"  All available fields: {list(entry.keys())}")
-        
+
         # Display each field with its value
         for field_name, field_value in entry.items():
-            if field_name == "phenotype":
-                print(f"  {field_name}: {field_value}")
-            elif field_name in ["confidence", "usage_count"]:
-                print(f"  {field_name}: {field_value}")
-            elif field_name in ["created_at", "last_updated"]:
-                print(f"  {field_name}: {field_value}")
-            elif field_name in ["governance_signature", "context_signature"]:
-                print(f"  {field_name}: {field_value}")
-            elif field_name == "exon_mask":
-                print(f"  {field_name}: {field_value}")
-            elif field_name == "_original_context":
+            if field_name in ["key", "mask", "conf"]:
                 print(f"  {field_name}: {field_value}")
             else:
                 print(f"  {field_name}: {field_value}")
-        
+
         print("-" * 50)
-    
+
     store.close()
 
 
@@ -73,43 +61,32 @@ def test_simple_wikipedia_knowledge_file_stats() -> None:
     assert knowledge_path.exists(), f"Knowledge file not found: {knowledge_path}"
 
     store = OrbitStore(str(knowledge_path), append_only=True)
-    
+
     total_entries = 0
-    total_phenotype_length = 0
-    confidence_sum = 0.0
-    phenotype_samples = []
-    usage_counts = []
-    
-    for context_key, entry in store.iter_entries():
+    conf_sum = 0.0
+    phenotype_samples: List[str] = []
+
+    for key, entry in store.iter_entries():
         total_entries += 1
-        if "phenotype" in entry:
-            phenotype_str = str(entry["phenotype"])
-            phenotype_length = len(phenotype_str)
-            total_phenotype_length += phenotype_length
-            if len(phenotype_samples) < 3:  # Keep first 3 phenotype samples
-                phenotype_samples.append(phenotype_str[:100] + "..." if phenotype_length > 100 else phenotype_str)
-        if "confidence" in entry:
-            confidence_sum += entry["confidence"]
-        if "usage_count" in entry:
-            usage_counts.append(entry["usage_count"])
-    
-    avg_phenotype_length = total_phenotype_length / total_entries if total_entries > 0 else 0
-    avg_confidence = confidence_sum / total_entries if total_entries > 0 else 0
-    avg_usage = sum(usage_counts) / len(usage_counts) if usage_counts else 0
-    
-    print(f"\n--- simple_wikipedia_1.bin Statistics ---")
+        if "mask" in entry:
+            mask_value = entry["mask"]
+            if len(phenotype_samples) < 3:  # Keep first 3 mask samples
+                phenotype_samples.append(f"mask: {mask_value}")
+        if "conf" in entry:
+            conf_sum += entry["conf"]
+
+    avg_conf = conf_sum / total_entries if total_entries > 0 else 0
+
+    print("\n--- simple_wikipedia_1.bin Statistics ---")
     print(f"Total entries: {total_entries}")
-    print(f"Average phenotype length: {avg_phenotype_length:.1f} characters")
-    print(f"Average confidence: {avg_confidence:.3f}")
-    print(f"Average usage count: {avg_usage:.1f}")
-    print(f"Total phenotype content: {total_phenotype_length:,} characters")
+    print(f"Average conf: {avg_conf:.3f}")
     print(f"File size: {knowledge_path.stat().st_size:,} bytes")
-    
+
     if phenotype_samples:
-        print(f"\nSample phenotype entries:")
+        print("\nSample mask entries:")
         for i, sample in enumerate(phenotype_samples, 1):
             print(f"  {i}. {sample}")
-    
+
     store.close()
 
 
@@ -131,7 +108,7 @@ def test_agent_with_simple_wikipedia_knowledge_speaks() -> None:
             "phenomenology_map_path": str(phenomenology_path),
             "base_path": str(tmpdir),
             "tokenizer_name": tokenizer_name,
-            "preferences": {"tokenizer": {"name": tokenizer_name}}  # type: ignore
+            "preferences": {"tokenizer": {"name": tokenizer_name}},  # type: ignore
         }
         agent = GyroSI(config, agent_id="test_agent", base_path=Path(tmpdir))
 
@@ -141,17 +118,17 @@ def test_agent_with_simple_wikipedia_knowledge_speaks() -> None:
             "Tell me about science.",
             "What is mathematics?",
             "Explain technology.",
-            "What is history?"
+            "What is history?",
         ]
-        
-        print(f"\n--- Testing agent with simple_wikipedia_1.bin knowledge ---")
+
+        print("\n--- Testing agent with simple_wikipedia_1.bin knowledge ---")
         for i, prompt in enumerate(test_prompts, 1):
             print(f"\nPrompt {i}: {prompt}")
             encoded = gyrotok.encode(prompt, name=tokenizer_name)
             response_bytes = agent.respond(encoded, max_new_tokens=64)
             response_text = gyrotok.decode(response_bytes, name=tokenizer_name)
             print(f"Response: {response_text}")
-        
+
         agent.close()
 
 
@@ -161,23 +138,25 @@ def test_knowledge_retrieval_from_simple_wikipedia() -> None:
     assert knowledge_path.exists(), f"Knowledge file not found: {knowledge_path}"
 
     store = OrbitStore(str(knowledge_path), append_only=True)
-    
+
     # Get all entries to analyze
     entries = list(store.iter_entries())
-    print(f"\n--- Knowledge Retrieval Test ---")
+    print("\n--- Knowledge Retrieval Test ---")
     print(f"Total entries available: {len(entries)}")
-    
+
     # Show some sample context keys and their associated content
-    print(f"\nSample knowledge entries:")
+    print("\nSample knowledge entries:")
     for i, (context_key, entry) in enumerate(entries[:5]):
         print(f"\nEntry {i+1}:")
         print(f"  Context key: {context_key}")
         if "phenotype" in entry:
-            phenotype_preview = str(entry["phenotype"])[:150] + "..." if len(str(entry["phenotype"])) > 150 else str(entry["phenotype"])
+            phenotype_preview = (
+                str(entry["phenotype"])[:150] + "..." if len(str(entry["phenotype"])) > 150 else str(entry["phenotype"])
+            )
             print(f"  Phenotype: {phenotype_preview}")
-        if "confidence" in entry:
-            print(f"  Confidence: {entry['confidence']:.3f}")
+        if "conf" in entry:
+            print(f"  Conf: {entry['conf']:.3f}")
         if "usage_count" in entry:
             print(f"  Usage count: {entry['usage_count']}")
-    
+
     store.close()

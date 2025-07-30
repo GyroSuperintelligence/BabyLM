@@ -12,6 +12,7 @@ import os
 import time
 import uuid
 from collections import OrderedDict, deque
+from functools import cached_property
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple, TypedDict, cast
 
@@ -25,13 +26,25 @@ from baby.inference import InferenceEngine
 from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
 
-numba_module: Optional[Any] = None
-try:
-    import numba as nb
 
-    numba_module = nb
-except ImportError:
-    pass
+class _TokBridge:
+    @cached_property
+    def mod(self) -> Any:
+        from toys.communication import tokenizer as _tok
+
+        return _tok
+
+    def id_to_bytes(self, tok_id: int) -> bytes:
+        return self.mod.id_to_bytes(tok_id)
+
+    def bytes_to_id(self, bs: bytes) -> int:
+        return self.mod.bytes_to_id(bs)
+
+    def bytes_to_ids(self, bs: bytes) -> List[int]:
+        return self.mod.bytes_to_ids(bs)
+
+
+TOK = _TokBridge()
 
 if TYPE_CHECKING:
     pass
@@ -55,20 +68,6 @@ def _abs(path: Optional[str], base: Path) -> str:
 
 
 # --- JIT batch function for epistemology ---
-if numba_module is not None:
-
-    @numba_module.njit(cache=True, fastmath=True)  # type: ignore[misc]
-    def _jit_batch_impl(epi: Any, state: Any, buf: Any) -> tuple[int, int]:
-        acc = 0
-        for i in range(buf.size):
-            intron = buf[i] ^ 0xAA  # transcribe inlined
-            state = epi[state, intron]  # fast C level lookup
-            acc ^= intron | (acc & (~intron & 0xFF))  # fold inlined
-        return state, acc
-
-    _jit_batch = _jit_batch_impl
-else:
-    raise ImportError("Numba is required for GyroSI; install it or set NUMBA_DISABLE_JIT=0.")
 
 
 class IntelligenceEngine:
@@ -125,6 +124,8 @@ class IntelligenceEngine:
         self.operator: InferenceEngine = InferenceEngine(self.s2, phenotype_store)
 
         # Agent state
+        # NOTE: The archetypal state (GENE_Mac_S) is NOT at index 0 in the ontology;
+        # its index is determined by its integer value after sorting all discovered states.
         self.agent_id: str = agent_id or str(uuid.uuid4())
         self.use_epistemology: bool = False
         self.current_state_index: int
@@ -163,6 +164,11 @@ class IntelligenceEngine:
 
         # BU-Ingress state initialization
         self._S: list[int] = [0] * 6
+
+        # Token-aware state variables
+        self._byte_buf: list[int] = []  # collects introns of current token
+        self._last_token_id: int = 0  # last closed token (for ingress)
+        self.MAX_TOKEN_BYTES: int = 10  # LEB128 should never exceed this for 32-bit tokens
         try:
             if self.phenomenology_map_path and os.path.exists(self.phenomenology_map_path):
                 # The .npy file does not contain autonomic_cycles; set to empty
@@ -198,6 +204,16 @@ class IntelligenceEngine:
         intron = governance.transcribe_byte(input_byte)
         intron &= 0xFF  # Defensive masking (optional, for symmetry)
 
+        # Check buffer size limit to prevent runaway growth
+        if len(self._byte_buf) >= self.MAX_TOKEN_BYTES:
+            self._byte_buf.clear()  # Prevent runaway buffer growth
+            self._last_token_id = 0  # Reset token ID to prevent stale context
+            print("Warning: Token buffer overflow cleared")
+            return intron  # EARLY-RETURN to discard the intron causing overflow
+
+        # Append intron to current token buffer
+        self._byte_buf.append(intron)
+
         # S1: Apply gyroscopic transformation to physical state
         if self.use_epistemology:
             self.current_state_index = self.epistemology[self.current_state_index, intron]
@@ -217,89 +233,93 @@ class IntelligenceEngine:
             self.gene_mac_m_int if not self.use_epistemology else self._cached_state_int
         )
         self._θ_buf.append(div)
+
+        # Check if token is complete (bit 7 == 0)
+        if (intron & 0x80) == 0:
+            try:
+                # Token is complete - unmask back to byte stream
+                tok_bytes = bytes(b ^ 0xAA for b in self._byte_buf)
+                token_id = TOK.bytes_to_id(tok_bytes)
+
+                # Knowledge update once per token
+                state_idx = (
+                    self.current_state_index
+                    if self.use_epistemology
+                    else self.s2.get_index_from_state(self.gene_mac_m_int)
+                )
+                phe = self.operator.get_phenotype(state_idx, token_id)
+                # Fold only with the final intron of the token
+                self.operator.learn(phe, intron, state_idx)
+
+                # Call post-cycle hooks after learning
+                for hook in self.post_cycle_hooks:
+                    hook(self, phe, intron)
+
+                # Prepare for ingress
+                self._last_token_id = token_id
+            except Exception as e:
+                # Handle malformed token sequences gracefully
+                print(f"Warning: Malformed token sequence skipped: {e}")
+            finally:
+                # Always clear buffer to prevent accumulation
+                self._byte_buf.clear()
+
         return intron
 
-    def process_ingress(self, last_intron: int) -> tuple[int, int]:
-        last_intron &= 0xFF  # Defensive masking
-        # S3: Get semantic meaning of current state + context
-        # state_index is physical index; canonicalisation (if enabled) is applied at storage layer (CanonicalView)
-        if self.use_epistemology:
-            state_index = self.current_state_index
-        else:
-            state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
-        # Ingress: complete monodromic loop by folding with the same intron used for addressing.
-        # This causes exon_mask to collapse (x → 0), expressing closure—not accumulation.
-        # Phenotype metadata tracks recurrence; output is drawn from the stored value, not from the mask.
-        output_entry = self.operator.get_phenotype(state_index, last_intron)
+    def reset_token_buffer(self) -> None:
+        """
+        Reset token buffer - call when starting new stream.
+        Clears accumulated bytes and resets last token ID.
+        """
+        self._byte_buf.clear()
+        self._last_token_id = 0
 
-        # S3: Learn through Monodromic Fold
-        self.operator.learn(output_entry, last_intron)
+    def process_ingress(self) -> tuple[int, int]:
+        """
+        Generate **one token** (may be 1-3 bytes). Returns:
+            (byte_out, intron_out)  of the *last* byte emitted.
+        """
+        # --- 1. resolve current state ---
+        state_idx = (
+            self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
+        )
 
-        # Buffer hook events and process hooks every N cycles, unless pain spike
-        self._hook_event_buffer.append((self, output_entry, last_intron))
-        process_hooks_now = False
-        θ = np.mean(self._θ_buf) if self._θ_buf else 0.0  # Cache θ once
-        if θ > self._θ_high or len(self._hook_event_buffer) >= self._hook_batch_interval:
-            process_hooks_now = True
-        if process_hooks_now and self.post_cycle_hooks:
-            for event in list(self._hook_event_buffer):
-                for hook in self.post_cycle_hooks:
-                    hook(*event)
-            self._hook_event_buffer.clear()
+        phe = self.operator.get_phenotype(state_idx, self._last_token_id)
 
-        # Store original phenotype_entry for output
-        output_entry = output_entry
-        # Algedonic decision at start (must run before output)
-        # Use cached θ
-        if θ > self._θ_high:
-            self._pain_streak += 1
-            cooling_intron = self._cool_introns[self.cycle_count % len(self._cool_introns)]
-            saved = self.cycle_count
-            self.process_egress(cooling_intron)  # does all the usual work
-            self.cycle_count = saved  # restore the external-cycle count
-            self._microstep_count += 1  # track internal steps separately
-            # State integrity assertion after cooling micro-step
-            assert (
-                self.gene_mac_m_int
-                if not self.use_epistemology
-                else self.s2.get_state_from_index(self.current_state_index)
-            ) < (1 << 48)
-            if self.use_epistemology:
-                state_index_cool = self.current_state_index
-            else:
-                state_index_cool = self.s2.get_index_from_state(self.gene_mac_m_int)
-            cool_entry = self.operator.get_phenotype(state_index_cool, cooling_intron)
-            self.operator.learn(cool_entry, cooling_intron)
-            if self._pain_streak > 256 and self._autonomic_cycles:
-                for intr in self._autonomic_cycles[self.cycle_count % len(self._autonomic_cycles)]:
-                    saved = self.cycle_count
-                    self.process_egress(intr)
-                    self.cycle_count = saved
-                    self._microstep_count += 1
-                    # State integrity assertion after autonomic cycle micro-step
-                    assert (
-                        self.gene_mac_m_int
-                        if not self.use_epistemology
-                        else self.s2.get_state_from_index(self.current_state_index)
-                    ) < (1 << 48)
-                    if self.use_epistemology:
-                        si_aut = self.current_state_index
-                    else:
-                        si_aut = self.s2.get_index_from_state(self.gene_mac_m_int)
-                    aut_entry = self.operator.get_phenotype(si_aut, intr)
-                    self.operator.learn(aut_entry, intr)
-                self._pain_streak = 0
-        elif θ < self._θ_low:
-            self._pain_streak = 0
+        # ---------- 2. decide next intron (p) -------------
+        theta = float(np.mean(self._θ_buf)) if self._θ_buf else 0.0
+        intron_out = self._choose_intron(phe, theta, state_idx)  # delegate to small helper
+        byte_out = intron_out ^ 0xAA
 
-        # Generate response from original phenotype_entry (not cooling intron)
-        θ = np.mean(self._θ_buf) if self._θ_buf else 0.0
-        byte_out, intron_out = self._bu_ingress_step(output_entry, float(θ))
-
-        # Learn from the intron_out (symmetric learning)
-        self.operator.learn(output_entry, intron_out)
+        # ---------- 3. feed back through egress -----------
+        self.process_egress(byte_out)  # will update state + learn
 
         return byte_out, intron_out
+
+    def _choose_intron(self, phe: PhenotypeEntry, theta: float, state_index: int) -> int:
+        """
+        Choose the next intron based on phenotype and theta.
+
+        Args:
+            phe: Phenotype entry with minimal structure (mask, conf)
+            theta: Current theta value
+            state_index: Current state index for orbit cardinality calculation
+
+        Returns:
+            Chosen intron value
+        """
+        mask = phe["mask"]
+        conf = phe["conf"]
+        v = self.s2.orbit_cardinality[state_index]
+        p = governance.exon_product_from_metadata(mask, conf, v, self.s2._v_max)
+
+        self._S = self._S[1:] + [governance.fold(self._S[0], p)]
+
+        if theta < self._θ_low:
+            return self._S[5]
+        elif theta < self._θ_high:
+            return self._S[4]
+        return p
 
     def add_hook(self, hook: CycleHookFunction) -> None:
         """
@@ -325,36 +345,6 @@ class IntelligenceEngine:
             return True
         except ValueError:
             return False
-
-    def batch_learn(self, data: bytes) -> None:
-        if not data:
-            return
-
-        # Force the reliable path so *every* call learns exactly once
-        # (long sentences included, runs fast enough in CPython)
-        if False and self.use_epistemology and numba_module is not None and len(data) > 256:
-            buf = np.frombuffer(data, dtype=np.uint8)
-            self.current_state_index, acc = _jit_batch(self.epistemology, np.uint32(self.current_state_index), buf)
-            # keep the integer representation coherent for later divergence checks
-            self._cached_state_int = self.s2.get_state_from_index(self.current_state_index)
-            self.gene_mac_m_int = self._cached_state_int
-            self.cycle_count += buf.size
-        else:
-            acc = 0
-            for b in data:
-                intr = self.process_egress(b)
-                acc = governance.fold(acc, intr)
-
-        # Always learn at the end, even if acc is 0 (FIXED: was causing tiny knowledge files)
-        state_idx = (
-            self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
-        )
-        phe = self.operator.get_phenotype(state_idx, acc)
-        self.operator.learn(phe, acc)
-
-        # flush
-        if hasattr(self.operator.store, "commit"):
-            self.operator.store.commit()
 
     def get_state_info(self) -> StateInfo:
         """
@@ -400,33 +390,6 @@ class IntelligenceEngine:
     def _sync_index_from_state_int(self) -> None:
         if self.use_epistemology:
             self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
-
-    def _bu_ingress_step(self, entry: "PhenotypeEntry", theta_val: float) -> tuple[int, int]:
-        """
-        One generative micro‑step:
-          • derive exon_product
-          • slide the 6‑byte S‑window
-          • choose which intron to emit
-          • return (byte_out, intron_out) tuple
-        """
-        sig = entry["governance_signature"]
-        conf = entry["confidence"]
-        v = self.s2.orbit_cardinality[self.current_state_index]
-        p = governance.exon_product_from_metadata(sig, conf, v, self.s2._v_max)
-
-        # 6‑byte context window lives in self._S (init with [0]*6 in __init__)
-        aligned = governance.fold(self._S[0], p)
-        self._S = self._S[1:] + [aligned]
-
-        if theta_val < self._θ_low:
-            intron_out = self._S[5]
-        elif theta_val < self._θ_high:
-            intron_out = self._S[4]
-        else:
-            intron_out = p
-
-        byte_out = intron_out ^ 0xAA  # transcribe back to byte‐space
-        return byte_out, intron_out
 
     def validate_knowledge_integrity(self) -> bool:
         """
@@ -484,7 +447,9 @@ class IntelligenceEngine:
         if pruning_cfg.get("enable_auto_decay", False):
             self.add_hook(self._auto_prune_hook)
 
-    def _auto_prune_hook(self, engine: "IntelligenceEngine", phenotype_entry: PhenotypeEntry, last_intron: int) -> None:
+    def _auto_prune_hook(
+        self, engine: "IntelligenceEngine", phenotype_entry: PhenotypeEntry, last_token_byte: int
+    ) -> None:
         """
         Post-cycle hook to automatically prune low-confidence entries.
 
@@ -642,7 +607,9 @@ class GyroSI:
         Args:
             data: Bytes to learn from
         """
-        self.engine.batch_learn(data)
+        for b in data:
+            self.engine.process_egress(b)
+
         # Ensure pending writes are flushed
         store = self.engine.operator.store
         if hasattr(store, "commit"):
@@ -655,9 +622,8 @@ class GyroSI:
         LEB128 token is complete (no dangling continuation bit).
         """
         # ---------- 1. ingest user prompt -------------------------------
-        last_intron = 0
         for b in data:
-            last_intron = self.engine.process_egress(b)
+            self.engine.process_egress(b)
 
         # ---------- 2. generate -----------------------------------------
         out = bytearray()
@@ -667,13 +633,10 @@ class GyroSI:
             # keep the start offset so we can EOS-check later
             token_start = len(out)
 
-            # -------- byte-loop for ONE token ----------------------------
+            # -------- generate ONE token ----------------------------
             while True:
-                byte_out, last_intron = self.engine.process_ingress(last_intron)
+                byte_out, _ = self.engine.process_ingress()
                 out.append(byte_out)
-
-                # holographic feedback
-                self.engine.process_egress(byte_out)
 
                 # Did the *intron* side say "done"?  (bit-7 = 0)
                 if ((byte_out ^ 0xAA) & 0x80) == 0:
@@ -740,6 +703,11 @@ class GyroSI:
 
         # Prune low-confidence entries
         pruned_count = self.engine.prune_low_confidence_entries(confidence_threshold)
+
+        # Commit changes to persist maintenance operations
+        store = self.engine.operator.store
+        if hasattr(store, "commit"):
+            store.commit()
 
         return {"decay_applied": decay_report, "entries_pruned": pruned_count, "timestamp": time.time()}
 

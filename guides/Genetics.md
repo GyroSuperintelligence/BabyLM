@@ -332,17 +332,6 @@ This alignment between the path-dependent physics of state transformation and th
 
 ---
 
-
-The structure of the 8-bit intron is not arbitrary but is functionally isomorphic to the LEB128 variable-length integer encoding protocol. The intron's bit families map directly to the protocol's components:
-
--   **Bit 7 (L0 Family):** Functions as the **continuation bit**. An internally generated `intron` with bit 7 set indicates that the generative sequence for the current token continues. An intron with bit 7 clear signals completion.
--   **Bits 1-6 (LI, FG, BG Families):** Carry the 6 bits of dynamic, physical information.
--   **Bit 0 (L0 Family):** Serves as a structural anchor.
-
-This profound alignment means the system's physics naturally produces valid LEB128 byte streams. The boundary transcription (`⊕ 0xAA`) lawfully translates the internal physical signals into the bit patterns expected by external decoders without altering the underlying physical logic. This endogenous compatibility makes the architecture robust and future-proof, as the communication protocol is a direct consequence of the system's physical design.
-
----
-
 ### **5.5 The BU Intelligence Cycle: Egress and Ingress**
 
 The BU stage, representing Universal Balance, is implemented as a dual-phase intelligence cycle that governs all interaction between the system's internal physics and the external byte-space. These two phases, **BU Egress** (learning and state transformation) and **BU Ingress** (generative expression), are not merely input/output functions but are the complete physical mechanics of experience absorption and responsive action.
@@ -532,32 +521,26 @@ The `inference.py` module defines the `InferenceEngine`, which manages the trans
 **Core Responsibilities and Contracts:**
 
 * **Phenotype Addressing and Retrieval:**
-  Each semantic phenotype is uniquely addressed by a `(state_index, intron)` tuple.
-  `get_phenotype(state_index, intron)` ensures retrieval or creation of a canonical phenotype entry for every physical state-context pairing. Context keys are handled deterministically, and entries are created if not already present, using a hash-based semantic address.
-  Each newly‑created PhenotypeEntry now carries an immutable
+  Each semantic phenotype is uniquely addressed by a `(state_index, token_id)` tuple.
+  `get_phenotype(state_index, token_id)` ensures retrieval or creation of a canonical phenotype entry for every physical state-token pairing. Context keys are handled deterministically, and entries are created if not already present, using a hash-based semantic address.
+  Each newly‑created PhenotypeEntry carries a minimal structure:
 
   ```python
-  governance_signature: GovernanceSignature
-
+  mask: int          # uint8   (exon_mask)
+  conf: float        # float32
   ```
 
-  computed from its initial 8‑bit `exon_mask`.  This signature is then used by policies (decay, pruning, monitoring) without ever altering the entry's physical residue.
+  The `mask` is initialized from the `token_id` and represents the 8-bit Monodromic-Fold residue. The `conf` represents epistemic confidence (0.0-1.0) with monotone increase and decay behavior.
 
 * **Learning (Memory Update):**
   All learning in S3 proceeds by applying the Monodromic Fold to the phenotype's memory mask.
-  `learn(phenotype_entry, intron)` accumulates experience by path-dependent folding. Confidence is updated monotonically, modulated by the structural variety factor (orbit cardinality from S2), and novelty of the update (fraction of changed bits in the memory mask).
-  The learning update resets the age counter and increments usage statistics.
+  `learn(phenotype_entry, token_id)` accumulates experience by path-dependent folding. Confidence is updated monotonically, modulated by the structural variety factor (orbit cardinality from S2), and novelty of the update (fraction of changed bits in the memory mask).
+  The learning update applies the Monodromic Fold to the existing mask using the token_id as the learning signal.
 
-  Immediately after the Monodromic Fold yields a new exon_mask, the engine calls
-
-  ```python
-  sig = compute_governance_signature(new_mask)
-  ```
-
-  and stores that 5‑tuple in the entry's `governance_signature` field.  Because `compute_governance_signature` always returns a valid tuple, there is no conditional failure case.
+  The minimal phenotype structure eliminates all derived, human-facing, or temporal metadata, achieving 85%+ compression while preserving essential learning dynamics.
 
 * **Batch Learning:**
-  `batch_learn(state_index, introns)` allows ingestion of an ordered sequence of introns.
+  `batch_learn(state_index, token_ids)` allows ingestion of an ordered sequence of token IDs.
   The sequence is reduced through a left-fold with the Monodromic Fold, preserving full path-dependence, before a single learning update is applied.
 
 * **Variety-weighted Confidence:**
@@ -565,7 +548,7 @@ The `inference.py` module defines the `InferenceEngine`, which manages the trans
   The learning rate is calculated as a function of the square root of the state's relative variety, preventing rapid overconfidence in rare orbits, and accelerating trust in symmetric regions.
 
 * **Knowledge Integrity:**
-  `validate_knowledge_integrity()` checks the internal consistency of the entire knowledge store. This includes validation of context signatures, canonical state indices, mask and confidence ranges, and timestamp monotonicity. An integrity report is produced, including a count of all anomalies.
+  `validate_knowledge_integrity()` checks the internal consistency of the entire knowledge store. This includes validation of context keys, canonical state indices, mask and confidence ranges. An integrity report is produced, including a count of all anomalies.
 
 * **Memory Ageing and Confidence Decay:**
   `apply_confidence_decay(decay_factor)` implements temporal decay of confidence values in all entries, simulating the natural forgetting of unused knowledge. This process does not affect the memory masks and ensures that dormant memories gradually lose epistemic weight.
@@ -574,11 +557,11 @@ The `inference.py` module defines the `InferenceEngine`, which manages the trans
   `prune_low_confidence_entries(confidence_threshold)` removes all knowledge entries below a set confidence threshold, reclaiming memory and maintaining operational focus on relevant, trustworthy entries.
 
 * **Statistics and Utilisation:**
-  Use the policy helper `export_knowledge_statistics(store_path, output_path)` (in `baby.policies`) to dump entry counts, confidence distributions and timestamps.
+  Use the policy helper `export_knowledge_statistics(store_path, output_path)` (in `baby.policies`) to dump entry counts, confidence distributions and storage metrics.
 
-**Variety-weighted Confidence Integration:**
+**Token-Aware Architecture:**
 
-At every learning update, S3 queries S2 for the orbit cardinality of the current state index. The learning rate and initial confidence are both scaled relative to this value, enforcing structural trust. This prevents pathological overfitting in rare orbits and stabilises inference in highly symmetric regions.
+The system now operates on token boundaries rather than individual bytes, aligning internal physics with semantic units. The tokenizer serves as an "active internal decoder" rather than just a passive I/O adapter, leveraging the BERT tokenizer's inherent knowledge of token-to-byte mappings as a first-class component.
 
 **Implementation and Interface:**
 
@@ -689,15 +672,9 @@ All system-wide types, configuration, and maintenance protocols are declared in 
 
 - **PhenotypeEntry (TypedDict)**  
   The atomic record of agent knowledge. Each entry represents a unique phenotype and includes:
-    - `phenotype: str`  
-    - `confidence: float`  
-    - `exon_mask: int`  
-    - `usage_count: int`  
-    - `last_updated: float`  
-    - `created_at: float`  
-    - `governance_signature: GovernanceSignature` (immutable tuple derived from `exon_mask`)
-    - `context_signature: Tuple[int, int]` (canonical index + intron)
-    - `_original_context: Optional[Tuple[int, int]]` (for decorator tracking)
+    - `mask: int`          # uint8   (exon_mask) - 8-bit Monodromic-Fold residue
+    - `conf: float`        # float32 - epistemic confidence (0.0-1.0)
+    - `key: Tuple[int, int]`  # (state_index, token_id) - composite key for storage
 
 - **AgentConfig (TypedDict)**  
   Agent runtime and environment configuration, including:
@@ -714,7 +691,7 @@ All system-wide types, configuration, and maintenance protocols are declared in 
 
 - **PreferencesConfig (TypedDict)**  
   Global and pool-level storage, maintenance, and policy parameters, including:
-    - `storage_backend: str` (e.g. `"msgpack-v2"`)
+    - `storage_backend: str` 
     - `compression_level: int`
     - `max_file_size_mb: int`
     - `enable_auto_decay: bool`
@@ -744,17 +721,17 @@ All system-wide types, configuration, and maintenance protocols are declared in 
 
 ### 6.5.2 Storage and Policy Layer
 
-The canonical knowledge store is **OrbitStore**, implemented as a single-file, append-only MsgPack stream (`.bin`), supporting atomic get/put/close interfaces. It guarantees the following:
+The canonical knowledge store is **OrbitStore**, implemented as a single-file, append-only stream (`.bin`), supporting atomic get/put/close interfaces. It guarantees the following:
 
 - **Storage contract:**
-    - `get(context_key: Tuple[int, int]) -> Optional[Any]`
+    - `get(context_key: Tuple[int, int]) -> Optional[Any]`  # (state_index, token_id)
     - `put(context_key: Tuple[int, int], entry: Any) -> None`
     - `commit() -> None`  _(NO-OP in append-only mode, retained for compatibility)_
     - `close() -> None`
     - `data -> Dict[Tuple[int, int], Any]`  _(returns all entries, as reconstructed from `.bin`)_
     - `iter_entries() -> Iterator[Tuple[Tuple[int, int], Any]]`
 
-- **All mutations are streamed to the MsgPack file**. No `.log` or `.idx` sidecar files are written in append-only mode. **Deletion is not supported**; instead, call `prune_and_compact_store` to create a new file without old entries.
+- **All mutations are streamed to the Bin file**. No `.log` or `.idx` sidecar files are written in append-only mode. **Deletion is not supported**; instead, call `prune_and_compact_store` to create a new file without old entries.
 
 - **CanonicalView** applies canonicalisation (using a phenomenology map) for all key lookups, so each unique operational orbit is consistently addressed regardless of its physical context. The original context is retained in `_original_context` for provenance.  
   - All lookups and puts are transparently normalised.
@@ -787,7 +764,7 @@ All store/view objects must be explicitly closed by the user or registered with 
 ---
 
 **Summary:**  
-The entirety of GyroSI agent knowledge, for any configuration or deployment scale, is maintained through a strict, minimal API over a single append-only MsgPack file. All canonicalisation, overlays, pruning, and statistics are enforced through well-defined, testable decorator layers and contracts, never requiring runtime code to touch or interpret raw file content.
+The entirety of GyroSI agent knowledge, for any configuration or deployment scale, is maintained through a strict, minimal API over a single append-only Bin file. All canonicalisation, overlays, pruning, and statistics are enforced through well-defined, testable decorator layers and contracts, never requiring runtime code to touch or interpret raw file content.
 
 ---
 
@@ -1000,7 +977,7 @@ You can run **dozens of agents concurrently** on a modern workstation. Latency s
 
 GyroSI has **two memories**:  
 1. **Active working state:** always 48 bits (**6 bytes**) + the current input byte. That's it.  
-2. **Passive long‑term memory (OrbitStore):** grows with experience, one entry per *(state_index, intron)* pair you ever see.
+2. **Passive long‑term memory (OrbitStore):** grows with experience, one entry per *(state_index, token_id)* pair you ever see.
 
 This means an edge device only needs to keep 6 bytes "alive". Everything else can sit on SD/flash and be fetched when needed.
 
@@ -1131,8 +1108,8 @@ The `fold_sequence([...])` function performs a non-associative reduction over a 
 The stable 8-bit result of folding. This value encodes the final memory state, carrying the condensed expression of the entire intronic history. Bit families (`LI`, `FG`, `BG`, `L0`) persist structurally and define the mask's functional signature.
 
 **Exon‑Product (p)**:
-A transient 8‑bit operator generated at BU‑Ingress time from the phenotype’s governance signature, confidence, and orbit cardinality.
-It projects the stored exon_mask back onto the rolling 6‑byte context, progressively realigning the agent with the Common Source.
+A transient 8‑bit operator generated at BU‑Ingress time from the phenotype's governance signature, confidence, and orbit cardinality.
+It projects the stored exon_mask back onto the rolling 6‑byte context, progressively realigning the agent with the Common Source.
 
 **Protein (`governance_signature`)**
 A 5-tuple derived from the exon mask. It quantifies the expressed content:
