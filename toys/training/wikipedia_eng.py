@@ -1,118 +1,146 @@
 #!/usr/bin/env python3
 """
-Wikipedia Training - High-Performance Implementation
+GyroSI Wikipedia Training Pipeline - Token-Aware Stream Compiler
 
-Key optimizations for 1000+ articles/second:
-- Cached tokenizer for maximum speed
-- Sentence buffering with 100 sentences per batch_learn
-- Less frequent commits (every 100 articles)
-- Streaming processing to avoid memory issues
-- Optimized for 16-core server
-- Reduced logging/checkpoint frequency for speed
-- Fixed checkpoint mutation that caused progress loops
-- Fixed knowledge file growth issue (batch_learn always learns)
-- Proper tokenizer byte encoding
-- Better progress tracking
+This script converts Wikipedia text dumps into compact "gyro-tapes" (raw intron streams)
+and optionally updates token-aware knowledge stores. It's optimized for the 0.9.6.7
+token-aware refactored architecture.
+
+Key Features:
+- Streams articles one-by-one to avoid memory issues
+- Uses HF FastTokenizer for efficient tokenization
+- Converts tokens to LEB128 bytes then to introns via XOR 0xAA
+- Writes compact .gyro tape files (~1.5 bytes/token)
+- Optionally updates token-aware knowledge store automatically via process_egress
+- Real-time progress tracking with performance metrics
+- PEP8 compliant with proper typing for static analysis tools
+
+Usage:
+    # Simple Wikipedia to tape only (fastest)
+    python gyro_tape_compiler.py --simple -o simple_wiki.gyro
+
+    # Full Wikipedia to tape with learning
+    python gyro_tape_compiler.py --full -o full_wiki.gyro --learn
+
+    # Limit articles for testing
+    python gyro_tape_compiler.py --simple -o test.gyro --limit 1000
 """
 
-from toys.communication import tokenizer as gyrotok
-from baby.intelligence import GyroSI
-from baby.contracts import AgentConfig
-import sys
-from pathlib import Path
 import argparse
+import gzip
 import json
-import logging
-import os
-import re
-import signal
+import sys
 import time
-import zlib
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from logging.handlers import RotatingFileHandler
-from typing import Dict, List, Optional, Tuple, Any
+from itertools import islice
+from pathlib import Path
+from typing import Iterator, Iterable, Optional, List, Union, cast, Dict
 
-# Project setup
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from transformers import AutoTokenizer
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Cache the tokenizer for high performance
-TOKENIZER = gyrotok._load("bert-base-uncased")
+from toys.communication.tokenizer import id_to_bytes  # noqa: E402
+from baby.intelligence import GyroSI  # noqa: E402
+from baby.contracts import AgentConfig, PreferencesConfig  # noqa: E402
 
-# High-performance constants
-SENTENCES_PER_LEARN = 100  # Bigger batches
-ARTICLES_PER_COMMIT = 100  # Less frequent commits
-
-# Environment setup for parallel tokenization
-os.environ["TOKENIZERS_PARALLELISM"] = "true"
-os.environ["RAYON_NUM_THREADS"] = "16"
-os.environ["NUMBA_NUM_THREADS"] = "16"  # For JIT optimization
-
-try:
-    import psutil
-
-    HAVE_PSUTIL = True
-except ImportError:
-    HAVE_PSUTIL = False
-
-try:
-    from tqdm import tqdm
-
-    HAVE_TQDM = True
-except ImportError:
-    HAVE_TQDM = False
-
-# Constants - Optimized for 16-core server and maximum speed
-SENT_RE = re.compile(r"""(?<=[.!?])['")]*\s+(?=[A-Z])""", re.VERBOSE)
-MIN_ARTICLE_TOKENS = 20
-MIN_SENTENCE_TOKENS = 3
-LEARNING_BATCH_SIZE = 50  # Increased for better throughput
-PREPROCESSING_BATCH_SIZE = 16000  # Increased for maximum parallel processing
-CHECKPOINT_INTERVAL = 5000  # Less frequent checkpoints for speed
-LOG_INTERVAL = 500  # Less frequent logging for speed
-MONITOR_INTERVAL = 2000  # Less frequent monitoring for speed
-
-# Global state
-shutdown_requested = False
+# Default constants
+DEFAULT_LOG_INTERVAL = 50_000  # Default logging interval
+GENE_MIC_S = 0xAA  # ψ(b) = b ^ 0xAA - the holographic boundary transcription
+DEFAULT_BLANK_LINES = 3  # Default number of blank lines that separate articles
 
 
-def signal_handler(signum: int, frame: Any) -> None:
-    """Handle Ctrl+C gracefully."""
-    global shutdown_requested
-    shutdown_requested = True
-    print("\n⚠️  Shutdown requested. Finishing current batch...")
+def iter_wiki_articles(files: Iterable[Path], blank_line_threshold: int = DEFAULT_BLANK_LINES) -> Iterator[str]:
+    """
+    Yield one article (str) at a time from Wikipedia dataset files.
+
+    Articles are separated by blank_line_threshold or more blank lines.
+
+    Args:
+        files: Iterable of file paths to process
+        blank_line_threshold: Number of consecutive blank lines to define article boundary
+
+    Yields:
+        str: Complete article text as a single string
+    """
+    for file_path in files:
+        # Handle both .txt and .gz files
+        open_func = gzip.open if file_path.suffix == ".gz" else open
+
+        with open_func(file_path, "rt", encoding="utf-8", errors="ignore") as f:
+            buffer: List[str] = []
+            blank_line_count = 0
+
+            for line in f:
+                if line.strip():
+                    buffer.append(line)
+                    blank_line_count = 0
+                else:
+                    blank_line_count += 1
+                    # Configurable blank line threshold for article boundary
+                    if blank_line_count >= blank_line_threshold and buffer:
+                        yield "".join(buffer)
+                        buffer.clear()
+
+            # Don't forget the last article if file doesn't end with blank lines
+            if buffer:
+                yield "".join(buffer)
 
 
-def setup_logging(log_dir: Path) -> logging.Logger:
-    """Setup rotating file logger."""
-    log_dir.mkdir(parents=True, exist_ok=True)
+def build_agent(private_knowledge_path: Path) -> GyroSI:
+    """
+    Create a private GyroSI agent for training.
 
-    logger = logging.getLogger("wikipedia_training")
-    logger.setLevel(logging.INFO)
-    logger.handlers.clear()
+    Args:
+        private_knowledge_path: Path to private knowledge store file
 
-    # Rotating file handler
-    log_file = log_dir / f"training_{int(time.time())}.log"
-    file_handler = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=5)
-    file_handler.setLevel(logging.INFO)
+    Returns:
+        GyroSI: Configured agent instance
+    """
+    # Create dummy public knowledge file if it doesn't exist
+    dummy_public = PROJECT_ROOT / "toys/training/dummy_public_knowledge.bin"
+    if not dummy_public.exists():
+        dummy_public.parent.mkdir(parents=True, exist_ok=True)
+        dummy_public.write_bytes(b"")
 
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    # Load preferences for auto-pruning
+    prefs_path = PROJECT_ROOT / "memories/memory_preferences.json"
+    if prefs_path.exists():
+        with open(prefs_path) as f:
+            preferences = json.load(f)
+    else:
+        # Default pruning preferences
+        preferences = {
+            "pruning": {
+                "confidence_threshold": 0.05,
+                "enable_auto_decay": True,
+                "decay_factor": 0.995,
+            }
+        }
 
-    # Formatter
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
+    # Configure agent with proper paths
+    config: AgentConfig = {
+        "ontology_path": str(PROJECT_ROOT / "memories/public/meta/ontology_keys.npy"),
+        "phenomenology_map_path": str(PROJECT_ROOT / "memories/public/meta/phenomenology_map.npy"),
+        "public_knowledge_path": str(dummy_public),
+        "private_knowledge_path": str(private_knowledge_path),
+        "preferences": cast(PreferencesConfig, preferences.get("pruning", {})),
+    }
 
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-    return logger
+    return GyroSI(config, agent_id="wiki_trainer")
 
 
 def format_size(size_bytes: int) -> str:
-    """Format bytes to human readable size."""
+    """
+    Format bytes to human readable size.
+
+    Args:
+        size_bytes: Size in bytes
+
+    Returns:
+        str: Formatted size string
+    """
     if size_bytes < 1024:
         return f"{size_bytes}B"
     elif size_bytes < 1024 * 1024:
@@ -123,801 +151,480 @@ def format_size(size_bytes: int) -> str:
         return f"{size_bytes / (1024 * 1024 * 1024):.2f}GB"
 
 
-def robust_sentence_split(text: str) -> List[str]:
+def format_time(seconds: float) -> str:
     """
-    Split text into sentences using robust regex approach.
-    Handles abbreviations and common edge cases.
+    Format seconds into human readable time string.
+
+    Args:
+        seconds: Time in seconds
+
+    Returns:
+        str: Formatted time string (HH:MM:SS or MM:SS)
     """
-    # Handle common abbreviations
-    text = re.sub(r"\b(Dr|Mr|Mrs|Ms|Prof|Sr|Jr|vs|etc|i\.e|e\.g)\.\s*", r"\1<PERIOD>", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(Inc|Ltd|Corp|Co|LLC)\.\s*", r"\1<PERIOD>", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.\s*", r"\1<PERIOD>", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b(BC|AD)\.\s*", r"\1<PERIOD>", text, flags=re.IGNORECASE)
-
-    # Split using regex
-    sentences = SENT_RE.split(text)
-
-    # Clean up and restore periods
-    result = []
-    for sentence in sentences:
-        sentence = sentence.replace("<PERIOD>", ".").strip()
-        if sentence and len(sentence) > 10:
-            result.append(sentence)
-
-    return result
-
-
-def preprocess_article(article_text: str) -> Optional[List[str]]:
-    """
-    Preprocess article into clean sentences.
-    Returns list of sentence strings or None if article should be skipped.
-    """
-    # Much more lenient
-    if len(article_text.strip()) < 50:  # Was 100
-        return None
-    if "#REDIRECT" in article_text.upper()[:20]:  # Only check start
-        return None
-    # Remove disambiguation check entirely - these are valid content
-
-    sentences = robust_sentence_split(article_text)
-    return sentences if sentences else None
-
-
-def preprocess_articles_parallel(
-    articles: List[Tuple[int, str]], max_workers: Optional[int] = None
-) -> List[Tuple[int, List[str]]]:
-    """
-    Preprocess articles in parallel, return (article_idx, sentences) pairs.
-    """
-    if max_workers is None:
-        max_workers = os.cpu_count() or 16
-
-    results = []
-
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        future_to_idx = {executor.submit(preprocess_article, text): idx for idx, text in articles}
-
-        for future in as_completed(future_to_idx):
-            if shutdown_requested:
-                executor.shutdown(wait=False)
-                break
-
-            idx = future_to_idx[future]
-            try:
-                sentences = future.result()
-                if sentences:
-                    results.append((idx, sentences))
-            except Exception as e:
-                print(f"⚠️  Error preprocessing article {idx}: {e}")
-
-    results.sort(key=lambda x: x[0])
-    return results
-
-
-def create_agent(knowledge_path: Path) -> GyroSI:
-    """Create a private agent with proper configuration."""
-    # Create dummy public knowledge file if it doesn't exist
-    dummy_public = PROJECT_ROOT / "toys/training/dummy_public_knowledge.bin"
-    if not dummy_public.exists():
-        dummy_public.parent.mkdir(parents=True, exist_ok=True)
-        dummy_public.write_bytes(b"")
-
-    # Load preferences
-    prefs_path = PROJECT_ROOT / "memories/memory_preferences.json"
-    if prefs_path.exists():
-        with open(prefs_path) as f:
-            preferences = json.load(f)
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        minutes, seconds = divmod(seconds, 60)
+        return f"{int(minutes)}m {int(seconds)}s"
     else:
-        preferences = {"pruning": {"confidence_threshold": 0.05, "enable_auto_decay": True, "decay_factor": 0.995}}
-
-    # Use explicit paths that match your project structure
-    config: AgentConfig = {
-        "ontology_path": str(PROJECT_ROOT / "memories/public/meta/ontology_keys.npy"),
-        "phenomenology_map_path": str(PROJECT_ROOT / "memories/public/meta/phenomenology_map.npy"),
-        "public_knowledge_path": str(dummy_public),
-        "private_knowledge_path": str(knowledge_path),
-        "learn_batch_size": 1000,
-        "preferences": preferences.get("pruning", {}),
-    }
-
-    return GyroSI(config, agent_id="wikipedia_trainer")
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{int(hours)}h {int(minutes)}m {int(seconds)}s"
 
 
-def save_checkpoint_atomic(checkpoint_data: Dict[str, Any], checkpoint_path: Path) -> None:
-    """Save checkpoint atomically with CRC validation. FIXED: no longer mutates input dict."""
-    tmp_path = checkpoint_path.with_suffix(".tmp")
-
-    try:
-        # Create a deep copy to avoid mutating the original stats dict
-        data_to_write = json.loads(json.dumps(checkpoint_data))
-
-        # Add CRC to the copy (not the original)
-        json_str = json.dumps(data_to_write, indent=2, sort_keys=True)
-        crc32 = format(zlib.crc32(json_str.encode()) & 0xFFFFFFFF, "08x")
-        data_to_write["crc32"] = crc32
-
-        # Write to temp file
-        with open(tmp_path, "w") as f:
-            json.dump(data_to_write, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-
-        # Atomic rename
-        tmp_path.replace(checkpoint_path)
-
-    except Exception as e:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise e
-
-
-def load_checkpoint(checkpoint_path: Path) -> Optional[Dict[str, Any]]:
-    """Load and validate checkpoint."""
-    if not checkpoint_path.exists():
-        return None
-
-    try:
-        with open(checkpoint_path) as f:
-            data = json.load(f)
-
-        # Validate CRC if present
-        if "crc32" in data:
-            crc32 = data.pop("crc32")
-            json_str = json.dumps(data, indent=2, sort_keys=True)
-            expected_crc32 = format(zlib.crc32(json_str.encode()) & 0xFFFFFFFF, "08x")
-            if crc32 != expected_crc32:
-                print("⚠️  Checkpoint CRC mismatch, may be corrupted")
-
-        return data
-    except Exception as e:
-        print(f"⚠️  Error loading checkpoint: {e}")
-        return None
-
-
-def get_knowledge_entry_count(knowledge_path: Path) -> int:
-    """Get number of entries in knowledge file."""
-    if not knowledge_path.exists():
-        return 0
-
-    try:
-        # Read file and count entries (expensive operation)
-        with open(knowledge_path, "rb") as f:
-            data = f.read()
-        return len(data) // 1024  # Rough estimate
-    except Exception:
-        return 0
-
-
-def stream_articles(file_path: Path):
-    """Stream articles one at a time from disk."""
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-        article_lines = []
-        for line in f:
-            if line.strip():
-                article_lines.append(line)
-            elif article_lines:  # Empty line = article boundary
-                yield "".join(article_lines)
-                article_lines = []
-        if article_lines:  # Don't forget the last one
-            yield "".join(article_lines)
-
-
-def train_with_batch_learn(
-    agent: GyroSI,
-    all_articles: List[str],
-    checkpoint_path: Path,
-    knowledge_path: Path,
-    logger: logging.Logger,
-    max_workers: Optional[int] = None,
-    max_articles: Optional[int] = None,
-) -> Dict[str, Any]:
+def compile_stream(
+    articles: Iterable[str],
+    output_tape_path: Path,
+    agent: Optional[GyroSI] = None,
+    limit: Optional[int] = None,
+    log_interval: int = DEFAULT_LOG_INTERVAL,
+) -> Dict[str, Union[int, float, str]]:
     """
-    Train using batch_learn with proper state evolution.
-    Process ALL articles, not just the first batch.
+    Compile Wikipedia articles into a gyro-tape and optionally update knowledge store.
+
+    Args:
+        articles: Iterable of article texts
+        output_tape_path: Path to output .gyro file
+        agent: Optional GyroSI agent for learning (via process_egress)
+        limit: Optional limit on number of articles to process
+        log_interval: How often to log progress (in number of articles)
+
+    Returns:
+        Dictionary of statistics about the compilation
     """
-    if max_workers is None:
-        max_workers = os.cpu_count() or 16
+    # Initialize fast tokenizer
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased", use_fast=True)  # type: ignore
 
-    stats: Dict[str, Any] = {
-        "articles_processed": 0,
-        "articles_skipped": 0,
-        "sentences_processed": 0,
-        "batches_processed": 0,
-        "start_time": time.time(),
-        "unique_states_count": 0,  # Just count, don't store
-        "last_seen_states": set(),  # Keep only last 1000 for sampling
-    }
+    # Create output directory
+    output_tape_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Process and system monitoring
-    process = psutil.Process() if HAVE_PSUTIL else None
+    # Initialize counters
+    articles_processed = 0
+    tokens_processed = 0
+    bytes_written = 0
+    start_time = time.time()
+    last_log_time = start_time
 
-    # Load checkpoint if exists
-    checkpoint = load_checkpoint(checkpoint_path)
-    if checkpoint:
-        start_article = checkpoint.get("last_article_index", 0)
-        checkpoint_stats = checkpoint.get("stats", {})
-        # Merge checkpoint stats but preserve the set type for last_seen_states
-        for key, value in checkpoint_stats.items():
-            if key == "last_seen_states" and isinstance(value, list):
-                stats[key] = set(value)
-            else:
-                stats[key] = value
-        logger.info(f"Resuming from checkpoint at article {start_article}")
-    else:
-        start_article = 0
+    print("🚀 Starting compilation...")
+    print(f"   Output: {output_tape_path}")
+    print(f"   Learning: {'Yes' if agent else 'No'}")
+    if limit:
+        print(f"   Limit: {limit:,} articles")
+    print("-" * 60)
 
-    # Limit articles if requested
-    if max_articles and len(all_articles) > max_articles:
-        all_articles = all_articles[:max_articles]
+    # Open output file for writing
+    with output_tape_path.open("wb") as tape_file:
+        # Apply limit if specified
+        article_iterator = islice(articles, limit) if limit else articles
 
-    total_articles = len(all_articles)
-    logger.info(f"Processing {total_articles:,} total articles")
+        try:
+            for article_text in article_iterator:
+                articles_processed += 1
 
-    # SEP token bytes
-    sep_bytes = gyrotok.sep_bytes(1)
+                # Tokenize article
+                token_ids = tokenizer.encode(article_text, add_special_tokens=False)
+                tokens_processed += len(token_ids)
 
-    # Track state evolution
-    initial_state = agent.engine.get_state_info()["tensor_index"]
-    logger.info(f"Starting from state index: {initial_state}")
+                # Process each token
+                for token_id in token_ids:
+                    # Convert token ID to LEB128 bytes
+                    leb_bytes = id_to_bytes(token_id)
 
-    # Process articles in chunks
-    articles_to_process = all_articles[start_article:]
-    last_checkpoint_time = time.time()
+                    # Ensure leb_bytes is treated as bytes for iteration
+                    # This handles any potential future API changes
+                    if not isinstance(leb_bytes, bytes):
+                        leb_bytes = bytes(cast(List[int], leb_bytes))
 
-    # Setup progress tracking
-    if HAVE_TQDM:
-        pbar = tqdm(total=len(articles_to_process), desc="Training", unit="articles")
-        pbar.update(0)
+                    # Convert all bytes to introns and write as batch
+                    intron_bytes = bytes(b ^ GENE_MIC_S for b in leb_bytes)
+                    tape_file.write(intron_bytes)
+                    bytes_written += len(intron_bytes)
 
-    # High-performance sentence buffering
-    sentence_buffer = bytearray()
-    sentence_count = 0
-    articles_since_commit = 0
+                    # If learning, feed each intron to engine
+                    # process_egress handles token boundary detection and learning
+                    if agent:
+                        for intron in intron_bytes:
+                            agent.engine.process_egress(intron)
 
-    # Process ALL articles, not just first batch
-    for chunk_start in range(0, len(articles_to_process), PREPROCESSING_BATCH_SIZE):
-        if shutdown_requested:
-            break
+                # Log progress periodically based on articles or time
+                current_time = time.time()
+                if (
+                    articles_processed % log_interval == 0 or current_time - last_log_time >= 60
+                ):  # At least every minute
 
-        # Get chunk of articles
-        chunk_end = min(chunk_start + PREPROCESSING_BATCH_SIZE, len(articles_to_process))
-        article_chunk = articles_to_process[chunk_start:chunk_end]
+                    elapsed = current_time - start_time
+                    rate_articles = articles_processed / elapsed if elapsed > 0 else 0
+                    rate_tokens = tokens_processed / elapsed if elapsed > 0 else 0
+                    rate_bytes = bytes_written / elapsed / (1024 * 1024) if elapsed > 0 else 0  # MB/s
 
-        # Create indexed articles for preprocessing
-        indexed_articles = [(start_article + chunk_start + i, article) for i, article in enumerate(article_chunk)]
+                    # Calculate ETA if we know the limit
+                    eta_str = ""
+                    if limit:
+                        articles_remaining = limit - articles_processed
+                        if rate_articles > 0:
+                            eta_seconds = articles_remaining / rate_articles
+                            eta_str = f" | ETA: {format_time(eta_seconds)}"
 
-        logger.info(
-            f"Preprocessing articles {chunk_start + start_article} to "
-            f"{chunk_end + start_article} ({len(indexed_articles)} articles)"
-        )
-
-        # Preprocess in parallel
-        preprocessed = preprocess_articles_parallel(indexed_articles, max_workers)
-
-        if not preprocessed:
-            logger.warning(f"No valid articles in chunk {chunk_start}-{chunk_end}")
-            stats["articles_skipped"] += len(article_chunk)
-            continue
-
-        logger.info(f"Found {len(preprocessed)} valid articles in chunk")
-
-        # Process preprocessed articles in small learning batches
-        for batch_start in range(0, len(preprocessed), LEARNING_BATCH_SIZE):
-            if shutdown_requested:
-                break
-
-            batch_end = min(batch_start + LEARNING_BATCH_SIZE, len(preprocessed))
-            learning_batch = preprocessed[batch_start:batch_end]
-
-            for article_idx, sentences in learning_batch:
-                for sentence in sentences:
-                    try:
-                        ids = TOKENIZER.encode(sentence).ids  # Use cached tokenizer
-                        sentence_buffer.extend(gyrotok.bytes_from_ids(ids))
-                        sentence_buffer.extend(sep_bytes)
-                        sentence_count += 1
-                        stats["sentences_processed"] += 1
-
-                        if sentence_count >= SENTENCES_PER_LEARN:
-                            agent.ingest(bytes(sentence_buffer))
-                            sentence_buffer = bytearray()
-                            sentence_count = 0
-
-                    except Exception as e:
-                        logger.warning(f"Failed to encode sentence: {e}")
-
-                stats["articles_processed"] += 1
-                articles_since_commit += 1
-
-                # Update progress bar
-                if HAVE_TQDM:
-                    pbar.update(1)
-
-                # Track state evolution
-                if stats["articles_processed"] % MONITOR_INTERVAL == 0:
-                    current_state = agent.engine.get_state_info()["tensor_index"]
-                    if current_state not in stats["last_seen_states"]:
-                        stats["unique_states_count"] += 1
-                    stats["last_seen_states"].add(current_state)
-                    if len(stats["last_seen_states"]) > 1000:
-                        # Remove oldest item (sets don't have pop(), so we'll just keep the size bounded)
-                        # Convert to list, remove first item, convert back to set
-                        temp_list = list(stats["last_seen_states"])
-                        temp_list.pop(0)
-                        stats["last_seen_states"] = set(temp_list)
-                    logger.info(
-                        f"State evolution check - Current state: {current_state}, "
-                        f"Unique states seen: {stats['unique_states_count']}"
+                    progress_msg = (
+                        f"📊 Progress: {articles_processed:,} articles"
+                        f"{f'/{limit:,}' if limit else ''} | "
+                        f"{tokens_processed:,} tokens | "
+                        f"{format_size(bytes_written)} written | "
+                        f"{rate_articles:.0f} arts/s | "
+                        f"{rate_tokens:.0f} tokens/s | "
+                        f"{rate_bytes:.1f} MB/s{eta_str}"
                     )
+                    print(progress_msg)
+                    last_log_time = current_time
 
-                # Commit less frequently
-                if articles_since_commit >= ARTICLES_PER_COMMIT:
-                    if hasattr(agent.engine.operator.store, "commit"):
-                        agent.engine.operator.store.commit()
-                    articles_since_commit = 0
+                    # Flush output to show progress in logs
+                    sys.stdout.flush()
 
-            # Don't forget the final buffer
-            if sentence_buffer:
-                agent.ingest(bytes(sentence_buffer))
+        except KeyboardInterrupt:
+            print("\n⚠️  Compilation interrupted! Saving progress...")
 
-            # Commit once per batch (20 articles) instead of per article
-            if hasattr(agent.engine.operator.store, "commit"):
-                agent.engine.operator.store.commit()
+        finally:
+            # Always flush the tape file before closing
+            tape_file.flush()
 
-            stats["batches_processed"] += 1
+    # Commit any pending changes to knowledge store
+    if agent and hasattr(agent.engine.operator.store, "commit"):
+        agent.engine.operator.store.commit()
 
-            # Progress updates
-            if stats["articles_processed"] % LOG_INTERVAL == 0:
-                elapsed = time.time() - stats["start_time"]
-                rate = stats["articles_processed"] / elapsed if elapsed > 0 else 0
+    # Final statistics
+    total_elapsed = time.time() - start_time
+    final_rate_articles = articles_processed / total_elapsed if total_elapsed > 0 else 0
+    final_rate_tokens = tokens_processed / total_elapsed if total_elapsed > 0 else 0
+    final_rate_bytes = bytes_written / total_elapsed / (1024 * 1024) if total_elapsed > 0 else 0
 
-                # System stats
-                mem_str = ""
-                cpu_str = ""
-                if process:
-                    try:
-                        mem_mb = process.memory_info().rss / (1024 * 1024)
-                        cpu_percent = process.cpu_percent(interval=0.1)
-                        mem_str = f" | Mem: {mem_mb:.0f}MB"
-                        cpu_str = f" | CPU: {cpu_percent:.0f}%"
-                    except Exception:
-                        pass
+    # Prepare stats dictionary
+    stats: Dict[str, Union[int, float, str]] = {
+        "articles_processed": articles_processed,
+        "tokens_processed": tokens_processed,
+        "bytes_written": bytes_written,
+        "processing_time": total_elapsed,
+        "rate_articles": final_rate_articles,
+        "rate_tokens": final_rate_tokens,
+        "rate_bytes": final_rate_bytes,
+    }
 
-                # File stats
-                file_size = knowledge_path.stat().st_size if knowledge_path.exists() else 0
-                # entry_count = get_knowledge_entry_count(knowledge_path)  # REMOVE THIS - too expensive
+    # Add knowledge stats if learning was enabled
+    if agent:
+        knowledge_path_str = agent.config.get("private_knowledge_path")
+        if knowledge_path_str is not None:
+            knowledge_path = Path(knowledge_path_str)
+            if knowledge_path.exists():
+                knowledge_size = knowledge_path.stat().st_size
+                stats["knowledge_size"] = knowledge_size
 
-                # Progress message
-                progress_pct = (stats["articles_processed"] / total_articles * 100) if total_articles > 0 else 0
-                message = (
-                    f"Progress: {stats['articles_processed']:,}/{total_articles:,} "
-                    f"({progress_pct:.1f}%) | "
-                    f"{stats['sentences_processed']:,} sentences | "
-                    f"{rate:.1f} art/s{mem_str}{cpu_str} | "
-                    f"Knowledge: {format_size(file_size)}"  # No entry count
-                )
+    print("-" * 60)
+    print("✅ Compilation completed!")
+    print(f"   Articles processed: {articles_processed:,}")
+    print(f"   Tokens processed: {tokens_processed:,}")
+    print(f"   Tape size: {format_size(bytes_written)}")
+    print(f"   Processing time: {format_time(total_elapsed)}")
+    final_perf_msg = (
+        f"   Performance: {final_rate_articles:.0f} arts/s | "
+        f"{final_rate_tokens:.0f} tokens/s | "
+        f"{final_rate_bytes:.1f} MB/s"
+    )
+    print(final_perf_msg)
+    if agent and "knowledge_size" in stats:
+        print(f"   Knowledge store: {format_size(int(stats['knowledge_size']))}")
 
-                print(f"📊 {message}")
-                logger.info(message)
+    # Write stats to JSON file alongside the tape
+    stats_path = output_tape_path.with_suffix(".stats.json")
+    with stats_path.open("w") as f:
+        # Convert stats to JSON-serializable format
+        json_stats = {k: v if not isinstance(v, Path) else str(v) for k, v in stats.items()}
+        json.dump(json_stats, f, indent=2)
 
-            # Checkpoint periodically
-            if time.time() - last_checkpoint_time > 300 or stats["articles_processed"] % CHECKPOINT_INTERVAL == 0:
-
-                # Save checkpoint (stats won't be mutated anymore)
-                checkpoint_data = {
-                    "last_article_index": start_article + chunk_start + batch_end,
-                    "stats": {
-                        "articles_processed": stats["articles_processed"],
-                        "articles_skipped": stats["articles_skipped"],
-                        "sentences_processed": stats["sentences_processed"],
-                        "batches_processed": stats["batches_processed"],
-                        "start_time": stats["start_time"],
-                        "last_seen_states": list(stats["last_seen_states"]),
-                    },
-                    "timestamp": time.time(),
-                }
-
-                save_checkpoint_atomic(checkpoint_data, checkpoint_path)
-
-                # Log checkpoint
-                file_size = knowledge_path.stat().st_size if knowledge_path.exists() else 0
-                # entry_count = get_knowledge_entry_count(knowledge_path)  # REMOVE THIS - too expensive
-                message = (
-                    f"Checkpoint saved at article {stats['articles_processed']}, "
-                    f"knowledge: {format_size(file_size)}"
-                )  # No entry count
-                print(f"💾 {message}")
-                logger.info(message)
-
-                last_checkpoint_time = time.time()
-
-    if HAVE_TQDM:
-        pbar.close()
-
-    # Final state check
-    final_state = agent.engine.get_state_info()["tensor_index"]
-    if final_state not in stats["last_seen_states"]:
-        stats["unique_states_count"] += 1
-    stats["last_seen_states"].add(final_state)
-    if len(stats["last_seen_states"]) > 1000:
-        # Remove oldest item (sets don't have pop(), so we'll just keep the size bounded)
-        # Convert to list, remove first item, convert back to set
-        temp_list = list(stats["last_seen_states"])
-        temp_list.pop(0)
-        stats["last_seen_states"] = set(temp_list)
-    logger.info(f"Final state: {final_state}, Total unique states: {stats['unique_states_count']}")
+    print(f"   Stats saved to: {stats_path}")
 
     return stats
 
 
-def train_with_streaming(
+def replay_tape(
+    tape_path: Path,
     agent: GyroSI,
-    files: List[Path],
-    checkpoint_path: Path,
-    knowledge_path: Path,
-    logger: logging.Logger,
-    max_workers: Optional[int] = None,
-    max_articles: Optional[int] = None,
-) -> Dict[str, Any]:
+    log_interval: int = 1_000_000,  # Log every 1M bytes by default
+) -> Dict[str, Union[int, float, str]]:
     """
-    High-performance streaming training that processes articles one at a time.
+    Replay a gyro-tape through an agent for learning.
+
+    Args:
+        tape_path: Path to .gyro file
+        agent: GyroSI agent to feed introns to
+        log_interval: How often to log progress (in bytes)
+
+    Returns:
+        Dictionary of statistics about the replay
     """
-    # Initialize stats
-    stats = {
-        "articles_processed": 0,
-        "articles_skipped": 0,
-        "sentences_processed": 0,
-        "batches_processed": 0,
-        "start_time": time.time(),
-        "unique_states_count": 0,
-        "last_seen_states": set(),
-    }
+    print(f"🎬 Replaying tape: {tape_path}")
 
-    # Process and system monitoring
-    process = psutil.Process() if HAVE_PSUTIL else None
+    # Get tape file size for progress tracking
+    tape_size = tape_path.stat().st_size
 
-    # Load checkpoint if exists
-    checkpoint = load_checkpoint(checkpoint_path)
-    if checkpoint:
-        start_article = checkpoint.get("last_article_index", 0)
-        checkpoint_stats = checkpoint.get("stats", {})
-        # Merge checkpoint stats but preserve the set type for last_seen_states
-        for key, value in checkpoint_stats.items():
-            if key == "last_seen_states" and isinstance(value, list):
-                stats[key] = set(value)
-            else:
-                stats[key] = value
-        logger.info(f"Resuming from checkpoint at article {start_article}")
-    else:
-        start_article = 0
+    bytes_processed = 0
+    start_time = time.time()
+    last_log_time = start_time
 
-    # SEP token bytes
-    sep_bytes = gyrotok.sep_bytes(1)
+    # Optimize reading with larger buffer
+    buffer_size = 1024 * 1024  # 1MB buffer for better throughput
 
-    # Track state evolution
+    # Get initial state for tracking
     initial_state = agent.engine.get_state_info()["tensor_index"]
-    logger.info(f"Starting from state index: {initial_state}")
 
-    # Setup progress tracking
-    total_articles = 0
-    if max_articles:
-        total_articles = max_articles
-    else:
-        # Count total articles for progress
-        for file_path in files:
-            total_articles += sum(1 for _ in stream_articles(file_path))
+    with tape_path.open("rb") as f:
+        try:
+            while True:
+                # Read in chunks for better performance
+                chunk = f.read(buffer_size)
+                if not chunk:
+                    break
 
-    if HAVE_TQDM:
-        pbar = tqdm(total=total_articles, desc="Training", unit="articles")
-        pbar.update(0)
+                # Process each byte in the chunk
+                for intron in chunk:
+                    agent.engine.process_egress(intron)
 
-    # High-performance stream processing
-    sentence_buffer = bytearray()
-    sentence_count = 0
-    articles_since_commit = 0
-    last_checkpoint_time = time.time()
+                bytes_processed += len(chunk)
 
-    for file_idx, file_path in enumerate(files):
-        if shutdown_requested:
-            break
+                # Log progress periodically based on bytes or time
+                current_time = time.time()
+                if bytes_processed % log_interval == 0 or current_time - last_log_time >= 60:  # At least every minute
 
-        logger.info(f"Processing file {file_idx + 1}/{len(files)}: {file_path.name}")
+                    elapsed = current_time - start_time
+                    rate = bytes_processed / elapsed / (1024 * 1024) if elapsed > 0 else 0
 
-        for article_idx, article in enumerate(stream_articles(file_path)):
-            if shutdown_requested:
-                break
+                    # Calculate progress percentage and ETA
+                    progress_pct = bytes_processed / tape_size * 100
+                    eta_seconds = (
+                        (tape_size - bytes_processed) / (bytes_processed / elapsed)
+                        if elapsed > 0 and bytes_processed > 0
+                        else 0
+                    )
 
-            if max_articles and stats["articles_processed"] >= max_articles:
-                break
+                    # Current state for tracking evolution
+                    current_state = agent.engine.get_state_info()["tensor_index"]
+                    state_delta = "same" if current_state == initial_state else "changed"
 
-            # Preprocess article
-            sentences = preprocess_article(article)
-            if not sentences:
-                stats["articles_skipped"] += 1
-                continue
+                    progress_msg = (
+                        f"   {progress_pct:.1f}% | "
+                        f"Processed {format_size(bytes_processed)}/{format_size(tape_size)} | "
+                        f"Rate: {rate:.1f} MB/s | "
+                        f"ETA: {format_time(eta_seconds)} | "
+                        f"State: {state_delta}"
+                    )
+                    print(progress_msg)
+                    last_log_time = current_time
 
-            # Process sentences
-            for sentence in sentences:
-                try:
-                    ids = TOKENIZER.encode(sentence).ids  # Use cached tokenizer
-                    sentence_buffer.extend(gyrotok.bytes_from_ids(ids))
-                    sentence_buffer.extend(sep_bytes)
-                    sentence_count += 1
-                    stats["sentences_processed"] += 1
+                    # Flush output to show progress in logs
+                    sys.stdout.flush()
 
-                    if sentence_count >= SENTENCES_PER_LEARN:
-                        agent.ingest(bytes(sentence_buffer))
-                        sentence_buffer = bytearray()
-                        sentence_count = 0
+        except KeyboardInterrupt:
+            print("\n⚠️  Replay interrupted!")
 
-                except Exception as e:
-                    logger.warning(f"Failed to encode sentence: {e}")
-
-            stats["articles_processed"] += 1
-            articles_since_commit += 1
-
-            # Update progress bar
-            if HAVE_TQDM:
-                pbar.update(1)
-
-            # Track state evolution
-            if stats["articles_processed"] % MONITOR_INTERVAL == 0:
-                current_state = agent.engine.get_state_info()["tensor_index"]
-                if current_state not in stats["last_seen_states"]:
-                    stats["unique_states_count"] += 1
-                stats["last_seen_states"].add(current_state)
-                if len(stats["last_seen_states"]) > 1000:
-                    temp_list = list(stats["last_seen_states"])
-                    temp_list.pop(0)
-                    stats["last_seen_states"] = set(temp_list)
-                logger.info(
-                    f"State evolution check - Current state: {current_state}, "
-                    f"Unique states seen: {stats['unique_states_count']}"
-                )
-
-            # Commit less frequently
-            if articles_since_commit >= ARTICLES_PER_COMMIT:
-                if hasattr(agent.engine.operator.store, "commit"):
-                    agent.engine.operator.store.commit()
-                articles_since_commit = 0
-
-            # Progress updates
-            if stats["articles_processed"] % LOG_INTERVAL == 0:
-                elapsed = time.time() - stats["start_time"]
-                rate = stats["articles_processed"] / elapsed if elapsed > 0 else 0
-
-                # System stats
-                mem_str = ""
-                cpu_str = ""
-                if process:
-                    try:
-                        mem_mb = process.memory_info().rss / (1024 * 1024)
-                        cpu_percent = process.cpu_percent(interval=0.1)
-                        mem_str = f" | Mem: {mem_mb:.0f}MB"
-                        cpu_str = f" | CPU: {cpu_percent:.0f}%"
-                    except Exception:
-                        pass
-
-                # File stats
-                file_size = knowledge_path.stat().st_size if knowledge_path.exists() else 0
-
-                # Progress message
-                progress_pct = (stats["articles_processed"] / total_articles * 100) if total_articles > 0 else 0
-                message = (
-                    f"Progress: {stats['articles_processed']:,}/{total_articles:,} "
-                    f"({progress_pct:.1f}%) | "
-                    f"{stats['sentences_processed']:,} sentences | "
-                    f"{rate:.1f} art/s{mem_str}{cpu_str} | "
-                    f"Knowledge: {format_size(file_size)}"
-                )
-
-                print(f"📊 {message}")
-                logger.info(message)
-
-            # Checkpoint periodically
-            if time.time() - last_checkpoint_time > 300 or stats["articles_processed"] % CHECKPOINT_INTERVAL == 0:
-
-                checkpoint_data = {
-                    "last_article_index": stats["articles_processed"],
-                    "stats": {
-                        "articles_processed": stats["articles_processed"],
-                        "articles_skipped": stats["articles_skipped"],
-                        "sentences_processed": stats["sentences_processed"],
-                        "batches_processed": stats["batches_processed"],
-                        "start_time": stats["start_time"],
-                        "last_seen_states": list(stats["last_seen_states"]),
-                    },
-                    "timestamp": time.time(),
-                }
-
-                save_checkpoint_atomic(checkpoint_data, checkpoint_path)
-
-                # Log checkpoint
-                file_size = knowledge_path.stat().st_size if knowledge_path.exists() else 0
-                message = (
-                    f"Checkpoint saved at article {stats['articles_processed']}, "
-                    f"knowledge: {format_size(file_size)}"
-                )
-                print(f"💾 {message}")
-                logger.info(message)
-
-                last_checkpoint_time = time.time()
-
-    # Don't forget the final buffer
-    if sentence_buffer:
-        agent.ingest(bytes(sentence_buffer))
-
-    # Final commit
+    # Commit changes
     if hasattr(agent.engine.operator.store, "commit"):
         agent.engine.operator.store.commit()
 
-    stats["batches_processed"] += 1
-
-    if HAVE_TQDM:
-        pbar.close()
-
     # Final state check
     final_state = agent.engine.get_state_info()["tensor_index"]
-    if final_state not in stats["last_seen_states"]:
-        stats["unique_states_count"] += 1
-    stats["last_seen_states"].add(final_state)
-    if len(stats["last_seen_states"]) > 1000:
-        temp_list = list(stats["last_seen_states"])
-        temp_list.pop(0)
-        stats["last_seen_states"] = set(temp_list)
-    logger.info(f"Final state: {final_state}, Total unique states: {stats['unique_states_count']}")
+    state_changed = final_state != initial_state
+
+    total_elapsed = time.time() - start_time
+    final_rate = bytes_processed / total_elapsed / (1024 * 1024) if total_elapsed > 0 else 0
+
+    # Prepare stats dictionary
+    stats: Dict[str, Union[int, float, str]] = {
+        "tape_size": tape_size,
+        "bytes_processed": bytes_processed,
+        "processing_time": total_elapsed,
+        "rate_bytes": final_rate,
+        "state_changed": state_changed,
+        "initial_state": initial_state,
+        "final_state": final_state,
+    }
+
+    # Add knowledge stats
+    knowledge_path_str = agent.config.get("private_knowledge_path")
+    if knowledge_path_str is not None:
+        knowledge_path = Path(knowledge_path_str)
+        if knowledge_path.exists():
+            knowledge_size = knowledge_path.stat().st_size
+            stats["knowledge_size"] = knowledge_size
+
+    print(f"✅ Replay completed: {format_size(bytes_processed)} in {format_time(total_elapsed)}")
+    print(f"   Final rate: {final_rate:.1f} MB/s")
+    print(f"   State evolution: {'Changed' if state_changed else 'Unchanged'}")
+    if "knowledge_size" in stats:
+        print(f"   Knowledge store: {format_size(int(stats['knowledge_size']))}")
+
+    # Write stats to JSON file
+    stats_path = tape_path.with_suffix(".replay.json")
+    with stats_path.open("w") as f:
+        # Convert stats to JSON-serializable format
+        json_stats = {k: v if not isinstance(v, Path) else str(v) for k, v in stats.items()}
+        json.dump(json_stats, f, indent=2)
+
+    print(f"   Stats saved to: {stats_path}")
 
     return stats
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Wikipedia Training - Fixed Implementation")
-    parser.add_argument("--simple-data", action="store_true", help="Use Simple Wikipedia")
-    parser.add_argument("--full-data", action="store_true", help="Use Full Wikipedia")
-    parser.add_argument("--max-articles", type=int, help="Limit articles to process")
-    parser.add_argument("--workers", type=int, default=None, help="Parallel preprocessing workers")
-    parser.add_argument("--batch-size", type=int, help="Learning batch size (default: 20)")
-    parser.add_argument("--resume", action="store_true", help="Resume from checkpoint")
+    """
+    Main entry point for the gyro-tape compiler.
+
+    Returns:
+        int: Exit code (0 for success, 1 for error)
+    """
+    parser = argparse.ArgumentParser(
+        description="GyroSI Wikipedia Training Pipeline - Token-Aware Stream Compiler",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Simple Wikipedia to tape only (fastest)
+  python gyro_tape_compiler.py --simple -o simple_wiki.gyro
+
+  # Full Wikipedia to tape with learning
+  python gyro_tape_compiler.py --full -o full_wiki.gyro --learn
+
+  # Limit articles for testing
+  python gyro_tape_compiler.py --simple -o test.gyro --limit 1000
+
+  # Replay existing tape for learning
+  python gyro_tape_compiler.py --replay tape.gyro --learn
+
+  # Customize blank line threshold for article boundary
+  python gyro_tape_compiler.py --simple -o simple_wiki.gyro --blank-lines 2
+        """,
+    )
+
+    # Input source group
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument("--simple", action="store_true", help="Use Simple Wikipedia dataset")
+
+    source_group.add_argument("--full", action="store_true", help="Use Full English Wikipedia dataset")
+
+    source_group.add_argument("--replay", type=str, help="Replay existing .gyro tape file")
+
+    # Output specification
+    parser.add_argument("-o", "--output", help="Output .gyro tape file path (required unless using --replay)")
+
+    # Learning option
+    parser.add_argument("--learn", action="store_true", help="Also update private knowledge store")
+
+    # Processing options
+    parser.add_argument("--limit", type=int, help="Stop after processing N articles (useful for testing)")
+
+    parser.add_argument(
+        "--log-interval",
+        type=int,
+        default=DEFAULT_LOG_INTERVAL,
+        help=f"Log progress every N articles (default: {DEFAULT_LOG_INTERVAL})",
+    )
+
+    parser.add_argument(
+        "--blank-lines",
+        type=int,
+        default=DEFAULT_BLANK_LINES,
+        help=f"Number of blank lines that separate articles (default: {DEFAULT_BLANK_LINES})",
+    )
 
     args = parser.parse_args()
 
-    if not (args.simple_data or args.full_data):
-        parser.error("Must specify either --simple-data or --full-data")
-
-    # Setup
-    signal.signal(signal.SIGINT, signal_handler)
-
-    # Update batch size if specified
-    global LEARNING_BATCH_SIZE
-    if args.batch_size:
-        LEARNING_BATCH_SIZE = args.batch_size
-
-    # Default workers to CPU count
-    workers = args.workers or os.cpu_count() or 16
-
-    # Paths
-    dataset_type = "simple" if args.simple_data else "full"
-    data_dir = PROJECT_ROOT / f"toys/training/wikipedia_{dataset_type}_data"
-    knowledge_dir = PROJECT_ROOT / "toys/training/knowledge"
-    log_dir = PROJECT_ROOT / "toys/training/logs"
-
-    # Create directories
-    knowledge_dir.mkdir(parents=True, exist_ok=True)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    # Setup logging
-    logger = setup_logging(log_dir)
-    logger.info(f"Starting Wikipedia {dataset_type} training")
-    logger.info(f"Learning batch size: {LEARNING_BATCH_SIZE} articles")
-    logger.info(f"Preprocessing workers: {workers}")
-    logger.info(f"Preprocessing batch size: {PREPROCESSING_BATCH_SIZE}")
-
-    # Find or create knowledge file
-    if args.resume:
-        knowledge_files = list(knowledge_dir.glob(f"{dataset_type}_wikipedia_*.bin"))
-        if knowledge_files:
-            # Sort by creation time (newest first)
-            knowledge_path = max(
-                knowledge_files, key=lambda p: int(p.stem.split("_")[-1]) if p.stem.split("_")[-1].isdigit() else 0
-            )
-            logger.info(f"Resuming with knowledge file: {knowledge_path}")
-        else:
-            logger.error("No previous run found for resume")
-            return 1
-    else:
-        existing = list(knowledge_dir.glob(f"{dataset_type}_wikipedia_*.bin"))
-        run_num = 1
-        if existing:
-            # Find highest run number
-            for path in existing:
-                try:
-                    num = int(path.stem.split("_")[-1])
-                    run_num = max(run_num, num + 1)
-                except (ValueError, IndexError):
-                    pass
-
-        knowledge_path = knowledge_dir / f"{dataset_type}_wikipedia_{run_num}.bin"
-        logger.info(f"Starting new run: {knowledge_path}")
-
-    checkpoint_path = knowledge_path.with_suffix(".checkpoint.json")
-
-    # Create agent
-    agent = None
-    try:
-        logger.info("Creating GyroSI agent...")
-        agent = create_agent(knowledge_path)
-        logger.info("Agent created successfully")
-
-        # Find files
-        if args.simple_data:
-            files = [data_dir / "AllCombined.txt"]
-        else:
-            files = []
-            for subdir in data_dir.iterdir():
-                if subdir.is_dir() and len(subdir.name) == 2 and subdir.name.isupper():
-                    files.extend(sorted(subdir.glob("wiki_*")))
-
-        if not files:
-            logger.error(f"No files found in {data_dir}")
+    # Handle replay mode
+    if args.replay:
+        if not args.learn:
+            print("❌ Error: --replay requires --learn", file=sys.stderr)
             return 1
 
-        logger.info(f"Found {len(files)} files to process")
+        tape_path = Path(args.replay)
+        if not tape_path.exists():
+            print(f"❌ Error: Tape file not found: {tape_path}", file=sys.stderr)
+            return 1
 
-        # Use streaming training for maximum performance (1000+ articles/second)
-        stats = train_with_streaming(
-            agent, files, checkpoint_path, knowledge_path, logger, max_workers=workers, max_articles=args.max_articles
-        )
+        private_knowledge_path = tape_path.with_suffix(".bin")
+        print(f"🧠 Creating agent with knowledge store: {private_knowledge_path}")
+        replay_agent = build_agent(private_knowledge_path)
 
-        # Final stats
-        logger.info("Training completed")
-        logger.info(f"Articles processed: {stats['articles_processed']:,}")
-        logger.info(f"Articles skipped: {stats['articles_skipped']:,}")
-        logger.info(f"Sentences processed: {stats['sentences_processed']:,}")
-        logger.info(f"Batches processed: {stats['batches_processed']:,}")
-        logger.info(f"Unique states visited: {stats['unique_states_count']}")
+        try:
+            replay_tape(tape_path, replay_agent, log_interval=args.log_interval * 1000)
+            return 0
+        except KeyboardInterrupt:
+            print("\n⚠️  Replay interrupted by user")
+            return 1
+        except Exception as e:
+            print(f"❌ Error during replay: {e}", file=sys.stderr)
+            return 1
+        finally:
+            replay_agent.close()
 
-        # Verify knowledge file
-        if knowledge_path.exists():
-            size = knowledge_path.stat().st_size
-            # entry_count = get_knowledge_entry_count(knowledge_path)  # REMOVE THIS - too expensive
-
-            logger.info(f"Final knowledge file: {format_size(size)}")
-            print("\n📊 Final Results:")
-            print(f"  • Knowledge file: {format_size(size)}")
-            print(f"  • Articles processed: {stats['articles_processed']:,}")
-            print(f"  • Unique states: {stats['unique_states_count']}")
-
-            # Success indicator
-            if size > 1024 * 1024:  # 1MB threshold instead of entry count
-                print("  ✅ Knowledge file grew successfully!")
-            else:
-                print(f"  ⚠️  Warning: Only {format_size(size)} for {stats['articles_processed']:,} articles!")
-        else:
-            logger.error("Knowledge file was not created!")
-            print("\n❌ Knowledge file was not created!")
-
-    except Exception as e:
-        logger.exception(f"Training failed: {e}")
+    # Validate compilation mode arguments
+    if not args.output:
+        print("❌ Error: --output is required for compilation mode", file=sys.stderr)
         return 1
 
+    # Determine dataset directory
+    dataset_dir = (
+        PROJECT_ROOT / "toys/training/wikipedia_simple_data"
+        if args.simple
+        else PROJECT_ROOT / "toys/training/wikipedia_full_data"
+    )
+
+    if not dataset_dir.exists():
+        print(f"❌ Error: Dataset directory not found: {dataset_dir}", file=sys.stderr)
+        return 1
+
+    # Find dataset files
+    files = sorted(dataset_dir.rglob("*"))
+    files = [f for f in files if f.is_file() and (f.suffix == ".txt" or f.suffix == ".gz")]
+
+    if not files:
+        print(f"❌ Error: No .txt or .gz files found in {dataset_dir}", file=sys.stderr)
+        return 1
+
+    print(f"📚 Found {len(files)} files in {dataset_dir}")
+
+    # Create agent if learning is enabled
+    agent: Optional[GyroSI] = None
+    if args.learn:
+        private_knowledge_path = Path(args.output).with_suffix(".bin")
+        knowledge_msg = f"🧠 Creating private agent with knowledge store: " f"{private_knowledge_path}"
+        print(knowledge_msg)
+        agent = build_agent(private_knowledge_path)
+
+    # Create article iterator with configurable blank line threshold
+    articles = iter_wiki_articles(files, blank_line_threshold=args.blank_lines)
+
+    # Compile the stream
+    try:
+        compile_stream(
+            articles=articles,
+            output_tape_path=Path(args.output),
+            agent=agent,
+            limit=args.limit,
+            log_interval=args.log_interval,
+        )
+        return 0
+    except KeyboardInterrupt:
+        print("\n⚠️  Interrupted by user")
+        return 1
+    except Exception as e:
+        print(f"❌ Error during compilation: {e}", file=sys.stderr)
+        import traceback
+
+        traceback.print_exc()
+        return 1
     finally:
-        # Graceful shutdown
+        # Clean up agent if created
         if agent:
             try:
-                logger.info("Closing agent...")
                 agent.close()
-                logger.info("Agent closed successfully")
+                print("🧹 Agent closed successfully")
             except Exception as e:
-                logger.error(f"Error closing agent: {e}")
-
-    if shutdown_requested:
-        logger.info("Training interrupted by user")
-        print("\n🛑 Training interrupted by user")
-    else:
-        logger.info("Training completed successfully")
-        print("\n✅ Training completed successfully!")
-
-    return 0
+                print(f"⚠️  Error closing agent: {e}")
 
 
 if __name__ == "__main__":

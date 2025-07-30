@@ -35,13 +35,13 @@ class _TokBridge:
         return _tok
 
     def id_to_bytes(self, tok_id: int) -> bytes:
-        return self.mod.id_to_bytes(tok_id)
+        return cast(bytes, self.mod.id_to_bytes(tok_id))
 
     def bytes_to_id(self, bs: bytes) -> int:
-        return self.mod.bytes_to_id(bs)
+        return cast(int, self.mod.bytes_to_id(bs))
 
     def bytes_to_ids(self, bs: bytes) -> List[int]:
-        return self.mod.bytes_to_ids(bs)
+        return cast(List[int], self.mod.bytes_to_ids(bs))
 
 
 TOK = _TokBridge()

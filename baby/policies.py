@@ -281,7 +281,7 @@ class OrbitStore:
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
-                    entry_buf = self._mmap[offset:offset + size]
+                    entry_buf = self._mmap[offset : offset + size]
                 else:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
