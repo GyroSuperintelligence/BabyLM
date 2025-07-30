@@ -57,7 +57,7 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 
 ## ✨ Mind-Blowing Features
 
-- 🧠 **Learns Like a Baby**: Starts with zero knowledge and learns from raw experience, no pre-training needed.
+- 🧠 **Learns Like a Baby**: Starts with zero *learned associations* but leverages the pretrained *symbolic knowledge* of a standard tokenizer, learning to bind physical states to existing semantic concepts.
 - ♾️ **Unlimited Memory**: Never forgets; knowledge is limited by disk space, not RAM, via an efficient append-only log.
 - ⚡ **High Throughput**: Estimated ~1 million bytes/sec per core on modern hardware.
 - 💾 **Compact Brain**: The core logic and ontology maps fit in ~30MB. An optional 770MB State Transition Table (STT) unlocks maximum performance.
@@ -70,31 +70,55 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 
 --- 
 
-## ⚙️ How It Works
+- ## ⚙️ How It Works
+- 
+- **🌐 The Byte as a Holographic Quantum of Spacetime Topology**
+- 
+- Data isn't just information here. It's a physical force that transforms structure. The architecture unfolds from one idea: a single byte acts as a holographic set of instructions for navigating a gyroscopic state space.
+- 
+- ### 📐 The Logical Progression
+- 
+- **1. The Quantum of Data: 1 Byte**
+- A byte is not a symbol but a governance mask. Its 8 bits encode one of 256 possible instruction sets (`introns`) that trigger a unique set of physical operations.
+- 
+- **2. The Universal Reference: XOR with 0xAA**
+- Every input byte is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield a dynamic 8-bit instruction. This simulates the expression of intelligence through physical modulation.
+- 
+- **3. From Byte to Operations**
+- Each bit of the instruction maps to a consistent gyroscopic transformation, regardless of input/output direction (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is a complete instruction for transforming the system's physical state.
+- 
+- **4. The Evolving Physical State**
+- These operations apply to the system's canonical state, a 48-bit integer representing one of **788,986** possible physical configurations. Each input byte acts as a physical force that evolves this state, creating an irreversible, path-dependent history. The intelligence resides in the *trajectory* of this state, not in static data.
+- 
+- **5. From State to Meaning**
+- The system's new physical state, combined with the instruction that created it, forms a unique context. This context is used to look up a "phenotype"—a learned response, such as a character or action—from the system's memory.
+- 
+- **6. Learning as Physical Integration**
+- Learning is not backpropagation. It is the integration of experience into memory via **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that the *sequence* of events is structurally encoded into the system's knowledge, mirroring how memories are formed in a lived experience.
 
-**🌐 The Byte as a Holographic Quantum of Spacetime Topology**
+## ⚙️ How It Works: Token-Aware Physics
 
-Data isn't just information here. It's a physical force that transforms structure. The architecture unfolds from one idea: a single byte acts as a holographic set of instructions for navigating a gyroscopic state space.
+**The system's core insight is that pretrained tokenizers are not just I/O tools; they are active, internal maps of symbolic knowledge.** The `v0.9.6.7` architecture redefines "knowledge" to be token-aware, leveraging the tokenizer's structure as part of the physics.
 
 ### 📐 The Logical Progression
 
-**1. The Quantum of Data: 1 Byte**
-A byte is not a symbol but a governance mask. Its 8 bits encode one of 256 possible instruction sets (`introns`) that trigger a unique set of physical operations.
-
-**2. The Universal Reference: XOR with 0xAA**
-Every input byte is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield a dynamic 8-bit instruction. This simulates the expression of intelligence through physical modulation.
-
-**3. From Byte to Operations**
-Each bit of the instruction maps to a consistent gyroscopic transformation, regardless of input/output direction (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is a complete instruction for transforming the system's physical state.
-
-**4. The Evolving Physical State**
-These operations apply to the system's canonical state, a 48-bit integer representing one of **788,986** possible physical configurations. Each input byte acts as a physical force that evolves this state, creating an irreversible, path-dependent history. The intelligence resides in the *trajectory* of this state, not in static data.
-
-**5. From State to Meaning**
-The system's new physical state, combined with the instruction that created it, forms a unique context. This context is used to look up a "phenotype"—a learned response, such as a character or action—from the system's memory.
-
-**6. Learning as Physical Integration**
-Learning is not backpropagation. It is the integration of experience into memory via **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that the *sequence* of events is structurally encoded into the system's knowledge, mirroring how memories are formed in a lived experience.
++ **1. The Quantum of Meaning: 1 Token**
++ The fundamental unit of knowledge is now a `token_id` from a standard tokenizer (e.g., BERT). This token ID, not its byte fragments, serves as the semantic anchor for learning.
++ 
++ **2. From Token to Physics: LEB128 Byte Streams**
++ Each `token_id` is converted into its unique, variable-length byte sequence using LEB128 encoding. These bytes are the physical carriers of the token's identity.
++ 
++ **3. The Universal Reference: XOR with 0xAA**
++ Each byte in the sequence is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield a dynamic 8-bit physical instruction (`intron`). This lawfully translates the external byte protocol into the internal physical language of the system.
++ 
++ **4. The Evolving Physical State**
++ The sequence of introns from a token drives the system's canonical state (a 48-bit integer) through a path-dependent trajectory across the **788,986** possible physical configurations. The intelligence resides in this trajectory.
++ 
++ **5. From State to Meaning: Token-Level Learning**
++ After processing a full token's byte sequence, the system's final state and the original `token_id` form the unique context key: `(state_index, token_id)`. This key is used to look up a minimal "phenotype"—a learned physical residue and a confidence score—from the system's memory.
++ 
++ **6. Learning as Physical Integration**
++ Learning occurs once per token. The final intron of the token's byte sequence is integrated into the phenotype's memory (`mask`) via the **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that knowledge is both semantically coherent (keyed by token) and physically grounded (updated via path-dependent physics).
 
 ### 🎯 What This Achieves
 
@@ -144,13 +168,13 @@ The system is designed for extreme efficiency. All core runtime operations are c
 
 ### Memory Capacity (Estimated)
 
-Each learned association (phenotype) requires ~90 bytes in RAM for the OrbitStore index. This determines how many unique facts the system can hold in memory for fast lookup.
+Each learned association (phenotype) is now a minimal **12-byte record** in the append-only store, with an in-memory index requiring only the key (`(state, token)`). This dramatically increases knowledge density.
 
-| Device | Available RAM | Max Phenotypes in Memory |
-|--------|---------------|-------------------------|
-| MacBook Air 2015 (8GB) | ~4 GB | ~45 million |
-| MacBook M4 (16GB) | ~12 GB | ~130 million |
-| Server (256GB) | ~220 GB | ~2.4 billion |
+| Device | Available RAM for Index | Max Phenotypes in Memory |
+|---|---|---|
+| Raspberry Pi 4 (4GB) | ~2 GB | ~166 million |
+| MacBook Air (8GB) | ~4 GB | ~333 million |
+| Server (256GB) | ~220 GB | ~18.3 billion |
 
 For context: WordNet contains ~150,000 facts, and the English Wikipedia title/abstract graph contains ~40 million facts. A modern laptop can comfortably hold both entirely in RAM.
 
@@ -174,22 +198,15 @@ A "cycle" is one byte in, one internal update, and one byte out.
 
 ---
 
-## 🔄 Current Status & Expectations
+## 🔄 New in v0.9.6.7: Token-Aware Minimal Phenotype Architecture
 
-**⚠️ Active Refactoring In Progress**
-Core learning logic and operator semantics have been corrected. Until the integration is complete, runtime behavior may be unstable.
+The system has undergone a fundamental refactoring to align its learning mechanism with meaningful semantic units.
 
-**This is experimental research**, not a production language model. Current limitations:
+- **Token-Aware Learning**: Knowledge is now keyed by `(state_index, token_id)`, eliminating inference overlaps and ensuring coherent learning based on whole tokens.
+- **Minimal Phenotypes**: The knowledge record has been reduced to its physical essence: an 8-bit `mask` and a `confidence` score. This massively reduces memory footprint and simplifies the data model.
+- **Active Tokenizer Integration**: The tokenizer is no longer a passive I/O adapter but an active internal map that provides the symbolic foundation for learning.
 
-- **Learning from scratch** - No pre-training, starts with zero knowledge
-- **Byte-level output** - May produce non-printable characters
-- **Early development** - Many features still being implemented
-
-**What to expect:**
-- Interesting emergent behaviors as the tensor evolves
-- Gradual improvement in pattern selection over time
-- Unique approach to text generation and encryption
-- Insights into alternative approaches to machine learning
+**This is experimental research**, not a production language model.
 
 ---
 
@@ -236,6 +253,42 @@ The GyroSI system enforces strict separation between:
 - **Auxiliary applications** (`toys/`) - Testing and development tools
 
 Knowledge is managed via canonical OrbitStore instances, with public and private overlays maintaining agent-specific and shared knowledge indexed by canonical context keys.
+
+---
+
+## ⚡ Training: Compiling Knowledge Tapes
+
+Training in GyroSI is not backpropagation; it's the process of compiling a corpus (like Wikipedia) into a loss-less, physics-compatible stream of instructions called a "gyro-tape". This process can optionally populate a knowledge store by binding the text's symbolic content to the system's physical state trajectories.
+
+The primary tool for this is `gyro_tape_compiler.py`.
+
+### Common Commands
+
+**1. Compile a Corpus to a Tape (No Learning)**
+This is the fastest operation, ideal for creating a replayable data source.
+
+```sh
+# Compile Simple Wikipedia
+python toys/training/gyro_tape_compiler.py --simple -o memories/private/simple_wiki.gyro
+
+# Compile Full Wikipedia (from multiple files)
+python toys/training/gyro_tape_compiler.py --full -o memories/private/full_wiki.gyro
+```
+
+**2. Compile and Learn Simultaneously**
+This creates the tape and updates a private knowledge store (`.bin` file) at the same time.
+
+```sh
+# Compile and learn from Simple Wikipedia
+python toys/training/gyro_tape_compiler.py --simple -o memories/private/simple_wiki.gyro --learn
+```
+
+**3. Replay an Existing Tape to Learn**
+If you already have a `.gyro` tape, you can feed it to an agent to populate its knowledge store without re-processing the source text.
+
+```sh
+python toys/training/gyro_tape_compiler.py --replay memories/private/simple_wiki.gyro --learn
+```
 
 ---
 
