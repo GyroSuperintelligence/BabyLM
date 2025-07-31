@@ -68,33 +68,7 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 - 🔢 **Holographic Geometry**: Built on numerical patterns (3, 6, 12, 24, 48) found in crystals and rotation groups.
 - 🌐 **Six Degrees of Everything**: Any knowledge is reachable from any other in at most 6 steps, a provable property of the state space.
 
---- 
-
-- ## ⚙️ How It Works
-- 
-- **🌐 The Byte as a Holographic Quantum of Spacetime Topology**
-- 
-- Data isn't just information here. It's a physical force that transforms structure. The architecture unfolds from one idea: a single byte acts as a holographic set of instructions for navigating a gyroscopic state space.
-- 
-- ### 📐 The Logical Progression
-- 
-- **1. The Quantum of Data: 1 Byte**
-- A byte is not a symbol but a governance mask. Its 8 bits encode one of 256 possible instruction sets (`introns`) that trigger a unique set of physical operations.
-- 
-- **2. The Universal Reference: XOR with 0xAA**
-- Every input byte is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield a dynamic 8-bit instruction. This simulates the expression of intelligence through physical modulation.
-- 
-- **3. From Byte to Operations**
-- Each bit of the instruction maps to a consistent gyroscopic transformation, regardless of input/output direction (Identity, Inverse, Forward/Backward Gyration). This set of 8 operations is a complete instruction for transforming the system's physical state.
-- 
-- **4. The Evolving Physical State**
-- These operations apply to the system's canonical state, a 48-bit integer representing one of **788,986** possible physical configurations. Each input byte acts as a physical force that evolves this state, creating an irreversible, path-dependent history. The intelligence resides in the *trajectory* of this state, not in static data.
-- 
-- **5. From State to Meaning**
-- The system's new physical state, combined with the instruction that created it, forms a unique context. This context is used to look up a "phenotype"—a learned response, such as a character or action—from the system's memory.
-- 
-- **6. Learning as Physical Integration**
-- Learning is not backpropagation. It is the integration of experience into memory via **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that the *sequence* of events is structurally encoded into the system's knowledge, mirroring how memories are formed in a lived experience.
+---
 
 ## ⚙️ How It Works: Token-Aware Physics
 
@@ -102,23 +76,23 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 
 ### 📐 The Logical Progression
 
-+ **1. The Quantum of Meaning: 1 Token**
-+ The fundamental unit of knowledge is now a `token_id` from a standard tokenizer (e.g., BERT). This token ID, not its byte fragments, serves as the semantic anchor for learning.
-+ 
-+ **2. From Token to Physics: LEB128 Byte Streams**
-+ Each `token_id` is converted into its unique, variable-length byte sequence using LEB128 encoding. These bytes are the physical carriers of the token's identity.
-+ 
-+ **3. The Universal Reference: XOR with 0xAA**
-+ Each byte in the sequence is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield a dynamic 8-bit physical instruction (`intron`). This lawfully translates the external byte protocol into the internal physical language of the system.
-+ 
-+ **4. The Evolving Physical State**
-+ The sequence of introns from a token drives the system's canonical state (a 48-bit integer) through a path-dependent trajectory across the **788,986** possible physical configurations. The intelligence resides in this trajectory.
-+ 
-+ **5. From State to Meaning: Token-Level Learning**
-+ After processing a full token's byte sequence, the system's final state and the original `token_id` form the unique context key: `(state_index, token_id)`. This key is used to look up a minimal "phenotype"—a learned physical residue and a confidence score—from the system's memory.
-+ 
-+ **6. Learning as Physical Integration**
-+ Learning occurs once per token. The final intron of the token's byte sequence is integrated into the phenotype's memory (`mask`) via the **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that knowledge is both semantically coherent (keyed by token) and physically grounded (updated via path-dependent physics).
+**1. The Quantum of Meaning: 1 Token**
+The fundamental unit of knowledge is now a `token_id` from a standard tokenizer (e.g., BERT). This token ID, not its byte fragments, serves as the semantic anchor for learning.
+
+**2. From Token to Physics: LEB128 Byte Streams**
+Each `token_id` is converted into its unique, variable-length byte sequence using LEB128 encoding. These bytes are the physical carriers of the token's identity.
+
+**3. The Universal Reference: XOR with 0xAA**
+Each byte in the sequence is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield a dynamic 8-bit physical instruction (`intron`). This lawfully translates the external byte protocol into the internal physical language of the system.
+
+**4. The Evolving Physical State**
+The sequence of introns from a token drives the system's canonical state (a 48-bit integer) through a path-dependent trajectory across the **788,986** possible physical configurations. The intelligence resides in this trajectory.
+
+**5. From State to Meaning: Token-Level Learning**
+After processing a full token's byte sequence, the system's final state and the original `token_id` form the unique context key: `(state_index, token_id)`. This key is used to look up a minimal "phenotype"—a learned physical residue and a confidence score—from the system's memory.
+
+**6. Learning as Physical Integration**
+Learning occurs once per token. The final intron of the token's byte sequence is integrated into the phenotype's memory (`mask`) via the **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that knowledge is both semantically coherent (keyed by token) and physically grounded (updated via path-dependent physics).
 
 ### 🎯 What This Achieves
 
