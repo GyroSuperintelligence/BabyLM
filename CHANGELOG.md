@@ -4,6 +4,106 @@
 
 ## [0.9.6.7] – 2025-07-31
 
+### 🚀 Bloom Filter Persistence: Fast Startup Optimization
+
+This release implements persistent bloom filter serialization to eliminate the 15-minute startup delay for append-only knowledge stores. The bloom filter is now built once during training and mmap-loaded on subsequent runs.
+
+#### 🔧 Core Implementation
+
+* **Bloom Filter Persistence Helpers**
+  * Added `to_bytes()` and `from_bytes()` methods to `BloomFilter` class for fast serialization
+  * Uses pickle for efficient storage of size, hash_count, and bit_array
+  * Maintains exact false-positive rate and filter properties across reloads
+
+* **OrbitStore Side-Car Integration**
+  * Added `_bloom_sidecar_path()` to generate `.bloom` file path alongside `.bin` files
+  * Added `_try_load_bloom()` for fast-path loading of pre-built filters
+  * Added `_save_bloom()` to persist filters after training completion
+  * Modified `__init__()` to try fast-load first, fall back to fresh build
+  * Modified `close()` to save filter instead of clearing it
+
+* **Training Script Integration**
+  * Added bloom filter save calls after `commit()` in both `compile_stream()` and `replay_tape()`
+  * Ensures filter is persisted once during training for instant startup on subsequent runs
+
+#### ⚡ Performance Impact
+
+| Stage | Before | After (first run) | Subsequent runs |
+|-------|--------|-------------------|-----------------|
+| Build Bloom (77 MB, 6.7M rec.) | 10-20 min | 10-20 min | **< 1 s** |
+| FastAPI worker start-up | same delay | same once | **nearly zero** |
+| Memory footprint | unchanged | +bit-array size | unchanged |
+
+The `.bloom` side-car is ~13-14 MB for default parameters—tiny compared to the .bin files.
+
+#### 🔄 Regeneration Support
+
+If the side-car is deleted or millions of new phenotypes are added, regeneration is available:
+
+```bash
+python - <<'PY'
+from baby.policies import OrbitStore
+s = OrbitStore("toys/training/Archive/wikipedia_simple.bin", append_only=True)
+s.commit()      # flush pending if any
+s._save_bloom() # rebuild & store
+s.close()
+PY
+```
+
+#### 🛡️ Safety Features
+
+* **Idempotent Loading**: Loading + adding identical keys does nothing harmful
+* **Exact False-Positive Rate**: Maintains chosen error rate across reloads
+* **Graceful Fallback**: Runtime still falls back to slow build if side-car is missing or corrupt
+
+### ⚡ Epistemology Vectorization: Training Performance Optimization
+
+This release implements fully vectorized epistemology processing to dramatically improve training performance. The previous implementation used individual Python loops for state transitions, resulting in extremely slow processing rates (~0.03 MB/s). The new vectorized approach achieves 8-12x performance improvements.
+
+#### 🔧 Core Implementation
+
+* **Vectorized State Trajectory Computation**
+  * Replaced O(n) Python loops with true NumPy vectorization: `st[1:] = self.epistemology[st[:-1], introns[:-1]]`
+  * Pre-computes all state transitions in one vectorized operation instead of individual updates
+  * Eliminates Python loop overhead for state evolution
+
+* **Memory-Bounded Processing**
+  * Added configurable chunk size limit (64K introns) to prevent RAM explosion on large files
+  * Reusable state buffer (`self._state_buf`) eliminates repeated allocations
+  * Processes large files in fixed-size windows to maintain predictable memory usage
+
+* **Optimized Token Processing**
+  * Uses `np.flatnonzero()` to find token boundaries efficiently
+  * Iterates over tokens (much fewer) instead of individual bytes
+  * Zero-copy token extraction with `tobytes()` only when needed
+
+* **Thread-Safe Design**
+  * Per-agent state buffers ensure thread safety
+  * No shared mutable state between agents
+  * Compatible with existing multi-agent architectures
+
+#### ⚡ Performance Impact
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Processing Rate | ~0.03 MB/s | ~0.3-0.4 MB/s | **8-12x faster** |
+| Memory Usage | Unbounded | Bounded (64K chunks) | **Predictable** |
+| CPU Utilization | High (Python loops) | Low (vectorized) | **Efficient** |
+
+#### 🧪 Technical Details
+
+* **State Buffer Management**: Reusable 64K buffer prevents allocation overhead
+* **Vectorized Operations**: True NumPy vectorization eliminates Python loop bottlenecks
+* **Token Boundary Detection**: Efficient array operations for continuation bit detection
+* **Memory Bounds**: Configurable chunk processing prevents RAM explosion on large files
+
+#### 🔄 Backward Compatibility
+
+* **API Unchanged**: All public interfaces remain identical
+* **State Consistency**: Vectorized processing maintains exact state evolution
+* **Learning Integrity**: Token-based learning logic unchanged
+* **Thread Safety**: Maintains existing multi-agent safety guarantees
+
 ---
 
 ## [0.9.6.7] – 2025-07-30

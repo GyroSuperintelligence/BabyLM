@@ -225,14 +225,19 @@ class OrbitStore:
 
         # Bloom filter for append-only mode
         self._bloom_filter: Optional[BloomFilter] = None
+        self._bloom_loaded = False  # <── add
         if self.append_only:
-            # Initialize bloom filter with estimated capacity
-            estimated_entries = 100000  # Default estimate, will be adjusted
-            if os.path.exists(resolved_store_path):
-                file_size = os.path.getsize(resolved_store_path)
-                # Rough estimate: assume average entry size of 200 bytes
-                estimated_entries = max(100000, file_size // 200)
-            self._bloom_filter = BloomFilter(estimated_entries, error_rate=0.01)
+            # 1) try fast-path: load pre-built side-car
+            if self._try_load_bloom():
+                self._bloom_loaded = True
+            else:
+                # 2) fresh build, capacity estimate as before
+                estimated_entries = 100000  # Default estimate, will be adjusted
+                if os.path.exists(resolved_store_path):
+                    file_size = os.path.getsize(resolved_store_path)
+                    # Rough estimate: assume average entry size of 200 bytes
+                    estimated_entries = max(100000, file_size // 200)
+                self._bloom_filter = BloomFilter(estimated_entries, error_rate=0.01)
 
         if self.append_only:
             # self.index is not used in append_only mode
@@ -255,6 +260,25 @@ class OrbitStore:
 
         # Register graceful shutdown handlers
         self._register_shutdown_handlers()
+
+    # ---------- Bloom filter side-car (.bloom) ----------
+    def _bloom_sidecar_path(self) -> str:
+        return self.store_path + ".bloom"
+
+    def _try_load_bloom(self) -> bool:
+        if not self.append_only:
+            return False
+        p = self._bloom_sidecar_path()
+        if not os.path.exists(p):
+            return False
+        with open(p, "rb") as f:
+            self._bloom_filter = BloomFilter.from_bytes(f.read())
+        return True
+
+    def _save_bloom(self) -> None:
+        if self.append_only and self._bloom_filter:
+            with open(self._bloom_sidecar_path(), "wb") as f:
+                f.write(self._bloom_filter.to_bytes())
 
     def _open_mmap(self) -> None:
         if self._mmap:
@@ -471,7 +495,11 @@ class OrbitStore:
 
     def _load_index(self) -> None:
         if self.append_only:
-            # Populate bloom filter with existing entries
+            # Fast-path: already loaded from .bloom — nothing to do
+            if self._bloom_loaded:
+                return
+
+            # Slow path: build filter from scratch
             if self._bloom_filter and os.path.exists(self.log_path):
                 with open(self.log_path, "rb") as f:
                     buf = memoryview(f.read())
@@ -524,9 +552,8 @@ class OrbitStore:
                 self.log_file.close()
             if self._fsync_executor:
                 self._fsync_executor.shutdown(wait=True)
-            # Clear bloom filter
-            if self._bloom_filter:
-                self._bloom_filter.clear()
+            # Persist bloom filter so next run is instant
+            self._save_bloom()
 
             # Clear cache
             # Clear global cache for this store
@@ -1420,3 +1447,25 @@ class BloomFilter:
         """Clear the bloom filter."""
         self.bit_array = bytearray((self.size + 7) // 8)
         self.count = 0
+
+    # ────────────────  NEW: persistence helpers  ────────────────
+    def to_bytes(self) -> bytes:
+        """Serialize size, hash_count and bit_array for fast reload."""
+        import pickle
+
+        return pickle.dumps((self.size, self.hash_count, bytes(self.bit_array)))
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "BloomFilter":
+        import pickle
+
+        size, k, bits = pickle.loads(data)
+
+        bf = object.__new__(cls)  # skip __init__
+        bf.size = size
+        bf.hash_count = k
+        bf.bit_array = bytearray(bits)
+        bf.count = 0
+        bf.capacity = size  # optional bookkeeping
+        bf.error_rate = 0.01
+        return bf

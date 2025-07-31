@@ -465,6 +465,7 @@ class TestPruningOperations:
         agent_config = {
             "ontology_path": "memories/public/meta/ontology_keys.npy",
             "knowledge_path": str(tmp_path / "test_knowledge.bin"),
+            "epistemology_path": "memories/public/meta/epistemology.npy",
             "preferences": {
                 "pruning": {
                     "confidence_threshold": 0.05,
@@ -475,8 +476,10 @@ class TestPruningOperations:
             },
             "base_path": str(tmp_path),
         }
-
-        agent = GyroSI(cast(AgentConfig, agent_config), agent_id="test_agent")
+        # Use project root for epistemology path resolution
+        agent = GyroSI(
+            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
+        )
 
         # Check that auto-pruning hook is registered
         hook_count = len(agent.engine.post_cycle_hooks)
@@ -490,6 +493,7 @@ class TestPruningOperations:
         agent_config = {
             "ontology_path": "memories/public/meta/ontology_keys.npy",
             "knowledge_path": str(tmp_path / "test_knowledge.bin"),
+            "epistemology_path": "memories/public/meta/epistemology.npy",
             "preferences": {
                 "pruning": {
                     "confidence_threshold": 0.05,
@@ -500,8 +504,10 @@ class TestPruningOperations:
             },
             "base_path": str(tmp_path),
         }
-
-        agent = GyroSI(cast(AgentConfig, agent_config), agent_id="test_agent")
+        # Use project root for epistemology path resolution
+        agent = GyroSI(
+            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
+        )
 
         # Check that auto-pruning hook is not registered
         hook_count = len(agent.engine.post_cycle_hooks)
@@ -515,6 +521,7 @@ class TestPruningOperations:
         agent_config = {
             "ontology_path": "memories/public/meta/ontology_keys.npy",
             "knowledge_path": str(tmp_path / "test_knowledge.bin"),
+            "epistemology_path": "memories/public/meta/epistemology.npy",
             "preferences": {
                 "pruning": {
                     "confidence_threshold": 0.05,
@@ -525,8 +532,10 @@ class TestPruningOperations:
             },
             "base_path": str(tmp_path),
         }
-
-        agent = GyroSI(cast(AgentConfig, agent_config), agent_id="test_agent")
+        # Use project root for epistemology path resolution
+        agent = GyroSI(
+            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
+        )
         engine = agent.engine.operator
 
         # Add low-confidence entries by creating them and then modifying confidence
@@ -578,6 +587,7 @@ class TestPruningOperations:
         agent_config = {
             "ontology_path": "memories/public/meta/ontology_keys.npy",
             "knowledge_path": str(tmp_path / "test_knowledge.bin"),
+            "epistemology_path": "memories/public/meta/epistemology.npy",
             "preferences": {
                 "pruning": {
                     "confidence_threshold": custom_threshold,
@@ -588,8 +598,10 @@ class TestPruningOperations:
             },
             "base_path": str(tmp_path),
         }
-
-        agent = GyroSI(cast(AgentConfig, agent_config), agent_id="test_agent")
+        # Use project root for epistemology path resolution
+        agent = GyroSI(
+            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
+        )
         engine = agent.engine.operator
 
         # Add entries with confidence around the custom threshold
@@ -630,6 +642,7 @@ class TestPruningOperations:
         agent_config = {
             "ontology_path": "memories/public/meta/ontology_keys.npy",
             "knowledge_path": str(tmp_path / "test_knowledge.bin"),
+            "epistemology_path": "memories/public/meta/epistemology.npy",
             "preferences": {
                 "pruning": {
                     "decay_factor": 0.995,
@@ -640,8 +653,10 @@ class TestPruningOperations:
             },
             "base_path": str(tmp_path),
         }
-
-        agent = GyroSI(cast(AgentConfig, agent_config), agent_id="test_agent")
+        # Use project root for epistemology path resolution
+        agent = GyroSI(
+            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
+        )
         engine = agent.engine.operator
 
         # Add entries with confidence around the default threshold (0.05)

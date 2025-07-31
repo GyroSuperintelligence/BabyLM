@@ -59,6 +59,7 @@ class AgentConfig(TypedDict, total=False):
     private_knowledge_path: Optional[str]
     enable_phenomenology_storage: Optional[bool]
     phenomenology_map_path: Optional[str]
+    epistemology_path: Optional[str]
     learn_batch_size: Optional[int]
     agent_metadata: Optional[Dict[str, Any]]
     private_agents_base_path: Optional[str]  # for test path overrides

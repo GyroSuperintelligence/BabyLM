@@ -67,9 +67,13 @@ signal.signal(signal.SIGTERM, signal_handler)
 # ---------------------------------------------------------------------
 # One shared AgentPool for the whole process
 # ---------------------------------------------------------------------
+# Resolve knowledge path relative to project root, not memories directory
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+base_knowledge_path = str(PROJECT_ROOT / PREFERENCES["public_knowledge"]["path"])
+
 agent_pool = AgentPool(
     ontology_path=PREFERENCES["ontology"]["ontology_map_path"],
-    base_knowledge_path=PREFERENCES["public_knowledge"]["path"],
+    base_knowledge_path=base_knowledge_path,
     preferences=PREFERENCES,
     allowed_ids={"user", "system", "assistant"},
     allow_auto_create=False,

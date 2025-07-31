@@ -87,7 +87,7 @@ class IntelligenceEngine:
         hook_batch_interval: int = 8,
         epistemology_path: Optional[str] = None,
         phenomenology_map_path: Optional[str] = None,
-        base_path: Path = Path(__file__).resolve().parents[1],
+        base_path: Path = Path(__file__).resolve().parents[2],
         preferences: Optional[PreferencesConfig] = None,
     ):
         """
@@ -111,9 +111,11 @@ class IntelligenceEngine:
         # --- epistemology setup ------------------------------------------------
         self.use_epistemology = epistemology_path is not None
         if self.use_epistemology:
-            epistemology_path = _abs(epistemology_path, self.base_path)
+            # For epistemology paths, always resolve relative to project root
+            project_root = Path(__file__).resolve().parents[2] / "BabyLM"
+            epistemology_path = _abs(epistemology_path, project_root)
             self.epistemology = np.load(epistemology_path)
-            self.current_state_index = 0
+            self.current_state_index = 0  # Will be set to archetypal state after s2 is created
         else:
             self.epistemology = None
             self.current_state_index = 0  # Always initialize to 0, not None
@@ -121,7 +123,9 @@ class IntelligenceEngine:
         # --- phenomenology setup ----------------------------------------------
         self.use_phenomenology = phenomenology_map_path is not None
         if self.use_phenomenology:
-            phenomenology_map_path = _abs(phenomenology_map_path, self.base_path)
+            # For phenomenology paths, always resolve relative to project root
+            project_root = Path(__file__).resolve().parents[2] / "BabyLM"
+            phenomenology_map_path = _abs(phenomenology_map_path, project_root)
             self.phenomenology_map = np.load(phenomenology_map_path)
         else:
             self.phenomenology_map = None
@@ -141,7 +145,12 @@ class IntelligenceEngine:
         )
 
         # --- state tracking --------------------------------------------------
-        self.gene_mac_m_int = self.s2.get_state_from_index(0)  # Use first state as archetypal
+        if self.use_epistemology:
+            # Start at archetypal state when using epistemology
+            self.current_state_index = self.s2.get_index_from_state(self.s2.tensor_to_int(governance.GENE_Mac_S))
+            self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
+        else:
+            self.gene_mac_m_int = self.s2.get_state_from_index(0)  # Use first state as archetypal
         self._last_token_id = 0
 
         # --- theta tracking --------------------------------------------------
@@ -158,6 +167,10 @@ class IntelligenceEngine:
 
         # --- auto-prune setup -----------------------------------------------
         self._register_auto_prune_hook()
+
+        # --- vectorized epistemology buffer ----------------------------------
+        # Reusable buffer for state trajectory computation (max 64K to prevent RAM explosion)
+        self._state_buf = np.empty(65536, dtype=np.int32)
 
     def process_egress(self, input_byte: int) -> int:
         """
@@ -264,24 +277,25 @@ class IntelligenceEngine:
 
         # --- 1. state evolution ------------------------------------------------
         if self.use_epistemology:
-            # Process each intron individually to maintain state consistency
-            start = 0
-            assert self.epistemology is not None
-            for i, intron in enumerate(introns.tolist()):  # use unmasked intron
-                self.current_state_index = self.epistemology[self.current_state_index, intron]
-                state_idx = self.current_state_index
+            # Fully vectorized epistemology processing for high performance
+            if self.epistemology is None:
+                raise RuntimeError("Epistemology not loaded")
 
-                # Token completes when the *intron* continuation bit is 0
-                if (intron & 0x80) == 0:
-                    # token_bytes must be the original *masked* slice from the blob
-                    token_bytes = bytes(arr[start:i + 1])
-                    try:
-                        token_id = TOK.bytes_to_id(token_bytes)  # expects masked bytes
-                        phe = self.operator.get_phenotype(state_idx, token_id)
-                        self.operator.learn(phe, int(intron), state_idx)
-                    except Exception:
-                        pass
-                    start = i + 1
+            # --- 1. build full state trajectory in one shot
+            intr = introns  # alias for brevity (np.ndarray[uint8])
+            n = intr.shape[0]
+
+            # Allocate state buffer with memory bounds (max 64K to prevent RAM explosion)
+            max_chunk_size = 65536  # 64K introns max per chunk
+            if n > max_chunk_size:
+                # Process in chunks to maintain memory bounds
+                for chunk_start in range(0, n, max_chunk_size):
+                    chunk_end = min(chunk_start + max_chunk_size, n)
+                    chunk_introns = intr[chunk_start:chunk_end]
+                    self._process_epistemology_chunk(chunk_introns, arr[chunk_start:chunk_end])
+            else:
+                # Process full chunk if within bounds
+                self._process_epistemology_chunk(intr, arr)
         else:
             # Fallback to individual processing for non-epistemology mode
             for intron in arr:
@@ -289,6 +303,54 @@ class IntelligenceEngine:
 
         # Update cycle count
         self.cycle_count += len(arr)
+
+    def _process_epistemology_chunk(self, introns: np.ndarray[Any, Any], masked_arr: np.ndarray[Any, Any]) -> None:
+        """
+        Process a chunk of introns using fully vectorized epistemology.
+
+        Args:
+            introns: Unmasked intron array (uint8)
+            masked_arr: Original masked byte array for token extraction
+        """
+        if self.epistemology is None:
+            raise RuntimeError("Epistemology not loaded")
+
+        n = introns.shape[0]
+        if n == 0:
+            return
+
+        # --- 1. build full state trajectory in one shot using vectorized operations
+        # Allocate buffer slice - reuse existing buffer to avoid allocations
+        if self._state_buf.shape[0] < n:
+            # Expand buffer if needed (should be rare with 64K max chunks)
+            self._state_buf = np.empty(max(n, 65536), dtype=np.int32)
+
+        st = self._state_buf[:n]
+        st[0] = self.current_state_index
+
+        # True vectorization: compute all state transitions in one operation
+        st[1:] = self.epistemology[st[:-1], introns[:-1]]
+
+        # --- 2. find token boundaries (continuation bit cleared)
+        ends = np.flatnonzero((introns & 0x80) == 0)
+
+        # --- 3. iterate *tokens* not bytes (much fewer iterations)
+        prev = 0
+        for idx in ends:
+            # Zero-copy token extraction until tobytes() call
+            token_bytes = introns[prev:idx + 1].tobytes()
+            try:
+                token_id = TOK.bytes_to_id(token_bytes)
+                state_idx = int(st[idx])  # final state *after* this token
+                phe = self.operator.get_phenotype(state_idx, token_id)
+                self.operator.learn(phe, int(introns[idx]), state_idx)
+            except Exception:
+                pass
+            prev = idx + 1
+
+        # --- 4. persist new head state
+        if n > 0:
+            self.current_state_index = self.epistemology[self.current_state_index, introns[-1]]
 
     def process_ingress(self) -> tuple[int, int]:
         """
@@ -538,7 +600,7 @@ class GyroSI:
         config: AgentConfig,
         agent_id: Optional[str] = None,
         phenotype_store: Optional[Any] = None,
-        base_path: Path = Path(__file__).resolve().parents[1],
+        base_path: Path = Path(__file__).resolve().parents[2],
     ):
         """
         Initialize GyroSI agent.
@@ -553,7 +615,9 @@ class GyroSI:
             and self.config["ontology_path"]
             and not os.path.isabs(str(self.config["ontology_path"]))
         ):
-            self.config["ontology_path"] = str(self.base_path / str(self.config["ontology_path"]))
+            # For ontology paths, always resolve relative to project root
+            project_root = Path(__file__).resolve().parents[2] / "BabyLM"
+            self.config["ontology_path"] = str(project_root / str(self.config["ontology_path"]))
         if (
             "knowledge_path" in self.config
             and self.config["knowledge_path"]
@@ -577,7 +641,9 @@ class GyroSI:
             and self.config["phenomenology_map_path"]
             and not os.path.isabs(str(self.config["phenomenology_map_path"]))
         ):
-            self.config["phenomenology_map_path"] = str(self.base_path / str(self.config["phenomenology_map_path"]))
+            # For phenomenology paths, always resolve relative to project root
+            project_root = Path(__file__).resolve().parents[2] / "BabyLM"
+            self.config["phenomenology_map_path"] = str(project_root / str(self.config["phenomenology_map_path"]))
         if (
             "private_agents_base_path" in self.config
             and self.config["private_agents_base_path"]
@@ -592,7 +658,9 @@ class GyroSI:
         if "phenomenology_map_path" not in self.config or not self.config["phenomenology_map_path"]:
             onto = self.config.get("ontology_path")
             assert isinstance(onto, str)
-            self.config["phenomenology_map_path"] = str(Path(onto).with_name("phenomenology_map.npy"))
+            # For phenomenology paths, always resolve relative to project root
+            project_root = Path(__file__).resolve().parents[2] / "BabyLM"
+            self.config["phenomenology_map_path"] = str(project_root / "memories/public/meta/phenomenology_map.npy")
         if "base_path" not in self.config or not self.config["base_path"]:
             self.config["base_path"] = str(self.base_path / "memories")
         self.agent_id = agent_id or str(uuid.uuid4())
@@ -607,7 +675,14 @@ class GyroSI:
         if onto is None:
             raise ValueError("ontology_path must be set in config")
         assert isinstance(onto, str)
-        epistemology_path = str(Path(onto).with_name("epistemology.npy"))
+
+        # Use epistemology_path from config if provided, otherwise derive from ontology path
+        epistemology_path = self.config.get("epistemology_path")
+        if epistemology_path is None:
+            epistemology_path = str(Path(onto).with_name("epistemology.npy"))
+        else:
+            epistemology_path = str(epistemology_path)
+
         self.engine = IntelligenceEngine(
             ontology_path=onto,
             phenotype_store=phenotype_store,
@@ -686,7 +761,7 @@ class GyroSI:
                 import sys
                 from pathlib import Path
 
-                sys.path.append(str(Path(__file__).resolve().parents[1] / "toys" / "communication"))
+                sys.path.append(str(Path(__file__).resolve().parents[2] / "toys" / "communication"))
                 from toys.communication import tokenizer as tok
 
                 # unmask just this token and decode its ID
@@ -873,7 +948,7 @@ class AgentPool:
         allowed_ids: Optional[set[str]] = None,
         allow_auto_create: bool = False,
         private_agents_base_path: Optional[str] = None,
-        base_path: Path = Path(__file__).resolve().parents[1],
+        base_path: Path = Path(__file__).resolve().parents[2],
         meta_dir: Optional[str] = None,
     ):
         self.base_path = base_path.resolve()

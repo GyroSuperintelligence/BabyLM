@@ -142,6 +142,7 @@ def build_agent(private_knowledge_path: Path) -> GyroSI:
     config: AgentConfig = {
         "ontology_path": str(PROJECT_ROOT / "memories/public/meta/ontology_keys.npy"),
         "phenomenology_map_path": str(PROJECT_ROOT / "memories/public/meta/phenomenology_map.npy"),
+        "epistemology_path": str(PROJECT_ROOT / "memories/public/meta/epistemology.npy"),
         "public_knowledge_path": str(dummy_public),
         "private_knowledge_path": str(private_knowledge_path),
         "learn_batch_size": 5000,  # Bigger write buffer for performance
@@ -300,6 +301,9 @@ def compile_stream(
     # Commit any pending changes to knowledge store
     if agent and hasattr(agent.engine.operator.store, "commit"):
         agent.engine.operator.store.commit()
+        # Save bloom filter for fast startup on next run
+        if hasattr(agent.engine.operator.store, "_save_bloom"):
+            agent.engine.operator.store._save_bloom()
 
     # Final statistics
     total_elapsed = time.time() - start_time
@@ -404,6 +408,7 @@ def replay_tape(
                 # if we've crossed the next_log_at threshold or 60s have passed
                 if bytes_processed >= next_log_at or (current_time - last_log_time) >= 60:
 
+                    # Calculate rate using time up to the end of the previous chunk for accuracy
                     elapsed = current_time - start_time
                     rate = bytes_processed / elapsed / (1024 * 1024) if elapsed > 0 else 0
 
@@ -426,8 +431,8 @@ def replay_tape(
                     progress_msg = (
                         f"   {progress_pct:.1f}% | "
                         f"Processed {format_size(bytes_processed)}/{format_size(tape_size)} | "
-                        f"Rate: {rate:.1f} MB/s | "
-                        f"Last chunk: {chunk_size_mb:.1f}MB in {chunk_processing_time:.1f}s ({chunk_rate:.1f} MB/s) | "
+                        f"Rate: {rate:.3f} MB/s | "
+                        f"Last chunk: {chunk_size_mb:.1f}MB in {chunk_processing_time:.1f}s ({chunk_rate:.3f} MB/s) | "
                         f"ETA: {format_time(eta_seconds)} | "
                         f"State: {state_delta}"
                     )
@@ -444,6 +449,9 @@ def replay_tape(
     # Commit changes at the end (not during the loop)
     if hasattr(agent.engine.operator.store, "commit"):
         agent.engine.operator.store.commit()
+        # Save bloom filter for fast startup on next run
+        if hasattr(agent.engine.operator.store, "_save_bloom"):
+            agent.engine.operator.store._save_bloom()
 
     # Final state check
     final_state = agent.engine.get_state_info()["tensor_index"]
@@ -472,7 +480,7 @@ def replay_tape(
             stats["knowledge_size"] = knowledge_size
 
     print(f"✅ Replay completed: {format_size(bytes_processed)} in {format_time(total_elapsed)}")
-    print(f"   Final rate: {final_rate:.1f} MB/s")
+    print(f"   Final rate: {final_rate:.3f} MB/s")
     print(f"   State evolution: {'Changed' if state_changed else 'Unchanged'}")
     if "knowledge_size" in stats:
         print(f"   Knowledge store: {format_size(int(stats['knowledge_size']))}")
@@ -592,8 +600,6 @@ Examples:
             return 1
         finally:
             # Clean up memory-mapped arrays before closing
-            if hasattr(replay_agent.engine, "epistemology"):
-                del replay_agent.engine.epistemology
             import gc
 
             gc.collect()
@@ -663,8 +669,6 @@ Examples:
         if agent:
             try:
                 # Clean up memory-mapped arrays before closing
-                if hasattr(agent.engine, "epistemology"):
-                    del agent.engine.epistemology
                 import gc
 
                 gc.collect()
