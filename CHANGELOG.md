@@ -1,5 +1,8 @@
 # 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
 
+---
+
+## [0.9.6.7] – 2025-07-31
 
 ---
 

@@ -82,6 +82,8 @@ toys/training/wikipedia_simple_data
 toys/training/knowledge/
 toys/training/checkpoints/
 toys/training/logs/
+toys/training/trash/
+toys/training/Archive/
 
 # Documentation builds
 guides/build/

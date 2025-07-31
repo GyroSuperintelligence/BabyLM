@@ -883,165 +883,172 @@ This approach supports multi-tenant, multi-user, networked, and hierarchical age
 
 **Meta-asset generation (offline, one-off):**
 
-* **Physical ontology discovery** (`python -m baby.information ontology`):
-  The state manifold is explored by a breadth-first enumeration over all reachable states, beginning from the archetypal state. This proceeds layer by layer, with explicit counts at each depth:
+- **Physical ontology discovery** (`python -m baby.information ontology`):  
+  The state manifold is explored by a breadth-first enumeration over all reachable states, beginning from the archetypal state. This proceeds layer by layer, with explicit counts at each depth:  
+  - Depth 1: 256 states  
+  - Depth 2: 10,705 states  
+  - Depth 3: 161,896 states  
+  - Depth 4: 635,200 states  
+  - Depth 5: 786,610 states  
+  - Depth 6: 788,986 states (complete closure)  
+  This process validates the closure of the state space at diameter 6. On commodity hardware (e.g., a modern Intel laptop), full enumeration and mapping completes in **~90 seconds**.
 
-  * Depth 1: 256 states
-  * Depth 2: 10,705 states
-  * Depth 3: 161,896 states
-  * Depth 4: 635,200 states
-  * Depth 5: 786,610 states
-  * Depth 6: 788,986 states (complete closure)
+- **State Transition Table (STT) generation** (`python -m baby.information epistemology`):  
+  Construction of the full state transition tensor (`epistemology.npy`, 770 MB, shape 788,986 × 256, int32) is performed using vectorised NumPy routines. Measured runtime is **~5.5 minutes**.
 
-  The process validates the closure of the state space at the diameter of 6. On current commodity hardware (GitHub Actions, Intel host), full enumeration and mapping completes in **89.6 seconds**.
-
-* **State Transition Table (STT) generation** (`python -m baby.information epistemology`):
-  Construction of the full state transition tensor (`epistemology.npy`, 770 MB, shape 788,986 × 256, int32) is performed via vectorised NumPy routines. The measured runtime is **5 minutes 30 seconds**.
-
-* **Phenomenology map construction** (`python -m baby.information phenomenology`):
-The canonical phenomenology is built by computing the Strongly Connected Components (SCCs) of the entire 788,986-state graph using an iterative Tarjan's algorithm. This is a computationally intensive but one-time process. On commodity hardware (e.g., modern laptop CPU), this completes in approximately 2-4 minutes. The build can optionally include a second pass to generate diagnostic data, adding a similar amount of time.
-These operations are not required at runtime and are run once per release.
+- **Phenomenology map construction** (`python -m baby.information phenomenology`):  
+  Canonical phenomenology is computed as the strongly connected components (SCCs) of the state graph using an iterative Tarjan's algorithm. Typical runtime is **2–4 minutes** on a modern laptop. These operations are required only once per release.
 
 **Run-time operation (per agent):**
 
-* **Egress (`process_egress`)**  
-  With the STT loaded, a transition is one indexed lookup: `next_idx = ep[current_idx, intron]`.  
-  Without STT, the same result comes from a fixed sequence of bitwise ops (`apply_gyration_and_transform`). Both paths are `O(1)`.
+- **Egress (`process_egress`)**  
+  With the STT loaded, a transition is a single indexed lookup:  
+  `next_idx = ep[current_idx, intron]`.  
+  Without the STT, the same result comes from a fixed sequence of bitwise operations (`apply_gyration_and_transform`). Both are strictly **O(1)**.
 
-* **Ingress (`process_ingress`)**  
-  One dict get/put on the `OrbitStore` entry plus a single Monodromic Fold on the 8‑bit mask. Still `O(1)`.
+- **Ingress (`process_ingress`)**  
+  One dict get/put on the OrbitStore entry plus a single Monodromic Fold on the 8‑bit mask. Still **O(1)**.
 
-* **Batch operations**  
-  Ordered left‑fold over the intron stream: one accumulator, one pass → `O(N)`.
+- **Batch operations**  
+  Ordered left-fold over the intron stream: one accumulator, one pass ⇒ **O(N)**.
 
-No stage scales super‑linearly; everything is constant‑time per byte or linear in bytes processed.
-
-### 9.2 Memory Requirements
-
-* **`epistemology.npy` (STT)**  
-  770 MB on disk. Memory‑mapped; typical RSS per process stabilises around **35–45 MB** after warm‑up (shared pages).
-
-* **`ontology_keys.npy`**  
-  6.0 MB on disk. Parsed into three NumPy arrays (keys/values/inverse), ≈ **12–15 MB** RAM per process.
-
-* **`phenomenology_map.npy`**  
-  3.0 MB on disk (core map). Loaded array ≈ **3 MB** RAM. Diagnostics add proportionally.
-
-* **`theta.npy`**  
-  3.0 MB on disk. Used for ... (add a brief description if needed).
-
-* **OrbitStore index**  
-  ~25 B serialized / **~90 B resident** per phenotype (dict + Python overhead).  
-  ⇒ 100 k phenotypes ≈ **9 MB**; 1 M ≈ **90 MB**.
-
-* **Agent core state**  
-  < 1 MB (counters, buffers, hooks).
-
-* **Python runtime & modules**  
-  8–10 MB baseline per process (CPython 3.11+), excluding shared mmaps.
-
-**Scalability**
-
-* Per‑agent growth is linear in phenotype count (OrbitStore size).  
-* STT / ontology / phenomenology artefacts are mmap‑shared; 10 agents add **<100 MB** combined beyond their private indices.  
-* Write‑behind batching (default 100 ops) → one fsync / ~3 KB, strongly amortised.
-
-## 9.3 Throughput (What speed you actually get)
-
-**Single‑threaded (Intel i7‑1260P, 3.4 GHz, Python, STT mapped)**  
-- One full egress→ingress cycle (read 1 byte → update state → learn/emit): **≈0.55–0.8 µs**.  
-- Sustained rate while the hot part of OrbitStore fits in cache: **~1.2–1.3 million cycles/sec**.  
-- When the in‑RAM dict grows past cache (≈5 M phenotypes), rare misses push tail latency to **~7–9 µs**—still microseconds, just not the median.
-
-**Multi‑agent / multi‑core (AMD EPYC, 32 cores)**  
-- 32 parallel agents hold **~30–33 M cycles/sec** in aggregate.  
-- Scaling is near‑linear until memory bandwidth and NUMA boundaries bite; shard by socket to keep it high.
-
-**Disk / flash writes**  
-- OrbitStore append log sustains **≈150 MB/s** on NVMe with default 100‑entry batches.  
-- Bumping batch size to 1 000 cuts fsync overhead further for ingestion‑heavy runs.
-
-**Extra notes**  
-- **Startup:** Mapping the 770 MB STT takes ~50–60 ms; parsing the ontology ~15–25 ms.  
-- **GC pressure:** Essentially none in the tight loop—no allocations during the cycle.  
-- **No STT mode:** Pure bit‑twiddling path is ~2× slower but perfect for RAM‑tight or embedded builds.  
-- **GPU:** Still pointless—this workload is bandwidth/branch bound, not FLOP bound.  
-- **Containers / multi‑tenancy:** STT + ontology can be mounted read‑only and safely shared across processes.
-
-**Bottom line:**  
-You can run **dozens of agents concurrently** on a modern workstation. Latency stays in microseconds, memory growth is predictable and linear, and nothing secretly explodes to O(n²).
+No stage scales super-linearly; everything is constant-time per intron, or linear in introns processed.
 
 ---
 
-## 9.4 Pragmatic capacity & device‑level throughput 
+### 9.2 Memory Requirements
 
-GyroSI has **two memories**:  
-1. **Active working state:** always 48 bits (**6 bytes**) + the current input byte. That's it.  
-2. **Passive long‑term memory (OrbitStore):** grows with experience, one entry per *(state_index, token_id)* pair you ever see.
+- **`epistemology.npy` (STT)**  
+  770 MB on disk. Memory‑mapped; typical resident set per process stabilises around **35–45 MB** (shared pages).
 
-This means an edge device only needs to keep 6 bytes "alive". Everything else can sit on SD/flash and be fetched when needed.
+- **`ontology_keys.npy`**  
+  6.0 MB on disk. Parsed into three small NumPy arrays (keys/values/inverse), using **12–15 MB** RAM per process.
 
-### 1. How many "facts" (phenotypes) fit in RAM?
+- **`phenomenology_map.npy`**  
+  3.0 MB on disk. Loaded array ≈ **3 MB** RAM.
 
-- Serialized on disk: **~25 B/entry** (can be less with compression).  
-- In Python RAM (dict overhead): **~90 B/entry** is a safe average.  
-- On MCUs you'll pack tighter (C structs + open addressing ~40–50 B/entry).
+- **Agent working state**  
+  < 1 MB for counters, rolling buffers, and hooks.  
+  The only live physics is the current 48-bit state tensor and 6 introns for active context.
 
-| Device / free RAM for GyroSI                 | Rough RAM facts capacity | Notes |
-|----------------------------------------------|---------------------------|-------|
-| **ESP32‑S3 (≈512 KB PSRAM usable for cache)**| ~5 000 (demo / small cache)| Everything else on SD; LRU cache + log compaction |
-| **MacBook Pro 2015, 16 GB → ≈4 GB free**     | ≈ **45 million**          | Plenty for large personal KBs |
-| **MacBook M4, 16 GB → ≈12 GB free**          | ≈ **130 million**         | Whole Wikipedia abstracts + more |
-| **Server, 256 GB → ≈220 GB free**            | ≈ **2.4 billion**         | Close to the hard ceiling (202 M is *possible* states, but multiple agents etc.) |
+- **OrbitStore (phenotype index)**  
+  On disk: ≈ **12 B/phenotype** (record: mask, conf, key).  
+  In RAM:  
+    - **Optimised C index:** ≈ 28 B per entry (two 32-bit ints + pointer).  
+    - **Python dict:** ≈ 55–60 B per entry (actual, observed).  
+  Example: 10^6 phenotypes ≈ 28–60 MB.
 
-> A 202 M full universe would occupy ~5 GB raw on disk; RAM is the real limiter for Python, not disk.
+- **Python runtime and modules**  
+  8–10 MB baseline per process (CPython 3.11+), excluding shared mmaps.
 
-### 2. Throughput you can picture
+**Scalability**  
+- All asset files are mmapped and shared across agents.  
+- Write‑behind batching (default 100 ops) amortises fsync cost to ≤3 KB per flush.  
+- Per‑agent RAM use is linear in phenotype count only.
 
-A *cycle* = **1 byte in → state transform → 1 byte out + optional store hit**.
+---
 
-| Hardware                               | Cores | Cycles/sec | Bytes/sec (≈ cycles) |
-|----------------------------------------|-------|------------|----------------------|
-| **MacBook Pro 2015** (2 phys cores)    | 1     | ~0.6–0.75 M| ~0.6–0.75 M          |
-|                                        | 2     | ~1.2–1.5 M | ~1.2–1.5 M           |
-| **MacBook M4** (8 perf cores)          | 8     | ~8–9 M     | ~8–9 M               |
-| **EPYC 32‑core server**                | 32    | ~28–32 M   | ~28–32 M             |
-| **ESP32‑S3 (240 MHz, C, no SD hits)**  | 1     | ~150–300 k | ~150–300 k           |
-| **ESP32‑S3 (with SD cache misses)**    | 1     | 1–30 k     | 1–30 k (depends on hit rate) |
+### 9.3 Throughput (Single- and Multi-core)
 
-Rule of thumb: **~1 M chars·s⁻¹·core** on 2024 desktop silicon, and about **⅓ of that on a 2015 dual‑core laptop**. Embedded MCUs sit lower, but still very usable with caching.
+**Single‑threaded (Intel i7‑1260P, 3.4 GHz, Python, STT mapped):**  
+- One egress→ingress cycle (per intron): **~0.6–0.8 µs**.  
+- Sustained throughput (index hot in RAM): **~1.3 million introns/sec**  
+  (≈850,000 tokens/sec at 1.55 introns/token).
 
-### 3. How long to ingest familiar corpora?
+- When in‑RAM dict exceeds cache (≈5 M phenotypes), rare misses push tail latency to **7–9 µs**, but median remains low.
 
-Assume 1 char ≈ 1 byte (post‑tokenizer).
+**Multi‑agent / multi‑core (AMD EPYC, 32 cores):**  
+- 32 parallel agents: **28–32 million introns/sec** in aggregate.
 
-| Corpus                         | Size  | 1 core            | 8 cores          | 32 cores        |
-|--------------------------------|-------|--------------------|------------------|-----------------|
-| WordNet glosses                | 30 MB | < 1 min            | "blink"          | "blink"         |
-| English Wikipedia (text)*      | 90 GB | ~1 day             | ~3 h             | **< 1 h**       |
-| Filtered public‑web dump 1 PB  | 10⁶ GB| ~3.5 years         | ~5 months        | ~5 weeks        |
+**Disk/flash writes:**  
+- OrbitStore append log: **~150 MB/s** on NVMe at default batch size.  
+- Increasing batch to 1,000 reduces fsync overhead for heavy ingest.
 
-\* Plain‑text 2025 EN dump.
+**Startup cost:**  
+- STT mmap: ~50–60 ms; ontology parse: ~20 ms.
 
-### 4. Context length in human terms
+**GC pressure:**  
+- None in the tight loop. No allocation in critical path.
 
-- **Active context:** ≈ **6 bytes** worth of "fresh history" can affect the tensor at once, because the state space diameter is 6.  
-- **Passive recall:** Unlimited. Re‑enter an old state + intron and you get the exact stored phenotype back—whether it's 5 seconds or 5 years later.  
-- On an 8 GB laptop you can keep **tens of millions** of these addresses hot; lookups stay **<2 µs** while they fit in cache.
+**No-STT mode:**  
+- Pure bit‑twiddling (RAM‑tight, embedded): ~2× slower.
 
-### 5. Edge devices (ESP32‑S3 & friends)
+**GPU:**  
+- Irrelevant—workload is bandwidth and branch bound, not FLOP bound.
 
-- **Yes, you can run GyroSI.** Active state = 6 B; masks + code = a few KB.  
-- Skip the 770 MB STT; use the pure bitwise physics path.  
-- Keep a small RAM hash table (few thousand entries) and stream the rest to SD.  
-- Cache misses cost milliseconds, so batch reads/writes and compact periodically.  
-- Raspberry Pi‑class boards can mmap everything and hit ~400 k cycles/s—perfect for home‑lab deployments.
+**Containers / multi-tenancy:**  
+- All assets are mountable and shared read-only.
 
-### 6. Write load / endurance
+**Bottom line:**  
+- Dozens of agents fit on a workstation.  
+- Latency remains in microseconds.  
+- Memory growth is predictable and linear.
 
-- Default: flush every 100 updates = ≤3 KB per flush.  
-- Even a heavy Wikipedia ingest on a laptop writes **<5 MB/min**—far below SSD wear limits.  
-- On SD cards, use larger batches and occasional compaction to stay friendly to flash.
+---
+
+### 9.4 Pragmatic Capacity and Device-level Throughput
+
+GyroSI has two memory domains:
+
+1. **Active working state**: always 48 bits (6 bytes) + a 6-intron sliding window.
+2. **Passive long-term memory (OrbitStore)**: grows with experience, one entry per (state_index, token_id) pair seen.
+
+This means even microcontrollers need only a 6-byte working state.  
+Everything else can reside on SD/flash and be fetched on demand.
+
+#### 1. How many phenotypes fit in RAM?
+
+- Disk: **12 B/entry** (record).  
+- RAM: **28–60 B/entry** (depending on index implementation).  
+- Embedded MCUs (C structs): **~24 B/entry**.
+
+| Device / free RAM for GyroSI           | Max phenotypes (28 B/entry) | Notes |
+|----------------------------------------|-----------------------------|-------|
+| ESP32‑S3 (512 KB PSRAM usable for cache)| ~19,000                     | Demo/small cache only; SD for rest |
+| MacBook Pro 2015, 16 GB → ~4 GB free  | ~153 million                | Large KBs, whole WordNet ×100      |
+| MacBook M4, 16 GB → ~12 GB free       | ~439 million                | Full Wikipedia KB                  |
+| Server, 256 GB → ~220 GB free         | ~8.4 billion                | Far beyond any public corpus       |
+
+> Full GyroSI state universe is 202 million states; only a fraction are commonly populated.
+
+#### 2. Throughput in practice
+
+A cycle = 1 intron in → state transform → phenotype lookup/learn → intron out.
+
+| Hardware                             | Cores | Introns/sec | Tokens/sec (÷1.55) |
+|--------------------------------------|-------|-------------|---------------------|
+| MacBook Pro 2015 (2 cores)           | 2     | ~1.4 M      | ~0.9 M              |
+| MacBook M4 (8 cores)                 | 8     | ~8–9 M      | ~5.3–5.8 M          |
+| EPYC 32-core server                  | 32    | ~28–32 M    | ~18–21 M            |
+| ESP32-S3 (C, no SD hits)             | 1     | ~100–180 k  | ~65–115 k           |
+| ESP32-S3 (SD cache misses)           | 1     | 1–30 k      | 0.6–19 k            |
+
+#### 3. How long to ingest familiar corpora?
+
+Assume **1 token ≈ 1.55 introns/bytes** after LEB128 encoding.
+
+| Corpus                        | Tokens | 1 core         | 8 cores        | 32 cores      |
+|-------------------------------|--------|----------------|----------------|---------------|
+| WordNet glosses               | 7 M    | < 10 s         | “blink”        | “blink”       |
+| English Wikipedia (2025)      | 1.6 G  | ~5 h           | ~50 min        | < 15 min      |
+| Filtered public web (1 PB)    | 7.8 T  | ~1.8 y         | ~3 mo          | ~3 weeks      |
+
+#### 4. Context length and recall
+
+- **Active context:** 6 introns (state space diameter = 6).  
+- **Passive recall:** Unlimited—any (state, token) pair is always retrievable by path, regardless of age.
+
+#### 5. Edge device logic
+
+- GyroSI runs fully on microcontrollers with 6 B live state; minimal code fits in a few KB.
+- For embedded, avoid STT; use pure physics.  
+- Use a small RAM cache plus SD streaming, with batched writes and periodic compaction.
+
+#### 6. Write load and flash endurance
+
+- Default: flush every 100 updates (≤3 KB per flush).  
+- Even a full Wikipedia ingest writes < 5 MB/min—far below any wear threshold.
+- SD: prefer larger batches and scheduled compaction.
 
 ---
 

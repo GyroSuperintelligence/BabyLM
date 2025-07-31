@@ -14,7 +14,7 @@ import uuid
 from collections import OrderedDict, deque
 from functools import cached_property
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, Tuple, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, TypedDict, cast
 
 from dataclasses import asdict, is_dataclass
 
@@ -25,6 +25,7 @@ from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig, Ph
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
+from toys.communication import tokenizer as tokmod
 
 
 class _TokBridge:
@@ -98,92 +99,64 @@ class IntelligenceEngine:
         self.ontology_path = _abs(
             ontology_path if ontology_path is not None else "memories/public/meta/ontology_keys.npy", self.base_path
         )
-        self.epistemology_path = _abs(
-            (
-                epistemology_path
-                if epistemology_path is not None
-                else str(Path(self.ontology_path).with_name("epistemology.npy"))
-            ),
-            self.base_path,
-        )
-        self.phenomenology_map_path = _abs(
-            (
-                phenomenology_map_path
-                if phenomenology_map_path is not None
-                else str(Path(self.ontology_path).with_name("phenomenology_map.npy"))
-            ),
-            self.base_path,
-        )
-        # Initialize subsystem engines
-        self.s2: InformationEngine = InformationEngine(
-            self.ontology_path,  # keys_path
-            self.epistemology_path,
-            self.phenomenology_map_path,
-            str(Path(self.ontology_path).with_name("theta.npy")),
-        )
-        self.operator: InferenceEngine = InferenceEngine(self.s2, phenotype_store)
-
-        # Agent state
-        # NOTE: The archetypal state (GENE_Mac_S) is NOT at index 0 in the ontology;
-        # its index is determined by its integer value after sorting all discovered states.
-        self.agent_id: str = agent_id or str(uuid.uuid4())
-        self.use_epistemology: bool = False
-        self.current_state_index: int
-        self.gene_mac_m_int: int
-        self._cached_state_int: int = 0  # Only used if use_epistemology is True
-        if self.epistemology_path and os.path.exists(self.epistemology_path):
-            try:
-                self.epistemology = np.load(self.epistemology_path, mmap_mode="r")
-                self.use_epistemology = True
-                print("INFO: State Transition Table (STT) loaded. Using optimized state transitions.")
-            except Exception as e:
-                print(
-                    f"WARNING: Could not load STT from {self.epistemology_path}. "
-                    f"Error: {e}. Falling back to dynamic physics."
-                )
-
-        origin_int: int = self.s2.tensor_to_int(governance.GENE_Mac_S)
-        if self.use_epistemology:
-            self.current_state_index = self.s2.get_index_from_state(origin_int)
-            self.gene_mac_m_int = origin_int  # Ensure always defined
-        else:
-            self.gene_mac_m_int = origin_int
-            self.current_state_index = 0  # Default if not using epistemology
-        self.cycle_count: int = 0
-        self._microstep_count: int = 0  # Track internal cooling/autonomic steps
-        # Extension points
+        self.phenotype_store = phenotype_store
+        self.agent_id = agent_id or str(uuid.uuid4())
+        self.hook_batch_interval = hook_batch_interval
         self.post_cycle_hooks: List[CycleHookFunction] = []
-        self._hook_event_buffer: Deque[Tuple[Any, ...]] = deque(maxlen=hook_batch_interval)
-        self._hook_batch_interval = hook_batch_interval
-
-        # Algedonic regulation and autonomic cycles
-        self._θ_buf: deque[float] = deque(maxlen=128)
-        self._θ_high: float = 0.9  # radians
-        self._θ_low: float = 0.3
-        self._cool_introns: tuple[int, ...] = (0b01000010,)
-
-        # BU-Ingress state initialization
-        self._S: list[int] = [0] * 6
-
-        # Token-aware state variables
-        self._byte_buf: list[int] = []  # collects introns of current token
-        self._last_token_id: int = 0  # last closed token (for ingress)
-        self.MAX_TOKEN_BYTES: int = 10  # LEB128 should never exceed this for 32-bit tokens
-        try:
-            if self.phenomenology_map_path and os.path.exists(self.phenomenology_map_path):
-                # The .npy file does not contain autonomic_cycles; set to empty
-                _ = np.load(self.phenomenology_map_path, mmap_mode="r")
-                self._autonomic_cycles: list[Any] = []
-                self._autonomic_cycles_curated: dict[str, Any] = {}
-            else:
-                self._autonomic_cycles = []
-                self._autonomic_cycles_curated = {}
-        except Exception:
-            self._autonomic_cycles = []
-            self._autonomic_cycles_curated = {}
+        self.cycle_count = 0
         self._pain_streak: int = 0
+        # Buffer for emission of the current token as *unmasked introns*
+        self._emit_buf: list[int] = []
 
-        # Register auto-pruning hook if enabled
+        # --- epistemology setup ------------------------------------------------
+        self.use_epistemology = epistemology_path is not None
+        if self.use_epistemology:
+            epistemology_path = _abs(epistemology_path, self.base_path)
+            self.epistemology = np.load(epistemology_path)
+            self.current_state_index = 0
+        else:
+            self.epistemology = None
+            self.current_state_index = 0  # Always initialize to 0, not None
+
+        # --- phenomenology setup ----------------------------------------------
+        self.use_phenomenology = phenomenology_map_path is not None
+        if self.use_phenomenology:
+            phenomenology_map_path = _abs(phenomenology_map_path, self.base_path)
+            self.phenomenology_map = np.load(phenomenology_map_path)
+        else:
+            self.phenomenology_map = None
+
+        # --- information setup -----------------------------------------------
+        self.s2 = InformationEngine(
+            keys_path=self.ontology_path,
+            ep_path=_abs(epistemology_path or "memories/public/meta/epistemology.npy", self.base_path),
+            phenomap_path=_abs(phenomenology_map_path or "memories/public/meta/phenomenology_map.npy", self.base_path),
+            theta_path=str(Path(self.ontology_path).with_name("theta.npy")),
+        )
+
+        # --- operator setup ---------------------------------------------------
+        self.operator = InferenceEngine(
+            s2_engine=self.s2,
+            phenotype_store=self.phenotype_store,
+        )
+
+        # --- state tracking --------------------------------------------------
+        self.gene_mac_m_int = self.s2.get_state_from_index(0)  # Use first state as archetypal
+        self._last_token_id = 0
+
+        # --- theta tracking --------------------------------------------------
+        self._θ_buf: Deque[float] = deque(maxlen=8)
+        self._θ_low = -0.1
+        self._θ_high = 0.1
+
+        # --- S-buffer for intron selection ----------------------------------
+        self._S = [0] * 8
+
+        # --- token buffer for egress processing ------------------------------
+        self._byte_buf: List[int] = []
+        self.MAX_TOKEN_BYTES = 1024  # Maximum token buffer size
+
+        # --- auto-prune setup -----------------------------------------------
         self._register_auto_prune_hook()
 
     def process_egress(self, input_byte: int) -> int:
@@ -216,6 +189,7 @@ class IntelligenceEngine:
 
         # S1: Apply gyroscopic transformation to physical state
         if self.use_epistemology:
+            assert self.epistemology is not None
             self.current_state_index = self.epistemology[self.current_state_index, intron]
             self._cached_state_int = self.s2.get_state_from_index(self.current_state_index)
             # No eager sync here
@@ -274,6 +248,48 @@ class IntelligenceEngine:
         self._byte_buf.clear()
         self._last_token_id = 0
 
+    def process_egress_bulk(self, blob: bytes) -> None:
+        """
+        Vectorised replacement for repeated process_egress().
+        Handles state updates in C/NumPy, then walks the token
+        boundaries just once per byte for learning.
+        """
+        import numpy as np
+
+        if not blob:
+            return
+
+        arr = np.frombuffer(blob, dtype=np.uint8)  # masked bytes (external)
+        introns = arr ^ 0xAA  # unmask once → true introns
+
+        # --- 1. state evolution ------------------------------------------------
+        if self.use_epistemology:
+            # Process each intron individually to maintain state consistency
+            start = 0
+            assert self.epistemology is not None
+            for i, intron in enumerate(introns.tolist()):  # use unmasked intron
+                self.current_state_index = self.epistemology[self.current_state_index, intron]
+                state_idx = self.current_state_index
+
+                # Token completes when the *intron* continuation bit is 0
+                if (intron & 0x80) == 0:
+                    # token_bytes must be the original *masked* slice from the blob
+                    token_bytes = bytes(arr[start:i + 1])
+                    try:
+                        token_id = TOK.bytes_to_id(token_bytes)  # expects masked bytes
+                        phe = self.operator.get_phenotype(state_idx, token_id)
+                        self.operator.learn(phe, int(intron), state_idx)
+                    except Exception:
+                        pass
+                    start = i + 1
+        else:
+            # Fallback to individual processing for non-epistemology mode
+            for intron in arr:
+                self.process_egress(intron)
+
+        # Update cycle count
+        self.cycle_count += len(arr)
+
     def process_ingress(self) -> tuple[int, int]:
         """
         Generate **one token** (may be 1-3 bytes). Returns:
@@ -283,12 +299,17 @@ class IntelligenceEngine:
         state_idx = (
             self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
         )
+        # Prepare a fresh token when the buffer is empty
+        if not self._emit_buf:
+            phe = self.operator.get_phenotype(state_idx, self._last_token_id)
+            # Choose a deterministic token id from context; map into tokenizer vocab
+            vocab_size = tokmod.vocab_size()
+            tok_id = self.operator._compute_semantic_address(phe["key"]) % vocab_size
+            # id_to_bytes returns *masked* bytes; we need unmasked introns for the physics step
+            masked = TOK.id_to_bytes(int(tok_id))
+            self._emit_buf = [b ^ 0xAA for b in masked]  # store as unmasked introns
 
-        phe = self.operator.get_phenotype(state_idx, self._last_token_id)
-
-        # ---------- 2. decide next intron (p) -------------
-        theta = float(np.mean(self._θ_buf)) if self._θ_buf else 0.0
-        intron_out = self._choose_intron(phe, theta, state_idx)  # delegate to small helper
+        intron_out = self._emit_buf.pop(0)
         byte_out = intron_out ^ 0xAA
 
         # ---------- 3. feed back through egress -----------
@@ -615,6 +636,22 @@ class GyroSI:
         if hasattr(store, "commit"):
             store.commit()
         # Removed automatic close()
+
+    def ingest_bulk(self, blob: bytes, *, autoclose: bool = False) -> None:
+        """
+        Vectorized bulk ingestion for high-performance learning.
+
+        Args:
+            blob: Bytes to learn from (processed in bulk)
+            autoclose: Whether to commit changes immediately (default: False)
+        """
+        self.engine.process_egress_bulk(blob)
+
+        # Only commit if explicitly requested
+        if autoclose:
+            store = self.engine.operator.store
+            if hasattr(store, "commit"):
+                store.commit()
 
     def respond(self, data: bytes, max_new_tokens: int = 64) -> bytes:
         """

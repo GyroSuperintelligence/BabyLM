@@ -59,8 +59,6 @@ def _bytes_to_ids(blob: bytes) -> List[int]:
     ids, cur, shift = [], 0, 0
     for i, b in enumerate(blob):
         if shift > 28:  # Prevent overflow (32-bit token ID assumption)
-            print(f"[TOK-DBG] raw blob: {blob.hex()}")
-            print(f"[TOK-DBG] first 10 bytes: {[hex(b) for b in blob[:10]]}")
             raise ValueError(f"Token ID too large at byte {i}")
         cur |= (b & 0x7F) << shift
         if b & 0x80:
