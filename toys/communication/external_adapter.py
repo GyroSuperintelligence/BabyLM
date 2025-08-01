@@ -71,6 +71,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 base_knowledge_path = str(PROJECT_ROOT / PREFERENCES["public_knowledge"]["path"])
 
+
 agent_pool = AgentPool(
     ontology_path=PREFERENCES["ontology"]["ontology_map_path"],
     base_knowledge_path=base_knowledge_path,

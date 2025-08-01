@@ -8,10 +8,12 @@ the learning process through Monodromic Fold.
 
 import hashlib
 import math
-from typing import Any, Dict, Tuple, cast
+from typing import Any, Dict, Tuple, cast, Optional, List
 
+import numpy as np
+
+from baby import governance
 from baby.contracts import PhenotypeEntry, ValidationReport
-from baby.governance import fold
 from baby.information import InformationEngine
 
 
@@ -23,16 +25,39 @@ class InferenceEngine:
     Contains the endogenous inference operator that bridges physical and semantic worlds.
     """
 
-    def __init__(self, s2_engine: InformationEngine, phenotype_store: Any):
+    def __init__(
+        self,
+        s2_engine: InformationEngine,
+        phenotype_store: Any,
+        phenomenology_map: Optional[np.ndarray[Any, np.dtype[np.integer[Any]]]] = None,
+        s_buffer: Optional[List[int]] = None,
+    ):
         """
         Initialize inference operator with measurement engine and storage.
 
         Args:
             s2_engine: Information engine for state measurement
             phenotype_store: Storage interface for phenotype data
+            phenomenology_map: Optional map from state indices to orbit IDs (0-255)
+            s_buffer: Optional reference to S-buffer for mask synchronization
         """
         self.s2 = s2_engine
         self.store = phenotype_store
+        self.s_buffer = s_buffer
+
+        # Fix orbit-ID lookup - map canonical indices to 0-255 range
+        if phenomenology_map is not None:
+            reps = np.unique(phenomenology_map)  # 256 canonical reps
+            self._orbit_of: Optional[np.ndarray[Any, np.dtype[np.unsignedinteger[Any]]]] = np.zeros_like(
+                phenomenology_map, dtype=np.uint8
+            )
+            for i, rep in enumerate(reps):
+                self._orbit_of[phenomenology_map == rep] = i  # 0‥255
+        else:
+            self._orbit_of = None
+
+        self.phenomenology_map = phenomenology_map
+
         assert self.s2._keys is not None
         self.endogenous_modulus = len(self.s2._keys)
 
@@ -40,8 +65,6 @@ class InferenceEngine:
         oc = self.s2.orbit_cardinality
         if hasattr(oc, "max"):
             self._v_max = oc.max()
-        elif isinstance(oc, dict):
-            self._v_max = max(oc.values())
         else:
             self._v_max = max(oc)
         if self._v_max == 0:
@@ -65,17 +88,21 @@ class InferenceEngine:
         if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
             raise IndexError(f"state_index {state_index} out of bounds [0, {len(self.s2.orbit_cardinality)})")
 
-        context_key = (state_index, token_id)
-        entry = self.store.get(context_key)
+        # Use orbit ID for storage but preserve original state_index in key
+        orbit_id = int(self._orbit_of[state_index]) if self._orbit_of is not None else state_index
+        storage_key = (orbit_id, token_id)
+        context_key = (state_index, token_id)  # Preserve original state_index
+
+        entry = self.store.get(storage_key)
 
         if entry is None:
             entry = self._create_default_phenotype(context_key)
-            self.store.put(context_key, entry)
+            self.store.put(storage_key, entry)
         else:
             # Copy to avoid mutating shared dict references
             entry = dict(entry)
 
-        # Ensure 'key' is always present
+        # Ensure 'key' is always present with original state_index
         if "key" not in entry:
             entry["key"] = context_key
         return cast(PhenotypeEntry, entry)
@@ -109,7 +136,7 @@ class InferenceEngine:
         old_mask = phenotype_entry.get("mask", 0) & 0xFF
 
         # Use Monodromic Fold and clamp result
-        new_mask = fold(old_mask, last_intron) & 0xFF
+        new_mask = governance.fold(old_mask, last_intron) & 0xFF
 
         # Calculate learning rate and confidence
         novelty = bin(old_mask ^ new_mask).count("1") / 8.0
@@ -132,11 +159,64 @@ class InferenceEngine:
         phenotype_entry["mask"] = new_mask
         phenotype_entry["conf"] = new_confidence
 
-        # Persist mutations
+        # Persist mutations using orbit_id for storage
         key = phenotype_entry["key"]  # (state_idx, token_id)
-        self.store.put(key, phenotype_entry)  # persist
+        orbit_id = int(self._orbit_of[key[0]]) if self._orbit_of is not None else key[0]
+        storage_key = (orbit_id, key[1])
+        self.store.put(storage_key, phenotype_entry)  # persist
 
         return phenotype_entry
+
+    def learn_token(self, token_id: int, state_index: int, last_intron: int) -> PhenotypeEntry:
+        """
+        Token-level learning with proper intron-based mask evolution.
+
+        Args:
+            token_id: Token ID from the tokenizer
+            state_index: Current state index for learning rate calculation
+            last_intron: The actual intron that finished the token (for mask evolution)
+
+        Returns:
+            Updated phenotype entry
+        """
+        # Validate state_index is within bounds
+        if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
+            raise IndexError(f"state_index {state_index} out of bounds [0, {len(self.s2.orbit_cardinality)})")
+
+        # Use orbit ID for storage but preserve original state_index in key
+        orbit_id = int(self._orbit_of[state_index]) if self._orbit_of is not None else state_index
+        storage_key = (orbit_id, token_id)
+        context_key = (state_index, token_id)  # Preserve original state_index
+
+        entry = self.store.get(storage_key)
+
+        if entry is None:
+            entry = self._create_default_phenotype(context_key)
+            self.store.put(storage_key, entry)
+        else:
+            # Copy to avoid mutating shared dict references
+            entry = dict(entry)
+
+        # Let the phenotype evolve with mask folding using the actual intron
+        old_mask = entry.get("mask", 0) & 0xFF
+        new_mask = governance.fold(old_mask, last_intron)  # Use proper Monodromic Fold
+        entry["mask"] = new_mask
+
+        # Calculate confidence increment based on orbit cardinality
+        v = self.s2.orbit_cardinality[state_index]
+        alpha = (1 / 6) * math.sqrt(v / self._v_max)
+        current_confidence = entry.get("conf", 0.1)
+        new_confidence = min(1.0, current_confidence + (1 - current_confidence) * alpha)
+        entry["conf"] = new_confidence
+
+        # Keep S-buffer in sync with learning (if available)
+        if self.s_buffer is not None:
+            self.s_buffer[0] = new_mask  # keep S-buffer in sync with learning
+
+        # Save the updated entry using storage key
+        self.store.put(storage_key, entry)
+
+        return cast(PhenotypeEntry, entry)
 
     def validate_knowledge_integrity(self) -> ValidationReport:
         def _flush_store(s: Any) -> None:
@@ -184,12 +264,15 @@ class InferenceEngine:
             total_entries += 1
             confidence_sum += float(entry["conf"])
 
-        return {
-            "total_entries": len(seen),
-            "average_confidence": confidence_sum / max(total_entries, 1),
-            "store_type": type(self.store).__name__,
-            "modified_entries": anomaly_count,
-        }
+        return cast(
+            ValidationReport,
+            {
+                "total_entries": len(seen),
+                "average_confidence": confidence_sum / max(total_entries, 1),
+                "store_type": type(self.store).__name__,
+                "modified_entries": anomaly_count,
+            },
+        )
 
     def apply_confidence_decay(self, decay_factor: float = 0.001) -> Dict[str, Any]:
         """
@@ -309,21 +392,22 @@ class InferenceEngine:
 
     def _create_default_phenotype(self, context_key: Tuple[int, int]) -> PhenotypeEntry:
         """
-        Create default phenotype entry for unknown context.
+        Create a default phenotype entry for a new context key.
 
         Args:
-            context_key: (state_index, token_id) tuple
+            context_key: (orbit_id, token_id) tuple
 
         Returns:
-            Initialized phenotype entry with minimal structure
+            PhenotypeEntry with default values
         """
-        state_index, token_id = context_key
-        # Use a reasonable default confidence value, consistent with learn() method
-        confidence = 0.1  # Default confidence, same as in learn() method
-        init_mask = token_id & 0xFF
+        orbit_id, token_id = context_key
+
+        # Calculate initial confidence based on orbit cardinality
+        orbit_size = self.s2.orbit_cardinality[orbit_id] if orbit_id < len(self.s2.orbit_cardinality) else 1
+        confidence = 0.1 * math.sqrt(orbit_size / self._v_max) if self._v_max > 0 else 0.1
 
         return {
-            "mask": init_mask,  # Initial mask is the token_id
+            "mask": context_key[1],  # start with token_id; Fold will evolve it
             "conf": confidence,
             "key": context_key,
         }

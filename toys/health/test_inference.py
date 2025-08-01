@@ -21,7 +21,7 @@ from baby.intelligence import GyroSI
 @pytest.fixture
 def temp_store(tmp_path: Path) -> Generator[OrbitStore, None, None]:
     """Simple OrbitStore for testing, completely isolated."""
-    store = OrbitStore(str(tmp_path / "test_store.bin"), append_only=True)
+    store = OrbitStore(str(tmp_path / "test_store.bin"))
     yield store
     store.close()
 

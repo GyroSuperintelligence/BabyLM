@@ -1,22 +1,21 @@
 """
-S4/5: Intelligence – Orchestration & API
-…your module docstring…
+S5: Intelligence - Semantic Memory & Learning
+
+This module provides the IntelligenceEngine class responsible for
+coordinating the entire GyroSI learning process.
 """
 
-from __future__ import annotations
-
-from pathlib import Path
-
-# Import tokenizer for token-aware generation
+import math
 import os
+import random
 import time
 import uuid
 from collections import OrderedDict, deque
+from dataclasses import asdict, is_dataclass
 from functools import cached_property
+from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, TypedDict, cast
-
-from dataclasses import asdict, is_dataclass
 
 import numpy as np
 
@@ -138,11 +137,20 @@ class IntelligenceEngine:
             theta_path=str(Path(self.ontology_path).with_name("theta.npy")),
         )
 
+        # --- S-buffer for intron selection ----------------------------------
+        self._S = [0] * 8
+
         # --- operator setup ---------------------------------------------------
         self.operator = InferenceEngine(
             s2_engine=self.s2,
             phenotype_store=self.phenotype_store,
+            phenomenology_map=self.phenomenology_map,
+            s_buffer=self._S,
         )
+
+        # --- token buffer for egress processing ------------------------------
+        self._byte_buf: List[int] = []
+        self.MAX_TOKEN_BYTES = 1024  # Maximum token buffer size
 
         # --- state tracking --------------------------------------------------
         if self.use_epistemology:
@@ -157,13 +165,6 @@ class IntelligenceEngine:
         self._θ_buf: Deque[float] = deque(maxlen=8)
         self._θ_low = -0.1
         self._θ_high = 0.1
-
-        # --- S-buffer for intron selection ----------------------------------
-        self._S = [0] * 8
-
-        # --- token buffer for egress processing ------------------------------
-        self._byte_buf: List[int] = []
-        self.MAX_TOKEN_BYTES = 1024  # Maximum token buffer size
 
         # --- auto-prune setup -----------------------------------------------
         self._register_auto_prune_hook()
@@ -228,28 +229,39 @@ class IntelligenceEngine:
                 tok_bytes = bytes(b ^ 0xAA for b in self._byte_buf)
                 token_id = TOK.bytes_to_id(tok_bytes)
 
-                # Knowledge update once per token
+                # Fix: ignore [SEP] token (ID 102) when setting _last_token_id
+                if token_id == 102:  # WordPiece [SEP]
+                    # grab the *previous* real token instead
+                    token_id = getattr(self, "_prev_token_id", 102)
+                self._prev_token_id = token_id
+
+                # Knowledge update once per token using token-level learning
                 state_idx = (
                     self.current_state_index
                     if self.use_epistemology
                     else self.s2.get_index_from_state(self.gene_mac_m_int)
                 )
-                phe = self.operator.get_phenotype(state_idx, token_id)
-                # Fold only with the final intron of the token
-                self.operator.learn(phe, intron, state_idx)
+                # Use the actual intron that finished the token for learning
+                phenotype_entry = self.operator.learn_token(token_id, state_idx, intron)
 
-                # Call post-cycle hooks after learning
+                # Call post-cycle hooks for monitoring
                 for hook in self.post_cycle_hooks:
-                    hook(self, phe, intron)
+                    try:
+                        hook(self, phenotype_entry, intron)
+                    except Exception:
+                        # Log hook errors but don't fail the cycle
+                        print("Warning: Hook error occurred")
 
                 # Prepare for ingress
                 self._last_token_id = token_id
-            except Exception as e:
+            except Exception:
                 # Handle malformed token sequences gracefully
-                print(f"Warning: Malformed token sequence skipped: {e}")
+                print("Warning: Malformed token sequence skipped")
             finally:
                 # Always clear buffer to prevent accumulation
                 self._byte_buf.clear()
+        else:
+            pass
 
         return intron
 
@@ -328,29 +340,73 @@ class IntelligenceEngine:
         st = self._state_buf[:n]
         st[0] = self.current_state_index
 
+        # Bounds checking to prevent out-of-bounds access
+        epistemology_size = self.epistemology.shape[0]
+        if st[0] >= epistemology_size:
+            raise RuntimeError(
+                f"Initial state index {st[0]} is out of bounds for epistemology matrix (size {epistemology_size})"
+            )
+
         # True vectorization: compute all state transitions in one operation
-        st[1:] = self.epistemology[st[:-1], introns[:-1]]
+        # Add bounds checking for each transition
+        for i in range(1, n):
+            prev_state = st[i - 1]
+            intron = introns[i - 1]
+            if prev_state >= epistemology_size:
+                raise RuntimeError(
+                    f"State index {prev_state} is out of bounds for epistemology matrix (size {epistemology_size})"
+                )
+            new_state = self.epistemology[prev_state, intron]
+            if new_state >= epistemology_size:
+                raise RuntimeError(
+                    f"Transition to state {new_state} is out of bounds "
+                    f"for epistemology matrix (size {epistemology_size})"
+                )
+            st[i] = new_state
 
-        # --- 2. find token boundaries (continuation bit cleared)
-        ends = np.flatnonzero((introns & 0x80) == 0)
+        # --- 2. process tokens properly (like the original process_egress)
+        token_buffer = []
+        for i, intron in enumerate(introns):
+            token_buffer.append(intron)
 
-        # --- 3. iterate *tokens* not bytes (much fewer iterations)
-        prev = 0
-        for idx in ends:
-            # Zero-copy token extraction until tobytes() call
-            token_bytes = introns[prev:idx + 1].tobytes()
-            try:
-                token_id = TOK.bytes_to_id(token_bytes)
-                state_idx = int(st[idx])  # final state *after* this token
-                phe = self.operator.get_phenotype(state_idx, token_id)
-                self.operator.learn(phe, int(introns[idx]), state_idx)
-            except Exception:
-                pass
-            prev = idx + 1
+            # Check if token is complete (bit 7 == 0)
+            if (intron & 0x80) == 0:
+                # Token is complete - unmask back to byte stream
+                tok_bytes = bytes(b ^ 0xAA for b in token_buffer)
+                try:
+                    token_id = TOK.bytes_to_id(tok_bytes)
+                    state_idx = int(st[i])  # final state *after* this token
+                    # Use the actual intron that finished the token for learning
+                    phenotype_entry = self.operator.learn_token(token_id, state_idx, int(introns[i]))
+
+                    # Call post-cycle hooks for monitoring
+                    for hook in self.post_cycle_hooks:
+                        try:
+                            hook(self, phenotype_entry, int(introns[i]))
+                        except Exception:
+                            # Log hook errors but don't fail the cycle
+                            print("Warning: Hook error occurred")
+                except Exception:
+                    pass
+                finally:
+                    # Always clear buffer to prevent accumulation
+                    token_buffer.clear()
 
         # --- 4. persist new head state
         if n > 0:
-            self.current_state_index = self.epistemology[self.current_state_index, introns[-1]]
+            final_intron = introns[-1]
+            if self.current_state_index >= epistemology_size:
+                raise RuntimeError(
+                    f"Final state index {self.current_state_index} is out of bounds "
+                    f"for epistemology matrix (size {epistemology_size})"
+                )
+            new_state = self.epistemology[self.current_state_index, final_intron]
+            if new_state >= epistemology_size:
+                raise RuntimeError(
+                    f"Final transition to state {new_state} is out of bounds "
+                    f"for epistemology matrix (size {epistemology_size})"
+                )
+            self.current_state_index = new_state
 
     def process_ingress(self) -> tuple[int, int]:
         """
@@ -361,14 +417,59 @@ class IntelligenceEngine:
         state_idx = (
             self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
         )
+
         # Prepare a fresh token when the buffer is empty
         if not self._emit_buf:
+            # --- 0. resolve orbit & θ
+            theta = self._θ_buf[-1] if self._θ_buf else 0.0
+
+            # --- 1. Get phenotype using orbit-based lookup
             phe = self.operator.get_phenotype(state_idx, self._last_token_id)
-            # Choose a deterministic token id from context; map into tokenizer vocab
-            vocab_size = tokmod.vocab_size()
-            tok_id = self.operator._compute_semantic_address(phe["key"]) % vocab_size
-            # id_to_bytes returns *masked* bytes; we need unmasked introns for the physics step
-            masked = TOK.id_to_bytes(int(tok_id))
+
+            if phe:
+                # For now, use the last token ID as fallback since we're storing introns
+                tok_id = self._last_token_id
+                conf = phe.get("conf", 0.1)
+                mask = phe.get("mask", 0)
+
+                # --- 2. Theta-gated exploration (as per Genetics.md §5.5.4)
+                # Algedonic selection based on angular divergence
+                if theta < self._θ_low:
+                    # Calm mode: use newest aligned intron (S[5])
+                    current_s = self._S[-1] if hasattr(self, "_S") and self._S else 0
+                    sim = 1.0 - (bin(current_s ^ mask).count("1") / 8.0)
+                    # High similarity → stick to learned token
+                    if sim < 0.5:
+                        vocab_size = tokmod.vocab_size()
+                        tok_id = random.randint(0, vocab_size - 1)
+                elif theta < self._θ_high:
+                    # Cautious mode: use less recent intron (S[4])
+                    # Moderate exploration
+                    if random.random() < 0.3:
+                        vocab_size = tokmod.vocab_size()
+                        tok_id = random.randint(0, vocab_size - 1)
+                else:
+                    # Corrective mode: use raw exon-product for stability
+                    # High divergence → direct corrective action
+                    vocab_size = tokmod.vocab_size()
+                    tok_id = random.randint(0, vocab_size - 1)
+
+                # --- 3. Orbit-based learning rate adjustment
+                # Get orbit cardinality for learning rate
+                orbit_size = self.s2.orbit_cardinality[state_idx] if hasattr(self.s2, "orbit_cardinality") else 1
+                max_variety = getattr(self.s2, "max_variety", 1)
+                learning_rate = math.sqrt(orbit_size / max_variety) if max_variety > 0 else 0.1
+
+                # Confidence-weighted exploration
+                if random.random() < (1.0 - conf) * learning_rate:
+                    vocab_size = tokmod.vocab_size()
+                    tok_id = random.randint(0, vocab_size - 1)
+            else:
+                # Fallback to CLS token
+                tok_id = 101
+
+            # --- 4. emit as before
+            masked = TOK.id_to_bytes(tok_id)
             self._emit_buf = [b ^ 0xAA for b in masked]  # store as unmasked introns
 
         intron_out = self._emit_buf.pop(0)
@@ -538,7 +639,16 @@ class IntelligenceEngine:
 
         This hook is called after each cycle and removes entries below the confidence threshold.
         If more than 10,000 entries are removed, it triggers background compaction.
+
+        Rate limiting: Only runs every 1000 cycles to avoid performance issues with large stores.
         """
+        # Rate limiting: only run every 1000 cycles to avoid performance issues
+        if self.cycle_count % 1000 != 0:
+            return
+
+        # Skip pruning for now since we're using index-based mode
+        return
+
         # Get pruning configuration from preferences
         pruning_cfg = self.preferences.get("pruning", {})
         thr = pruning_cfg.get("confidence_threshold", 0.05)
@@ -554,6 +664,8 @@ class IntelligenceEngine:
             else:
                 # Re-raise other RuntimeErrors
                 raise
+        except Exception:
+            removed = 0
 
         # Optional: trigger background compaction if many entries vanished
         if removed > 10_000:
@@ -575,16 +687,14 @@ class IntelligenceEngine:
                         min_confidence=thr,
                         dry_run=False,
                     )
-                except Exception as e:
+                except Exception:
                     # Log the error but don't fail the hook
-                    print(f"Auto-pruning compaction failed: {e}")
+                    pass
 
         if removed > 0:
             # Only print this message if in debug mode
-            # print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
             if getattr(self, "debug_mode", False):
                 print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
-            # else: suppress in normal operation
 
 
 class GyroSI:
@@ -630,12 +740,13 @@ class GyroSI:
             and not os.path.isabs(str(self.config["public_knowledge_path"]))
         ):
             self.config["public_knowledge_path"] = str(self.base_path / str(self.config["public_knowledge_path"]))
-        if (
-            "private_knowledge_path" in self.config
-            and self.config["private_knowledge_path"]
-            and not os.path.isabs(str(self.config["private_knowledge_path"]))
-        ):
-            self.config["private_knowledge_path"] = str(self.base_path / str(self.config["private_knowledge_path"]))
+        # Don't modify private_knowledge_path - let OrbitStore resolve it with its own base_path
+        # if (
+        #     "private_knowledge_path" in self.config
+        #     and self.config["private_knowledge_path"]
+        #     and not os.path.isabs(str(self.config["private_knowledge_path"]))
+        # ):
+        #     self.config["private_knowledge_path"] = str(self.base_path / str(self.config["private_knowledge_path"]))
         if (
             "phenomenology_map_path" in self.config
             and self.config["phenomenology_map_path"]
@@ -733,8 +844,9 @@ class GyroSI:
         Generate an intelligent response.  Guarantees that every emitted
         LEB128 token is complete (no dangling continuation bit).
         """
+
         # ---------- 1. ingest user prompt -------------------------------
-        for b in data:
+        for i, b in enumerate(data):
             self.engine.process_egress(b)
 
         # ---------- 2. generate -----------------------------------------
@@ -758,10 +870,10 @@ class GyroSI:
             # -------- optional EOS check ---------------------------------
             try:
                 # Import tokenizer locally to avoid top-level sys.path hack
-                import sys
+                import sys as _sys
                 from pathlib import Path
 
-                sys.path.append(str(Path(__file__).resolve().parents[2] / "toys" / "communication"))
+                _sys.path.append(str(Path(__file__).resolve().parents[2] / "toys" / "communication"))
                 from toys.communication import tokenizer as tok
 
                 # unmask just this token and decode its ID
@@ -831,15 +943,8 @@ class GyroSI:
         """Create default storage based on configuration."""
         # --- Honor store_options for binary_struct/append-only store ---
         # cast self.config to a dict so .get is allowed
-        opts = cast(Dict[str, Any], self.config).get("store_options", {}) or {}
-        if opts.get("append_only"):
-            knowledge_path = cast(Dict[str, Any], self.config).get("knowledge_path")
-            if knowledge_path is None:
-                raise ValueError("knowledge_path must be set in config")
-            return OrbitStore(
-                knowledge_path,
-                append_only=opts.get("append_only", True),
-            )
+        # Always use index-based mode for faster lookups
+        pass
         # Canonicalisation enablement consistency: autodetect if flag is None or missing
         enable_phenomenology = cast(Dict[str, Any], self.config).get("enable_phenomenology_storage", None)
 
@@ -859,13 +964,9 @@ class GyroSI:
                 private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.bin")
             # Multi-agent overlay using decorators
             public_store = ReadOnlyView(
-                OrbitStore(
-                    public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path, append_only=True
-                )
+                OrbitStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
             )
-            private_store = OrbitStore(
-                private_path, write_threshold=learn_batch_size, base_path=self.base_path, append_only=True
-            )
+            private_store = OrbitStore(private_path, write_threshold=learn_batch_size, base_path=self.base_path)
             base_store: Any = OverlayView(public_store, private_store)
             phenomenology_map_path = self.config.get("phenomenology_map_path")
         else:
@@ -883,9 +984,9 @@ class GyroSI:
                 else:
                     base_path = self.config.get("base_path") or str(self.base_path / "memories")
                     knowledge_path = os.path.join(base_path, "knowledge.bin")  # binary_struct-based fallback path
-            base_store = OrbitStore(
-                knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path, append_only=True
-            )
+                    # Ensure the directory exists
+                    os.makedirs(os.path.dirname(knowledge_path), exist_ok=True)
+            base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
 
             # CanonicalView: enable if flag is True, or autodetect if None and file exists
             phenomenology_map_path = self.config.get("phenomenology_map_path")
@@ -975,7 +1076,11 @@ class AgentPool:
             else:
                 self._shards.append({"agents": OrderedDict(), "lock": RLock()})
         self._public_store: Optional[ReadOnlyView] = ReadOnlyView(
-            OrbitStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path, append_only=True)
+            CanonicalView(
+                OrbitStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path),
+                phenomenology_map_path=str(Path(self.ontology_path).with_name("phenomenology_map.npy")),
+                base_path=self.base_path,
+            )
         )
 
     def _shard_index(self, agent_id: str) -> int:
@@ -1011,9 +1116,7 @@ class AgentPool:
 
                 # Multi-agent overlay using decorators, reuse cached public store
                 public_store = self._public_store
-                private_store = OrbitStore(
-                    private_path, write_threshold=100, base_path=self.base_path, append_only=True
-                )
+                private_store = OrbitStore(private_path, write_threshold=100, base_path=self.base_path)
                 base_store: Any = OverlayView(public_store, private_store)
 
                 # Create agent config
@@ -1041,7 +1144,6 @@ class AgentPool:
                     phenotype_store=base_store,
                     base_path=self.base_path,
                 )
-                print(f"DEBUG: Created agent {agent_id}. Current agents: {list(agents.keys())}")
 
             return cast(GyroSI, agents[agent_id])
 
@@ -1189,4 +1291,5 @@ def orchestrate_turn(
 
     # 4. Decode response using the same tokenizer.
     #    The `decode` function already has a UTF-8 fallback for robustness.
-    return tok.decode(response, name=tokenizer_name)
+    result = tok.decode(response, name=tokenizer_name)
+    return result

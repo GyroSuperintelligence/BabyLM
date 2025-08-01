@@ -271,7 +271,7 @@ class TestHookSystem:
     def test_hooks_called_with_proper_context(
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
-        """Test hooks receive proper token-aware context."""
+        """Test hooks receive proper token-aware context during learning."""
         agent = isolated_agent_factory(tmp_path)
         captured_calls: List[Dict[str, Any]] = []
 
@@ -282,12 +282,12 @@ class TestHookSystem:
 
         agent.add_monitoring_hook(test_hook)
 
-        # Process tokenized input that should trigger hooks
+        # Process tokenized input that should trigger hooks during learning
         test_input = gyrotok.encode("hook test", name=TOKENIZER_NAME)
         agent.respond(test_input, max_new_tokens=3)
 
-        # Should have captured hook calls
-        assert len(captured_calls) > 0, "Hooks should be called during response generation"
+        # Should have captured hook calls during input processing (learning phase)
+        assert len(captured_calls) > 0, "Hooks should be called during input processing (learning phase)"
 
         for call_data in captured_calls:
             assert "phenotype" in call_data, "Hook should receive phenotype"

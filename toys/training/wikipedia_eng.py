@@ -135,6 +135,7 @@ def build_agent(private_knowledge_path: Path) -> GyroSI:
         PreferencesConfig,
         {
             "write_batch_size": 5000,  # Reduce disk flushes
+            "enable_phenomenology_storage": True,  # Keep keys canonical - same coordinate system as runtime
             **preferences.get("pruning", {}),
         },
     )
@@ -149,7 +150,7 @@ def build_agent(private_knowledge_path: Path) -> GyroSI:
         "preferences": preferences_config,
     }
 
-    return GyroSI(config, agent_id="wiki_trainer")
+    return GyroSI(config, agent_id="wiki_trainer", base_path=PROJECT_ROOT)
 
 
 def format_size(size_bytes: int) -> str:
@@ -586,6 +587,8 @@ Examples:
             return 1
 
         private_knowledge_path = tape_path.with_suffix(".bin")
+        # Ensure the directory exists
+        private_knowledge_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"🧠 Creating agent with knowledge store: {private_knowledge_path}")
         replay_agent = build_agent(private_knowledge_path)
 
@@ -638,6 +641,8 @@ Examples:
     agent: Optional[GyroSI] = None
     if args.learn:
         private_knowledge_path = Path(args.output).with_suffix(".bin")
+        # Ensure the directory exists
+        private_knowledge_path.parent.mkdir(parents=True, exist_ok=True)
         knowledge_msg = f"🧠 Creating private agent with knowledge store: " f"{private_knowledge_path}"
         print(knowledge_msg)
         agent = build_agent(private_knowledge_path)

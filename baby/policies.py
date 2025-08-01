@@ -15,7 +15,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable
+from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable, Union
 import sys
 import numpy as np
 
@@ -31,7 +31,7 @@ _phenomenology_map_lock = threading.Lock()
 _Sentinel = object()
 _append_only_cache_global: dict[tuple[int, int, str], Optional[Any]] = {}
 _append_only_cache_order: deque[tuple[int, int, str]] = deque()
-_append_only_cache_maxsize = 8192
+_append_only_cache_maxsize = 65536
 
 # Confidence normalization constants
 _CONFIDENCE_PRECISION = 1e-4  # Tolerance for float16 precision differences
@@ -180,7 +180,7 @@ def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJEC
 
 class OrbitStore:
     """
-    If append_only=False, creates a .idx sidecar for fast key lookup. Most agents/tests use append_only=True (no .idx).
+    Always uses index-based mode for O(1) lookups and Bloom filter for fast negative checks.
 
     Performance optimizations for append-only mode:
     - Bloom filter for fast "definitely absent" checks before disk scan
@@ -199,15 +199,13 @@ class OrbitStore:
         store_path: str,
         *,
         write_threshold: int = 100,
-        use_mmap: bool = False,
-        append_only: bool = False,
+        use_mmap: bool = True,  # Always use mmap for performance
         base_path: Path = PROJECT_ROOT,
     ):
         resolved_store_path = _abs(store_path, base_path)
         if not resolved_store_path:
             raise ValueError("store_path must not be None")
         self.store_path = resolved_store_path
-        self.append_only = append_only
         self.write_threshold = write_threshold
         self.use_mmap = use_mmap
         self.lock = threading.RLock()
@@ -223,39 +221,33 @@ class OrbitStore:
         self._last_remap = 0.0  # Timestamp of last remap
         self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
 
-        # Bloom filter for append-only mode
+        # Always use Bloom filter and index
         self._bloom_filter: Optional[BloomFilter] = None
-        self._bloom_loaded = False  # <── add
-        if self.append_only:
-            # 1) try fast-path: load pre-built side-car
-            if self._try_load_bloom():
-                self._bloom_loaded = True
-            else:
-                # 2) fresh build, capacity estimate as before
-                estimated_entries = 100000  # Default estimate, will be adjusted
-                if os.path.exists(resolved_store_path):
-                    file_size = os.path.getsize(resolved_store_path)
-                    # Rough estimate: assume average entry size of 200 bytes
-                    estimated_entries = max(100000, file_size // 200)
-                self._bloom_filter = BloomFilter(estimated_entries, error_rate=0.01)
+        self._bloom_loaded = False
 
-        if self.append_only:
-            # self.index is not used in append_only mode
-            self.log_path = self.store_path  # .bin file
-            self.index_path = None
+        # Try to load existing Bloom filter
+        if self._try_load_bloom():
+            self._bloom_loaded = True
         else:
-            self.index_path = resolved_store_path + ".idx"
-            self.log_path = resolved_store_path + ".log"
+            # Create new Bloom filter
+            estimated_entries = 1_000_000  # Default estimate
+            if os.path.exists(resolved_store_path):
+                file_size = os.path.getsize(resolved_store_path)
+                estimated_entries = max(1_000_000, file_size // _STRUCT_SIZE)
+            self._bloom_filter = BloomFilter(estimated_entries, error_rate=0.001)
+
+        # Always use index-based mode
+        self.index_path = resolved_store_path + ".idx"
+        self.log_path = self.store_path  # .bin file
+
         self._load_index()
+
+        # Ensure the directory exists and create the file if it doesn't exist
+        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
         self.log_file = open(self.log_path, "ab")
 
-        # Initialize mmap for both modes if enabled
+        # Initialize mmap
         if self.use_mmap and os.path.exists(self.log_path):
-            self._open_mmap()
-
-        # Enable mmap by default for append-only stores for better performance
-        if self.append_only and not self.use_mmap and os.path.exists(self.log_path):
-            self.use_mmap = True
             self._open_mmap()
 
         # Register graceful shutdown handlers
@@ -266,8 +258,6 @@ class OrbitStore:
         return self.store_path + ".bloom"
 
     def _try_load_bloom(self) -> bool:
-        if not self.append_only:
-            return False
         p = self._bloom_sidecar_path()
         if not os.path.exists(p):
             return False
@@ -276,7 +266,7 @@ class OrbitStore:
         return True
 
     def _save_bloom(self) -> None:
-        if self.append_only and self._bloom_filter:
+        if self._bloom_filter:
             with open(self._bloom_sidecar_path(), "wb") as f:
                 f.write(self._bloom_filter.to_bytes())
 
@@ -295,24 +285,24 @@ class OrbitStore:
         with self.lock:
             if context_key in self.pending_writes:
                 return self.pending_writes[context_key]
-            if self.append_only:
-                # Check bloom filter first for fast "definitely absent" check
-                if self._bloom_filter and not self._bloom_filter.might_contain(context_key):
-                    return None
 
-                # Use cached get for append-only mode
-                return self._get_append_only_cached(context_key)
+            # Check bloom filter first for fast "definitely absent" check
+            if self._bloom_filter and not self._bloom_filter.might_contain(context_key):
+                return None
+
+            # Use index for O(1) lookup
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
-                    entry_buf = self._mmap[offset:offset + size]
+                    entry_buf = self._mmap[offset : offset + size]
                 else:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
                         entry_buf = f.read(size)
                 entry, _ = _unpack_phenotype(memoryview(entry_buf))
                 return entry
-        return None
+
+            return None
 
     def _get_append_only_cached(self, context_key: Tuple[int, int]) -> Optional[Any]:
         return _get_append_only_cached_static(self.store_path, context_key, self._get_append_only_uncached)
@@ -329,43 +319,72 @@ class OrbitStore:
 
     def _get_append_only_uncached(self, context_key: Tuple[int, int]) -> Optional[Any]:
         """
-        Cached version of append-only get() for token-level training performance.
+        Efficient lookup for append-only stores using Bloom filter + file seeking.
 
-        This cache is automatically invalidated when the store is committed,
-        ensuring consistency with new writes.
+        The Bloom filter provides fast "definitely absent" checks. For keys that
+        might exist, we use file seeking to avoid loading the entire file.
         """
-        # Use mmap if available for faster scanning
-        if self.use_mmap and self._mmap:
-            buf = memoryview(self._mmap)
-        else:
-            with open(self.log_path, "rb") as f:
-                buf = memoryview(f.read())
+        state_idx, token_id = context_key
+        needle = struct.pack("<II", state_idx, token_id)  # 8-byte prefix
 
-        # Scan backwards for the most recent match
-        offsets = []
-        offset = 0
-        try:
-            while offset < len(buf):
-                try:
-                    _, new_offset = _unpack_phenotype(buf, offset)
-                    offsets.append(offset)
-                    offset = new_offset
-                except struct.error:
-                    break
-        except Exception as e:
-            logger.warning("Error during get() scan: %s", e)
-        # Now scan backwards
-        found = []
-        for offset in reversed(offsets):
-            try:
-                entry, _ = _unpack_phenotype(buf, offset)
-                key = tuple(entry["key"])
-                if key == context_key:
-                    found.append(entry)
-            except Exception:
-                continue
-        if found:
-            return found[0]
+        # Use file seeking for large files to avoid memory issues
+        if self.use_mmap and self._mmap:
+            buf: Union[mmap.mmap, bytes] = self._mmap
+        else:
+            # For large files, use file seeking instead of loading everything
+            file_size = os.path.getsize(self.log_path)
+            if file_size > 100 * 1024 * 1024:  # 100MB threshold
+                return self._get_with_file_seeking(context_key, needle)
+            else:
+                # For smaller files, load into memory
+                with open(self.log_path, "rb") as f:
+                    buf = f.read()
+
+        # Search from the end of the file towards the start (most recent entries first)
+        pos = len(buf)
+        while True:
+            pos = buf.rfind(needle, 0, pos)
+            if pos == -1:
+                return None  # not present
+            if pos % _STRUCT_SIZE == 0:  # 12-byte boundary
+                entry, _ = _unpack_phenotype(memoryview(buf), pos)
+                return entry
+            # false hit on the 8-byte motif – keep looking
+            pos -= 1
+
+    def _get_with_file_seeking(self, context_key: Tuple[int, int], needle: bytes) -> Optional[Any]:
+        """
+        Use file seeking for large files to avoid memory issues.
+        """
+        with open(self.log_path, "rb") as f:
+            file_size = os.path.getsize(self.log_path)
+            # Start from the end and work backwards in chunks
+            chunk_size = 1024 * 1024  # 1MB chunks
+            pos = file_size
+
+            while pos > 0:
+                start_pos = max(0, pos - chunk_size)
+                f.seek(start_pos)
+                chunk = f.read(pos - start_pos)
+
+                # Search in this chunk
+                chunk_pos = len(chunk)
+                while True:
+                    chunk_pos = chunk.rfind(needle, 0, chunk_pos)
+                    if chunk_pos == -1:
+                        break
+                    # Check if this is at a valid boundary
+                    global_pos = start_pos + chunk_pos
+                    if global_pos % _STRUCT_SIZE == 0:
+                        # Read the full entry
+                        f.seek(global_pos)
+                        entry_buf = f.read(_STRUCT_SIZE)
+                        entry, _ = _unpack_phenotype(memoryview(entry_buf))
+                        return entry
+                    chunk_pos -= 1
+
+                pos = start_pos
+
         return None
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
@@ -378,8 +397,7 @@ class OrbitStore:
                 entry["key"] = context_key
             self.pending_writes[context_key] = dict(entry)  # store a new dict
             # Fine‑grain invalidation – just drop the key we're overwriting
-            if self.append_only:
-                self._cache_pop(context_key)
+            self._cache_pop(context_key)
             if self.pending_writes is not None and len(self.pending_writes) >= self.write_threshold:
                 pending_fsync = self._flush()
         if pending_fsync:
@@ -389,7 +407,7 @@ class OrbitStore:
     def commit(self) -> None:
         with self.lock:
             # Capture pending writes before flush for bloom filter update
-            pending_keys = list(self.pending_writes.keys()) if self.append_only else []
+            pending_keys = list(self.pending_writes.keys())
 
             self._flush()
             self._write_index()
@@ -405,14 +423,13 @@ class OrbitStore:
                     self._last_remap = time.time()
 
             # Update bloom filter & **fine‑grain cache invalidation**
-            if self.append_only:
-                if self._bloom_filter:
-                    for context_key in pending_keys:
-                        self._bloom_filter.add(context_key)
+            if self._bloom_filter:
+                for context_key in pending_keys:
+                    self._bloom_filter.add(context_key)
 
-                # touch only affected items instead of nuking whole cache
-                for k in pending_keys:
-                    self._cache_pop(k)
+            # touch only affected items instead of nuking whole cache
+            for k in pending_keys:
+                self._cache_pop(k)
         # No blocking wait on fsync here; state will be updated asynchronously
 
     def _flush(self) -> Optional[concurrent.futures.Future[Any]]:
@@ -420,15 +437,11 @@ class OrbitStore:
         if not self.log_file or not self.pending_writes:
             return None
         for context_key, entry in self.pending_writes.items():
-            if self.append_only:
-                payload = _pack_phenotype(entry)
-                self.log_file.write(payload)
-            else:
-                payload = _pack_phenotype(entry)
-                offset = self.log_file.tell()
-                size = len(payload)
-                self.log_file.write(payload)
-                self.index[context_key] = (offset, size)
+            payload = _pack_phenotype(entry)
+            offset = self.log_file.tell()
+            size = len(payload)
+            self.log_file.write(payload)
+            self.index[context_key] = (offset, size)
         self.log_file.flush()
         now = time.time()
         if now - self._last_fsync > self._fsync_interval:
@@ -447,7 +460,7 @@ class OrbitStore:
             pending_fsync = self._pending_fsync
         self.pending_writes.clear()
         self._flush_count += 1
-        if self._flush_count >= 10 and not self.append_only:
+        if self._flush_count >= 10:
             self._write_index()
             self._flush_count = 0
         return pending_fsync
@@ -457,8 +470,6 @@ class OrbitStore:
             self.pending_writes[context_key] = entry.copy()
 
     def _write_index(self) -> None:
-        if self.append_only:
-            return
         if self.index_path is None:
             return
         # Convert all keys/values to native Python int before serializing
@@ -472,7 +483,7 @@ class OrbitStore:
                 os.fsync(f.fileno())
 
     def _read_index(self) -> None:
-        if self.append_only or not self.index_path or not os.path.exists(self.index_path):
+        if not self.index_path or not os.path.exists(self.index_path):
             return
         # Handle empty file gracefully
         if os.path.getsize(self.index_path) == 0:
@@ -494,47 +505,37 @@ class OrbitStore:
                     raise TypeError(f"Invalid key format in index: {k}") from e
 
     def _load_index(self) -> None:
-        if self.append_only:
-            # Fast-path: already loaded from .bloom — nothing to do
-            if self._bloom_loaded:
-                return
-
-            # Slow path: build filter from scratch
-            if self._bloom_filter and os.path.exists(self.log_path):
-                with open(self.log_path, "rb") as f:
-                    buf = memoryview(f.read())
-                    offset = 0
-                    try:
-                        while offset < len(buf):
-                            try:
-                                entry, new_offset = _unpack_phenotype(buf, offset)
-                                if "key" in entry:
-                                    context_key = tuple(entry["key"])
-                                    self._bloom_filter.add(context_key)
-                                offset = new_offset
-                            except struct.error:
-                                # Corrupt tail record - stop gracefully
-                                break
-                    except Exception as e:
-                        logger.warning("Error during _load_index scan: %s", e)
-            return
+        # Load index first
         self._read_index()
+
+        # If we have a valid index, don't scan the file
+        if self.index:
+            return
+
+        # Only scan the file if we don't have an index
         if not os.path.exists(self.log_path):
             return
+
+        # Build index from file
         with open(self.log_path, "rb") as f:
             buf = memoryview(f.read())
             offset = 0
             while offset < len(buf):
-                entry, new_offset = _unpack_phenotype(buf, offset)
-                size = new_offset - offset
-                if "key" in entry:
-                    context_key = tuple(entry["key"])
-                    self.index[context_key] = (offset, size)
-                offset = new_offset
+                try:
+                    entry, new_offset = _unpack_phenotype(buf, offset)
+                    size = new_offset - offset
+                    if "key" in entry:
+                        context_key = tuple(entry["key"])
+                        self.index[context_key] = (offset, size)
+                        # Also add to Bloom filter
+                        if self._bloom_filter:
+                            self._bloom_filter.add(context_key)
+                    offset = new_offset
+                except struct.error:
+                    # Corrupt tail record - stop gracefully
+                    break
 
     def delete(self, context_key: Tuple[int, int]) -> None:
-        if self.append_only:
-            raise RuntimeError("append_only store cannot delete; run prune-and-compact instead")
         with self.lock:
             self.index.pop(context_key, None)
 
@@ -605,13 +606,13 @@ class OrbitStore:
             if self.pending_writes:
                 logger.debug("Explicit flush: writing %d pending entries", len(self.pending_writes))
                 # Capture pending keys before flush for bloom filter update
-                pending_keys = list(self.pending_writes.keys()) if self.append_only else []
+                pending_keys = list(self.pending_writes.keys())
 
                 self._flush()
                 # No blocking wait on fsync here; state will be updated asynchronously
 
                 # Update bloom filter for append-only mode
-                if self.append_only and self._bloom_filter:
+                if self._bloom_filter:
                     for context_key in pending_keys:
                         self._bloom_filter.add(context_key)
 
@@ -620,17 +621,16 @@ class OrbitStore:
         entries: Dict[Tuple[int, int], Any] = {}
         if not os.path.exists(self.log_path):
             return entries
-        if self.append_only:
-            # Read all entries from binary log
-            with open(self.log_path, "rb") as f:
-                buf = memoryview(f.read())
-                offset = 0
-                while offset < len(buf):
-                    entry, new_offset = _unpack_phenotype(buf, offset)
-                    key = tuple(entry["key"])
-                    entries[key] = entry
-                    offset = new_offset
-            return entries
+        # Read all entries from binary log
+        with open(self.log_path, "rb") as f:
+            buf = memoryview(f.read())
+            offset = 0
+            while offset < len(buf):
+                entry, new_offset = _unpack_phenotype(buf, offset)
+                key = tuple(entry["key"])
+                entries[key] = entry
+                offset = new_offset
+        return entries
         with open(self.log_path, "rb") as f:
             for context_key, (offset, size) in self.index.items():
                 f.seek(offset)
@@ -645,8 +645,7 @@ class OrbitStore:
             if self.log_file:
                 self.log_file.close()
             open(self.log_path, "wb").close()
-            if not self.append_only:
-                self.index.clear()
+            self.index.clear()
             self.log_file = open(self.log_path, "ab")
             self.pending_writes.clear()
             for k, v in data.items():
@@ -655,40 +654,39 @@ class OrbitStore:
 
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
         yielded = set()
-        if self.append_only:
-            # Use mmap if available for faster scanning
-            if self.use_mmap and self._mmap:
-                buf = memoryview(self._mmap)
-            else:
-                with open(self.log_path, "rb") as f:
-                    buf = memoryview(f.read())
+        # Use mmap if available for faster scanning
+        if self.use_mmap and self._mmap:
+            buf = memoryview(self._mmap)
+        else:
+            with open(self.log_path, "rb") as f:
+                buf = memoryview(f.read())
 
-            offset = 0
-            latest_entries = {}  # Track latest entry for each key
+        offset = 0
+        latest_entries = {}  # Track latest entry for each key
 
-            try:
-                while offset < len(buf):
-                    try:
-                        entry, new_offset = _unpack_phenotype(buf, offset)
-                        key = tuple(entry["key"])
-                        latest_entries[key] = entry  # Keep the latest version
-                        offset = new_offset
-                    except struct.error:
-                        # Corrupt tail record - stop gracefully
-                        break
+        try:
+            while offset < len(buf):
+                try:
+                    entry, new_offset = _unpack_phenotype(buf, offset)
+                    key = tuple(entry["key"])
+                    latest_entries[key] = entry  # Keep the latest version
+                    offset = new_offset
+                except struct.error:
+                    # Corrupt tail record - stop gracefully
+                    break
 
-                # Yield only the latest version of each entry
-                for key, entry in latest_entries.items():
+            # Yield only the latest version of each entry
+            for key, entry in latest_entries.items():
+                yield key, entry
+                yielded.add(key)
+        except Exception as e:
+            logger.warning("Error during iter_entries scan: %s", e)
+            # Yield what we have so far
+            for key, entry in latest_entries.items():
+                if key not in yielded:
                     yield key, entry
                     yielded.add(key)
-            except Exception as e:
-                logger.warning("Error during iter_entries scan: %s", e)
-                # Yield what we have so far
-                for key, entry in latest_entries.items():
-                    if key not in yielded:
-                        yield key, entry
-                        yielded.add(key)
-            return
+        return
         with self.lock:
             for k, v in self.pending_writes.items():
                 yield k, v
@@ -957,7 +955,7 @@ def merge_phenotype_maps(
     for path in resolved_sources:
         try:
             if path.endswith(".bin"):
-                store = OrbitStore(path, append_only=True)
+                store = OrbitStore(path)
             else:
                 store = OrbitStore(path)
             source_data = store.data  # dict
@@ -1008,7 +1006,7 @@ def merge_phenotype_maps(
     # Save merged result
     os.makedirs(os.path.dirname(resolved_dest) or ".", exist_ok=True)
 
-    dest_store = OrbitStore(resolved_dest, append_only=resolved_dest.endswith(".bin"))
+    dest_store = OrbitStore(resolved_dest)
     dest_store.set_data_dict(merged_data)
     dest_store.commit()
     dest_store.close()
@@ -1060,7 +1058,7 @@ def apply_global_confidence_decay(
             "elapsed_seconds": 0,
         }
 
-    store = OrbitStore(resolved_store_path, append_only=True)
+    store = OrbitStore(resolved_store_path)
     modified_count = 0
     processed_count = 0
 
@@ -1124,7 +1122,7 @@ def export_knowledge_statistics(store_path: str, output_path: str, base_path: Pa
             "elapsed_seconds": 0,
         }
 
-    store = OrbitStore(resolved_store_path, append_only=True)
+    store = OrbitStore(resolved_store_path)
     entries = list(store.data.values())
     store.close()
 
@@ -1264,7 +1262,7 @@ def prune_and_compact_store(
     resolved_archive_summary_path = _abs(archive_summary_path, base_path) if archive_summary_path is not None else None
 
     # Load source store
-    source_store = OrbitStore(resolved_store_path, append_only=True)
+    source_store = OrbitStore(resolved_store_path)
     total_entries = 0
     pruned_entries = 0
 
@@ -1326,7 +1324,7 @@ def prune_and_compact_store(
     else:
         # Write to new path
         source_store.close()
-        dest_store = OrbitStore(destination, append_only=True)
+        dest_store = OrbitStore(destination)
         dest_store.set_data_dict(keep)
         dest_store.commit()
         dest_store.close()
