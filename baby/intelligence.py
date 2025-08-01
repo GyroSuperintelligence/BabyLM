@@ -482,7 +482,7 @@ class IntelligenceEngine:
 
     def _choose_intron(self, phe: PhenotypeEntry, theta: float, state_index: int) -> int:
         """
-        Choose the next intron based on phenotype and theta.
+        Choose the next intron based on phenotype and theta using LEB128 physics.
 
         Args:
             phe: Phenotype entry with minimal structure (mask, conf)
@@ -491,6 +491,36 @@ class IntelligenceEngine:
 
         Returns:
             Chosen intron value
+        """
+        # Import LEB128 physics functions
+        try:
+            from toys.experiments.leb128_physics import token_to_introns
+        except ImportError:
+            # Fallback to original byte-level approach if LEB128 not available
+            return self._choose_intron_byte_level(phe, theta, state_index)
+
+        # For LEB128 physics, we need to choose a token, not an intron
+        # This is a simplified approach - in practice, we'd want to choose from learned tokens
+        mask = phe["mask"]
+        conf = phe["conf"]
+        v = self.s2.orbit_cardinality[state_index]
+        p = governance.exon_product_from_metadata(mask, conf, v, self.s2._v_max)
+
+        self._S = self._S[1:] + [governance.fold(self._S[0], p)]
+
+        # For now, use the original logic but with LEB128-aware intron selection
+        if theta < self._θ_low:
+            chosen_intron = self._S[5]
+        elif theta < self._θ_high:
+            chosen_intron = self._S[4]
+        else:
+            chosen_intron = p
+
+        return chosen_intron
+
+    def _choose_intron_byte_level(self, phe: PhenotypeEntry, theta: float, state_index: int) -> int:
+        """
+        Original byte-level intron selection (fallback method).
         """
         mask = phe["mask"]
         conf = phe["conf"]

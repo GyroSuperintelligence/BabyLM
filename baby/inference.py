@@ -169,7 +169,7 @@ class InferenceEngine:
 
     def learn_token(self, token_id: int, state_index: int, last_intron: int) -> PhenotypeEntry:
         """
-        Token-level learning with proper intron-based mask evolution.
+        Token-level learning using LEB128 physics.
 
         Args:
             token_id: Token ID from the tokenizer
@@ -178,6 +178,64 @@ class InferenceEngine:
 
         Returns:
             Updated phenotype entry
+        """
+        # Import LEB128 physics functions
+        try:
+            from toys.experiments.leb128_physics import token_to_introns
+        except ImportError:
+            # Fallback to original byte-level approach if LEB128 not available
+            return self._learn_token_byte_level(token_id, state_index, last_intron)
+
+        # Validate state_index is within bounds
+        if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
+            raise IndexError(f"state_index {state_index} out of bounds [0, {len(self.s2.orbit_cardinality)})")
+
+        # Apply LEB128 physics to get final state after token's intron sequence
+        introns = token_to_introns(token_id)
+        current_state = state_index
+        
+        # Walk through the token's intron sequence
+        for intron in introns:
+            current_state = self.s2.epistemology[current_state, intron]
+        
+        # Use the final state for phenotype storage
+        orbit_id = int(self._orbit_of[current_state]) if self._orbit_of is not None else current_state
+        storage_key = (orbit_id, token_id)
+        context_key = (current_state, token_id)  # Use final state
+
+        entry = self.store.get(storage_key)
+
+        if entry is None:
+            entry = self._create_default_phenotype(context_key)
+            self.store.put(storage_key, entry)
+        else:
+            # Copy to avoid mutating shared dict references
+            entry = dict(entry)
+
+        # Let the phenotype evolve with mask folding using the last intron
+        old_mask = entry.get("mask", 0) & 0xFF
+        new_mask = governance.fold(old_mask, last_intron)  # Use proper Monodromic Fold
+        entry["mask"] = new_mask
+
+        # Calculate confidence increment based on orbit cardinality of final state
+        v = self.s2.orbit_cardinality[current_state]
+        alpha = (1 / 6) * math.sqrt(v / self._v_max)
+        current_confidence = entry.get("conf", 0.1)
+        new_confidence = min(1.0, current_confidence + (1 - current_confidence) * alpha)
+        entry["conf"] = new_confidence
+
+        # Keep S-buffer in sync with learning (if available)
+        if self.s_buffer is not None:
+            self.s_buffer[0] = new_mask  # keep S-buffer in sync with learning
+
+        # Save the updated entry using storage key
+        self.store.put(storage_key, entry)
+
+        return cast(PhenotypeEntry, entry)
+
+    def _learn_token_byte_level(self, token_id: int, state_index: int, last_intron: int) -> PhenotypeEntry:
+        """
+        Original byte-level learning (fallback method).
         """
         # Validate state_index is within bounds
         if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
