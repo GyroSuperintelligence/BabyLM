@@ -16,6 +16,31 @@ This release addresses critical correctness issues, focusing on store iteration,
   * No more full file scanning - uses O(1) index lookups
   * Includes defensive copies to prevent mutation issues
 
+* **OrbitStore.index_by_state - Fixed Synchronization Issues**
+  * Fixed `index_by_state` not being updated during writes and deletes
+  * Now properly maintains `index_by_state` in `_flush()` and `delete()` methods
+  * Prevents stale token IDs and ensures `iter_keys_for_state()` sees new tokens immediately
+  * O(k) candidate lookup performance maintained with complete data
+
+* **OrbitStore.iter_keys_for_state - Added Pending Writes**
+  * Now includes pending writes first (most recent), then committed keys
+  * Ensures generation and learning see consistent data
+  * Prevents missing recent tokens during active writing
+  * Real-time updates without waiting for flush operations
+
+* **decode_text() - Fixed Unsafe 0x00 Trimming**
+  * Replaced unsafe 0x00 byte trimming with reliable [SEP] token delimiter
+  * Now decodes to token IDs first, then trims at SEP_ID (102)
+  * Prevents silent truncation of valid content containing 0x00 bytes
+  * Uses proper end-of-sequence marker instead of arbitrary byte values
+
+* **IntelligenceEngine - Unified STT Path**
+  * Removed all `use_epistemology` branches for single STT source of truth
+  * Eliminated `self.epistemology = self.s2.ep` circular reference
+  * Restored proper epistemology loading from file
+  * All state access now uses `self.current_state_index` consistently
+  * Simplified sync methods and removed vestigial code
+
 * **OrbitStore.data Property - Simplified to Reuse iter_entries()**
   * Removed duplicate code and dead code paths
   * Now consistently uses the optimized iter_entries() method
@@ -588,27 +613,27 @@ An auto-pruning functionality has been fully implemented with the following comp
     1. Read `confidence_threshold` from preferences.
     2. Call `InferenceEngine.prune_low_confidence_entries(threshold)`.
     3. Gracefully handle append‑only and view‑layer stores (catch and ignore non‑deletable errors).
-    4. If > 10 000 entries were “removed,” invoke `prune_and_compact_store()` in‑place to do a full compaction.
+    4. If > 10 000 entries were "removed," invoke `prune_and_compact_store()` in‑place to do a full compaction.
 * **`AgentConfig.preferences`**
 
   * Extended `AgentConfig` to accept a `preferences` sub‑dict and pass it through `GyroSI → IntelligenceEngine`.
 * **`CanonicalView.commit()`**
 
-  * Added a `commit()` method to `CanonicalView` so the auto‑pruner’s initial `commit()` call always succeeds on view‑wrapped stores.
+  * Added a `commit()` method to `CanonicalView` so the auto‑pruner's initial `commit()` call always succeeds on view‑wrapped stores.
 
 ## Changed
 
 * **`InferenceEngine.prune_low_confidence_entries()`**
 
   * Now always calls `store.commit()` first to flush pending writes.
-  * Wraps `store.delete(key)` in `try/except NotImplementedError/RuntimeError` so overlay and read‑only views don’t crash.
+  * Wraps `store.delete(key)` in `try/except NotImplementedError/RuntimeError` so overlay and read‑only views don't crash.
   * Removed fallback `del store.data[key]` for non‑append‑only stores (views use their own `.delete()`).
 * **`GyroSI` constructor**
 
   * Now reads `config["preferences"]` and passes it into `IntelligenceEngine`.
 * **`AgentPool`**
 
-  * Propagates its `preferences` into each newly created agent’s `AgentConfig`, ensuring hooks get wired automatically.
+  * Propagates its `preferences` into each newly created agent's `AgentConfig`, ensuring hooks get wired automatically.
 
 ## Tests
 
@@ -618,7 +643,7 @@ An auto-pruning functionality has been fully implemented with the following comp
   * Added tests for:
 
     * Hook registration when `enable_auto_decay` is `true` vs. `false`.
-    * Hook execution (ensuring it doesn’t blow up on append‑only or overlay stores).
+    * Hook execution (ensuring it doesn't blow up on append‑only or overlay stores).
     * Custom vs. default thresholds.
 * **All existing pruning and compact tests** continue to pass unmodified.
 
@@ -695,7 +720,7 @@ The codebase is now fully binary-asset based, with a modern, type-safe, and main
 
 * Verified Numba + LLVM compatibility for Intel MacBook Pro:
 
-  * Uses Homebrew’s `llvm` to ensure full `llvmlite` support.
+  * Uses Homebrew's `llvm` to ensure full `llvmlite` support.
   * Explicit `CC` and `CXX` environment variables documented for stable builds.
 
 #### ✅ **Filesystem and Checkpoints**
@@ -753,7 +778,7 @@ Training now hopefully will run at hardware‑limited throughput. Storage is por
 
   * Uses the shared pool with `ensure_triad()`.
   * Maps all external users to the internal `"user"` id by default.
-  * No silent auto-creation of “user2”, “assistant42”, etc.
+  * No silent auto-creation of "user2", "assistant42", etc.
 
 * **Store construction**
 
@@ -839,7 +864,7 @@ No further action required for this cycle.
 ### Added
 
 * **Tokenizer integration layer** (`toys/communication/tokenizer.py`):
-  Implements reversible text-to-byte encoding via HuggingFace tokenizers using LEB128 encoding. All tokens are encoded as ≤255 bytes to remain compatible with GyroSI’s physics layer.
+  Implements reversible text-to-byte encoding via HuggingFace tokenizers using LEB128 encoding. All tokens are encoded as ≤255 bytes to remain compatible with GyroSI's physics layer.
   Supports encoding/decoding via pretrained models (e.g. `bert-base-uncased`) stored under `memories/public/tokenizers/`.
 
 * **Tokenizer setup script** (`toys/communication/setup_tokenizers.py`):
@@ -1094,7 +1119,7 @@ A new, consistent naming scheme has been adopted to better reflect the system's 
   2. Model Training: The trainer script consumes the generated corpus file for fast, scalable learning.
 - Restored and updated all curriculum format and thread generator scripts in toys/learning/formats/ and toys/learning/threads/ to use correct namespace UUIDs and implement pattern index cycling (degeneracy).
 - Ensured all scripts are runnable with PYTHONPATH=. for proper import resolution.
-- Rewrote learning update logic so all loaded formats are updated for each winning pattern index, enabling true multi-format associative learning and correct handling of degeneracy.
+- Rewritten learning update logic so all loaded formats are updated for each winning pattern index, enabling true multi-format associative learning and correct handling of degeneracy.
 - Fixed all pyright type errors related to string/bytes handling and added targeted type ignore comments where necessary.
 - Moved all generated and output files to appropriate subdirectories to avoid clutter and maintain a clean project structure.
 
@@ -1144,7 +1169,7 @@ A new, consistent naming scheme has been adopted to better reflect the system's 
 - Clarified and formalized the dual nature of BU (Egress/Recollection and Ingress/Closure) in both documentation and code
 - Updated all terminology to remove analogies (e.g., "physicist/linguist"), using only precise CGM language
 - Ensured the spec and implementation match: _generate_response_byte now documented and implemented as a two-stage ONA/BU process using combined resonance and confidence
-- Rewrote learning mechanisms section to reflect that confidence directly influences generation (BU closure), and removed outdated "attention mechanism" text
+- Rewritten learning mechanisms section to reflect that confidence directly influences generation (BU closure), and removed outdated "attention mechanism" text
 - Added a comprehensive glossary of all key terms (Epigenome, Genome, Egress, Ingress, ONA, BU, etc.)
 - Fixed Pyright and linter errors in intelligence.py and babylm.py (indentation, type safety, buffer handling)
 

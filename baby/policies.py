@@ -220,6 +220,8 @@ class OrbitStore:
         self._mmap_size = 0
         self._last_remap = 0.0  # Timestamp of last remap
         self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        # O(1) candidate listing for a given state
+        self.index_by_state: Dict[int, List[int]] = {}
 
         # Always use Bloom filter and index
         self._bloom_filter: Optional[BloomFilter] = None
@@ -266,9 +268,9 @@ class OrbitStore:
         """Save the Bloom filter to disk with proper locking."""
         if not self._bloom_filter:
             return
-        
+
         bloom_path = self._bloom_sidecar_path()
-        
+
         # FIXED: Use the same lock as commit to prevent race conditions
         with self.lock:
             try:
@@ -305,7 +307,7 @@ class OrbitStore:
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
-                    entry_buf = self._mmap[offset : offset + size]
+                    entry_buf = self._mmap[offset:offset + size]
                 else:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
@@ -453,6 +455,11 @@ class OrbitStore:
             size = len(payload)
             self.log_file.write(payload)
             self.index[context_key] = (offset, size)
+            # keep index_by_state fresh
+            s_idx, tok_id = context_key
+            lst = self.index_by_state.setdefault(s_idx, [])
+            if not lst or lst[-1] != tok_id:  # micro-opt to reduce dup risk
+                lst.append(tok_id)
         self.log_file.flush()
         now = time.time()
         if now - self._last_fsync > self._fsync_interval:
@@ -504,7 +511,7 @@ class OrbitStore:
                     line = line.strip()
                     if not line:
                         continue
-                    
+
                     try:
                         # Parse "state_idx-token_id:offset,size" or legacy format
                         if ":" in line and "," in line:
@@ -516,13 +523,18 @@ class OrbitStore:
                             token_id = int(token_id_str)
                             offset = int(offset_part)
                             size = int(size_part)
-                            
+
                             # Index sanity checks
-                            if offset < 0 or size != _STRUCT_SIZE or (os.path.exists(self.log_path) and offset + size > os.path.getsize(self.log_path)):
+                            if (
+                                offset < 0
+                                or size != _STRUCT_SIZE
+                                or (os.path.exists(self.log_path) and offset + size > os.path.getsize(self.log_path))
+                            ):
                                 print(f"Warning: Skipping invalid index entry: {line}")
                                 continue
-                                
+
                             self.index[(state_idx, token_id)] = (offset, size)
+                            self.index_by_state.setdefault(state_idx, []).append(token_id)
                         else:
                             # Legacy format or malformed - skip
                             print(f"Warning: Skipping legacy/malformed index line: {line}")
@@ -559,6 +571,8 @@ class OrbitStore:
                     if "key" in entry:
                         context_key = tuple(entry["key"])
                         self.index[context_key] = (offset, size)
+                        s_idx, tok_id = context_key
+                        self.index_by_state.setdefault(s_idx, []).append(tok_id)
                         # Also add to Bloom filter
                         if self._bloom_filter:
                             self._bloom_filter.add(context_key)
@@ -570,6 +584,14 @@ class OrbitStore:
     def delete(self, context_key: Tuple[int, int]) -> None:
         with self.lock:
             self.index.pop(context_key, None)
+            # also fix index_by_state
+            s_idx, tok_id = context_key
+            lst = self.index_by_state.get(s_idx)
+            if lst:
+                try:
+                    lst.remove(tok_id)
+                except ValueError:
+                    pass
 
     def close(self) -> None:
         with self.lock:
@@ -689,8 +711,8 @@ class OrbitStore:
                 for context_key, (offset, size) in self.index.items():
                     if context_key in yielded:
                         continue
-                    entry_buf = mv[offset:offset + size]
-                    entry, _ = _unpack_phenotype(entry_buf)
+                    entry_buf_mv = mv[offset:offset + size]
+                    entry, _ = _unpack_phenotype(entry_buf_mv)
                     yield context_key, entry
             else:
                 with open(self.log_path, "rb") as f:
@@ -698,16 +720,19 @@ class OrbitStore:
                         if context_key in yielded:
                             continue
                         f.seek(offset)
-                        entry_buf = f.read(size)
-                        entry, _ = _unpack_phenotype(memoryview(entry_buf))
+                        entry_buf: bytes = f.read(size)
+                        entry, _ = _unpack_phenotype(memoryview(entry_buf), 0)
                         yield context_key, entry
 
     # Fast helper: iterate keys for a given state using the in-memory index.
     def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
         with self.lock:
-            for (s_idx, tok_id) in self.index.keys():
-                if s_idx == state_idx:
-                    yield (s_idx, tok_id)
+            # pending first (most recent)
+            for (s, t) in self.pending_writes.keys():
+                if s == state_idx:
+                    yield (s, t)
+            for tok_id in self.index_by_state.get(state_idx, ()):
+                yield (state_idx, tok_id)
 
 
 class CanonicalView:
@@ -788,6 +813,20 @@ class CanonicalView:
             raise RuntimeError("CanonicalView: base_store is closed or None")
         for phen_key, entry in self.base_store.iter_entries():
             yield phen_key, entry
+
+    # Fast path for candidate fetch in generation
+    def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
+        if self.base_store is None:
+            raise RuntimeError("CanonicalView: base_store is closed or None")
+        rep = self.phen_map.get(state_idx, state_idx)
+        it = getattr(self.base_store, "iter_keys_for_state", None)
+        if callable(it):
+            yield from it(rep)  # (rep, tok_id)
+            return
+        # Fallback: scan entries (slower, but correct)
+        for (s_idx, tok_id), _ in self.base_store.iter_entries():  # pyright: ignore
+            if s_idx == rep:
+                yield (s_idx, tok_id)
 
 
 class OverlayView:
@@ -870,18 +909,34 @@ class OverlayView:
             raise RuntimeError("OverlayView: store is closed or None")
         yielded = set()
         # Yield all private entries first (latest versions only)
-        for key, entry in self.private_store.iter_entries():
+        for key, entry in self.private_store.iter_entries():  # pyright: ignore
             if key not in yielded:
                 yield key, entry
                 yielded.add(key)
         # Yield public entries not shadowed by private
-        for key, entry in self.public_store.iter_entries():
+        for key, entry in self.public_store.iter_entries():  # pyright: ignore
             if key not in yielded:
                 yield key, entry
 
     def _load_index(self) -> None:
         if self.private_store is not None and hasattr(self.private_store, "_load_index"):
             self.private_store._load_index()
+
+    # Needed for candidate enumeration under CanonicalView
+    def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
+        if self.private_store is None or self.public_store is None:
+            raise RuntimeError("OverlayView: store is closed or None")
+        seen: set[Tuple[int, int]] = set()
+        it_priv = getattr(self.private_store, "iter_keys_for_state", None)
+        if callable(it_priv):
+            for k in it_priv(state_idx):
+                seen.add(k)
+                yield k
+        it_pub = getattr(self.public_store, "iter_keys_for_state", None)
+        if callable(it_pub):
+            for k in it_pub(state_idx):
+                if k not in seen:
+                    yield k
 
 
 class ReadOnlyView:
@@ -930,6 +985,18 @@ class ReadOnlyView:
         if self.base_store is None:
             raise RuntimeError("ReadOnlyView: base_store is closed or None")
         yield from self.base_store.iter_entries()
+
+    def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
+        if self.base_store is None:
+            raise RuntimeError("ReadOnlyView: base_store is closed or None")
+        it = getattr(self.base_store, "iter_keys_for_state", None)
+        if callable(it):
+            yield from it(state_idx)
+            return
+        # Fallback scan
+        for (s_idx, tok_id), _ in self.base_store.iter_entries():  # pyright: ignore
+            if s_idx == state_idx:
+                yield (s_idx, tok_id)
 
 
 def merge_phenotype_maps(

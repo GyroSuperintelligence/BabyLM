@@ -30,9 +30,11 @@ Build steps:
 
 # ---------- Tokenization & LEB128 Functions ----------
 
+
 def _load_tokenizer(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> Any:
     """Load tokenizer from HuggingFace."""
     from tokenizers import Tokenizer
+
     tokenizer_root = base_path / "memories" / "public" / "tokenizers"
     tokenizer_path = tokenizer_root / name / "tokenizer.json"
     if not tokenizer_path.exists():
@@ -44,7 +46,7 @@ def _id_to_bytes(idx: int) -> List[int]:
     """Convert token ID to LEB128 bytes."""
     if idx < 0:
         raise ValueError("Token ID must be non-negative")
-    
+
     bytes_list = []
     while True:
         byte = idx & 0x7F
@@ -80,7 +82,9 @@ def _apply_mask(buf: bytes) -> bytes:
     return bytes(b ^ 0xAA for b in buf)
 
 
-def encode_text(text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> bytes:
+def encode_text(
+    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]
+) -> bytes:
     """Encode text to bytes via tokenizer + LEB128 (vectorized). Uses base_path for root."""
     # 1. text → token IDs ----------------------------------------------------
     tokenizer = _load_tokenizer(name, base_path)
@@ -103,21 +107,22 @@ def encode_text(text: str, name: str = "bert-base-uncased", base_path: Path = Pa
     return _apply_mask(bytes(introns[:pos]))
 
 
-def decode_text(blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> str:
+def decode_text(
+    blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]
+) -> str:
     """Decode LEB128 bytes back to text via tokenizer. Uses base_path for root."""
-    # 0. Trim at EOS sentinel (remains valid after masking)
-    if 0x00 in blob:
-        blob = blob.split(b"\x00", 1)[0]
-
     # 1. external bytes → intron stream -------------------------------------
     introns = _apply_mask(blob)
 
     # 2. intron stream → token IDs ------------------------------------------
     try:
         ids = _bytes_to_ids(introns)
+        # Trim at [SEP] if present
+        if SEP_ID in ids:
+            ids = ids[: ids.index(SEP_ID)]
         # 3. IDs → text ------------------------------------------------------
         tokenizer = _load_tokenizer(name, base_path)
-        return tokenizer.decode(ids)
+        return str(tokenizer.decode(ids))
     except Exception:
         # malformed stream fallback
         return blob.decode("utf-8", errors="replace")
@@ -126,7 +131,7 @@ def decode_text(blob: bytes, name: str = "bert-base-uncased", base_path: Path = 
 def get_vocab_size(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> int:
     """Get vocabulary size of a tokenizer. Uses base_path for root."""
     tokenizer = _load_tokenizer(name, base_path)
-    return tokenizer.get_vocab_size()
+    return int(tokenizer.get_vocab_size())
 
 
 def token_id_to_bytes(tok_id: int) -> bytes:
@@ -162,6 +167,7 @@ def bytes_to_token_ids(bs: bytes) -> List[int]:
 
 # ---------- ψ Isomorphism Functions ----------
 
+
 def ψ(byte: int) -> int:
     """ψ isomorphism: byte → intron via XOR 0xAA."""
     return byte ^ 0xAA
@@ -174,15 +180,16 @@ def ψ_inv(intron: int) -> int:
 
 # ---------- Token ↔ Intron Conversion ----------
 
+
 def token_to_introns(token_id: int) -> List[int]:
     """Convert a token ID to its LEB128 intron sequence.
-    
+
     This is the ψ isomorphism: token_id → LEB128 bytes → introns via XOR 0xAA.
     Each intron is a single byte that can be fed directly to GyroSI physics.
-    
+
     Args:
         token_id: The token ID to convert
-        
+
     Returns:
         List of intron bytes (0-255) that represent the token
     """
@@ -195,12 +202,12 @@ def token_to_introns(token_id: int) -> List[int]:
 
 def introns_to_token(introns: List[int]) -> int:
     """Convert an intron sequence back to a token ID.
-    
+
     This is the ψ⁻¹ isomorphism: introns → LEB128 bytes → token_id.
-    
+
     Args:
         introns: List of intron bytes (0-255)
-        
+
     Returns:
         The token ID that produced these introns
     """
@@ -242,6 +249,7 @@ def encode_text_with_sep(
 
 
 # ---------- Information Engine ----------
+
 
 class InformationEngine:
     """

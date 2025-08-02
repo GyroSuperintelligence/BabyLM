@@ -5,39 +5,38 @@ This module provides the IntelligenceEngine class responsible for
 coordinating the entire GyroSI learning process.
 """
 
-import math
 import os
-import random
 import time
 import uuid
 from collections import OrderedDict, deque
 from dataclasses import asdict, is_dataclass
-from functools import cached_property
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, TypedDict, cast, Iterator
+from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, TypedDict, cast, Iterator, Tuple
 
 import numpy as np
 
 from baby import governance
 from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig, PhenotypeEntry
 from baby.inference import InferenceEngine
-from baby.information import InformationEngine
+from baby.information import InformationEngine, SEP_ID
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
-from baby.information import encode_text, decode_text, bytes_to_token_ids, token_id_to_bytes, bytes_to_token_id
 
 
 class _TokBridge:
     def id_to_bytes(self, tok_id: int) -> bytes:
         from baby.information import token_id_to_bytes
+
         return token_id_to_bytes(tok_id)
 
     def bytes_to_id(self, bs: bytes) -> int:
         from baby.information import bytes_to_token_id
+
         return bytes_to_token_id(bs)
 
     def bytes_to_ids(self, bs: bytes) -> List[int]:
         from baby.information import bytes_to_token_ids
+
         return bytes_to_token_ids(bs)
 
 
@@ -101,22 +100,11 @@ class IntelligenceEngine:
         self.post_cycle_hooks: List[CycleHookFunction] = []
         self.cycle_count = 0
         self._pain_streak: int = 0
-        # Buffer for emission of the current token as *unmasked introns*
-        self._emit_buf: list[int] = []
 
-        # --- epistemology setup ------------------------------------------------
-        self.use_epistemology = epistemology_path is not None
-        if self.use_epistemology:
-            epistemology_path = _abs(epistemology_path, self.base_path)
-            self.epistemology = np.load(epistemology_path)
-            self.current_state_index = 0  # Will be set to archetypal state after s2 is created
-        else:
-            self.epistemology = None
-            self.current_state_index = 0  # Always initialize to 0, not None
+        self.current_state_index = 0
 
         # --- phenomenology setup ----------------------------------------------
-        self.use_phenomenology = phenomenology_map_path is not None
-        if self.use_phenomenology:
+        if phenomenology_map_path is not None:
             phenomenology_map_path = _abs(phenomenology_map_path, self.base_path)
             self.phenomenology_map = np.load(phenomenology_map_path)
         else:
@@ -132,6 +120,9 @@ class IntelligenceEngine:
             theta_path=str(Path(ep_path_resolved).with_name("theta.npy")),
         )
 
+        # Load epistemology directly from file with memory mapping to avoid RAM duplication
+        self.epistemology = np.load(ep_path_resolved, mmap_mode="r")
+
         # --- S-buffer for intron selection ----------------------------------
         self._S = [0] * 8
 
@@ -143,23 +134,20 @@ class IntelligenceEngine:
             s_buffer=self._S,
         )
 
-        # --- token buffer for egress processing ------------------------------
-        self._byte_buf: List[int] = []
+        # --- token buffer for egress processing: stores RAW LEB bytes (post-ψ) ---
+        self._raw_leb_buf: List[int] = []
         self.MAX_TOKEN_BYTES = 1024  # Maximum token buffer size
 
         # --- state tracking --------------------------------------------------
-        if self.use_epistemology:
-            # Start at archetypal state when using epistemology
-            self.current_state_index = self.s2.get_index_from_state(self.s2.tensor_to_int(governance.GENE_Mac_S))
-            self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
-        else:
-            self.gene_mac_m_int = self.s2.get_state_from_index(0)  # Use first state as archetypal
+        # Start at archetypal state from ontology via STT
+        self.current_state_index = self.s2.get_index_from_state(self.s2.tensor_to_int(governance.GENE_Mac_S))
+        self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
         self._last_token_id = 0
 
         # --- theta tracking --------------------------------------------------
         self._θ_buf: Deque[float] = deque(maxlen=8)
-        self._θ_low = 0.05
-        self._θ_high = 0.6
+        self._θ_low = float(cast(float, self.preferences.get("theta_low", 0.05)))
+        self._θ_high = float(cast(float, self.preferences.get("theta_high", 0.6)))
 
         # --- auto-prune setup -----------------------------------------------
         self._register_auto_prune_hook()
@@ -167,6 +155,45 @@ class IntelligenceEngine:
         # --- vectorized epistemology buffer ----------------------------------
         # Reusable buffer for state trajectory computation (max 64K to prevent RAM explosion)
         self._state_buf = np.empty(65536, dtype=np.int32)
+
+    def _temperature_from_theta(self, theta: float) -> float:
+        """Convert theta to temperature using the configured schedule."""
+        # Get floor/cap preferences for experimentation
+        temp_floor = float(cast(float, self.preferences.get("temperature_floor", 0.1)))
+        temp_cap = float(cast(float, self.preferences.get("temperature_cap", 1.0)))
+
+        if theta < self._θ_low:
+            return temp_floor
+        if theta < self._θ_high:
+            return 0.5
+        return temp_cap
+
+    def _state_byte_projection(self, state_index: int) -> int:
+        """Stable 8-bit projection of 48-bit state via XOR-fold; invariant under bit shifts that preserve parity."""
+        try:
+            s = self.s2.get_state_from_index(state_index)  # 48-bit int
+        except Exception:
+            s = state_index
+        # XOR-fold 48→8 bits (6 bytes)
+        b0 = (s >> 0) & 0xFF
+        b1 = (s >> 8) & 0xFF
+        b2 = (s >> 16) & 0xFF
+        b3 = (s >> 24) & 0xFF
+        b4 = (s >> 32) & 0xFF
+        b5 = (s >> 40) & 0xFF
+        return b0 ^ b1 ^ b2 ^ b3 ^ b4 ^ b5
+
+    def _emit_token_with_feedback(self, state_idx: int, theta: float) -> Tuple[int, bytes]:
+        """Select one token, emit its full LEB128 byte sequence, feed each byte through Egress.
+        Returns (token_id, emitted_bytes)."""
+        temperature = self._temperature_from_theta(theta)
+        tok_id = self.generate_token_exon(state_idx, temperature)
+        from baby.information import token_id_to_bytes
+        token_bytes = token_id_to_bytes(tok_id)
+        for byte_out in token_bytes:
+            # Feed back as *external* bytes; process_egress handles ψ and learning
+            self.process_egress(byte_out)
+        return tok_id, token_bytes
 
     def process_egress(self, input_byte: int) -> int:
         """
@@ -182,62 +209,49 @@ class IntelligenceEngine:
             Transcribed intron instruction
         """
         input_byte &= 0xFF  # Defensive masking
-        # S1: Transcribe input through holographic topology
-        intron = governance.transcribe_byte(input_byte)
+        # S1: Transcribe (ψ) to raw LEB byte
+        intron = governance.transcribe_byte(input_byte)  # raw LEB byte after XOR
         intron &= 0xFF  # Defensive masking (optional, for symmetry)
 
         # Check buffer size limit to prevent runaway growth
-        if len(self._byte_buf) >= self.MAX_TOKEN_BYTES:
-            self._byte_buf.clear()  # Prevent runaway buffer growth
+        if len(self._raw_leb_buf) >= self.MAX_TOKEN_BYTES:
+            self._raw_leb_buf.clear()  # Prevent runaway buffer growth
             self._last_token_id = 0  # Reset token ID to prevent stale context
-            print("Warning: Token buffer overflow cleared")
-            return intron  # EARLY-RETURN to discard the intron causing overflow
+            if getattr(self, 'debug_mode', False):
+                print("Warning: Token buffer overflow cleared")
+            return intron
 
         # Append intron to current token buffer
-        self._byte_buf.append(intron)
+        self._raw_leb_buf.append(intron)
 
-        # S1: Apply gyroscopic transformation to physical state
-        if self.use_epistemology:
-            assert self.epistemology is not None
-            self.current_state_index = self.epistemology[self.current_state_index, intron]
-            self._cached_state_int = self.s2.get_state_from_index(self.current_state_index)
-            # FIXED: Update gene_mac_m_int to keep it current in epistemology mode
-            self.gene_mac_m_int = self._cached_state_int
-            # No eager sync here
-        else:
-            self.gene_mac_m_int = governance.apply_gyration_and_transform(self.gene_mac_m_int, intron)
-            self._sync_index_from_state_int()
+        self.current_state_index = self.epistemology[self.current_state_index, intron]
+        self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
+        self._cached_state_int = self.gene_mac_m_int
 
-        # State integrity assertion
-        assert (self.gene_mac_m_int if not self.use_epistemology else self._cached_state_int) < (1 << 48)
+        # State integrity assertion - 48-bit bounds
+        assert self.gene_mac_m_int < (1 << 48)
 
         self.cycle_count += 1
 
         # Record divergence in θ buffer
-        div = self.s2.measure_state_divergence(
-            self.gene_mac_m_int if not self.use_epistemology else self._cached_state_int
-        )
+        div = self.s2.measure_state_divergence(self._cached_state_int)
         self._θ_buf.append(div)
 
-        # Check if token is complete (bit 7 == 0)
-        if (intron & 0x80) == 0:
+        # Check if token is complete (bit 7 == 0) - last LEB byte
+        if (intron & 0x80) == 0:  # last LEB byte
             try:
                 # Token is complete - unmask back to byte stream
-                tok_bytes = bytes(b ^ 0xAA for b in self._byte_buf)
+                tok_bytes = bytes(b ^ 0xAA for b in self._raw_leb_buf)  # re-mask to external
                 token_id = TOK.bytes_to_id(tok_bytes)
 
-                # Fix: ignore [SEP] token (ID 102) when setting _last_token_id
-                if token_id == 102:  # WordPiece [SEP]
-                    # grab the *previous* real token instead
+                # Ignore [SEP] token (ID 102) when setting _last_token_id
+                if token_id == SEP_ID:  # WordPiece [SEP]
+                    # Use the previous real token instead
                     token_id = getattr(self, "_prev_token_id", 102)
                 self._prev_token_id = token_id
 
                 # Knowledge update once per token using token-level learning
-                state_idx = (
-                    self.current_state_index
-                    if self.use_epistemology
-                    else self.s2.get_index_from_state(self.gene_mac_m_int)
-                )
+                state_idx = self.current_state_index
                 # Use the actual intron that finished the token for learning
                 phenotype_entry = self.operator.learn_token(token_id, state_idx, intron)
 
@@ -248,16 +262,18 @@ class IntelligenceEngine:
                         hook(self, phenotype_entry, intron, token_id, state_idx)
                     except Exception:
                         # Log hook errors but don't fail the cycle
-                        print("Warning: Hook error occurred")
+                        if getattr(self, 'debug_mode', False):
+                            print("Warning: Hook error occurred")
 
                 # Prepare for ingress
                 self._last_token_id = token_id
             except Exception:
                 # Handle malformed token sequences gracefully
-                print("Warning: Malformed token sequence skipped")
+                if getattr(self, 'debug_mode', False):
+                    print("Warning: Malformed token sequence skipped")
             finally:
                 # Always clear buffer to prevent accumulation
-                self._byte_buf.clear()
+                self._raw_leb_buf.clear()
         else:
             pass
 
@@ -268,7 +284,7 @@ class IntelligenceEngine:
         Reset token buffer - call when starting new stream.
         Clears accumulated bytes and resets last token ID.
         """
-        self._byte_buf.clear()
+        self._raw_leb_buf.clear()
         self._last_token_id = 0
 
     def process_egress_bulk(self, blob: bytes) -> None:
@@ -286,45 +302,38 @@ class IntelligenceEngine:
         introns = arr ^ 0xAA  # unmask once → true introns
 
         # --- 1. state evolution ------------------------------------------------
-        if self.use_epistemology:
-            # Fully vectorized epistemology processing for high performance
-            if self.epistemology is None:
-                raise RuntimeError("Epistemology not loaded")
+        # Fully vectorized STT processing for high performance
 
-            # --- 1. build full state trajectory in one shot
-            intr = introns  # alias for brevity (np.ndarray[uint8])
-            n = intr.shape[0]
+        # --- 1. build full state trajectory in one shot
+        intr = introns  # alias for brevity (np.ndarray[uint8])
+        n = intr.shape[0]
 
-            # Allocate state buffer with memory bounds (max 64K to prevent RAM explosion)
-            max_chunk_size = 65536  # 64K introns max per chunk
-            if n > max_chunk_size:
-                # Process in chunks to maintain memory bounds
-                for chunk_start in range(0, n, max_chunk_size):
-                    chunk_end = min(chunk_start + max_chunk_size, n)
-                    chunk_introns = intr[chunk_start:chunk_end]
-                    self._process_epistemology_chunk(chunk_introns, arr[chunk_start:chunk_end])
-            else:
-                # Process full chunk if within bounds
-                self._process_epistemology_chunk(intr, arr)
+        # Allocate state buffer with memory bounds (max 64K to prevent RAM explosion)
+        max_chunk_size = 65536  # 64K introns max per chunk
+        if n > max_chunk_size:
+            # Process in chunks to maintain memory bounds
+            for chunk_start in range(0, n, max_chunk_size):
+                chunk_end = min(chunk_start + max_chunk_size, n)
+                chunk_introns = intr[chunk_start:chunk_end]
+                self._process_epistemology_chunk(chunk_introns, arr[chunk_start:chunk_end])
         else:
-            # Fallback to individual processing for non-epistemology mode
-            for intron in arr:
-                self.process_egress(intron)
+            # Process full chunk if within bounds
+            self._process_epistemology_chunk(intr, arr)
 
-        # Update cycle count only for epistemology path (scalar path already increments per byte)
-        if self.use_epistemology:
-            self.cycle_count += len(arr)
+        # Update cycle count
+        self.cycle_count += len(arr)
 
-    def _process_epistemology_chunk(self, introns: np.ndarray[Any, Any], masked_arr: np.ndarray[Any, Any] = None) -> None:
+    def _process_epistemology_chunk(
+        self, introns: np.ndarray[Any, Any], masked_arr: Optional[np.ndarray[Any, Any]] = None
+    ) -> None:
         """
-        Process a chunk of introns using fully vectorized epistemology.
+        Process a chunk of introns using fully vectorized STT.
 
         Args:
             introns: Unmasked intron array (uint8)
             masked_arr: Original masked byte array for token extraction
         """
-        if self.epistemology is None:
-            raise RuntimeError("Epistemology not loaded")
+        ep = self.epistemology
 
         n = introns.shape[0]
         if n == 0:
@@ -340,7 +349,7 @@ class IntelligenceEngine:
         st[0] = self.current_state_index
 
         # Bounds checking to prevent out-of-bounds access
-        epistemology_size = self.epistemology.shape[0]
+        epistemology_size = ep.shape[0]
         if st[0] >= epistemology_size:
             raise RuntimeError(
                 f"Initial state index {st[0]} is out of bounds for epistemology matrix (size {epistemology_size})"
@@ -355,7 +364,7 @@ class IntelligenceEngine:
                 raise RuntimeError(
                     f"State index {prev_state} is out of bounds for epistemology matrix (size {epistemology_size})"
                 )
-            new_state = self.epistemology[prev_state, intron]
+            new_state = ep[prev_state, intron]
             if new_state >= epistemology_size:
                 raise RuntimeError(
                     f"Transition to state {new_state} is out of bounds "
@@ -364,18 +373,33 @@ class IntelligenceEngine:
             st[i] = new_state
 
         # --- 2. process tokens properly (like the original process_egress)
-        token_buffer = []
+        # Use existing self._raw_leb_buf to handle cross-chunk token boundaries
         for i, intron in enumerate(introns):
-            token_buffer.append(intron)
+            # Check buffer size limit to prevent runaway growth
+            if len(self._raw_leb_buf) >= self.MAX_TOKEN_BYTES:
+                self._raw_leb_buf.clear()  # Prevent runaway buffer growth
+                self._last_token_id = 0  # Reset token ID to prevent stale context
+                if getattr(self, 'debug_mode', False):
+                    print("Warning: Token buffer overflow cleared")
+
+            # Append intron to current token buffer
+            self._raw_leb_buf.append(intron)
 
             # Check if token is complete (bit 7 == 0)
             if (intron & 0x80) == 0:
                 # Token is complete - unmask back to byte stream
-                tok_bytes = bytes(b ^ 0xAA for b in token_buffer)
+                tok_bytes = bytes(b ^ 0xAA for b in self._raw_leb_buf)
                 try:
                     token_id = TOK.bytes_to_id(tok_bytes)
+
+                    # Ignore [SEP] token (ID 102) when setting _last_token_id
+                    if token_id == SEP_ID:  # WordPiece [SEP]
+                        # Use the previous real token instead
+                        token_id = getattr(self, "_prev_token_id", 102)
+                    self._prev_token_id = token_id
+
                     # Learn using the *post* state (after applying the current intron)
-                    post_state = int(self.epistemology[st[i], intron])
+                    post_state = int(ep[st[i], intron])
                     phenotype_entry = self.operator.learn_token(token_id, post_state, int(intron))
 
                     # Call post-cycle hooks for monitoring
@@ -385,15 +409,20 @@ class IntelligenceEngine:
                         except Exception:
                             # Log hook errors but don't fail the cycle
                             print("Warning: Hook error occurred")
+
+                    # Prepare for ingress
+                    self._last_token_id = token_id
                 except Exception:
-                    pass
+                    # Handle malformed token sequences gracefully
+                    if getattr(self, 'debug_mode', False):
+                        print("Warning: Malformed token sequence skipped")
                 finally:
                     # Always clear buffer to prevent accumulation
-                    token_buffer.clear()
+                    self._raw_leb_buf.clear()
 
         # --- 4. persist new head state + θ updates
         if n > 0:
-            final_pre_state = int(st[n - 1])     # state *before* applying the last intron
+            final_pre_state = int(st[n - 1])  # state *before* applying the last intron
             final_intron = int(introns[-1])
             if final_pre_state >= epistemology_size:
                 raise RuntimeError(
@@ -428,66 +457,14 @@ class IntelligenceEngine:
                     pass
 
     def process_ingress(self) -> tuple[int, int]:
-        """
-        Generate **one token** using LEB128 physics and learned phenotypes.
-        Returns:
-            (byte_out, intron_out) of the *last* byte emitted.
-        """
-        # --- 1. resolve current state ---
-        state_idx = (
-            self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
-        )
-
-        # Prepare a fresh token when the buffer is empty
-        if not self._emit_buf:
-            # --- 0. resolve orbit & θ
-            theta = self._θ_buf[-1] if self._θ_buf else 0.0
-
-            # --- 1. Generate token using LEB128 physics and learned phenotypes
-            # Use token-level generation with temperature based on theta
-            if theta < self._θ_low:
-                temperature = 0.1  # Deterministic for calm mode
-            elif theta < self._θ_high:
-                temperature = 0.5  # Moderate exploration
-            else:
-                temperature = 1.0  # High exploration for corrective mode
-            
-            tok_id = self.generate_token_exon(state_idx, temperature)
-
-            # --- 2. emit using LEB128 token-level physics
-            from baby.information import token_to_introns
-            self._emit_buf = token_to_introns(tok_id)  # Direct token-to-intron conversion
-
-        intron_out = self._emit_buf.pop(0)
-        byte_out = intron_out ^ 0xAA
-
-        # ---------- 3. feed back through egress -----------
-        self.process_egress(byte_out)  # will update state + learn
-
-        return byte_out, intron_out
-
-    def _choose_intron(self, phe: PhenotypeEntry, theta: float, state_index: int) -> int:
-        """
-        Choose the next intron based on phenotype and theta using LEB128 physics.
-
-        Args:
-            phe: Phenotype entry with minimal structure (mask, conf)
-            theta: Current theta value
-            state_index: Current state index for orbit cardinality calculation
-
-        Returns:
-            Chosen intron value
-        """
-        # For LEB128 physics, we need to choose a token, not an intron
-        # This is a simplified approach - in practice, we'd want to choose from learned tokens
-        mask = phe["mask"]
-        conf = phe["conf"]
-        v = self.s2.orbit_cardinality[state_index]
-        v_max = 1000  # Use reasonable default instead of computing max
-        alpha = (1 / 6) * math.sqrt(v / v_max)
-        
-        # Use exon-product generation instead of byte-level intron selection
-        return self.generate_token_exon(state_index, temperature=0.5)
+        """Emit exactly one token and return (last_byte, last_intron) of that token."""
+        state_idx = self.current_state_index
+        theta = self._θ_buf[-1] if self._θ_buf else 0.0
+        tok_id, token_bytes = self._emit_token_with_feedback(state_idx, theta)
+        # Derive last intron from last byte via ψ
+        last_byte = token_bytes[-1]
+        last_intron = last_byte ^ 0xAA
+        return last_byte, last_intron
 
     def add_hook(self, hook: CycleHookFunction) -> None:
         """
@@ -523,9 +500,7 @@ class IntelligenceEngine:
         """
         self._sync_state_fields_from_index()
         angular_divergence = self.s2.measure_state_divergence(self.gene_mac_m_int)
-        tensor_index = (
-            self.current_state_index if self.use_epistemology else self.s2.get_index_from_state(self.gene_mac_m_int)
-        )
+        tensor_index = self.current_state_index
         agent_id: str = self.agent_id
         cycle_count: int = self.cycle_count
         state_integer: int = self.gene_mac_m_int
@@ -551,13 +526,11 @@ class IntelligenceEngine:
         self.cycle_count = 0
 
     def _sync_state_fields_from_index(self) -> None:
-        if self.use_epistemology:
-            self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
-            self._cached_state_int = self.gene_mac_m_int
+        self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
+        self._cached_state_int = self.gene_mac_m_int
 
     def _sync_index_from_state_int(self) -> None:
-        if self.use_epistemology:
-            self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
+        self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
 
     def validate_knowledge_integrity(self) -> bool:
         """
@@ -615,8 +588,12 @@ class IntelligenceEngine:
             self.add_hook(self._auto_prune_hook)
 
     def _auto_prune_hook(
-        self, engine: "IntelligenceEngine", phenotype_entry: PhenotypeEntry, last_token_byte: int, 
-        token_id: Optional[int] = None, state_index: Optional[int] = None
+        self,
+        engine: "IntelligenceEngine",
+        phenotype_entry: PhenotypeEntry,
+        last_intron: int,
+        token_id: Optional[int] = None,
+        state_index: Optional[int] = None,
     ) -> None:
         """
         Auto-prune low-confidence entries to prevent memory bloat.
@@ -627,7 +604,7 @@ class IntelligenceEngine:
 
         pruning_cfg = self.preferences.get("pruning", {})
         if not pruning_cfg.get("enable_auto_decay", False):
-                return
+            return
 
         thr = float(pruning_cfg.get("confidence_threshold", 0.05))
         try:
@@ -635,28 +612,29 @@ class IntelligenceEngine:
             if getattr(self, "debug_mode", False):
                 print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
         except Exception as e:
-            print(f"Warning: Auto-prune failed: {e}")
+            if getattr(self, 'debug_mode', False):
+                print(f"Warning: Auto-prune failed: {e}")
 
     def generate_token_exon(self, state_index: int, temperature: float = 1.0) -> int:
         """
         Generate next token using exon-product physics and LEB128 token associations.
-        
+
         The exon-product is computed from phenotype metadata and converted to LEB128
         token associations through the governance physics.
-        
+
         Args:
             state_index: Current state index
             temperature: Generation temperature (0.0 = deterministic, 1.0 = random)
-            
+
         Returns:
             Generated token_id
         """
         # Get candidate phenotypes for this state
         candidates = []
-        
+
         # Canonicalize once to match CanonicalView's key space
         rep_state_idx = state_index
-        if getattr(self, "phenomenology_map", None) is not None:
+        if self.phenomenology_map is not None:
             try:
                 rep_state_idx = int(self.phenomenology_map[state_index])
             except Exception:
@@ -665,55 +643,58 @@ class IntelligenceEngine:
         # Pull candidates directly via the index: O(k) in number of tokens for this state.
         fetch_limit = 512  # bounded to avoid pathological huge states
         pulled = 0
-        for (s_idx, token_id) in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(rep_state_idx):
+        for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(rep_state_idx):
             if pulled >= fetch_limit:
                 break
             entry = self.operator.store.get((s_idx, token_id))
             if not entry:
                 continue
             pulled += 1
-                confidence = entry.get("conf", 0.1)
-                mask = entry.get("mask", 0)
-                
-                # Get orbit cardinality for exon-product computation
-                orbit_v = 1
-                v_max = 1
-                if hasattr(self, 's2') and hasattr(self.s2, 'orbit_cardinality'):
-                    try:
-                        orbit_v = self.s2.orbit_cardinality[state_index]
+            confidence = entry.get("conf", 0.1)
+            mask = entry.get("mask", 0)
+
+            # Get orbit cardinality for exon-product computation
+            orbit_v = 1
+            v_max = 1
+            if hasattr(self, "s2") and hasattr(self.s2, "orbit_cardinality"):
+                try:
+                    orbit_v = self.s2.orbit_cardinality[rep_state_idx]
                     # Use the actual maximum from InformationEngine
                     v_max = getattr(self.s2, "_v_max", 1000) or 1000
-                    except (IndexError, AttributeError):
-                        pass
-                
-                # Compute exon-product from phenotype metadata
-                from baby.governance import exon_product_from_metadata
-                exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
-                
-                # Calculate resonance between state and exon-product
-                resonance = self._calculate_resonance(state_index, exon_product)
-                
-                # Weighted combination: confidence, resonance, and orbit factors
-                orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
-                score = (confidence * 0.4) + (resonance * 0.4) + (orbit_factor * 0.2)
-                
-                candidates.append((token_id, score, exon_product))
-        
+                except (IndexError, AttributeError):
+                    pass
+
+            # Compute exon-product from phenotype metadata
+            from baby.governance import exon_product_from_metadata
+
+            exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
+
+            # Calculate resonance between state and exon-product
+            resonance = self._calculate_resonance(rep_state_idx, exon_product)
+
+            # Weighted combination: confidence, resonance, and orbit factors
+            orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
+            score = (confidence * 0.4) + (resonance * 0.4) + (orbit_factor * 0.2)
+
+            candidates.append((token_id, score, exon_product))
+
         if not candidates:
             # No learned tokens for this state, generate random
             return self._generate_random_token()
-        
+
         # Always sort by score
         candidates.sort(key=lambda x: x[1], reverse=True)
-        
+
         if temperature < 0.1 or len(candidates) <= 3:
-            return candidates[0][0]
+            return int(candidates[0][0])
         else:
             # Probabilistic: sample based on scores and temperature
             scores = np.array([score for _, score, _ in candidates])
-            
+
             # Apply temperature scaling with softmax-like normalization
             if temperature > 0:
+                # Add neutrality at high τ by subtracting minimum score
+                scores = scores - scores.min()
                 # Use log-space for numerical stability
                 log_scores = np.log(scores + 1e-8)  # Add small epsilon to avoid log(0)
                 scaled_log_scores = log_scores / temperature
@@ -723,38 +704,38 @@ class IntelligenceEngine:
             else:
                 # Fallback to simple normalization
                 probs = scores / np.sum(scores)
-            
+
             # Sample with replacement for diversity
-            chosen_idx = np.random.choice(len(candidates), p=probs)
-            return candidates[chosen_idx][0]
-    
+            chosen_idx = int(np.random.choice(len(candidates), p=probs))
+            return int(candidates[chosen_idx][0])
+
     def _calculate_resonance(self, state_index: int, mask: int) -> float:
         """Calculate token-level resonance between state and phenotype mask."""
         # Cache key for resonance calculation
         cache_key = (state_index, mask)
-        
+
         # Check if we have a resonance cache
-        if not hasattr(self, '_resonance_cache'):
-            self._resonance_cache = {}
-        
+        if not hasattr(self, "_resonance_cache"):
+            self._resonance_cache: Dict[Tuple[int, int], float] = {}
+
         # Return cached result if available
         if cache_key in self._resonance_cache:
             return self._resonance_cache[cache_key]
-        
-        # Compare physical state's low byte to mask as a crude, fast resonance proxy.
-        try:
-            state_int = self.s2.get_state_from_index(state_index)
-        except Exception:
-            state_int = state_index  # fallback
-        low_byte = state_int & 0xFF
+
+        # Use stable 8-bit projection for resonance calculation
+        low_byte = self._state_byte_projection(state_index)
         hd = bin((low_byte ^ (mask & 0xFF)) & 0xFF).count("1")
         base_resonance = 1.0 - (hd / 8.0)
-        
+
         # Add orbit-based resonance if phenomenology is available
-        if hasattr(self, 's2') and hasattr(self.s2, 'orbit_cardinality'):
+        if hasattr(self, "s2") and hasattr(self.s2, "orbit_cardinality"):
             try:
-                orbit_size = self.s2.orbit_cardinality[state_index]
-                max_orbit_size = max(self.s2.orbit_cardinality) if len(self.s2.orbit_cardinality) > 0 else 1
+                # Use representative state index for orbit factor calculation
+                rep_state_idx = state_index
+                if self.phenomenology_map is not None:
+                    rep_state_idx = int(self.phenomenology_map[state_index])
+                orbit_size = self.s2.orbit_cardinality[rep_state_idx]
+                max_orbit_size = getattr(self.s2, "_v_max", int(np.max(self.s2.orbit_cardinality))) or 1
                 orbit_factor = min(1.0, orbit_size / max_orbit_size)
                 # Combine base resonance with orbit factor
                 result = (base_resonance * 0.7) + (orbit_factor * 0.3)
@@ -762,87 +743,95 @@ class IntelligenceEngine:
                 result = base_resonance
         else:
             result = base_resonance
-        
+
         # Cache the result (limit cache size to prevent memory issues)
         if len(self._resonance_cache) < 10000:  # Max 10K cached results
             self._resonance_cache[cache_key] = result
-        
-        return result
-    
+
+        return float(result)
+
     def _generate_random_token(self) -> int:
         """Generate a random token ID using cached vocabulary size."""
         # FIXED: Cache vocabulary size to avoid repeated calls and OOV leaks
-        if not hasattr(self, '_cached_vocab_size'):
+        if not hasattr(self, "_cached_vocab_size"):
             try:
                 # Try to get actual vocabulary size from tokenizer
                 from baby.information import get_vocab_size
+
                 self._cached_vocab_size = get_vocab_size()
             except (ImportError, Exception):
                 # Fallback to BERT vocab size if tokenizer not available
                 self._cached_vocab_size = 30522  # BERT vocab size approx
-        
+
         # Generate a valid token ID within the vocabulary range
         # Use smaller range to ensure LEB128 encoding works properly
         max_safe_token = min(self._cached_vocab_size, 8191)  # 2^13 - 1 for safe LEB128
-        return np.random.randint(1, max_safe_token)
+        return int(np.random.randint(1, max_safe_token))
 
 
 # ---------- Token Physics Functions ----------
 
-def apply_token_physics(state_index: int, token_id: int, epistemology: np.ndarray) -> int:
+
+def apply_token_physics(state_index: int, token_id: int, epistemology: np.ndarray[Any, Any]) -> int:
     """Apply token-level physics to evolve state through the token's intron sequence.
-    
+
     This is more efficient than applying introns one-by-one because it uses
     the token's complete intron sequence in a single operation.
-    
+
     Args:
         state_index: Current state index
         token_id: Token ID to apply
         epistemology: State transition table (STT)
-        
+
     Returns:
         Final state index after applying the token's physics
     """
     from baby.information import token_to_introns
+
     introns = token_to_introns(token_id)
     current_state = state_index
-    
+
     # Walk through the token's intron sequence
     for intron in introns:
         current_state = epistemology[current_state, intron]
-    
+
     return current_state
 
 
 class TokenSTT:
-    """Pre-computed token-level state transition table."""
-    
-    def __init__(self, epistemology: np.ndarray, vocab_size: int):
-        self.epistemology = epistemology
+    """Pre-computed token-level state transition table.
+
+    NOTE: This is an optional utility for future token-level acceleration.
+    Currently unused in the main learning pipeline.
+    """
+
+    def __init__(self, epistemology: np.ndarray[Any, Any], vocab_size: int):
+        self.epistemology = epistemology  # pass engine.s2.ep if you use it
         self.vocab_size = vocab_size
-        self.cache: dict = {}  # Lazy loading of token transitions
-        
+        self.cache: Dict[Tuple[int, int], int] = {}  # Lazy loading of token transitions
+
     def get_token_transition(self, state_index: int, token_id: int) -> int:
         """Get the final state after applying a token's intron sequence."""
         key = (state_index, token_id)
-        
+
         if key not in self.cache:
             # Compute the full token walk
             from baby.information import token_to_introns
+
             introns = token_to_introns(token_id)
             final_state = state_index
-            
+
             for intron in introns:
                 final_state = self.epistemology[final_state, intron]
-            
+
             self.cache[key] = final_state
-        
+
         return self.cache[key]
-    
-    def precompute_common_tokens(self, token_frequencies: dict, threshold: float = 0.01):
+
+    def precompute_common_tokens(self, token_frequencies: Dict[int, float], threshold: float = 0.01) -> None:
         """Pre-compute transitions for frequently used tokens."""
         total_freq = sum(token_frequencies.values())
-        
+
         for token_id, freq in token_frequencies.items():
             if freq / total_freq > threshold:
                 # Pre-compute for all states
@@ -850,20 +839,24 @@ class TokenSTT:
                     self.get_token_transition(state, token_id)
 
 
-def compute_token_divergence(token_id: int, theta_map: np.ndarray, epistemology: np.ndarray) -> float:
+def compute_token_divergence(
+    token_id: int, theta_map: np.ndarray[Any, Any], epistemology: np.ndarray[Any, Any]
+) -> float:
     """Compute the angular divergence introduced by a token."""
     # Start from archetypal state
     archetypal_state = 0  # GENE_Mac_S equivalent
     final_state = apply_token_physics(archetypal_state, token_id, epistemology)
-    
+
     return theta_map[final_state] if final_state < len(theta_map) else 0.0
 
 
-def precompute_common_tokens(epistemology: np.ndarray, token_frequencies: dict, threshold: float = 0.01) -> dict:
+def precompute_common_tokens(
+    epistemology: np.ndarray[Any, Any], token_frequencies: Dict[int, float], threshold: float = 0.01
+) -> Dict[Tuple[int, int], int]:
     """Pre-compute transitions for frequently used tokens."""
     token_stt_cache = {}
     total_freq = sum(token_frequencies.values())
-    
+
     for token_id, freq in token_frequencies.items():
         if freq / total_freq > threshold:
             # Pre-compute for all states
@@ -871,15 +864,17 @@ def precompute_common_tokens(epistemology: np.ndarray, token_frequencies: dict, 
                 key = (state, token_id)
                 if key not in token_stt_cache:
                     token_stt_cache[key] = apply_token_physics(state, token_id, epistemology)
-    
+
     return token_stt_cache
 
 
 # ---------- Stream Processing Functions ----------
 
+
 def text_to_intron_stream(text: str, tokenizer_name: str = "bert-base-uncased") -> Iterator[int]:
     """Convert text to intron stream using tokenizer + LEB128 + ψ."""
     from baby.information import _load_tokenizer, token_to_introns
+
     tokenizer = _load_tokenizer(tokenizer_name)
     for token_id in tokenizer.encode(text).ids:
         for intron in token_to_introns(token_id):
@@ -889,61 +884,65 @@ def text_to_intron_stream(text: str, tokenizer_name: str = "bert-base-uncased") 
 def intron_stream_to_text(intron_stream: Iterator[int], tokenizer_name: str = "bert-base-uncased") -> str:
     """Convert intron stream back to text."""
     from baby.information import _load_tokenizer, ψ_inv, bytes_to_token_id
+
     tokenizer = _load_tokenizer(tokenizer_name)
     current_token_bytes = []
     tokens = []
-    
+
     for intron in intron_stream:
         byte = ψ_inv(intron)
         current_token_bytes.append(byte)
-        
+
         if (byte & 0x80) == 0:  # Token complete
             token_id = bytes_to_token_id(bytes(current_token_bytes))
             tokens.append(token_id)
             current_token_bytes.clear()
-    
-    return tokenizer.decode(tokens)
+
+    return str(tokenizer.decode(tokens))
 
 
-def process_text_stream_leb128(text_stream: Iterator[str], engine, tokenizer_name: str = "bert-base-uncased") -> Iterator[int]:
+def process_text_stream_leb128(
+    text_stream: Iterator[str], engine: Any, tokenizer_name: str = "bert-base-uncased"
+) -> Iterator[int]:
     """Process text stream using LEB128 physics."""
     from baby.information import _load_tokenizer, token_to_introns
+
     tokenizer = _load_tokenizer(tokenizer_name)
     current_state = 0  # Start from archetypal state
-    
+
     for text in text_stream:
         for token_id in tokenizer.encode(text).ids:
-            # Learn the token
-            entry = engine.operator.learn_token(token_id, current_state, 0)  # Use 0 as last_intron for now
-            
-            # Update state using token physics
             introns = token_to_introns(token_id)
+            last_intron = introns[-1]  # use real learning signal
+
+            # Apply all introns to get to post-state (consistent with live path)
             for intron in introns:
-                current_state = engine.epistemology[current_state, intron] if hasattr(engine, 'epistemology') else current_state
-            
+                current_state = (
+                    engine.epistemology[current_state, intron] if hasattr(engine, "epistemology") else current_state
+                )
+
+            # Learn on post-state (consistent with process_egress)
+            engine.operator.learn_token(token_id, current_state, last_intron)
+
             yield token_id
 
 
-def generate_text_stream_leb128(engine, initial_prompt: str, max_tokens: int = 50, tokenizer_name: str = "bert-base-uncased") -> Iterator[str]:
+def generate_text_stream_leb128(
+    engine: Any, initial_prompt: str, max_tokens: int = 50, tokenizer_name: str = "bert-base-uncased"
+) -> Iterator[str]:
     """Generate text stream using LEB128 physics."""
-    from baby.information import _load_tokenizer, token_to_introns
+    from baby.information import _load_tokenizer, encode_text
+
     tokenizer = _load_tokenizer(tokenizer_name)
-    current_state = 0  # Start from archetypal state
-    
-    # Process initial prompt
-    for token_id in tokenizer.encode(initial_prompt).ids:
-        introns = token_to_introns(token_id)
-        for intron in introns:
-            current_state = engine.epistemology[current_state, intron] if hasattr(engine, 'epistemology') else current_state
-    
-    # Generate continuation
+    # Prime engine with the prompt through the exact same boundary law
+    for b in encode_text(initial_prompt, name=tokenizer_name):
+        engine.process_egress(b)
+
     for _ in range(max_tokens):
-        token_id = engine.generate_token_exon(current_state, temperature=0.7)
-        introns = token_to_introns(token_id)
-        for intron in introns:
-            current_state = engine.epistemology[current_state, intron] if hasattr(engine, 'epistemology') else current_state
-        
-        yield tokenizer.decode([token_id])
+        state_idx = engine.current_state_index
+        theta = (engine._θ_buf[-1] if getattr(engine, "_θ_buf", None) else 0.0)
+        tok_id, _ = engine._emit_token_with_feedback(state_idx, theta)
+        yield tokenizer.decode([tok_id])
 
 
 # ---------- Intelligence Engine ----------
@@ -1087,75 +1086,20 @@ class GyroSI:
                 store.commit()
 
     def respond(self, data: bytes, max_new_tokens: int = 64) -> bytes:
-        """
-        Generate an intelligent response using exon-product physics converted to LEB128 token associations.
-        Guarantees that every emitted LEB128 token is complete (no dangling continuation bit).
-        """
-
-        # ---------- 1. ingest user prompt -------------------------------
-        for i, b in enumerate(data):
+        # 1) Ingest prompt bytes
+        for b in data:
             self.engine.process_egress(b)
 
-        # ---------- 2. generate using token-level physics ----------------
         out = bytearray()
         tokens_done = 0
-
         while tokens_done < max_new_tokens:
-            # -------- generate ONE token using exon-product physics -----------
-            # Get current state for token-level generation
-            state_idx = (
-                self.engine.current_state_index if self.engine.use_epistemology 
-                else self.engine.s2.get_index_from_state(self.engine.gene_mac_m_int)
-            )
-            
-            # Use token-level generation with adaptive temperature
+            state_idx = self.engine.current_state_index
             theta = self.engine._θ_buf[-1] if self.engine._θ_buf else 0.0
-            if theta < self.engine._θ_low:
-                temperature = 0.1  # Deterministic for calm mode
-            elif theta < self.engine._θ_high:
-                temperature = 0.5  # Moderate exploration
-            else:
-                temperature = 1.0  # High exploration for corrective mode
-            
-            # Generate token using exon-product physics
-            token_id = self.engine.generate_token_exon(state_idx, temperature)
-            
-            # Validate that the token can be properly encoded as LEB128
-            try:
-                from baby.information import token_to_introns, introns_to_token
-                introns = token_to_introns(token_id)
-                # Verify round-trip conversion works
-                validated_token_id = introns_to_token(introns)
-                if validated_token_id != token_id:
-                    # If round-trip fails, generate a safe token
-                    token_id = self.engine._generate_random_token()
-                    introns = token_to_introns(token_id)
-            except (ValueError, ImportError):
-                # If validation fails, generate a safe token
-                token_id = self.engine._generate_random_token()
-                from baby.information import token_to_introns
-                introns = token_to_introns(token_id)
-            
-            # Convert token to complete LEB128 bytes
-            from baby.information import token_id_to_bytes
-            token_bytes = token_id_to_bytes(token_id)
-            
-            # Emit complete token bytes and update state
-            for byte_out in token_bytes:
-                out.append(byte_out)
-                # Update state through the unmasked byte (process_egress expects input bytes)
-                self.engine.process_egress(byte_out)
-            
+            tok_id, token_bytes = self.engine._emit_token_with_feedback(state_idx, theta)
+            out.extend(token_bytes)
             tokens_done += 1
-            
-            # -------- optional EOS check ---------------------------------
-            try:
-                # Check if we generated a SEP token
-                if token_id == 102:  # [SEP]
-                    break
-            except (ValueError, ImportError):
-                # Continue if tokenizer not available or parsing fails
-                pass
+            if tok_id == SEP_ID:  # [SEP] as EOS if desired
+                break
 
         self._commit_if_needed()
         return bytes(out)
@@ -1337,12 +1281,12 @@ class AgentPool:
         # cast preferences to a dict so .get is allowed
         self.max_agents = cast(Dict[str, Any], self.preferences).get("max_agents_in_memory", 1000)
         self.eviction_policy = cast(Dict[str, Any], self.preferences).get("agent_eviction_policy", "lru")
-        
+
         # Initialize TTL settings
         self.agent_ttl_minutes = 0
         if self.eviction_policy == "ttl":
             self.agent_ttl_minutes = cast(Dict[str, Any], self.preferences).get("agent_ttl_minutes", 30)
-        
+
         self.allowed_ids = allowed_ids or {"user", "system", "assistant"}
         self.allow_auto_create = allow_auto_create
         self.agent_access_times: Dict[str, float] = {}
@@ -1426,6 +1370,7 @@ class AgentPool:
                 )
                 # Track creation time for TTL eviction
                 if self.eviction_policy == "ttl":
+                    now_mono = time.monotonic()
                     self.agent_created_at[agent_id] = now_mono
 
             return cast(GyroSI, agents[agent_id])
@@ -1525,7 +1470,7 @@ class AgentPool:
             return
         now = time.monotonic()
         ttl = self.agent_ttl_minutes * 60.0
-        
+
         for shard in self._shards:
             with shard["lock"]:
                 expired = []
@@ -1533,11 +1478,11 @@ class AgentPool:
                     last = self.agent_access_times.get(agent_id, self.agent_created_at.get(agent_id, now))
                     if now - last > ttl:
                         expired.append(agent_id)
-                
+
                 for agent_id in expired:
                     try:
                         agent = shard["agents"].pop(agent_id)
-                        if hasattr(agent, 'close'):
+                        if hasattr(agent, "close"):
                             agent.close()
                     except Exception as e:
                         print(f"Warning: Failed to evict agent {agent_id}: {e}")

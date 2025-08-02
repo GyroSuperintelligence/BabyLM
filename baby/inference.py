@@ -209,7 +209,7 @@ class InferenceEngine:
             entry["key"] = context_key
 
         # Learn the token using LEB128 physics
-        return self.learn(entry, last_intron, state_index)
+        return self.learn(cast(PhenotypeEntry, entry), last_intron, state_index)
 
     def validate_knowledge_integrity(self) -> ValidationReport:
         def _flush_store(s: Any) -> None:
@@ -366,6 +366,9 @@ class InferenceEngine:
         """
         Compute deterministic semantic address for context.
 
+        NOTE: This is a utility method for semantic addressing. Currently unused
+        in the main learning pipeline but available for future routing needs.
+
         Uses hash-based mapping to endogenous modulus for consistent
         address assignment across restarts.
 
@@ -386,10 +389,10 @@ class InferenceEngine:
     def _create_default_phenotype(self, context_key: Tuple[int, int]) -> PhenotypeEntry:
         """
         Create a new PhenotypeEntry with default values.
-        
+
         Args:
             context_key: (state_index, token_id) tuple
-            
+
         Returns:
             PhenotypeEntry with default values
         """

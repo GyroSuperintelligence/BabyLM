@@ -225,6 +225,7 @@ async def chat_completions(
                 try:
                     # Get token text directly from tokenizer
                     from baby.information import _load_tokenizer
+
                     tokenizer = _load_tokenizer(PREFERENCES["tokenizer"]["name"])
                     token_text = tokenizer.decode([token_id])
                 except (AttributeError, Exception):

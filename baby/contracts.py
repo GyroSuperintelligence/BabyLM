@@ -80,7 +80,7 @@ class CycleHookFunction(Protocol):
         self,
         engine: Any,  # Would be IntelligenceEngine but avoiding circular import
         phenotype_entry: PhenotypeEntry,
-        last_token_byte: int,
+        last_intron: int,
         token_id: Optional[int] = None,
         state_index: Optional[int] = None,
     ) -> None:

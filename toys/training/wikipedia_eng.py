@@ -53,7 +53,7 @@ warnings.filterwarnings("ignore")
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from toys.communication.tokenizer import encode as gyro_encode, bytes_to_ids  # noqa: E402
+from baby.information import encode_text_with_sep as gyro_encode  # noqa: E402
 from baby.intelligence import GyroSI  # noqa: E402
 from baby.contracts import AgentConfig, PreferencesConfig  # noqa: E402
 
@@ -121,24 +121,19 @@ def build_agent(private_knowledge_path: Path) -> GyroSI:
         with open(prefs_path) as f:
             preferences = json.load(f)
     else:
-        # Default pruning preferences
+        # Default preferences (keep pruning nested)
         preferences = {
             "pruning": {
                 "confidence_threshold": 0.05,
                 "enable_auto_decay": True,
                 "decay_factor": 0.995,
-            }
+            },
+            # You can also add generation schedule knobs if desired:
+            # "theta_low": 0.05, "theta_high": 0.6, "temperature_floor": 0.2, "temperature_cap": 0.9
         }
 
-    # Configure agent with proper paths
-    preferences_config = cast(
-        PreferencesConfig,
-        {
-            "write_batch_size": 5000,  # Reduce disk flushes
-            "enable_phenomenology_storage": True,  # Keep keys canonical - same coordinate system as runtime
-            **preferences.get("pruning", {}),
-        },
-    )
+    # Configure agent preferences (keep pruning nested)
+    preferences_config = cast(PreferencesConfig, preferences)
 
     config: AgentConfig = {
         "ontology_path": str(PROJECT_ROOT / "memories/public/meta/ontology_keys.npy"),
@@ -146,7 +141,8 @@ def build_agent(private_knowledge_path: Path) -> GyroSI:
         "epistemology_path": str(PROJECT_ROOT / "memories/public/meta/epistemology.npy"),
         "public_knowledge_path": str(dummy_public),
         "private_knowledge_path": str(private_knowledge_path),
-        "learn_batch_size": 5000,  # Bigger write buffer for performance
+        "learn_batch_size": 5000,  # write threshold for OrbitStore
+        "enable_phenomenology_storage": True,  # <-- top-level (so CanonicalView is enabled explicitly)
         "preferences": preferences_config,
     }
 
@@ -249,7 +245,9 @@ def compile_stream(
                 intron_bytes = gyro_encode(article_text)
 
                 # Count tokens for statistics (always enabled for progress tracking)
-                tokens_processed += len(bytes_to_ids(intron_bytes))  # cheap count
+                # Count tokens by LEB128 terminal-byte rule: last byte has top bit 0 after unmask
+                arr = np.frombuffer(intron_bytes, dtype=np.uint8)
+                tokens_processed += int(np.count_nonzero(((arr ^ 0xAA) & 0x80) == 0))
 
                 tape_file.write(intron_bytes)
                 bytes_written += len(intron_bytes)
@@ -291,6 +289,12 @@ def compile_stream(
 
                     # Flush output to show progress in logs
                     sys.stdout.flush()
+
+                    # Periodic commits for crash resiliency (optional)
+                    if agent and (articles_processed % 5000 == 0):
+                        store = agent.engine.operator.store
+                        if hasattr(store, "commit"):
+                            store.commit()
 
         except KeyboardInterrupt:
             print("\n⚠️  Compilation interrupted! Saving progress...")
@@ -612,7 +616,7 @@ Examples:
     if not args.output:
         # Use default knowledge directory
         knowledge_dir = PROJECT_ROOT / "toys/training/knowledge"
-        knowledge_dir.mkdir(exist_ok=True)
+        knowledge_dir.mkdir(parents=True, exist_ok=True)
         args.output = str(knowledge_dir / "wikipedia_simple.gyro" if args.simple else "wikipedia_full.gyro")
         print(f"📁 Using default output: {args.output}")
 

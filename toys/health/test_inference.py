@@ -457,7 +457,6 @@ class TestPruningOperations:
         # Allow for float16 precision differences
         assert abs(preserved_entry["conf"] - 0.5) < 1e-5, f"Expected preserved conf≈0.5, got {preserved_entry['conf']}"
 
-
     def test_auto_pruning_hook_registration_disabled(
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:

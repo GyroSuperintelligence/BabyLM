@@ -275,7 +275,13 @@ class TestHookSystem:
         agent = isolated_agent_factory(tmp_path)
         captured_calls: List[Dict[str, Any]] = []
 
-        def test_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_token_byte: int, token_id: Optional[int] = None, state_index: Optional[int] = None) -> None:
+        def test_hook(
+            engine: Any,
+            phenotype_entry: PhenotypeEntry,
+            last_token_byte: int,
+            token_id: Optional[int] = None,
+            state_index: Optional[int] = None,
+        ) -> None:
             captured_calls.append(
                 {"phenotype": phenotype_entry, "last_byte": last_token_byte, "call_count": len(captured_calls) + 1}
             )
@@ -299,7 +305,13 @@ class TestHookSystem:
         agent = isolated_agent_factory(tmp_path)
         call_count = 0
 
-        def test_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_token_byte: int, token_id: Optional[int] = None, state_index: Optional[int] = None) -> None:
+        def test_hook(
+            engine: Any,
+            phenotype_entry: PhenotypeEntry,
+            last_token_byte: int,
+            token_id: Optional[int] = None,
+            state_index: Optional[int] = None,
+        ) -> None:
             nonlocal call_count
             call_count += 1
 
