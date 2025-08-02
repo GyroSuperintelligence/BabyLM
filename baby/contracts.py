@@ -2,7 +2,7 @@
 Shared contracts (protocols and type definitions) for the GyroSI S4 system.
 """
 
-from typing import Any, Dict, Optional, Protocol, TypedDict
+from typing import TypedDict, Protocol, Dict, Any, Optional
 
 
 class PhenotypeEntry(TypedDict):
@@ -20,10 +20,7 @@ class PhenotypeEntry(TypedDict):
 
 
 class PreferencesConfig(TypedDict, total=False):
-    """Preferences and settings configuration.
-
-    write_batch_size: Number of store writes to buffer before flushing to disk.
-    """
+    """Preferences and settings configuration."""
 
     # Storage preferences
     storage_backend: str  # "binary_struct"
@@ -84,8 +81,10 @@ class CycleHookFunction(Protocol):
         engine: Any,  # Would be IntelligenceEngine but avoiding circular import
         phenotype_entry: PhenotypeEntry,
         last_token_byte: int,
+        token_id: Optional[int] = None,
+        state_index: Optional[int] = None,
     ) -> None:
-        """Post-cycle hook callback."""
+        """Post-cycle hook callback with token-level information."""
         ...
 
 

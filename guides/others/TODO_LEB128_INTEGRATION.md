@@ -35,9 +35,69 @@
 - [x] **Real system tests**: Integration with actual epistemology and knowledge store
 - [x] **Performance validation**: Token-level processing is faster than byte-level
 
+## ✅ COMPLETED - Complete LEB128 Migration
+
+### 25. Full Pipeline Migration - COMPLETED ✅
+- [x] **Remove legacy fallbacks**: Eliminated all byte-level fallback mechanisms
+- [x] **Update process_ingress()**: Now uses only LEB128 token-level generation
+- [x] **Update respond()**: Now uses only LEB128 token-level generation  
+- [x] **Update _choose_intron()**: Now uses only token-level generation
+- [x] **Update learn_token()**: Now uses only LEB128 token-level learning
+- [x] **Remove legacy methods**: Eliminated _choose_intron_byte_level and _learn_token_byte_level
+
+## ✅ COMPLETED - Test Loading Fix
+
+### 26. Test Loading Issues - COMPLETED ✅
+- [x] **Fixed `_read_index()` Path issue**: Changed `self.index_path.exists()` to `os.path.exists(self.index_path)` 
+- [x] **Fixed `_save_bloom()` attribute issue**: Changed `self.bloom_path` to `self._bloom_sidecar_path()`
+- [x] **Fixed lock reference**: Changed `self._lock` to `self.lock` in `_save_bloom()`
+- [x] **Verified test loading**: All test suites now load and run properly
+- [x] **Confirmed functionality**: Inference, Information, and Intelligence tests all passing
+
+## 🔄 IN PROGRESS - Advanced Features Implementation
+
+### 21. Stream Processing Utilities - COMPLETED ✅
+- [x] **`text_to_intron_stream()`**: Convert text to intron stream using tokenizer + LEB128 + ψ
+- [x] **`intron_stream_to_text()`**: Convert intron stream back to text
+- [x] **`process_text_stream_leb128()`**: Process text stream using LEB128 physics
+- [x] **`generate_text_stream_leb128()`**: Generate text stream using LEB128 physics
+
+### 22. Advanced Token Physics - COMPLETED ✅
+- [x] **`compute_token_divergence()`**: Compute angular divergence introduced by a token
+- [x] **`precompute_common_tokens()`**: Pre-compute transitions for frequently used tokens
+- [x] **Enhanced resonance calculation**: More sophisticated than current implementation
+- [x] **Orbit cardinality lookup**: Proper orbit size calculation
+
+### 23. Enhanced Phenotype Storage - ALREADY EXISTS ✅
+- [x] **Minimal phenotype**: Already implemented as `PhenotypeEntry` in contracts.py
+- [x] **Compact storage format**: Already using minimal 12-byte records
+- [x] **Efficient serialization**: Already optimized in existing code
+
+### 24. Advanced Integration Features - COMPLETED ✅
+- [x] **Enhanced learning methods**: Already implemented in `learn_token()`
+- [x] **Advanced generation methods**: Already implemented in `generate_token_leb128()`
+- [x] **Token-level physics**: Already integrated throughout the codebase
+
+## ✅ COMPLETED - Critical Bug Fixes (Latest)
+
+### 19. Critical Correctness Issues - FIXED ✅
+- [x] **Off-by-one state trajectory bug**: Fixed `_process_epistemology_chunk` to use `st[i+1]` for state index
+- [x] **Auto-prune hook disabled**: Removed unconditional return and added proper enable_auto_decay check
+- [x] **Stale gene_mac_m_int in epistemology mode**: Added assignment to keep it current
+- [x] **Index file parsing issues**: Changed to dash-separated format (`state_idx-token_id:offset`)
+- [x] **Duplicate write_batch_size field**: Removed duplicate from PreferencesConfig docstring
+
+### 20. Medium-Severity Issues - FIXED ✅
+- [x] **Token mask overflow**: Clamp token_id to 8 bits in `_create_default_phenotype`
+- [x] **Bloom filter race condition**: Wrapped `_save_bloom()` in same lock as `commit()`
+- [x] **TTL eviction clock issues**: Changed to `time.monotonic()` in `_evict_expired_agents`
+- [x] **Vocabulary size caching**: Cache vocab size in `_generate_random_token`
+- [x] **External adapter double-mask**: Use direct tokenizer decode instead of bytes
+- [x] **Stray pass statement**: Removed from `_create_default_store`
+
 ## 🔄 IN PROGRESS - Main System Integration
 
-### 6. Integrate LEB128 into Main Inference Engine ✅
+### 6. Integrate LEB128 into Main Inference Engine
 - [x] **Update `baby/inference.py`**: Replace byte-level `learn_token()` with LEB128 version
 - [x] **Update `baby/intelligence.py`**: Replace byte-level processing with token-level
 - [x] **Update generation pipeline**: Use token-level physics instead of byte-level
@@ -45,18 +105,18 @@
 - [x] **Performance optimization**: Ensure no performance regressions
 
 ### 7. Update Core Learning Pipeline
-- [ ] **Replace `learn_token()`**: Use LEB128 physics in `baby/inference.py`
-- [ ] **Update `process_egress()`**: Use token-level state transitions
-- [ ] **Update `respond()`**: Use token-level generation
-- [ ] **Update hook system**: Ensure hooks work with token-level processing
-- [ ] **Update phenotype storage**: Use minimal 12-byte records
+- [x] **Replace `learn_token()`**: Use LEB128 physics in `baby/inference.py`
+- [x] **Update `process_egress()`**: Use token-level state transitions
+- [x] **Update `respond()`**: Use token-level generation
+- [x] **Update hook system**: Ensure hooks work with token-level processing
+- [x] **Update phenotype storage**: Use minimal 12-byte records
 
 ### 8. Update Generation Pipeline
-- [ ] **Replace byte-level generation**: Use token-level physics
-- [ ] **Update `_choose_intron()`**: Use token-level selection
-- [ ] **Update resonance calculation**: Use token-level resonance
-- [ ] **Update temperature handling**: Ensure proper token-level sampling
-- [ ] **Update confidence weighting**: Use token-level confidence
+- [x] **Replace byte-level generation**: Use token-level physics
+- [x] **Update `_choose_intron()`**: Use token-level selection
+- [x] **Update resonance calculation**: Use token-level resonance with caching
+- [x] **Update temperature handling**: Ensure proper token-level sampling with softmax
+- [x] **Update confidence weighting**: Use token-level confidence with orbit factors
 
 ## 📋 TODO - Testing and Validation
 
@@ -68,18 +128,18 @@
 - [ ] **Learning testing**: Verify learning still works correctly
 
 ### 10. Integration Testing
-- [ ] **External adapter**: Ensure API still works with LEB128 integration
+- [x] **External adapter**: Ensure API still works with LEB128 integration
 - [ ] **Diagnostic scripts**: Update `diagnose_trained_model.py` for LEB128
-- [ ] **Hook system**: Ensure hooks work with token-level processing
-- [ ] **Store compatibility**: Ensure OrbitStore works with new phenotype format
+- [x] **Hook system**: Ensure hooks work with token-level processing
+- [x] **Store compatibility**: Ensure OrbitStore works with new phenotype format
 - [ ] **Configuration**: Update any config files for LEB128 settings
 
 ## 🎯 TODO - Performance and Optimization
 
 ### 11. Performance Optimization
-- [ ] **TokenSTT caching**: Implement efficient caching of token transitions
-- [ ] **Memory optimization**: Optimize memory usage for token-level processing
-- [ ] **Speed optimization**: Ensure token-level processing is faster than byte-level
+- [x] **TokenSTT caching**: Implement efficient caching of token transitions
+- [x] **Memory optimization**: Optimize memory usage for token-level processing
+- [x] **Speed optimization**: Ensure token-level processing is faster than byte-level
 - [ ] **Compression**: Implement Zstandard compression for intron streams
 - [ ] **Parallel processing**: Consider parallel token processing where possible
 
@@ -100,11 +160,11 @@
 - [ ] **Update examples**: Provide examples of LEB128 usage
 
 ### 14. Code Cleanup
-- [ ] **Remove old byte-level code**: Clean up unused byte-level functions
-- [ ] **Update imports**: Ensure all imports are correct
-- [ ] **Fix lints**: Address any remaining linting issues
-- [ ] **Type hints**: Add proper type hints for LEB128 functions
-- [ ] **Error handling**: Add proper error handling for LEB128 functions
+- [x] **Remove old byte-level code**: Clean up unused byte-level functions
+- [x] **Update imports**: Ensure all imports are correct
+- [x] **Fix lints**: Address any remaining linting issues
+- [x] **Type hints**: Add proper type hints for LEB128 functions
+- [x] **Error handling**: Add proper error handling for LEB128 functions
 
 ## 🧪 TODO - Experimental Features
 
@@ -156,10 +216,10 @@
 5. **Dimensional grounding**: 3D/6DoF physics prevents hallucinations
 
 ### Next Priority:
-**Integrate LEB128 physics into main `baby/inference.py` to replace current byte-level approach**
+**Test the improved system to see if text generation quality has improved**
 
 ---
 
-**Status**: LEB128 physics foundation complete ✅, ready for main system integration 🔄
-**Priority**: Update main inference engine to use token-level LEB128 physics
-**Timeline**: Immediate integration needed to fix current incoherent text generation 
+**Status**: LEB128 physics foundation complete ✅, main system integration complete ✅
+**Priority**: Test improved text generation quality
+**Timeline**: Ready to test if LEB128 integration fixes incoherent text generation 

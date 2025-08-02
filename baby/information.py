@@ -28,6 +28,221 @@ Build steps:
 """
 
 
+# ---------- Tokenization & LEB128 Functions ----------
+
+def _load_tokenizer(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> Any:
+    """Load tokenizer from HuggingFace."""
+    from tokenizers import Tokenizer
+    tokenizer_root = base_path / "memories" / "public" / "tokenizers"
+    tokenizer_path = tokenizer_root / name / "tokenizer.json"
+    if not tokenizer_path.exists():
+        raise FileNotFoundError(f"Tokenizer not found: {tokenizer_path}")
+    return Tokenizer.from_file(str(tokenizer_path))
+
+
+def _id_to_bytes(idx: int) -> List[int]:
+    """Convert token ID to LEB128 bytes."""
+    if idx < 0:
+        raise ValueError("Token ID must be non-negative")
+    
+    bytes_list = []
+    while True:
+        byte = idx & 0x7F
+        idx >>= 7
+        if idx == 0:
+            bytes_list.append(byte)
+            break
+        else:
+            bytes_list.append(byte | 0x80)
+    return bytes_list
+
+
+def _bytes_to_ids(blob: bytes) -> List[int]:
+    """Convert LEB128 bytes to token IDs."""
+    ids, cur, shift = [], 0, 0
+    for i, b in enumerate(blob):
+        if shift > 28:  # Prevent overflow (32-bit token ID assumption)
+            raise ValueError(f"Token ID too large at byte {i}")
+        cur |= (b & 0x7F) << shift
+        if b & 0x80:
+            shift += 7
+        else:
+            ids.append(cur)
+            cur, shift = 0, 0
+    if shift:
+        raise ValueError("Incomplete token ID sequence")
+    return ids
+
+
+def _apply_mask(buf: bytes) -> bytes:
+    """XOR every byte with 0xAA – vectorised & memory‑efficient."""
+    # bytes ↔ introns is a pure involution: f(f(x)) == x
+    return bytes(b ^ 0xAA for b in buf)
+
+
+def encode_text(text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> bytes:
+    """Encode text to bytes via tokenizer + LEB128 (vectorized). Uses base_path for root."""
+    # 1. text → token IDs ----------------------------------------------------
+    tokenizer = _load_tokenizer(name, base_path)
+    ids = tokenizer.encode(text).ids
+
+    # 2. IDs → pure‑LEB128 intron stream ------------------------------------
+    introns = bytearray(len(ids) * 5)  # worst‑case pre‑alloc
+    pos = 0
+    for tid in ids:
+        val = tid
+        while True:
+            byte = val & 0x7F
+            val >>= 7
+            introns[pos] = byte | (0x80 if val else 0x00)
+            pos += 1
+            if not val:
+                break
+
+    # 3. intron stream → external masked bytes ------------------------------
+    return _apply_mask(bytes(introns[:pos]))
+
+
+def decode_text(blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> str:
+    """Decode LEB128 bytes back to text via tokenizer. Uses base_path for root."""
+    # 0. Trim at EOS sentinel (remains valid after masking)
+    if 0x00 in blob:
+        blob = blob.split(b"\x00", 1)[0]
+
+    # 1. external bytes → intron stream -------------------------------------
+    introns = _apply_mask(blob)
+
+    # 2. intron stream → token IDs ------------------------------------------
+    try:
+        ids = _bytes_to_ids(introns)
+        # 3. IDs → text ------------------------------------------------------
+        tokenizer = _load_tokenizer(name, base_path)
+        return tokenizer.decode(ids)
+    except Exception:
+        # malformed stream fallback
+        return blob.decode("utf-8", errors="replace")
+
+
+def get_vocab_size(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> int:
+    """Get vocabulary size of a tokenizer. Uses base_path for root."""
+    tokenizer = _load_tokenizer(name, base_path)
+    return tokenizer.get_vocab_size()
+
+
+def token_id_to_bytes(tok_id: int) -> bytes:
+    """Convert a single token ID to bytes via LEB128 and apply the 0xAA mask."""
+    introns = bytearray(5)  # worst-case pre-alloc
+    pos = 0
+    val = tok_id
+    while True:
+        byte = val & 0x7F
+        val >>= 7
+        introns[pos] = byte | (0x80 if val else 0x00)
+        pos += 1
+        if not val:
+            break
+    return _apply_mask(bytes(introns[:pos]))
+
+
+def bytes_to_token_id(bs: bytes) -> int:
+    """Convert bytes back to a single token ID. Assumes complete token."""
+    # First unmask the bytes, then decode
+    unmasked = _apply_mask(bs)
+    ids = _bytes_to_ids(unmasked)
+    if len(ids) != 1:
+        raise ValueError(f"Expected single token ID, got {len(ids)}")
+    return ids[0]
+
+
+def bytes_to_token_ids(bs: bytes) -> List[int]:
+    """Convert bytes back to a list of token IDs."""
+    unmasked = _apply_mask(bs)
+    return _bytes_to_ids(unmasked)
+
+
+# ---------- ψ Isomorphism Functions ----------
+
+def ψ(byte: int) -> int:
+    """ψ isomorphism: byte → intron via XOR 0xAA."""
+    return byte ^ 0xAA
+
+
+def ψ_inv(intron: int) -> int:
+    """ψ⁻¹ isomorphism: intron → byte via XOR 0xAA."""
+    return intron ^ 0xAA
+
+
+# ---------- Token ↔ Intron Conversion ----------
+
+def token_to_introns(token_id: int) -> List[int]:
+    """Convert a token ID to its LEB128 intron sequence.
+    
+    This is the ψ isomorphism: token_id → LEB128 bytes → introns via XOR 0xAA.
+    Each intron is a single byte that can be fed directly to GyroSI physics.
+    
+    Args:
+        token_id: The token ID to convert
+        
+    Returns:
+        List of intron bytes (0-255) that represent the token
+    """
+    # Convert token ID to LEB128 bytes
+    leb_bytes = _id_to_bytes(token_id)
+    # Apply ψ isomorphism (XOR with 0xAA) to get introns
+    introns = [b ^ 0xAA for b in leb_bytes]
+    return introns
+
+
+def introns_to_token(introns: List[int]) -> int:
+    """Convert an intron sequence back to a token ID.
+    
+    This is the ψ⁻¹ isomorphism: introns → LEB128 bytes → token_id.
+    
+    Args:
+        introns: List of intron bytes (0-255)
+        
+    Returns:
+        The token ID that produced these introns
+    """
+    # Apply ψ⁻¹ isomorphism (XOR with 0xAA) to get LEB128 bytes
+    leb_bytes = [i ^ 0xAA for i in introns]
+    # Convert LEB128 bytes to token ID
+    token_ids = _bytes_to_ids(bytes(leb_bytes))
+    if len(token_ids) != 1:
+        raise ValueError(f"Expected single token ID, got {len(token_ids)}")
+    return token_ids[0]
+
+
+# ---------- SEP Token Utilities ----------
+
+SEP_ID = 102
+
+
+def sep_bytes(count: int = 1) -> bytes:
+    """Generate SEP token bytes for sentence/article boundaries."""
+    introns = bytearray(count * 5)  # worst-case pre-alloc
+    pos = 0
+    for _ in range(count):
+        val = SEP_ID
+        while True:
+            byte = val & 0x7F
+            val >>= 7
+            introns[pos] = byte | (0x80 if val else 0x00)
+            pos += 1
+            if not val:
+                break
+    return _apply_mask(bytes(introns[:pos]))
+
+
+def encode_text_with_sep(
+    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]
+) -> bytes:
+    """Encode text and append a single SEP token."""
+    return encode_text(text, name, base_path) + sep_bytes()
+
+
+# ---------- Information Engine ----------
+
 class InformationEngine:
     """
     S2: Measurement & Resource Coordination.
@@ -60,11 +275,17 @@ class InformationEngine:
         self.ep = np.load(ep_path, mmap_mode="r")
         self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
         if phenomap_path:
-            self.orbit_map = np.load(phenomap_path, mmap_mode="r")
-            sizes_path = Path(phenomap_path).with_name("orbit_sizes.npy")
-            if sizes_path.exists():
-                self.orbit_cardinality = np.load(sizes_path, mmap_mode="r")
-            else:
+            try:
+                self.orbit_map = np.load(phenomap_path, mmap_mode="r")
+                sizes_path = Path(phenomap_path).with_name("orbit_sizes.npy")
+                if sizes_path.exists():
+                    self.orbit_cardinality = np.load(sizes_path, mmap_mode="r")
+                else:
+                    self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
+            except Exception as e:
+                print(f"Warning: Could not load phenomenology map from {phenomap_path}: {e}")
+                print("Continuing without phenomenology mapping...")
+                self.orbit_map = None
                 self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
         if theta_path:
             try:
@@ -76,7 +297,11 @@ class InformationEngine:
         self._v_max = 1 if self.orbit_cardinality is None else int(np.max(self.orbit_cardinality))
         # Early fail if theta.npy is missing or corrupt
         if self._theta_table is None:
-            raise RuntimeError("theta.npy is missing or corrupt; required for divergence calculations.")
+            raise RuntimeError(
+                f"theta.npy is missing or corrupt at {theta_path}; required for divergence calculations. "
+                f"Please ensure theta.npy exists alongside epistemology.npy. "
+                f"Run the ontology builder to generate missing assets."
+            )
 
     def get_index_from_state(self, state_int: int) -> int:
         """

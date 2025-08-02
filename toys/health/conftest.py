@@ -204,7 +204,7 @@ def isolated_agent_factory(tmp_path: Path, test_env: TestEnvDict) -> Generator[C
             "ontology_path": test_env["main_meta_files"]["ontology"],
             "phenomenology_map_path": test_env["main_meta_files"]["phenomenology"],
             "knowledge_path": str(agent_dir / "knowledge.bin"),
-            "epistemology_path": "memories/public/meta/epistemology.npy",
+            "epistemology_path": test_env["main_meta_files"]["epistemology"],
             "base_path": str(tmp_path),
         }
         agent = GyroSI(config, agent_id=f"isolated_{uuid.uuid4().hex[:8]}", base_path=tmp_path)

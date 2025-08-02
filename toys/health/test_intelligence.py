@@ -5,14 +5,14 @@ Tests focus on end-to-end flows with token-aware architecture.
 
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import pytest
 
 from baby.contracts import PhenotypeEntry
 from baby.intelligence import AgentPool, GyroSI, orchestrate_turn
-from toys.communication import tokenizer as gyrotok
+from baby.information import encode_text, decode_text, bytes_to_token_ids
 
 # Test configuration
 TOKENIZER_NAME = "bert-base-uncased"
@@ -46,7 +46,7 @@ class TestTokenAwareIntelligence:
 
         # Use tokenized input
         test_text = "hello world test"
-        tokenized_input = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+        tokenized_input = encode_text(test_text, name=TOKENIZER_NAME)
         agent.ingest(tokenized_input)
 
         # Verify phenotypes use (state_index, token_id) keys
@@ -72,7 +72,7 @@ class TestTokenAwareIntelligence:
         all_keys = set()
 
         for text in texts:
-            tokenized = gyrotok.encode(text, name=TOKENIZER_NAME)
+            tokenized = encode_text(text, name=TOKENIZER_NAME)
             agent.ingest(tokenized)
 
             # Collect keys after each ingestion
@@ -93,7 +93,7 @@ class TestTokenAwareIntelligence:
 
         # Process a complete token sequence
         test_text = "test"
-        tokenized = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+        tokenized = encode_text(test_text, name=TOKENIZER_NAME)
 
         for byte_val in tokenized:
             agent.engine.process_egress(byte_val)
@@ -137,7 +137,7 @@ class TestTokenGeneration:
 
         # Generate response with tokenized input
         input_text = "Generate a response"
-        tokenized_input = gyrotok.encode(input_text, name=TOKENIZER_NAME)
+        tokenized_input = encode_text(input_text, name=TOKENIZER_NAME)
         response_bytes = agent.respond(tokenized_input, max_new_tokens=5)
 
         # Verify response contains complete tokens
@@ -146,7 +146,7 @@ class TestTokenGeneration:
 
         # Should be decodable as complete token sequence
         try:
-            decoded_tokens = gyrotok.bytes_to_ids(response_bytes)
+            decoded_tokens = bytes_to_token_ids(response_bytes)
             assert len(decoded_tokens) > 0, "Should decode at least one token"
             assert all(isinstance(tok_id, int) for tok_id in decoded_tokens), "All tokens should be integers"
         except ValueError as e:
@@ -157,11 +157,11 @@ class TestTokenGeneration:
         agent = isolated_agent_factory(tmp_path)
 
         input_text = "Test vocabulary"
-        tokenized_input = gyrotok.encode(input_text, name=TOKENIZER_NAME)
+        tokenized_input = encode_text(input_text, name=TOKENIZER_NAME)
         response_bytes = agent.respond(tokenized_input, max_new_tokens=10)
 
         # Decode and validate token IDs
-        decoded_tokens = gyrotok.bytes_to_ids(response_bytes)
+        decoded_tokens = bytes_to_token_ids(response_bytes)
 
         for token_id in decoded_tokens:
             assert 0 <= token_id <= 30522, f"Token ID {token_id} outside BERT vocabulary range"
@@ -173,17 +173,17 @@ class TestTokenGeneration:
         agent = isolated_agent_factory(tmp_path)
 
         input_text = "Roundtrip test"
-        tokenized_input = gyrotok.encode(input_text, name=TOKENIZER_NAME)
+        tokenized_input = encode_text(input_text, name=TOKENIZER_NAME)
         response_bytes = agent.respond(tokenized_input, max_new_tokens=8)
 
         # Decode to text and re-encode
-        response_text = gyrotok.decode(response_bytes, name=TOKENIZER_NAME)
-        re_encoded = gyrotok.encode(response_text, name=TOKENIZER_NAME)
+        response_text = decode_text(response_bytes, name=TOKENIZER_NAME)
+        re_encoded = encode_text(response_text, name=TOKENIZER_NAME)
 
         # Check that decode-encode-decode is idempotent (second decode equals first decode)
         # This verifies that the tokenizer can roundtrip the text without loss
         # Note: Tokenizer may normalize spacing around special tokens, so we normalize for comparison
-        roundtrip_text = gyrotok.decode(re_encoded, name=TOKENIZER_NAME)
+        roundtrip_text = decode_text(re_encoded, name=TOKENIZER_NAME)
         # Normalize by removing all spaces to handle tokenizer spacing differences
         normalized_response = response_text.replace(" ", "")
         normalized_roundtrip = roundtrip_text.replace(" ", "")
@@ -216,7 +216,7 @@ class TestAgentLifecycle:
 
         # Learn from tokenized input
         for text in TEST_TEXTS[:3]:
-            tokenized = gyrotok.encode(text, name=TOKENIZER_NAME)
+            tokenized = encode_text(text, name=TOKENIZER_NAME)
             agent.ingest(tokenized)
 
         final_state = agent.get_agent_info()
@@ -231,7 +231,7 @@ class TestAgentLifecycle:
         agent = isolated_agent_factory(tmp_path)
 
         for test_text in TEST_TEXTS:
-            tokenized_input = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+            tokenized_input = encode_text(test_text, name=TOKENIZER_NAME)
             response = agent.respond(tokenized_input, max_new_tokens=5)
 
             assert isinstance(response, bytes), f"Response should be bytes for input '{test_text}'"
@@ -253,8 +253,8 @@ class TestAgentLifecycle:
         text1 = "Agent one learns this"
         text2 = "Agent two learns that"
 
-        agent1.ingest(gyrotok.encode(text1, name=TOKENIZER_NAME))
-        agent2.ingest(gyrotok.encode(text2, name=TOKENIZER_NAME))
+        agent1.ingest(encode_text(text1, name=TOKENIZER_NAME))
+        agent2.ingest(encode_text(text2, name=TOKENIZER_NAME))
 
         # Should have independent stores
         keys1 = set(_get_store_keys(agent1.engine.operator.store))
@@ -275,7 +275,7 @@ class TestHookSystem:
         agent = isolated_agent_factory(tmp_path)
         captured_calls: List[Dict[str, Any]] = []
 
-        def test_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_token_byte: int) -> None:
+        def test_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_token_byte: int, token_id: Optional[int] = None, state_index: Optional[int] = None) -> None:
             captured_calls.append(
                 {"phenotype": phenotype_entry, "last_byte": last_token_byte, "call_count": len(captured_calls) + 1}
             )
@@ -283,7 +283,7 @@ class TestHookSystem:
         agent.add_monitoring_hook(test_hook)
 
         # Process tokenized input that should trigger hooks during learning
-        test_input = gyrotok.encode("hook test", name=TOKENIZER_NAME)
+        test_input = encode_text("hook test", name=TOKENIZER_NAME)
         agent.respond(test_input, max_new_tokens=3)
 
         # Should have captured hook calls during input processing (learning phase)
@@ -299,7 +299,7 @@ class TestHookSystem:
         agent = isolated_agent_factory(tmp_path)
         call_count = 0
 
-        def test_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_token_byte: int) -> None:
+        def test_hook(engine: Any, phenotype_entry: PhenotypeEntry, last_token_byte: int, token_id: Optional[int] = None, state_index: Optional[int] = None) -> None:
             nonlocal call_count
             call_count += 1
 
@@ -309,7 +309,7 @@ class TestHookSystem:
         assert removed, "Hook removal should return True when hook found"
 
         # Process input - should not trigger removed hook
-        test_input = gyrotok.encode("test", name=TOKENIZER_NAME)
+        test_input = encode_text("test", name=TOKENIZER_NAME)
         agent.respond(test_input)
 
         assert call_count == 0, "Removed hook should not be called"
@@ -388,8 +388,8 @@ class TestAgentPoolOrchestration:
         user_text = "User learns this information"
         assistant_text = "Assistant learns that information"
 
-        user_agent.ingest(gyrotok.encode(user_text, name=TOKENIZER_NAME))
-        assistant_agent.ingest(gyrotok.encode(assistant_text, name=TOKENIZER_NAME))
+        user_agent.ingest(encode_text(user_text, name=TOKENIZER_NAME))
+        assistant_agent.ingest(encode_text(assistant_text, name=TOKENIZER_NAME))
 
         # Verify independent learning
         user_final = user_agent.get_agent_info()
@@ -406,13 +406,13 @@ class TestTokenizerIntegration:
         """Test tokenizer roundtrip preserves content."""
         for test_text in TEST_TEXTS:
             # Encode to bytes
-            encoded = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+            encoded = encode_text(test_text, name=TOKENIZER_NAME)
 
             # Decode back to text
-            decoded = gyrotok.decode(encoded, name=TOKENIZER_NAME)
+            decoded = decode_text(encoded, name=TOKENIZER_NAME)
 
             # Re-encode and compare
-            re_encoded = gyrotok.encode(decoded, name=TOKENIZER_NAME)
+            re_encoded = encode_text(decoded, name=TOKENIZER_NAME)
 
             assert encoded == re_encoded, f"Roundtrip failed for text: '{test_text}'"
 
@@ -422,7 +422,7 @@ class TestTokenizerIntegration:
         invalid_bytes = b"\xff\xff\xff"
 
         # Should not raise exception (falls back to UTF-8)
-        result = gyrotok.decode(invalid_bytes, name=TOKENIZER_NAME)
+        result = decode_text(invalid_bytes, name=TOKENIZER_NAME)
         assert isinstance(result, str), "Should return string even for invalid input"
 
     def test_tokenizer_agent_compatibility(
@@ -433,11 +433,11 @@ class TestTokenizerIntegration:
 
         for test_text in TEST_TEXTS[:3]:  # Test subset to avoid long test
             # Encode and process with agent
-            encoded = gyrotok.encode(test_text, name=TOKENIZER_NAME)
+            encoded = encode_text(test_text, name=TOKENIZER_NAME)
             response = agent.respond(encoded, max_new_tokens=3)
 
             # Should be decodable
-            decoded_response = gyrotok.decode(response, name=TOKENIZER_NAME)
+            decoded_response = decode_text(response, name=TOKENIZER_NAME)
             assert isinstance(decoded_response, str), f"Response should decode to string for '{test_text}'"
 
 
@@ -550,7 +550,7 @@ class TestMaintenanceOperations:
 
         # Learn some data first
         for text in TEST_TEXTS[:2]:
-            tokenized = gyrotok.encode(text, name=TOKENIZER_NAME)
+            tokenized = encode_text(text, name=TOKENIZER_NAME)
             agent.ingest(tokenized)
 
         # Run maintenance
@@ -564,7 +564,7 @@ class TestMaintenanceOperations:
         agent = isolated_agent_factory(tmp_path)
 
         # Learn something to change state
-        test_input = gyrotok.encode("change state", name=TOKENIZER_NAME)
+        test_input = encode_text("change state", name=TOKENIZER_NAME)
         agent.ingest(test_input)
 
         # Verify state changed
@@ -599,7 +599,7 @@ class TestEdgeCasesAndErrorHandling:
 
         # Create large input
         large_text = "This is a large input. " * 100
-        large_input = gyrotok.encode(large_text, name=TOKENIZER_NAME)
+        large_input = encode_text(large_text, name=TOKENIZER_NAME)
 
         # Should handle without error
         response = agent.respond(large_input, max_new_tokens=5)
@@ -624,7 +624,7 @@ class TestEdgeCasesAndErrorHandling:
         # Simulate concurrent operations
         responses = []
         for i in range(5):
-            test_input = gyrotok.encode(f"concurrent test {i}", name=TOKENIZER_NAME)
+            test_input = encode_text(f"concurrent test {i}", name=TOKENIZER_NAME)
             response = agent.respond(test_input, max_new_tokens=2)
             responses.append(response)
 

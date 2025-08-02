@@ -118,39 +118,6 @@ class MinimalPhenotype:
         state_index, token_id, confidence = struct.unpack("<IIf", data)
         return cls(state_index, token_id, 0, confidence)  # exon_mask computed on demand
 
-# Endogenous compression utilities
-def compress_intron_stream(introns: List[int], output_file: str):
-    """Compress intron stream using Zstandard."""
-    try:
-        import zstandard as zstd  # type: ignore
-        compressor = zstd.ZstdCompressor(level=5)
-        
-        with open(output_file, 'wb') as f:
-            compressed = compressor.compress(bytes(introns))
-            f.write(compressed)
-            
-        return len(compressed)
-    except ImportError:
-        # Fallback to simple storage
-        with open(output_file, 'wb') as f:
-            f.write(bytes(introns))
-        return len(introns)
-
-def decompress_intron_stream(input_file: str) -> List[int]:
-    """Decompress intron stream."""
-    try:
-        import zstandard as zstd  # type: ignore
-        decompressor = zstd.ZstdDecompressor()
-        
-        with open(input_file, 'rb') as f:
-            compressed = f.read()
-            introns = list(decompressor.decompress(compressed))
-            
-        return introns
-    except ImportError:
-        # Fallback to simple reading
-        with open(input_file, 'rb') as f:
-            return list(f.read())
 
 # Stream processing utilities
 def text_to_intron_stream(text: str, tokenizer) -> Iterator[int]:

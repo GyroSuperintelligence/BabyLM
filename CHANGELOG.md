@@ -2,6 +2,81 @@
 
 ---
 
+## [0.9.6.7] – 2025-08-02
+
+### 🔧 Critical Correctness Fixes
+
+This release addresses critical correctness issues, focusing on store iteration, cycle counting, learning states, and performance optimizations.
+
+#### 🚨 Critical Fixes
+
+* **OrbitStore.iter_entries() - Fixed Unreachable Code**
+  * Fixed unreachable code after `return` statement
+  * Now properly yields pending writes first, then committed entries via index
+  * No more full file scanning - uses O(1) index lookups
+  * Includes defensive copies to prevent mutation issues
+
+* **OrbitStore.data Property - Simplified to Reuse iter_entries()**
+  * Removed duplicate code and dead code paths
+  * Now consistently uses the optimized iter_entries() method
+  * Eliminates code duplication and potential inconsistencies
+
+* **process_egress_bulk Double Counting - Fixed Cycle Count**
+  * Now only increments cycle_count for epistemology path
+  * Scalar path already increments per byte, so no double counting
+  * Ensures accurate cycle tracking for both processing modes
+
+* **_process_epistemology_chunk - Fixed Learning with Post-State**
+  * Now computes `post_state = epistemology[st[i], intron]` for each token
+  * Uses the correct post-intron state for learning instead of pre-intron state
+  * Ensures final token in chunk learns from correct state
+  * Critical for proper phenotype learning and state evolution
+
+* **AgentPool TTL Eviction - Fixed Tracking and Eviction Logic**
+  * Added `agent_created_at` tracking dictionary
+  * Fixed eviction to use proper monotonic time tracking
+  * Now properly removes expired agents and cleans up tracking dicts
+  * Uses `time.monotonic()` to avoid clock jump issues
+
+* **_choose_intron Method - Fixed Undefined Reference**
+  * Fixed undefined `_v_max` reference that would cause AttributeError
+  * Now computes `v_max` locally from orbit cardinality
+  * Prevents crashes when method is called
+
+#### 🔧 Performance Optimizations
+
+* **Index Parsing Robustness**
+  * Added legacy format handling for backward compatibility
+  * Added index sanity checks to validate offset/size bounds
+  * Skips malformed entries gracefully
+  * Handles both new and old index formats
+
+* **Token Generation Performance**
+  * Reduced max_entries_to_check from 1000 to 50 for faster token generation
+  * Replaced `max(self.s2.orbit_cardinality)` with reasonable default (1000)
+  * Prevents hanging on large orbit cardinality arrays
+  * Optimized candidate selection for faster response generation
+
+#### 🎯 Impact
+
+* **Orchestrated Conversation Test**: Now passes (3.5 minutes vs. hanging before)
+* **Store Iteration**: Uses optimized index-based lookups instead of full scans
+* **Learning Accuracy**: Correct post-state learning ensures proper phenotype evolution
+* **Memory Management**: Proper TTL eviction prevents memory leaks
+* **Performance**: Faster token generation and store operations
+
+#### 📝 Technical Details
+
+* **Store Consistency**: iter_entries() now includes pending writes and uses index
+* **Cycle Accuracy**: No more double counting in bulk processing
+* **State Learning**: Correct post-intron states for phenotype learning
+* **Index Robustness**: Handles legacy formats and validates entries
+* **Performance**: Reduced expensive operations in token generation
+
+This release resolves the critical correctness issues that were causing hanging tests and incorrect learning behavior, making the system much more reliable and performant.
+
+---
+
 ## [0.9.6.7] – 2025-08-01
 
 ### 🚀 OrbitStore Simplification: Performance & Reliability Overhaul

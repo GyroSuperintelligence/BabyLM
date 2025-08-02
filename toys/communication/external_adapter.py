@@ -39,7 +39,7 @@ from fastapi.responses import StreamingResponse
 from baby.intelligence import AgentPool, orchestrate_turn
 
 # Import the tokenizer bridge
-from toys.communication import tokenizer as gyrotok
+from baby.information import encode_text, decode_text, bytes_to_token_ids
 
 # ---------------------------------------------------------------------
 # Load preferences from canonical JSON
@@ -185,7 +185,7 @@ async def chat_completions(
         if system_msgs:
             system_text = "\n".join(system_msgs)
             # Encode with tokenizer
-            stimulus = system_agent.respond(gyrotok.encode(system_text, name=PREFERENCES["tokenizer"]["name"]))
+            stimulus = system_agent.respond(encode_text(system_text, name=PREFERENCES["tokenizer"]["name"]))
             # Feed that to assistant so its first cycles = system prompt
             assistant_agent.ingest(stimulus)
 
@@ -195,7 +195,7 @@ async def chat_completions(
     assistant_memories = [m.content for m in payload.messages if m.role == "assistant"]
     if assistant_memories:
         # Encode with tokenizer
-        memory_bytes = gyrotok.encode("\n".join(assistant_memories), name=PREFERENCES["tokenizer"]["name"])
+        memory_bytes = encode_text("\n".join(assistant_memories), name=PREFERENCES["tokenizer"]["name"])
         assistant_agent.ingest(memory_bytes)
 
     # --------------------------------------------------------------
@@ -213,14 +213,23 @@ async def chat_completions(
 
         def token_stream() -> Iterator[str]:
             # Encode the reply to bytes, then decode token by token
-            reply_bytes = gyrotok.encode(reply, name=PREFERENCES["tokenizer"]["name"])
+            reply_bytes = encode_text(reply, name=PREFERENCES["tokenizer"]["name"])
             # Get individual token IDs using public API
-            ids = gyrotok.bytes_to_ids(reply_bytes)
+            ids = bytes_to_token_ids(reply_bytes)
 
             for i, token_id in enumerate(ids):
-                # Decode single token using public API
-                token_bytes = gyrotok.id_to_bytes(token_id)
-                token_text = gyrotok.decode(token_bytes, name=PREFERENCES["tokenizer"]["name"])
+                # FIXED: Use direct tokenizer decode to avoid double-mask issue
+                # Instead of: token_bytes = gyrotok.id_to_bytes(token_id)
+                #           token_text = gyrotok.decode(token_bytes, name=PREFERENCES["tokenizer"]["name"])
+                # Use direct tokenizer method to get token text
+                try:
+                    # Get token text directly from tokenizer
+                    from baby.information import _load_tokenizer
+                    tokenizer = _load_tokenizer(PREFERENCES["tokenizer"]["name"])
+                    token_text = tokenizer.decode([token_id])
+                except (AttributeError, Exception):
+                    # Fallback: use direct token ID to text conversion
+                    token_text = f"[TOKEN_{token_id}]"
 
                 # OpenAI-compatible SSE chunk
                 chunk = {

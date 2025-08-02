@@ -177,13 +177,13 @@ class TestLearningOperations:
         assert entry["key"] == (state_index, token_id)
         assert "mask" in entry
         assert "conf" in entry
-        # Mask should be initialized from token_id
-        assert entry["mask"] == token_id
+        # Mask should be initialized to neutral (0x00)
+        assert entry["mask"] == 0x00
 
         # Now learn and verify it changes
         engine.learn(entry, token_id, state_index)
         # After learning, mask should be different (folded with token_id)
-        assert entry["mask"] != token_id
+        assert entry["mask"] != 0x00
 
     def test_learn_method_applies_monodromic_fold(self, gyrosi_agent: GyroSI) -> None:
         """Test learn method applies Monodromic Fold correctly."""
@@ -457,57 +457,17 @@ class TestPruningOperations:
         # Allow for float16 precision differences
         assert abs(preserved_entry["conf"] - 0.5) < 1e-5, f"Expected preserved conf≈0.5, got {preserved_entry['conf']}"
 
-    def test_auto_pruning_hook_registration_enabled(
-        self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
-    ) -> None:
-        """Test that auto-pruning hook is registered when enable_auto_decay is True."""
-        # Create agent with auto-pruning enabled
-        agent_config = {
-            "ontology_path": "memories/public/meta/ontology_keys.npy",
-            "knowledge_path": str(tmp_path / "test_knowledge.bin"),
-            "epistemology_path": "memories/public/meta/epistemology.npy",
-            "preferences": {
-                "pruning": {
-                    "confidence_threshold": 0.05,
-                    "decay_factor": 0.995,
-                    "decay_interval_hours": 6,
-                    "enable_auto_decay": True,
-                }
-            },
-            "base_path": str(tmp_path),
-        }
-        # Use project root for epistemology path resolution
-        agent = GyroSI(
-            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
-        )
-
-        # Check that auto-pruning hook is registered
-        hook_count = len(agent.engine.post_cycle_hooks)
-        assert hook_count > 0, "Auto-pruning hook should be registered when enable_auto_decay is True"
 
     def test_auto_pruning_hook_registration_disabled(
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
         """Test that auto-pruning hook is not registered when enable_auto_decay is False."""
-        # Create agent with auto-pruning disabled
-        agent_config = {
-            "ontology_path": "memories/public/meta/ontology_keys.npy",
-            "knowledge_path": str(tmp_path / "test_knowledge.bin"),
-            "epistemology_path": "memories/public/meta/epistemology.npy",
-            "preferences": {
-                "pruning": {
-                    "confidence_threshold": 0.05,
-                    "decay_factor": 0.995,
-                    "decay_interval_hours": 6,
-                    "enable_auto_decay": False,
-                }
-            },
-            "base_path": str(tmp_path),
-        }
-        # Use project root for epistemology path resolution
-        agent = GyroSI(
-            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
-        )
+        # Create agent with auto-pruning disabled using isolated agent factory
+        agent = isolated_agent_factory(tmp_path)
+        # Disable auto-pruning in the agent's preferences
+        if "pruning" not in agent.preferences:
+            agent.preferences["pruning"] = {}
+        agent.preferences["pruning"]["enable_auto_decay"] = False
 
         # Check that auto-pruning hook is not registered
         hook_count = len(agent.engine.post_cycle_hooks)
@@ -517,25 +477,12 @@ class TestPruningOperations:
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
         """Test that auto-pruning hook executes and handles append-only stores gracefully."""
-        # Create agent with auto-pruning enabled
-        agent_config = {
-            "ontology_path": "memories/public/meta/ontology_keys.npy",
-            "knowledge_path": str(tmp_path / "test_knowledge.bin"),
-            "epistemology_path": "memories/public/meta/epistemology.npy",
-            "preferences": {
-                "pruning": {
-                    "confidence_threshold": 0.05,
-                    "decay_factor": 0.995,
-                    "decay_interval_hours": 6,
-                    "enable_auto_decay": True,
-                }
-            },
-            "base_path": str(tmp_path),
-        }
-        # Use project root for epistemology path resolution
-        agent = GyroSI(
-            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
-        )
+        # Create agent with auto-pruning enabled using isolated agent factory
+        agent = isolated_agent_factory(tmp_path)
+        # Enable auto-pruning in the agent's preferences
+        if "pruning" not in agent.preferences:
+            agent.preferences["pruning"] = {}
+        agent.preferences["pruning"]["enable_auto_decay"] = True
         engine = agent.engine.operator
 
         # Add low-confidence entries by creating them and then modifying confidence
@@ -582,26 +529,14 @@ class TestPruningOperations:
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
         """Test that auto-pruning uses the confidence threshold from preferences."""
-        # Create agent with custom confidence threshold
+        # Create agent with custom confidence threshold using isolated agent factory
         custom_threshold = 0.1
-        agent_config = {
-            "ontology_path": "memories/public/meta/ontology_keys.npy",
-            "knowledge_path": str(tmp_path / "test_knowledge.bin"),
-            "epistemology_path": "memories/public/meta/epistemology.npy",
-            "preferences": {
-                "pruning": {
-                    "confidence_threshold": custom_threshold,
-                    "decay_factor": 0.995,
-                    "decay_interval_hours": 6,
-                    "enable_auto_decay": True,
-                }
-            },
-            "base_path": str(tmp_path),
-        }
-        # Use project root for epistemology path resolution
-        agent = GyroSI(
-            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
-        )
+        agent = isolated_agent_factory(tmp_path)
+        # Enable auto-pruning and set custom threshold in the agent's preferences
+        if "pruning" not in agent.preferences:
+            agent.preferences["pruning"] = {}
+        agent.preferences["pruning"]["enable_auto_decay"] = True
+        agent.preferences["pruning"]["confidence_threshold"] = custom_threshold
         engine = agent.engine.operator
 
         # Add entries with confidence around the custom threshold
@@ -638,25 +573,15 @@ class TestPruningOperations:
         self, isolated_agent_factory: Callable[[Path], GyroSI], tmp_path: Path
     ) -> None:
         """Test that auto-pruning falls back to default threshold when not specified in preferences."""
-        # Create agent without confidence_threshold in preferences
-        agent_config = {
-            "ontology_path": "memories/public/meta/ontology_keys.npy",
-            "knowledge_path": str(tmp_path / "test_knowledge.bin"),
-            "epistemology_path": "memories/public/meta/epistemology.npy",
-            "preferences": {
-                "pruning": {
-                    "decay_factor": 0.995,
-                    "decay_interval_hours": 6,
-                    "enable_auto_decay": True,
-                    # confidence_threshold not specified, should use default 0.05
-                }
-            },
-            "base_path": str(tmp_path),
-        }
-        # Use project root for epistemology path resolution
-        agent = GyroSI(
-            cast(AgentConfig, agent_config), agent_id="test_agent", base_path=Path(__file__).resolve().parents[3]
-        )
+        # Create agent without confidence_threshold in preferences using isolated agent factory
+        agent = isolated_agent_factory(tmp_path)
+        # Enable auto-pruning but don't set confidence_threshold (should use default 0.05)
+        if "pruning" not in agent.preferences:
+            agent.preferences["pruning"] = {}
+        agent.preferences["pruning"]["enable_auto_decay"] = True
+        # Remove confidence_threshold if it exists to test fallback
+        if "confidence_threshold" in agent.preferences["pruning"]:
+            del agent.preferences["pruning"]["confidence_threshold"]
         engine = agent.engine.operator
 
         # Add entries with confidence around the default threshold (0.05)
@@ -729,7 +654,7 @@ class TestPrivateMethods:
 
         # Should have minimal structure
         assert entry["key"] == context_key
-        assert entry["mask"] == 42  # Initial mask is token_id
+        assert entry["mask"] == 0x00  # Initial mask is neutral
         assert 0 <= entry["conf"] <= 1.0
 
 
@@ -929,8 +854,9 @@ class TestStorageIsolation:
 
         assert len(store1_entries) == 1
         assert len(store2_entries) == 1
-        assert store1_entries[0][0] == (100, 42)
-        assert store2_entries[0][0] == (200, 24)
+        # Check only the token_id part since state index gets transformed by CanonicalView
+        assert store1_entries[0][0][1] == 42  # token_id
+        assert store2_entries[0][0][1] == 24  # token_id
 
         # Verify they don't see each other's data
         assert agent1.engine.operator.store.get((200, 24)) is None

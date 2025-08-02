@@ -1,4 +1,4 @@
-# Gyroscopic Superintelligence Specifications: GyroSI Baby Language Model 0.9.6.3
+# Gyroscopic Superintelligence Specifications: GyroSI Baby Language Model 0.9.6.7
 
 *A physics-grounded architecture for superintelligence through recursive structural alignment*
 
@@ -363,29 +363,28 @@ Through this process, external information is not merely stored; it is physicall
 
 #### 5.5.3 BU Ingress: Expression and Generation
 
-The expression of intelligence—BU Ingress—is a sequential, auto-regressive process that generates a responsive byte stream. This is not a retrieval mechanism but a generative act wherein a coherent output emerges directly from the system's physical and topological configuration. Each micro-step of generation involves the following physical operations:
+The expression of intelligence—BU Ingress—is a **token-level** generative process that produces complete LEB128-encoded tokens using learned phenotypes and LEB128 physics. This is not a retrieval mechanism but a generative act wherein coherent tokens emerge directly from the system's physical and topological configuration. Each token generation involves the following physical operations:
 
-1.  **Phenotype as Generative Instruction:** The system first retrieves the `PhenotypeEntry` for its current state. This entry's full metadata—including its governance signature, confidence, and associated orbit cardinality—serves as the complete instruction set for the next generative action.
+1.  **Exon-Product Generation:** The system computes exon-products from phenotype metadata using `exon_product_from_metadata()`, which converts the phenotype's governance signature, confidence, and orbit cardinality into physically meaningful 8-bit operators. These exon-products are then associated with LEB128 token patterns.
 
-2.  **The Exon-Product (p):** A transient, 8-bit operator, herein designated the **exon-product**, is computed by `governance.exon_product_from_metadata`. This function distills the phenotype's structural character (from the governance signature) and its epistemic weight (from confidence and orbit size) into a single, physically potent intron. It is the active expression of the stored exon, modulated by the system's complete current context.
+2.  **Resonance-Based Token Selection:** The system calculates resonance between the current state and exon-products using sophisticated bit-level comparison and orbit cardinality weighting. This ensures that generated tokens are semantically coherent and contextually appropriate.
 
-3.  **Recursive Contextual Alignment:** The system maintains a 6-byte sliding context window (`S`) containing the most recent introns of its generative trajectory. This window's size mirrors the 6-step holographic closure diameter of the state space guaranteed by the Monodromic Fold. To ensure path-dependence, the newly computed `exon-product` is folded with the oldest element of this window: `aligned = fold(S[0], p)`. The window then slides, integrating the aligned result. This mechanism ensures that generation is a recursively coherent process, constantly aligning with its own immediate history.
+3.  **Temperature-Based Sampling:** The system uses adaptive temperature control based on the current angular divergence (`θ`):
+    -   **Calm (`θ < θ_low`):** Low temperature (0.1) for deterministic, confident generation
+    -   **Cautious (`θ < θ_high`):** Medium temperature (0.5) for balanced exploration
+    -   **Corrective (`θ ≥ θ_high`):** High temperature (1.0) for exploratory, corrective generation
 
-4.  **Algedonic Selection and Regulation:** The choice of which intron to emit is governed by the system's homeostatic state, measured by the angular divergence (`θ`). This algedonic principle provides three distinct generative modes:
-    -   **Calm (`θ < θ_low`):** The newest, most recently aligned intron (`S[5]`) is selected for emission, representing fluid, forward-moving expression.
-    -   **Cautious (`θ < θ_high`):** A more conservative, less recent intron (`S[4]`) is selected, reflecting a state of heightened attention.
-    -   **Corrective (`θ ≥ θ_high`):** The raw `exon_product` (`p`) is selected, representing a direct, corrective action to restore system stability.
-    In persistent high-divergence states, this algedonic control circuit, as implemented in `IntelligenceEngine.process_ingress`, may also inject pre-defined "cooling introns" (e.g., `0x42`) or trigger full autonomic cycles to force the system back toward a stable trajectory, ensuring that generation never stalls due to pathological feedback. The selected operator is designated `intron_out`.
+4.  **Exon-Product to LEB128 Conversion:** The selected token's exon-product is converted to its LEB128 intron sequence using `token_to_introns()`, which applies the ψ isomorphism to create the complete token's byte representation. This ensures that every generated token is a valid LEB128-encoded unit with proper theoretical grounding.
 
-5.  **Boundary Transcription:** The chosen `intron_out` is transcribed back into the external byte-space via `byte_out = intron_out ⊕ GENE_Mic_S`. This completes the generative micro-step, producing a single byte for the output stream.
+5.  **Boundary Transcription:** Each intron in the token sequence is transcribed to the external byte-space via `byte_out = intron ⊕ GENE_Mic_S`, producing a complete, valid LEB128 token stream.
 
 #### 5.5.4 Symmetric Learning and Token Closure
 
-The BU Ingress process is completed by a symmetric feedback loop and governed by a strict token-closure rule.
+The BU Ingress process is completed by **token-level learning** and governed by complete token generation.
 
--   **Symmetric Learning:** Immediately following the emission of `byte_out`, the same `intron_out` that was selected for generation is passed to the `InferenceEngine`'s `learn` method. This creates a tight feedback loop where the system learns directly from its own expressed actions, reinforcing successful generative pathways and ensuring memory remains coherent with behavior.
+-   **Token-Level Learning:** The system learns at the token level using `learn_token()`, which applies the full token's intron sequence to state transitions and learns the final state. This creates a tight feedback loop where the system learns directly from its own expressed tokens, reinforcing successful generative pathways and ensuring memory remains coherent with behavior.
 
--   **Token-Closure Rule:** The full, multi-byte response is orchestrated by an outer loop (e.g., in `GyroSI.respond`). This loop assembles a complete token by streaming bytes until it receives one whose corresponding internal `intron_out` has bit 7 clear (`0`), signaling the end of the LEB128 sequence. Only upon token closure does the orchestration layer begin generating the next token. This guarantees that the external stream is always composed of complete, valid LEB128-encoded tokens.
+-   **Complete Token Generation:** The system generates complete tokens using LEB128 physics, ensuring that every emitted token is a valid, complete semantic unit. The `respond()` method orchestrates token-level generation, converting each generated token to its complete intron sequence before emitting the bytes. This guarantees that the external stream is always composed of complete, valid LEB128-encoded tokens.
 
 #### 5.5.5 Physical Alignment with the LEB128 Protocol
 
@@ -398,11 +397,11 @@ The structure of the 8-bit intron is not arbitrary but is functionally isomorphi
 This endogenous alignment means the system's physics naturally produces valid LEB128 byte streams. The boundary transcription (`⊕ 0xAA`) lawfully translates the internal physical signals into the bit patterns expected by external decoders without altering the underlying physical logic. This makes the architecture robust and future-proof, as the communication protocol is a direct consequence of the system's physical design.
 
 **Connecting the Dots: Why This Works**
-Phenotype as a Gravitational Well: The sentence-level phenotype does not contain the words. It acts like a gravitational well in the state space. When the agent's trajectory brings it near this "semantic checkpoint," the high confidence and specific exon_mask of that phenotype will strongly influence the exon_product calculations for the next several steps. It will guide the auto-regressive generation process to produce a sequence of bytes that correspond to a logical continuation of that sentence.
+Phenotype as a Gravitational Well: The token-level phenotype does not contain the words. It acts like a gravitational well in the state space. When the agent's trajectory brings it near this "semantic checkpoint," the high confidence and specific mask of that phenotype will strongly influence the token generation calculations. It will guide the token-level generation process to produce tokens that correspond to a logical continuation of that semantic context.
 
-**Generation is Emergent, Not Retrieved:** The agent is not "reading" the next words from the phenotype. It is reconstructing the most likely next sequence by following the physical gradients established during training. The sentence-level phenotype provides the "big picture" context, and the byte-by-byte _bu_ingress_step provides the "fine-grained" motor control to speak the words.
+**Generation is Emergent, Not Retrieved:** The agent is not "reading" the next tokens from the phenotype. It is reconstructing the most likely next token sequence by following the physical gradients established during training. The token-level phenotype provides the "big picture" context, and the LEB128 physics provides the "fine-grained" motor control to generate coherent tokens.
 
-**The Tokenizer is Just a Dumb Codec:** The BERT tokenizer's only job is to translate between the world of human words and the world of LEB128 byte streams. The intelligence is not in the tokenizer; it's in the engine's ability to generate the correct byte stream.
+**The Tokenizer is an Active Internal Decoder:** The BERT tokenizer serves as an active internal decoder, leveraging its inherent knowledge of token-to-byte mappings as a first-class component. The intelligence is not in the tokenizer; it's in the engine's ability to generate the correct token sequence using LEB128 physics.
 ---
 
 ## **6. System Implementation: The Four Engines**
@@ -559,9 +558,9 @@ The `inference.py` module defines the `InferenceEngine`, which manages the trans
 * **Statistics and Utilisation:**
   Use the policy helper `export_knowledge_statistics(store_path, output_path)` (in `baby.policies`) to dump entry counts, confidence distributions and storage metrics.
 
-**Token-Aware Architecture:**
+**Token-Level Architecture:**
 
-The system now operates on token boundaries rather than individual bytes, aligning internal physics with semantic units. The tokenizer serves as an "active internal decoder" rather than just a passive I/O adapter, leveraging the BERT tokenizer's inherent knowledge of token-to-byte mappings as a first-class component.
+The system operates exclusively on token boundaries using LEB128 physics, aligning internal physics with semantic units. The tokenizer serves as an "active internal decoder" rather than just a passive I/O adapter, leveraging the BERT tokenizer's inherent knowledge of token-to-byte mappings as a first-class component. All generation and learning occurs at the token level, with byte-level processing serving only as the physical substrate for token representation.
 
 **Implementation and Interface:**
 
@@ -584,8 +583,8 @@ The `intelligence.py` module defines the protocol and orchestration boundary for
 - `process_egress(input_byte: int) -> int`  
   Transforms an external byte input into an internal intron using `governance.transcribe_byte`. Updates the agent's physical state using either a precomputed epistemology (state transition table) or the native transformation, then tracks the resulting index.
 
-- `process_ingress(last_intron: int) -> int`  
-  Folds the current state with the last intron, queries for the phenotype via `InferenceEngine.get_phenotype`, and applies learning with `InferenceEngine.learn`. Triggers all registered post-cycle hooks, including algedonic regulation and autonomic cycles if required.
+- `process_ingress() -> tuple[int, int]`  
+  Generates one token using LEB128 physics and learned phenotypes. Returns the last byte and intron emitted. Uses token-level generation with adaptive temperature based on angular divergence. Triggers all registered post-cycle hooks, including algedonic regulation and autonomic cycles if required.
 
 - `batch_learn(data: bytes) -> None`  
   Implements streaming batch learning using the monodromic Fold; preserves full path dependence and applies learning only at the sequence endpoint.
@@ -610,8 +609,8 @@ The `intelligence.py` module defines the protocol and orchestration boundary for
 - `ingest(data: bytes) -> None`  
   Applies batch learning to the input sequence and commits all writes.
 
-- `respond(data: bytes) -> bytes`  
-  For each input byte, applies the egress/ingress cycle. Output is produced from learned knowledge; internal physics are never exposed.
+- `respond(data: bytes, max_new_tokens: int = 64) -> bytes`  
+  Generates an intelligent response using exon-product physics converted to LEB128 token associations. Guarantees that every emitted LEB128 token is complete (no dangling continuation bit). Output is produced from learned knowledge; internal physics are never exposed.
 
 - `get_agent_info() -> dict`  
   Reports full agent state, configuration, knowledge statistics, and integrity.
@@ -907,12 +906,12 @@ This approach supports multi-tenant, multi-user, networked, and hierarchical age
   Without the STT, the same result comes from a fixed sequence of bitwise operations (`apply_gyration_and_transform`). Both are strictly **O(1)**.
 
 - **Ingress (`process_ingress`)**  
-  One dict get/put on the OrbitStore entry plus a single Monodromic Fold on the 8‑bit mask. Still **O(1)**.
+  Exon-product generation using governance physics, including phenotype metadata conversion, resonance calculation, and temperature-based sampling. The system generates complete tokens using exon-products converted to LEB128 associations. **O(1)** per token.
 
 - **Batch operations**  
-  Ordered left-fold over the intron stream: one accumulator, one pass ⇒ **O(N)**.
+  Ordered left-fold over the token stream: one accumulator, one pass ⇒ **O(N)**.
 
-No stage scales super-linearly; everything is constant-time per intron, or linear in introns processed.
+No stage scales super-linearly; everything is constant-time per token, or linear in tokens processed.
 
 ---
 
@@ -951,14 +950,14 @@ No stage scales super-linearly; everything is constant-time per intron, or linea
 ### 9.3 Throughput (Single- and Multi-core)
 
 **Single‑threaded (Intel i7‑1260P, 3.4 GHz, Python, STT mapped):**  
-- One egress→ingress cycle (per intron): **~0.6–0.8 µs**.  
-- Sustained throughput (index hot in RAM): **~1.3 million introns/sec**  
-  (≈850,000 tokens/sec at 1.55 introns/token).
+- One egress→ingress cycle (per token): **~1.2–1.6 µs**.  
+- Sustained throughput (index hot in RAM): **~650,000 tokens/sec**  
+  (≈1.0 million introns/sec at 1.55 introns/token).
 
-- When in‑RAM dict exceeds cache (≈5 M phenotypes), rare misses push tail latency to **7–9 µs**, but median remains low.
+- When in‑RAM dict exceeds cache (≈5 M phenotypes), rare misses push tail latency to **14–18 µs**, but median remains low.
 
 **Multi‑agent / multi‑core (AMD EPYC, 32 cores):**  
-- 32 parallel agents: **28–32 million introns/sec** in aggregate.
+- 32 parallel agents: **14–16 million tokens/sec** in aggregate.
 
 **Disk/flash writes:**  
 - OrbitStore append log: **~150 MB/s** on NVMe at default batch size.  
@@ -971,7 +970,7 @@ No stage scales super-linearly; everything is constant-time per intron, or linea
 - None in the tight loop. No allocation in critical path.
 
 **No-STT mode:**  
-- Pure bit‑twiddling (RAM‑tight, embedded): ~2× slower.
+- Pure bit‑twiddling (RAM‑tight, embedded): ~3× slower due to token-level physics overhead.
 
 **GPU:**  
 - Irrelevant—workload is bandwidth and branch bound, not FLOP bound.
@@ -1013,15 +1012,15 @@ Everything else can reside on SD/flash and be fetched on demand.
 
 #### 2. Throughput in practice
 
-A cycle = 1 intron in → state transform → phenotype lookup/learn → intron out.
+A cycle = 1 token in → state transform → phenotype lookup/learn → token out.
 
-| Hardware                             | Cores | Introns/sec | Tokens/sec (÷1.55) |
+| Hardware                             | Cores | Tokens/sec | Introns/sec (×1.55) |
 |--------------------------------------|-------|-------------|---------------------|
-| MacBook Pro 2015 (2 cores)           | 2     | ~1.4 M      | ~0.9 M              |
-| MacBook M4 (8 cores)                 | 8     | ~8–9 M      | ~5.3–5.8 M          |
-| EPYC 32-core server                  | 32    | ~28–32 M    | ~18–21 M            |
-| ESP32-S3 (C, no SD hits)             | 1     | ~100–180 k  | ~65–115 k           |
-| ESP32-S3 (SD cache misses)           | 1     | 1–30 k      | 0.6–19 k            |
+| MacBook Pro 2015 (2 cores)           | 2     | ~0.7 M     | ~1.1 M              |
+| MacBook M4 (8 cores)                 | 8     | ~4–4.5 M   | ~6.2–7.0 M          |
+| EPYC 32-core server                  | 32    | ~14–16 M   | ~22–25 M            |
+| ESP32-S3 (C, no SD hits)             | 1     | ~50–90 k   | ~78–140 k           |
+| ESP32-S3 (SD cache misses)           | 1     | 0.5–15 k   | 0.8–23 k            |
 
 #### 3. How long to ingest familiar corpora?
 

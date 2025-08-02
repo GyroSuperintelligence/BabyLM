@@ -223,12 +223,9 @@ class OrbitStore:
 
         # Always use Bloom filter and index
         self._bloom_filter: Optional[BloomFilter] = None
-        self._bloom_loaded = False
 
         # Try to load existing Bloom filter
-        if self._try_load_bloom():
-            self._bloom_loaded = True
-        else:
+        if not self._try_load_bloom():
             # Create new Bloom filter
             estimated_entries = 1_000_000  # Default estimate
             if os.path.exists(resolved_store_path):
@@ -266,9 +263,23 @@ class OrbitStore:
         return True
 
     def _save_bloom(self) -> None:
-        if self._bloom_filter:
-            with open(self._bloom_sidecar_path(), "wb") as f:
-                f.write(self._bloom_filter.to_bytes())
+        """Save the Bloom filter to disk with proper locking."""
+        if not self._bloom_filter:
+            return
+        
+        bloom_path = self._bloom_sidecar_path()
+        
+        # FIXED: Use the same lock as commit to prevent race conditions
+        with self.lock:
+            try:
+                bloom_data = self._bloom_filter.to_bytes()
+                with open(bloom_path, "wb") as f:
+                    f.write(bloom_data)
+                    f.flush()
+                    if sys.platform != "darwin":
+                        os.fsync(f.fileno())
+            except Exception as e:
+                print(f"Warning: Failed to save Bloom filter {bloom_path}: {e}")
 
     def _open_mmap(self) -> None:
         if self._mmap:
@@ -470,39 +481,60 @@ class OrbitStore:
             self.pending_writes[context_key] = entry.copy()
 
     def _write_index(self) -> None:
-        if self.index_path is None:
+        """Write the in-memory index to disk."""
+        if not self.index_path:
             return
-        # Convert all keys/values to native Python int before serializing
-        # Convert tuple keys to strings for JSON compatibility
-        index_py = {str(key): (int(v[0]), int(v[1])) for key, v in self.index.items()}
-        with open(self.index_path, "wb") as f:
-            packed = json.dumps(index_py).encode("utf-8")
-            f.write(packed)
-            f.flush()
-            if sys.platform != "darwin":
-                os.fsync(f.fileno())
+
+        try:
+            # Persist: "state_idx-token_id:offset,size"
+            with open(self.index_path, "w") as f:
+                for (state_idx, token_id), (offset, size) in self.index.items():
+                    f.write(f"{state_idx}-{token_id}:{offset},{size}\n")
+        except Exception as e:
+            print(f"Warning: Failed to write index file {self.index_path}: {e}")
 
     def _read_index(self) -> None:
-        if not self.index_path or not os.path.exists(self.index_path):
+        """Read the index file to populate the in-memory index."""
+        if not os.path.exists(self.index_path):
             return
-        # Handle empty file gracefully
-        if os.path.getsize(self.index_path) == 0:
-            self.index = {}
-            return
-        with open(self.index_path, "rb") as f:
-            raw_index = json.loads(f.read().decode("utf-8"))
-            # Convert string keys back to tuples
-            self.index = {}
-            for k, v in raw_index.items():
-                if not isinstance(k, str):
-                    raise TypeError(f"Invalid key type in index: {type(k)}. All keys must be strings.")
-                # Parse tuple string format back to tuple
-                try:
-                    state, token_id = map(int, k.strip("()").split(", "))
-                    key_tuple = (state, token_id)
-                    self.index[key_tuple] = tuple(v)
-                except (ValueError, IndexError) as e:
-                    raise TypeError(f"Invalid key format in index: {k}") from e
+
+        try:
+            with open(self.index_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    try:
+                        # Parse "state_idx-token_id:offset,size" or legacy format
+                        if ":" in line and "," in line:
+                            # New format: "state_idx-token_id:offset,size"
+                            key_part, offset_str = line.split(":", 1)
+                            offset_part, size_part = offset_str.split(",", 1)
+                            state_idx_str, token_id_str = key_part.split("-", 1)
+                            state_idx = int(state_idx_str)
+                            token_id = int(token_id_str)
+                            offset = int(offset_part)
+                            size = int(size_part)
+                            
+                            # Index sanity checks
+                            if offset < 0 or size != _STRUCT_SIZE or (os.path.exists(self.log_path) and offset + size > os.path.getsize(self.log_path)):
+                                print(f"Warning: Skipping invalid index entry: {line}")
+                                continue
+                                
+                            self.index[(state_idx, token_id)] = (offset, size)
+                        else:
+                            # Legacy format or malformed - skip
+                            print(f"Warning: Skipping legacy/malformed index line: {line}")
+                            continue
+                    except (ValueError, IndexError) as e:
+                        # Skip malformed lines but log for debugging
+                        print(f"Warning: Skipping malformed index line: {line} (error: {e})")
+                        continue
+        except Exception as e:
+            print(f"Warning: Failed to read index file {self.index_path}: {e}")
+            # Don't fail completely, just start with empty index
+            self.index.clear()
 
     def _load_index(self) -> None:
         # Load index first
@@ -582,18 +614,20 @@ class OrbitStore:
         # Register for clean exit
         atexit.register(_graceful_shutdown)
 
-        # Register for signals (SIGINT, SIGTERM)
+        # Register for signals (SIGINT, SIGTERM) - only in production
         def _signal_handler(signum: int, frame: Any) -> None:
             logger.info("Received signal %d, performing graceful shutdown", signum)
             _graceful_shutdown()
             sys.exit(0)
 
-        try:
-            signal.signal(signal.SIGINT, _signal_handler)
-            signal.signal(signal.SIGTERM, _signal_handler)
-        except (OSError, ValueError) as e:
-            # Some environments may not allow signal registration
-            logger.debug("Could not register signal handlers: %s", e)
+        # Only register signal handlers if not in test environment
+        if not any("pytest" in arg for arg in sys.argv):
+            try:
+                signal.signal(signal.SIGINT, _signal_handler)
+                signal.signal(signal.SIGTERM, _signal_handler)
+            except (OSError, ValueError) as e:
+                # Some environments may not allow signal registration
+                logger.debug("Could not register signal handlers: %s", e)
 
     def flush(self) -> None:
         """
@@ -618,26 +652,10 @@ class OrbitStore:
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
+        """Get all data as a dictionary."""
         entries: Dict[Tuple[int, int], Any] = {}
-        if not os.path.exists(self.log_path):
-            return entries
-        # Read all entries from binary log
-        with open(self.log_path, "rb") as f:
-            buf = memoryview(f.read())
-            offset = 0
-            while offset < len(buf):
-                entry, new_offset = _unpack_phenotype(buf, offset)
-                key = tuple(entry["key"])
-                entries[key] = entry
-                offset = new_offset
-        return entries
-        with open(self.log_path, "rb") as f:
-            for context_key, (offset, size) in self.index.items():
-                f.seek(offset)
-                entry_buf = f.read(size)
-                entry, _ = _unpack_phenotype(memoryview(entry_buf))
-                if isinstance(entry, dict):
-                    entries[context_key] = entry
+        for k, v in self.iter_entries():
+            entries[k] = v
         return entries
 
     def set_data_dict(self, data: Dict[Tuple[int, int], Any]) -> None:
@@ -653,54 +671,43 @@ class OrbitStore:
             self._flush()
 
     def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
-        yielded = set()
-        # Use mmap if available for faster scanning
-        if self.use_mmap and self._mmap:
-            buf = memoryview(self._mmap)
-        else:
-            with open(self.log_path, "rb") as f:
-                buf = memoryview(f.read())
-
-        offset = 0
-        latest_entries = {}  # Track latest entry for each key
-
-        try:
-            while offset < len(buf):
-                try:
-                    entry, new_offset = _unpack_phenotype(buf, offset)
-                    key = tuple(entry["key"])
-                    latest_entries[key] = entry  # Keep the latest version
-                    offset = new_offset
-                except struct.error:
-                    # Corrupt tail record - stop gracefully
-                    break
-
-            # Yield only the latest version of each entry
-            for key, entry in latest_entries.items():
-                yield key, entry
-                yielded.add(key)
-        except Exception as e:
-            logger.warning("Error during iter_entries scan: %s", e)
-            # Yield what we have so far
-            for key, entry in latest_entries.items():
-                if key not in yielded:
-                    yield key, entry
-                    yielded.add(key)
-        return
+        """Iterate over all entries in the store."""
         with self.lock:
+            yielded: set[Tuple[int, int]] = set()
+
+            # 1) yield pending (latest) first
             for k, v in self.pending_writes.items():
-                yield k, v
+                yield k, dict(v)  # defensive copy
                 yielded.add(k)
-        if not os.path.exists(self.log_path):
-            return
-        with open(self.log_path, "rb") as f:
-            for context_key, (offset, size) in self.index.items():
-                if context_key in yielded:
-                    continue
-                f.seek(offset)
-                entry_buf = f.read(size)
-                entry, _ = _unpack_phenotype(memoryview(entry_buf))
-                yield context_key, entry
+
+            # 2) yield committed last versions via index
+            if not os.path.exists(self.log_path):
+                return
+
+            if self.use_mmap and self._mmap:
+                mv = memoryview(self._mmap)
+                for context_key, (offset, size) in self.index.items():
+                    if context_key in yielded:
+                        continue
+                    entry_buf = mv[offset:offset + size]
+                    entry, _ = _unpack_phenotype(entry_buf)
+                    yield context_key, entry
+            else:
+                with open(self.log_path, "rb") as f:
+                    for context_key, (offset, size) in self.index.items():
+                        if context_key in yielded:
+                            continue
+                        f.seek(offset)
+                        entry_buf = f.read(size)
+                        entry, _ = _unpack_phenotype(memoryview(entry_buf))
+                        yield context_key, entry
+
+    # Fast helper: iterate keys for a given state using the in-memory index.
+    def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
+        with self.lock:
+            for (s_idx, tok_id) in self.index.keys():
+                if s_idx == state_idx:
+                    yield (s_idx, tok_id)
 
 
 class CanonicalView:
@@ -830,9 +837,13 @@ class OverlayView:
             raise NotImplementedError("Underlying private_store does not support deletion.")
 
     def close(self) -> None:
+        # Do NOT close public_store here; in AgentPool it is shared across agents.
         if self.private_store is not None:
             self.private_store.close()
             self.private_store = None
+
+    def close_public(self) -> None:
+        # Explicit opt-in to close the shared resource if the owner wants to.
         if self.public_store is not None:
             self.public_store.close()
             self.public_store = None
@@ -1047,9 +1058,7 @@ def apply_global_confidence_decay(
     start_time = time.time()
 
     resolved_store_path = _abs(store_path, base_path)
-    # Check if it's an OrbitStore file (has .log file)
-    log_path = Path(str(resolved_store_path) + ".log")
-    if not os.path.exists(resolved_store_path) and not log_path.exists():
+    if not os.path.exists(resolved_store_path):
         return {
             "operation": "apply_global_confidence_decay",
             "success": False,
@@ -1111,9 +1120,7 @@ def export_knowledge_statistics(store_path: str, output_path: str, base_path: Pa
 
     resolved_store_path = _abs(store_path, base_path)
     resolved_output_path = _abs(output_path, base_path)
-    # Check if it's an OrbitStore file (has .log file)
-    log_path = Path(str(resolved_store_path) + ".log")
-    if not os.path.exists(resolved_store_path) and not log_path.exists():
+    if not os.path.exists(resolved_store_path):
         return {
             "operation": "export_knowledge_statistics",
             "success": False,
@@ -1232,7 +1239,7 @@ def prune_and_compact_store(
     store_path: str,
     output_path: Optional[str] = None,
     min_confidence: Optional[float] = None,
-    max_age_days: Optional[float] = None,
+    max_age_days: Optional[float] = None,  # TODO: Implement age-based pruning
     dry_run: bool = False,
     archive_summary_path: Optional[str] = None,
     base_path: Path = PROJECT_ROOT,
