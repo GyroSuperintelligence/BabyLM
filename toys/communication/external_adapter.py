@@ -70,6 +70,7 @@ agent_pool = AgentPool(
     base_path=BASE_PATH,
 )
 
+
 # Signal handling for graceful shutdown
 # ---------------------------------------------------------------------
 def signal_handler(signum: int, frame: Any) -> None:
@@ -92,12 +93,12 @@ agent_pool.ensure_triad()
 # Sanity probe to confirm sidecars are loaded
 try:
     # unwrap ReadOnlyView → CanonicalView → OrbitStore
-    cv = agent_pool._public_store.base_store     # CanonicalView
-    store = cv.base_store                        # OrbitStore
+    cv = agent_pool._public_store.base_store  # CanonicalView
+    store = cv.base_store  # OrbitStore
     sp = store.store_path
     print("[public-store] path:", sp)
     print("[public-store] bloom exists:", os.path.exists(sp + ".bloom"))
-    print("[public-store] idx exists:",   os.path.exists(sp + ".idx"))
+    print("[public-store] idx exists:", os.path.exists(sp + ".idx"))
     print("[public-store] index entries:", len(store.index))
 except Exception as e:
     print("sanity probe failed:", e)
@@ -113,13 +114,14 @@ app = FastAPI(
     summary="OpenAI & HuggingFace compatible REST facade for GyroSI-Baby (Token-Aware)",
 )
 
+
 @app.on_event("startup")
 async def warm():
     """Pre-warm the system on startup to avoid first-turn penalty."""
     agent_pool.ensure_triad()
     try:
-        cv = agent_pool._public_store.base_store   # CanonicalView
-        store = cv.base_store                      # OrbitStore
+        cv = agent_pool._public_store.base_store  # CanonicalView
+        store = cv.base_store  # OrbitStore
         sp = store.store_path
         print(f"[warmup] public store: {sp}")
         print(f"[warmup] bloom: {os.path.exists(sp + '.bloom')}, idx: {os.path.exists(sp + '.idx')}")
@@ -127,10 +129,11 @@ async def warm():
 
         # Touch epistemology to page-in a tiny slice (avoids first-turn page faults)
         a = agent_pool.get("assistant").engine
-        _ = int(a.epistemology[0,0])  # tiny read is enough to map a page
+        _ = int(a.epistemology[0, 0])  # tiny read is enough to map a page
         print(f"[warmup] epistemology touched: {a.epistemology.shape}")
     except Exception as e:
         print("[warmup] failed:", e)
+
 
 # ---------------------------------------------------------------------
 # 1. OpenAI-compatible schema models
@@ -258,6 +261,7 @@ async def chat_completions(
 
             # Load tokenizer once, reuse
             from baby.information import _load_tokenizer
+
             tokenizer = _load_tokenizer(PREFERENCES["tokenizer"]["name"])
 
             for i, token_id in enumerate(ids):

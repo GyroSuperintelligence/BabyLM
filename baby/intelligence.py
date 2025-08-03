@@ -12,6 +12,7 @@ from collections import OrderedDict, deque
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from threading import RLock
+import math
 from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, TypedDict, cast, Iterator, Tuple
 
 import numpy as np
@@ -20,7 +21,7 @@ from baby import governance
 from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig, PhenotypeEntry
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine, SEP_ID
-from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
+from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView, DIR_PRE
 
 
 class _TokBridge:
@@ -134,7 +135,7 @@ class IntelligenceEngine:
             s_buffer=self._S,
         )
 
-        # --- token buffer for egress processing: stores RAW LEB bytes (post-ψ) ---
+        # --- token buffer for egress processing: stores introns (internal bytes) ---
         self._raw_leb_buf: List[int] = []
         self.MAX_TOKEN_BYTES = 1024  # Maximum token buffer size
 
@@ -157,16 +158,17 @@ class IntelligenceEngine:
         self._state_buf = np.empty(65536, dtype=np.int32)
 
     def _temperature_from_theta(self, theta: float) -> float:
-        """Convert theta to temperature using the configured schedule."""
-        # Get floor/cap preferences for experimentation
+        """
+        Smooth sigmoid temperature schedule.
+        Maps theta from [0, π] to temperature [floor, cap].
+        """
         temp_floor = float(cast(float, self.preferences.get("temperature_floor", 0.1)))
         temp_cap = float(cast(float, self.preferences.get("temperature_cap", 1.0)))
 
-        if theta < self._θ_low:
-            return temp_floor
-        if theta < self._θ_high:
-            return 0.5
-        return temp_cap
+        # Sigmoid centered at θ_low with steep transition
+        sigmoid = 1.0 / (1.0 + math.exp(-(theta - self._θ_low) * 10))
+
+        return temp_floor + (temp_cap - temp_floor) * sigmoid
 
     def _state_byte_projection(self, state_index: int) -> int:
         """Stable 8-bit projection of 48-bit state via XOR-fold; invariant under bit shifts that preserve parity."""
@@ -189,6 +191,7 @@ class IntelligenceEngine:
         temperature = self._temperature_from_theta(theta)
         tok_id = self.generate_token_exon(state_idx, temperature)
         from baby.information import token_id_to_bytes
+
         token_bytes = token_id_to_bytes(tok_id)
         for byte_out in token_bytes:
             # Feed back as *external* bytes; process_egress handles ψ and learning
@@ -196,86 +199,57 @@ class IntelligenceEngine:
         return tok_id, token_bytes
 
     def process_egress(self, input_byte: int) -> int:
-        """
-        Process Intelligence Egress: Transform input into action.
+        input_byte &= 0xFF
+        intron = governance.transcribe_byte(input_byte)
+        intron &= 0xFF
 
-        This is the "outward" phase where external input transforms the
-        system's internal physical state according to gyroscopic physics.
-
-        Args:
-            input_byte: Input byte (0-255) from external environment
-
-        Returns:
-            Transcribed intron instruction
-        """
-        input_byte &= 0xFF  # Defensive masking
-        # S1: Transcribe (ψ) to raw LEB byte
-        intron = governance.transcribe_byte(input_byte)  # raw LEB byte after XOR
-        intron &= 0xFF  # Defensive masking (optional, for symmetry)
-
-        # Check buffer size limit to prevent runaway growth
         if len(self._raw_leb_buf) >= self.MAX_TOKEN_BYTES:
-            self._raw_leb_buf.clear()  # Prevent runaway buffer growth
-            self._last_token_id = 0  # Reset token ID to prevent stale context
-            if getattr(self, 'debug_mode', False):
-                print("Warning: Token buffer overflow cleared")
+            self._raw_leb_buf.clear()
+            self._last_token_id = 0
             return intron
 
-        # Append intron to current token buffer
         self._raw_leb_buf.append(intron)
 
+        # Cache pre-state before transition
+        pre_state_index = self.current_state_index
+
+        # Apply state transition
         self.current_state_index = self.epistemology[self.current_state_index, intron]
         self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
         self._cached_state_int = self.gene_mac_m_int
 
-        # State integrity assertion - 48-bit bounds
         assert self.gene_mac_m_int < (1 << 48)
-
         self.cycle_count += 1
 
-        # Record divergence in θ buffer
         div = self.s2.measure_state_divergence(self._cached_state_int)
         self._θ_buf.append(div)
 
-        # Check if token is complete (bit 7 == 0) - last LEB byte
-        if (intron & 0x80) == 0:  # last LEB byte
+        if (intron & 0x80) == 0:  # Token complete
             try:
-                # Token is complete - unmask back to byte stream
-                tok_bytes = bytes(b ^ 0xAA for b in self._raw_leb_buf)  # re-mask to external
+                tok_bytes = bytes(b ^ 0xAA for b in self._raw_leb_buf)
                 token_id = TOK.bytes_to_id(tok_bytes)
 
-                # Ignore [SEP] token (ID 102) when setting _last_token_id
-                if token_id == SEP_ID:  # WordPiece [SEP]
-                    # Use the previous real token instead
-                    token_id = getattr(self, "_prev_token_id", 102)
+                if token_id == SEP_ID:
+                    self._raw_leb_buf.clear()
+                    return intron
                 self._prev_token_id = token_id
 
-                # Knowledge update once per token using token-level learning
-                state_idx = self.current_state_index
-                # Use the actual intron that finished the token for learning
-                phenotype_entry = self.operator.learn_token(token_id, state_idx, intron)
+                # Learn with pre-only storage (physics-correct)
+                self.operator.learn_token_preonly(token_id, pre_state_index, intron)
 
-                # Call post-cycle hooks for monitoring with token-level information
+                # Get the pre-state entry for hooks
+                pre_entry = self.operator.store.get((pre_state_index, token_id))
                 for hook in self.post_cycle_hooks:
                     try:
-                        # Pass token-level information to hooks
-                        hook(self, phenotype_entry, intron, token_id, state_idx)
+                        hook(self, cast(PhenotypeEntry, pre_entry), intron, token_id, pre_state_index)
                     except Exception:
-                        # Log hook errors but don't fail the cycle
-                        if getattr(self, 'debug_mode', False):
-                            print("Warning: Hook error occurred")
+                        pass
 
-                # Prepare for ingress
                 self._last_token_id = token_id
             except Exception:
-                # Handle malformed token sequences gracefully
-                if getattr(self, 'debug_mode', False):
-                    print("Warning: Malformed token sequence skipped")
+                pass
             finally:
-                # Always clear buffer to prevent accumulation
                 self._raw_leb_buf.clear()
-        else:
-            pass
 
         return intron
 
@@ -372,53 +346,47 @@ class IntelligenceEngine:
                 )
             st[i] = new_state
 
-        # --- 2. process tokens properly (like the original process_egress)
-        # Use existing self._raw_leb_buf to handle cross-chunk token boundaries
+        # Process tokens with correct phase
+        token_start_idx = 0
         for i, intron in enumerate(introns):
-            # Check buffer size limit to prevent runaway growth
             if len(self._raw_leb_buf) >= self.MAX_TOKEN_BYTES:
-                self._raw_leb_buf.clear()  # Prevent runaway buffer growth
-                self._last_token_id = 0  # Reset token ID to prevent stale context
-                if getattr(self, 'debug_mode', False):
-                    print("Warning: Token buffer overflow cleared")
+                self._raw_leb_buf.clear()
+                self._last_token_id = 0
+                token_start_idx = i + 1  # Reset token start
 
-            # Append intron to current token buffer
             self._raw_leb_buf.append(intron)
 
-            # Check if token is complete (bit 7 == 0)
-            if (intron & 0x80) == 0:
-                # Token is complete - unmask back to byte stream
+            if (intron & 0x80) == 0:  # Token complete
                 tok_bytes = bytes(b ^ 0xAA for b in self._raw_leb_buf)
                 try:
                     token_id = TOK.bytes_to_id(tok_bytes)
 
-                    # Ignore [SEP] token (ID 102) when setting _last_token_id
-                    if token_id == SEP_ID:  # WordPiece [SEP]
-                        # Use the previous real token instead
-                        token_id = getattr(self, "_prev_token_id", 102)
+                    if token_id == SEP_ID:
+                        self._raw_leb_buf.clear()
+                        token_start_idx = i + 1
+                        continue
                     self._prev_token_id = token_id
 
-                    # Learn using the *post* state (after applying the current intron)
-                    post_state = int(ep[st[i], intron])
-                    phenotype_entry = self.operator.learn_token(token_id, post_state, int(intron))
+                    # Get pre-state (where token started)
+                    pre_state = int(st[token_start_idx])
 
-                    # Call post-cycle hooks for monitoring
+                    # Pre-only storage (physics-correct)
+                    self.operator.learn_token_preonly(token_id, pre_state, int(intron))
+
+                    # Get the pre-state entry for hooks
+                    pre_entry = self.operator.store.get((pre_state, token_id))
                     for hook in self.post_cycle_hooks:
                         try:
-                            hook(self, phenotype_entry, int(intron), token_id, post_state)
+                            hook(self, cast(PhenotypeEntry, pre_entry), int(intron), token_id, pre_state)
                         except Exception:
-                            # Log hook errors but don't fail the cycle
-                            print("Warning: Hook error occurred")
+                            pass
 
-                    # Prepare for ingress
                     self._last_token_id = token_id
                 except Exception:
-                    # Handle malformed token sequences gracefully
-                    if getattr(self, 'debug_mode', False):
-                        print("Warning: Malformed token sequence skipped")
+                    pass
                 finally:
-                    # Always clear buffer to prevent accumulation
                     self._raw_leb_buf.clear()
+                    token_start_idx = i + 1  # Next token starts here
 
         # --- 4. persist new head state + θ updates
         if n > 0:
@@ -580,12 +548,9 @@ class IntelligenceEngine:
 
     def _register_auto_prune_hook(self) -> None:
         """
-        Registers a post-cycle hook to automatically prune low-confidence entries
-        based on preferences configuration.
+        Disabled: We now use orbit-entropy management instead of confidence pruning.
         """
-        pruning_cfg = self.preferences.get("pruning", {})
-        if pruning_cfg.get("enable_auto_decay", False):
-            self.add_hook(self._auto_prune_hook)
+        pass  # Pruning disabled to preserve trajectory richness
 
     def _auto_prune_hook(
         self,
@@ -612,7 +577,7 @@ class IntelligenceEngine:
             if getattr(self, "debug_mode", False):
                 print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
         except Exception as e:
-            if getattr(self, 'debug_mode', False):
+            if getattr(self, "debug_mode", False):
                 print(f"Warning: Auto-prune failed: {e}")
 
     def generate_token_exon(self, state_index: int, temperature: float = 1.0) -> int:
@@ -640,43 +605,74 @@ class IntelligenceEngine:
             except Exception:
                 pass
 
-        # Pull candidates directly via the index: O(k) in number of tokens for this state.
-        fetch_limit = 512  # bounded to avoid pathological huge states
+        # Import governance function once at the beginning
+        from baby.governance import exon_product_from_metadata
+
+        fetch_limit = 512
         pulled = 0
+
+        # First try: exact state match (pre-state entries only)
         for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(rep_state_idx):
             if pulled >= fetch_limit:
                 break
             entry = self.operator.store.get((s_idx, token_id))
-            if not entry:
-                continue
+            if not entry or entry.get("direction", 0) != DIR_PRE:
+                continue  # Skip post-state entries
             pulled += 1
-            confidence = entry.get("conf", 0.1)
-            mask = entry.get("mask", 0)
 
-            # Get orbit cardinality for exon-product computation
+            confidence = entry.get("conf", 0.1)
+            mask = entry.get("mask", 0) & 0xFE  # Clear direction bit
+
             orbit_v = 1
             v_max = 1
             if hasattr(self, "s2") and hasattr(self.s2, "orbit_cardinality"):
                 try:
                     orbit_v = self.s2.orbit_cardinality[rep_state_idx]
-                    # Use the actual maximum from InformationEngine
-                    v_max = getattr(self.s2, "_v_max", 1000) or 1000
+                    v_max = int(np.max(self.s2.orbit_cardinality))
                 except (IndexError, AttributeError):
                     pass
 
-            # Compute exon-product from phenotype metadata
-            from baby.governance import exon_product_from_metadata
-
             exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
-
-            # Calculate resonance between state and exon-product
             resonance = self._calculate_resonance(rep_state_idx, exon_product)
 
-            # Weighted combination: confidence, resonance, and orbit factors
             orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
-            score = (confidence * 0.4) + (resonance * 0.4) + (orbit_factor * 0.2)
+
+            # Add token frequency weighting to reduce common word dominance
+            # Higher score for rare tokens (anti-log frequency)
+            uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
+
+            score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
 
             candidates.append((token_id, score, exon_product))
+
+        # Second try: if no candidates and state differs from its representative
+        if not candidates and state_index != rep_state_idx:
+            # Try original state directly
+            for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(state_index):
+                if pulled >= fetch_limit:
+                    break
+                entry = self.operator.store.get((s_idx, token_id))
+                if not entry or entry.get("direction", 0) != DIR_PRE:
+                    continue
+                pulled += 1
+
+                confidence = entry.get("conf", 0.1)
+                mask = entry.get("mask", 0) & 0xFE
+
+                orbit_v = self.s2.orbit_cardinality[state_index]
+                v_max = int(np.max(self.s2.orbit_cardinality))
+
+                exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
+                resonance = self._calculate_resonance(state_index, exon_product)
+
+                orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
+
+                # Add token frequency weighting to reduce common word dominance
+                uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
+
+                score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
+
+                candidates.append((token_id, score, exon_product))
 
         if not candidates:
             # Instrument fallback rate (first 5 events only to avoid spam)
@@ -920,14 +916,17 @@ def process_text_stream_leb128(
             introns = token_to_introns(token_id)
             last_intron = introns[-1]  # use real learning signal
 
-            # Apply all introns to get to post-state (consistent with live path)
+            # Cache pre-state before applying introns (physics-correct)
+            pre_state = current_state
+
+            # Apply all introns to get to post-state
             for intron in introns:
                 current_state = (
                     engine.epistemology[current_state, intron] if hasattr(engine, "epistemology") else current_state
                 )
 
-            # Learn on post-state (consistent with process_egress)
-            engine.operator.learn_token(token_id, current_state, last_intron)
+            # Learn on pre-state (physics-correct, matches live path)
+            engine.operator.learn_token_preonly(token_id, pre_state, last_intron)
 
             yield token_id
 
@@ -945,7 +944,7 @@ def generate_text_stream_leb128(
 
     for _ in range(max_tokens):
         state_idx = engine.current_state_index
-        theta = (engine._θ_buf[-1] if getattr(engine, "_θ_buf", None) else 0.0)
+        theta = engine._θ_buf[-1] if getattr(engine, "_θ_buf", None) else 0.0
         tok_id, _ = engine._emit_token_with_feedback(state_idx, theta)
         yield tokenizer.decode([tok_id])
 
@@ -1133,13 +1132,16 @@ class GyroSI:
         """Add a monitoring hook to the intelligence engine."""
         self.engine.add_hook(hook)
 
-    def apply_maintenance(self, decay_rate: float = 0.001, confidence_threshold: float = 0.05) -> Dict[str, Any]:
+    def apply_maintenance(
+        self, decay_rate: float = 0.001, confidence_threshold: float = 0.05, max_tokens_per_orbit: int = 64
+    ) -> Dict[str, Any]:
         """
         Apply maintenance operations to the knowledge base.
 
         Args:
             decay_rate: Confidence decay rate for aging entries (small value, e.g. 0.001)
             confidence_threshold: Minimum confidence for entry retention
+            max_tokens_per_orbit: Maximum tokens to keep per orbit (orbit entropy management)
 
         Returns:
             Maintenance report
@@ -1147,15 +1149,15 @@ class GyroSI:
         # Apply confidence decay
         decay_report = self.engine.apply_confidence_decay(decay_rate)
 
-        # Prune low-confidence entries
-        pruned_count = self.engine.prune_low_confidence_entries(confidence_threshold)
+        # Manage orbit entropy (replaces confidence-based pruning)
+        orbit_entropy_removed = self.engine.operator.manage_orbit_entropy(max_tokens_per_orbit)
 
         # Commit changes to persist maintenance operations
         store = self.engine.operator.store
         if hasattr(store, "commit"):
             store.commit()
 
-        return {"decay_applied": decay_report, "entries_pruned": pruned_count, "timestamp": time.time()}
+        return {"decay_applied": decay_report, "orbit_entropy_removed": orbit_entropy_removed, "timestamp": time.time()}
 
     def close(self) -> None:
         """Clean shutdown of the agent."""

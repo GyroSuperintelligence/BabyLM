@@ -25,6 +25,8 @@ Usage:
     # Simple Wikipedia to tape only (fastest) - uses default knowledge directory
     python toys/training/wikipedia_eng.py --simple
 
+    python toys/training/wikipedia_eng.py --replay toys/training/knowledge/wikipedia_simple.gyro --learn
+
     # Full Wikipedia to tape with learning - uses default knowledge directory
     python toys/training/wikipedia_eng.py --full --learn
 
@@ -56,6 +58,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from baby.information import encode_text_with_sep as gyro_encode  # noqa: E402
 from baby.intelligence import GyroSI  # noqa: E402
 from baby.contracts import AgentConfig, PreferencesConfig  # noqa: E402
+from baby.policies import prune_and_compact_store  # noqa: E402
 
 # Default constants
 DEFAULT_LOG_INTERVAL = 50_000  # Default logging interval
@@ -141,7 +144,7 @@ def build_agent(private_knowledge_path: Path) -> GyroSI:
         "epistemology_path": str(PROJECT_ROOT / "memories/public/meta/epistemology.npy"),
         "public_knowledge_path": str(dummy_public),
         "private_knowledge_path": str(private_knowledge_path),
-        "learn_batch_size": 5000,  # write threshold for OrbitStore
+        "learn_batch_size": 5000,  # write threshold for OrbitStore (optimized for bulk replay)
         "enable_phenomenology_storage": True,  # <-- top-level (so CanonicalView is enabled explicitly)
         "preferences": preferences_config,
     }
@@ -403,9 +406,9 @@ def replay_tape(
                 if not chunk:
                     break
 
-                # Process chunk using bulk ingestion (much faster!)
+                # Use vectorized bulk ingestion - same physics as live learning
                 chunk_start_time = time.time()
-                agent.ingest_bulk(chunk)
+                agent.ingest_bulk(chunk)  # masked bytes are exactly what this expects
                 chunk_processing_time = time.time() - chunk_start_time
 
                 bytes_processed += len(chunk)
@@ -558,6 +561,7 @@ Examples:
 
     # Learning option
     parser.add_argument("--learn", action="store_true", help="Also update private knowledge store")
+    parser.add_argument("--compact", action="store_true", help="Compact the knowledge store at the end")
 
     # Processing options
     parser.add_argument("--limit", type=int, help="Stop after processing N articles (useful for testing)")
@@ -597,7 +601,7 @@ Examples:
         replay_agent = build_agent(private_knowledge_path)
 
         try:
-            replay_tape(tape_path, replay_agent, log_interval=args.log_interval)
+            stats = replay_tape(tape_path, replay_agent, log_interval=args.log_interval)
             return 0
         except KeyboardInterrupt:
             print("\n⚠️  Replay interrupted by user")
@@ -611,6 +615,13 @@ Examples:
 
             gc.collect()
             replay_agent.close()
+            if args.compact:
+                try:
+                    private_knowledge_path = tape_path.with_suffix(".bin")
+                    report = prune_and_compact_store(str(private_knowledge_path))
+                    print(f"🗜️  Compaction: kept {report['entries_processed']-report['entries_modified']} / {report['entries_processed']}")
+                except Exception as e:
+                    print(f"⚠️  Compaction failed: {e}")
 
     # Validate compilation mode arguments
     if not args.output:
@@ -675,6 +686,13 @@ Examples:
         return 1
     finally:
         # Clean up agent if created
+        if agent and args.compact:
+            try:
+                priv = Path(args.output).with_suffix(".bin")
+                report = prune_and_compact_store(str(priv))
+                print(f"🗜️  Compaction: kept {report['entries_processed']-report['entries_modified']} / {report['entries_processed']}")
+            except Exception as e:
+                print(f"⚠️  Compaction failed: {e}")
         if agent:
             try:
                 # Clean up memory-mapped arrays before closing

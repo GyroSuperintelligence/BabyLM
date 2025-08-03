@@ -15,6 +15,7 @@ import numpy as np
 from baby import governance
 from baby.contracts import PhenotypeEntry, ValidationReport
 from baby.information import InformationEngine
+from baby.policies import DIR_PRE, DIR_POST
 
 
 class InferenceEngine:
@@ -92,7 +93,7 @@ class InferenceEngine:
         if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
             raise IndexError(f"state_index {state_index} out of bounds [0, {len(self.s2.orbit_cardinality)})")
 
-        # Always store with the true physical state index; CanonicalView will canonicalize.
+        # Store with canonical keys (learn_token_preonly handles canonicalization).
         storage_key = (state_index, token_id)
         context_key = (state_index, token_id)  # Preserve original state_index
 
@@ -113,59 +114,52 @@ class InferenceEngine:
     def learn(self, phenotype_entry: PhenotypeEntry, last_intron: int, state_index: int) -> PhenotypeEntry:
         """
         Update memory via the Monodromic Fold.
-
-        This is where all learning occurs in the GyroSI system. Uses the
-        path-dependent Monodromic Fold operation to accumulate experience.
-
-        Args:
-            phenotype_entry: Entry to update with new experience
-            last_intron: Last intron to integrate
-            state_index: Current state index for learning rate calculation
-
-        Returns:
-            Updated phenotype entry
-
-        Raises:
-            IndexError: If state_index is out of bounds
+        Now stores both pre-state and post-state entries for richer trajectory.
         """
-        # Validate state_index is within bounds
         if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
             raise IndexError(f"state_index {state_index} out of bounds [0, {len(self.s2.orbit_cardinality)})")
 
-        # Clamp last_intron to 8 bits
         last_intron = last_intron & 0xFF
+        old_mask = phenotype_entry.get("mask", 0) & 0xFE  # Clear direction bit
 
-        # Get old mask and ensure it's clamped
-        old_mask = phenotype_entry.get("mask", 0) & 0xFF
-
-        # Use Monodromic Fold and clamp result
-        new_mask = governance.fold(old_mask, last_intron) & 0xFF
+        # Use Monodromic Fold
+        new_mask = governance.fold(old_mask, last_intron) & 0xFE  # Keep clean
 
         # Calculate learning rate and confidence
         novelty = bin(old_mask ^ new_mask).count("1") / 8.0
-
         v = self.s2.orbit_cardinality[state_index]
         alpha = (1 / 6) * math.sqrt(v / self._v_max)
         current_confidence = phenotype_entry.get("conf", 0.1)
         new_confidence = min(1.0, current_confidence + (1 - current_confidence) * alpha * novelty)
 
-        # Short-circuit: if mask and confidence unchanged, return early
-        # Use normalized comparison to avoid float16 precision issues
-        if new_mask == old_mask and abs(round(new_confidence, 4) - round(current_confidence, 4)) < 1e-4:
-            return phenotype_entry
+        # Check if this is a brand-new entry
+        is_new = bool(phenotype_entry.pop("_new", False))
 
-        # Assertions before updating
-        assert 0 <= new_mask <= 255
+        # Quantize to q8 for commit gating, to match storage precision and avoid jitter writes
+        def _q8(x: float) -> int:
+            x = max(0.0, min(1.0, float(x)))
+            return int(round(x * 255.0))
+
+        if (new_mask == old_mask
+            and _q8(new_confidence) == _q8(current_confidence)
+            and not is_new):
+            return phenotype_entry  # safe to skip – already stored
+
+        assert 0 <= new_mask <= 0xFE  # Excluding direction bit
         assert 0 <= new_confidence <= 1
 
-        # Update the entry with minimal structure
         phenotype_entry["mask"] = new_mask
         phenotype_entry["conf"] = new_confidence
 
-        # Persist mutations using the original key
-        key = phenotype_entry["key"]  # (state_idx, token_id)
+        # Preserve direction bit
+        direction = phenotype_entry.get("direction", DIR_PRE)
+        phenotype_entry["direction"] = direction
+
+        key = phenotype_entry.get("key")
+        if key is None:
+            raise ValueError("PhenotypeEntry missing required 'key' field")
         storage_key = key
-        self.store.put(storage_key, phenotype_entry)  # persist
+        self.store.put(storage_key, phenotype_entry)
 
         return phenotype_entry
 
@@ -211,6 +205,31 @@ class InferenceEngine:
         # Learn the token using LEB128 physics
         return self.learn(cast(PhenotypeEntry, entry), last_intron, state_index)
 
+    def learn_token_preonly(self, token_id: int, state_index_pre: int, last_intron: int) -> None:
+        """
+        Learn pre-state association for a token (physics-correct).
+        This respects the BU hinge and avoids phase mixing.
+        """
+        # Canonicalize to representative state
+        rep_pre = state_index_pre
+        if self.phenomenology_map is not None:
+            rep_pre = int(self.phenomenology_map[state_index_pre])
+        
+        key = (rep_pre, token_id)
+        entry = self.store.get(key)
+        
+        entry_new = entry is None
+        if entry is None:
+            entry = self._create_default_phenotype(key)
+            entry["direction"] = DIR_PRE
+        else:
+            entry = dict(entry)
+            entry["direction"] = DIR_PRE
+
+        entry["key"] = key
+        entry["_new"] = entry_new
+        self.learn(cast(PhenotypeEntry, entry), last_intron & 0xFF, rep_pre)
+
     def validate_knowledge_integrity(self) -> ValidationReport:
         def _flush_store(s: Any) -> None:
             if hasattr(s, "_flush"):
@@ -227,6 +246,7 @@ class InferenceEngine:
         confidence_sum = 0.0
         anomaly_count = 0
         seen: set[tuple[int, int]] = set()
+        unique_confidence_sum = 0.0
 
         # Walk down to the lowest OrbitStore (or anything that has an 'index') to inspect raw keys
         def _unwrap_raw_store(s: Any) -> Any:
@@ -253,6 +273,9 @@ class InferenceEngine:
             norm_key = _norm_key(store_key, entry)
             if norm_key in seen:
                 anomaly_count += 1
+            else:
+                # Only sum confidence for unique entries
+                unique_confidence_sum += float(entry["conf"])
             seen.add(norm_key)
             total_entries += 1
             confidence_sum += float(entry["conf"])
@@ -261,7 +284,7 @@ class InferenceEngine:
             ValidationReport,
             {
                 "total_entries": len(seen),
-                "average_confidence": confidence_sum / max(total_entries, 1),
+                "average_confidence": unique_confidence_sum / max(len(seen), 1),
                 "store_type": type(self.store).__name__,
                 "modified_entries": anomaly_count,
             },
@@ -312,55 +335,63 @@ class InferenceEngine:
             "decay_factor": decay_factor,
         }
 
-    def prune_low_confidence_entries(
-        self,
-        *,
-        confidence_threshold: float,
-    ) -> int:
+    def manage_orbit_entropy(self, max_tokens_per_orbit: int = 64) -> int:
         """
-        Remove all phenotypes whose *current* confidence is below the threshold.
-
-        NOTE: This only mutates the in‑memory dict of the underlying
-        OrbitStore (which is safe even for OverlayView).  Persisting the
-        effect to disk is left to the caller via baby.policies.prune_and_compact_store.
+        Manage phenotype storage by orbit entropy instead of raw confidence.
+        Keeps the most informative tokens per orbit.
         """
-        if confidence_threshold < 0.0:
-            raise ValueError("confidence_threshold must be ≥ 0.0")
+        # Group entries by orbit
+        orbit_tokens: Dict[int, List[Tuple[int, Any]]] = {}  # orbit_id -> [(token_id, entry)]
 
-        # First, flush any pending writes to ensure we see all entries
-        if hasattr(self.store, "commit"):
-            self.store.commit()
-
-        # `iter_entries()` gives canonicalised keys even under the view layer.
-        # Use normalized comparison to avoid float16 precision issues
-        to_remove: list[tuple[int, int]] = []
         for key, entry in self.store.iter_entries():
-            # Normalize confidence for consistent comparison
-            normalized_conf = round(entry["conf"], 4)  # Same precision as normalize_confidence
-            if normalized_conf < confidence_threshold:
-                to_remove.append(key)
+            state_idx, token_id = key
 
-        for key in to_remove:
-            # Use the store's delete method if available, otherwise try to delete from data
-            if hasattr(self.store, "delete"):
-                try:
-                    self.store.delete(key)
-                except (NotImplementedError, RuntimeError) as e:
-                    # OverlayView may not support deletion for public entries
-                    # Append-only stores don't support deletion
-                    # Log but continue with other entries
-                    if getattr(self, "debug_mode", False):
-                        print(f"Could not delete entry {key}: {e}")
-            elif hasattr(self.store, "data") and not (type(self.store).__name__ in ("OverlayView", "CanonicalView")):
-                # Only try data deletion for non-view stores
-                if key in self.store.data:
-                    del self.store.data[key]
+            # Get orbit representative
+            orbit_id = state_idx
+            if self.phenomenology_map is not None:
+                orbit_id = int(self.phenomenology_map[state_idx])
 
-        # Commit changes to persist deletions
+            if orbit_id not in orbit_tokens:
+                orbit_tokens[orbit_id] = []
+            orbit_tokens[orbit_id].append((token_id, entry))
+
+        removed_count = 0
+
+        for orbit_id, tokens in orbit_tokens.items():
+            if len(tokens) <= max_tokens_per_orbit:
+                continue
+
+            # Calculate token probabilities within orbit
+            total_conf = sum(e["conf"] for _, e in tokens)
+            if total_conf == 0:
+                continue
+
+            # Score by confidence * uniqueness
+            scored_tokens = []
+            for token_id, entry in tokens:
+                p = entry["conf"] / total_conf
+                # Higher score for rare tokens (anti-log frequency)
+                uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
+                score = p * uniqueness
+                scored_tokens.append((score, token_id, entry))
+
+            # Keep top K by score
+            scored_tokens.sort(reverse=True)
+
+            # Remove excess tokens
+            for _, token_id, entry in scored_tokens[max_tokens_per_orbit:]:
+                key = entry["key"]
+                if hasattr(self.store, "delete"):
+                    try:
+                        self.store.delete(key)
+                        removed_count += 1
+                    except Exception:
+                        pass
+
         if hasattr(self.store, "commit"):
             self.store.commit()
 
-        return len(to_remove)
+        return removed_count
 
     def _compute_semantic_address(self, context_key: Tuple[int, int]) -> int:
         """
@@ -405,3 +436,25 @@ class InferenceEngine:
                 "key": context_key,
             },
         )
+
+    def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
+        """
+        Remove phenotype entries with confidence below the threshold.
+
+        Args:
+            confidence_threshold: Minimum confidence to keep (default: 0.05)
+
+        Returns:
+            Number of entries removed
+        """
+        removed_count = 0
+
+        # Get all entries from the store
+        entries = list(self.store.iter_entries()) if hasattr(self.store, "iter_entries") else []
+
+        for key, entry in entries:
+            if isinstance(entry, dict) and entry.get("conf", 0.0) < confidence_threshold:
+                self.store.delete(key)
+                removed_count += 1
+
+        return removed_count

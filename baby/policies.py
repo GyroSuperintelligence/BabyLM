@@ -15,7 +15,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable, Union, Set
 import sys
 import numpy as np
 
@@ -36,6 +36,10 @@ _append_only_cache_maxsize = 65536
 # Confidence normalization constants
 _CONFIDENCE_PRECISION = 1e-4  # Tolerance for float16 precision differences
 _CONFIDENCE_ROUNDING_DIGITS = 4  # Round to 4 decimal places for consistency
+
+# Direction bit constants
+DIR_PRE = 0  # Pre-state entry (for generation)
+DIR_POST = 1  # Post-state entry (for diagnostics/reverse)
 
 
 def normalize_confidence(confidence: float) -> float:
@@ -137,10 +141,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def _pack_phenotype(entry: Dict[str, Any]) -> bytes:
     if "key" not in entry:
         raise KeyError("Entry must have 'key' field")
-    state_idx, token_id = entry["key"]  # renamed upstream
-    mask = entry["mask"] & 0xFF
+    state_idx, token_id = entry["key"]
+
+    # Extract direction bit if present, default to DIR_PRE
+    direction = entry.get("direction", DIR_PRE)
+    raw_mask = entry["mask"] & 0xFE  # Clear bit 0
+    mask = raw_mask | (direction & 0x01)  # Set direction bit
+
     conf = float(entry["conf"])
-    # Convert to float16 and then to uint16 for storage
     conf_f16 = np.float16(conf)
     conf_u16 = conf_f16.view(np.uint16).item()
     return struct.pack(_STRUCT_FMT, state_idx, token_id, mask, conf_u16)
@@ -148,17 +156,15 @@ def _pack_phenotype(entry: Dict[str, Any]) -> bytes:
 
 def _unpack_phenotype(buf: memoryview, offset: int = 0) -> tuple[Dict[str, Any], int]:
     state_idx, token_id, mask, conf_u16 = struct.unpack_from(_STRUCT_FMT, buf, offset)
-    # Convert from uint16 back to float16 and then to float
     conf_f16 = np.uint16(conf_u16).view(np.float16)
     raw_conf = float(conf_f16.item())
-    # Normalize confidence to ensure consistent decision-making
     normalized_conf = normalize_confidence(raw_conf)
-    entry = {
-        "mask": mask,
-        "conf": normalized_conf,
-        # expose composite key for callers
-        "key": (state_idx, token_id),
-    }
+
+    # Extract direction bit and clear it from mask
+    direction = mask & 0x01
+    clean_mask = mask & 0xFE
+
+    entry = {"mask": clean_mask, "conf": normalized_conf, "key": (state_idx, token_id), "direction": direction}
     return entry, offset + _STRUCT_SIZE
 
 
@@ -215,13 +221,19 @@ class OrbitStore:
         self._pending_fsync: Optional[concurrent.futures.Future[Any]] = None
         self._last_fsync = 0.0
         self._fsync_interval = 0.05  # 50ms or configurable
+        
+        # Index write throttling to reduce I/O churn
+        self._last_index_write = 0.0
+        self._index_write_interval = 2.0  # Write index at most every 2 seconds
+        self._new_keys_since_index_write = 0
+        self._index_write_threshold = 1000  # Or write after 1000 new keys
         self.log_file: Optional[Any] = None
         self._mmap: Optional[mmap.mmap] = None
         self._mmap_size = 0
         self._last_remap = 0.0  # Timestamp of last remap
         self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
         # O(1) candidate listing for a given state
-        self.index_by_state: Dict[int, List[int]] = {}
+        self.index_by_state: Dict[int, Set[int]] = {}
 
         # Always use Bloom filter and index
         self._bloom_filter: Optional[BloomFilter] = None
@@ -229,10 +241,10 @@ class OrbitStore:
         # Try to load existing Bloom filter
         if not self._try_load_bloom():
             # Create new Bloom filter
-            estimated_entries = 1_000_000  # Default estimate
+            estimated_entries = 2_000_000  # Increased to 2M capacity
             if os.path.exists(resolved_store_path):
                 file_size = os.path.getsize(resolved_store_path)
-                estimated_entries = max(1_000_000, file_size // _STRUCT_SIZE)
+                estimated_entries = max(2_000_000, file_size // _STRUCT_SIZE)
             self._bloom_filter = BloomFilter(estimated_entries, error_rate=0.001)
 
         # Always use index-based mode
@@ -307,16 +319,16 @@ class OrbitStore:
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
-                    entry_buf = self._mmap[offset:offset + size]
+                    entry_buf = self._mmap[offset : offset + size]
                 else:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
                         entry_buf = f.read(size)
-                
+
                 # Safety check for empty buffer
                 if len(entry_buf) == 0:
                     return None
-                    
+
                 entry, _ = _unpack_phenotype(memoryview(entry_buf))
                 return entry
 
@@ -426,9 +438,23 @@ class OrbitStore:
         with self.lock:
             # Capture pending writes before flush for bloom filter update
             pending_keys = list(self.pending_writes.keys())
+            new_keys_count = len(pending_keys)
 
             self._flush()
-            self._write_index()
+            
+            # Throttled index writes to reduce I/O churn
+            now = time.time()
+            should_write_index = (
+                now - self._last_index_write >= self._index_write_interval or
+                self._new_keys_since_index_write >= self._index_write_threshold
+            )
+            
+            if should_write_index:
+                self._write_index()
+                self._last_index_write = now
+                self._new_keys_since_index_write = 0
+            else:
+                self._new_keys_since_index_write += new_keys_count
 
             # Only remap mmap after flush if file has grown
             if self.use_mmap:
@@ -460,11 +486,9 @@ class OrbitStore:
             size = len(payload)
             self.log_file.write(payload)
             self.index[context_key] = (offset, size)
-            # keep index_by_state fresh
+            # keep index_by_state fresh (using set for deduplication)
             s_idx, tok_id = context_key
-            lst = self.index_by_state.setdefault(s_idx, [])
-            if not lst or lst[-1] != tok_id:  # micro-opt to reduce dup risk
-                lst.append(tok_id)
+            self.index_by_state.setdefault(s_idx, set()).add(tok_id)
         self.log_file.flush()
         now = time.time()
         if now - self._last_fsync > self._fsync_interval:
@@ -482,10 +506,7 @@ class OrbitStore:
         if self._pending_fsync:
             pending_fsync = self._pending_fsync
         self.pending_writes.clear()
-        self._flush_count += 1
-        if self._flush_count >= 10:
-            self._write_index()
-            self._flush_count = 0
+        # Removed periodic index writes - only write at commit() for better performance
         return pending_fsync
 
     def mark_dirty(self, context_key: Tuple[int, int], entry: Any) -> None:
@@ -539,7 +560,7 @@ class OrbitStore:
                                 continue
 
                             self.index[(state_idx, token_id)] = (offset, size)
-                            self.index_by_state.setdefault(state_idx, []).append(token_id)
+                            self.index_by_state.setdefault(state_idx, set()).add(token_id)
                         else:
                             # Legacy format or malformed - skip
                             print(f"Warning: Skipping legacy/malformed index line: {line}")
@@ -577,7 +598,7 @@ class OrbitStore:
                         context_key = tuple(entry["key"])
                         self.index[context_key] = (offset, size)
                         s_idx, tok_id = context_key
-                        self.index_by_state.setdefault(s_idx, []).append(tok_id)
+                        self.index_by_state.setdefault(s_idx, set()).add(tok_id)
                         # Also add to Bloom filter
                         if self._bloom_filter:
                             self._bloom_filter.add(context_key)
@@ -591,17 +612,17 @@ class OrbitStore:
             self.index.pop(context_key, None)
             # also fix index_by_state
             s_idx, tok_id = context_key
-            lst = self.index_by_state.get(s_idx)
-            if lst:
-                try:
-                    lst.remove(tok_id)
-                except ValueError:
-                    pass
+            st = self.index_by_state.get(s_idx)
+            if st:
+                st.discard(tok_id)
 
     def close(self) -> None:
         with self.lock:
             if self.pending_writes:
                 self.commit()
+            # Force final index write to ensure no data loss
+            if self._new_keys_since_index_write > 0:
+                self._write_index()
             if hasattr(self, "_pending_fsync") and self._pending_fsync is not None:
                 # No blocking wait on fsync here; state will be updated asynchronously
                 pass
@@ -716,7 +737,7 @@ class OrbitStore:
                 for context_key, (offset, size) in self.index.items():
                     if context_key in yielded:
                         continue
-                    entry_buf_mv = mv[offset:offset + size]
+                    entry_buf_mv = mv[offset : offset + size]
                     entry, _ = _unpack_phenotype(entry_buf_mv)
                     yield context_key, entry
             else:
@@ -733,7 +754,7 @@ class OrbitStore:
     def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
         with self.lock:
             # pending first (most recent)
-            for (s, t) in self.pending_writes.keys():
+            for s, t in self.pending_writes.keys():
                 if s == state_idx:
                     yield (s, t)
             for tok_id in self.index_by_state.get(state_idx, ()):
@@ -768,7 +789,13 @@ class CanonicalView:
         if self.base_store is None:
             raise RuntimeError("CanonicalView: base_store is closed or None")
         phen_key = self._get_phenomenology_key(context_key)
-        # For minimal phenotype, just store with the phenomenology key
+        # Ensure the packed record contains the canonical key for consistency
+        if hasattr(entry, "copy"):
+            entry = entry.copy()
+        elif isinstance(entry, dict):
+            entry = dict(entry)
+        entry["key"] = phen_key
+        # Store with the phenomenology key
         self.base_store.put(phen_key, entry)
 
     def commit(self) -> None:
@@ -1546,3 +1573,23 @@ class BloomFilter:
         bf.capacity = size  # optional bookkeeping
         bf.error_rate = 0.01
         return bf
+
+
+# Module exports for static analysis
+__all__ = [
+    "DIR_PRE",
+    "DIR_POST",
+    "OrbitStore",
+    "CanonicalView",
+    "OverlayView",
+    "ReadOnlyView",
+    "BloomFilter",
+    "normalize_confidence",
+    "confidence_equals",
+    "load_phenomenology_map",
+    "merge_phenotype_maps",
+    "apply_global_confidence_decay",
+    "export_knowledge_statistics",
+    "validate_ontology_integrity",
+    "prune_and_compact_store",
+]

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-PROJECT_ROOT = Path('.').resolve()
+PROJECT_ROOT = Path(".").resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -19,7 +19,11 @@ def probe_candidates():
     """Probe the current state's candidate count."""
     try:
         a = agent_pool.get("assistant").engine
-        rep = int(a.phenomenology_map[a.current_state_index]) if a.phenomenology_map is not None else a.current_state_index
+        rep = (
+            int(a.phenomenology_map[a.current_state_index])
+            if a.phenomenology_map is not None
+            else a.current_state_index
+        )
         keys = list(a.operator.store.iter_keys_for_state(rep))
         print(f"Current state index: {a.current_state_index}")
         print(f"Canonical state index: {rep}")
@@ -33,4 +37,4 @@ def probe_candidates():
 
 
 if __name__ == "__main__":
-    probe_candidates() 
+    probe_candidates()

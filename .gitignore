@@ -124,6 +124,7 @@ node_modules/
 
 # BabyLM: ignore all private agent and thread data
 memories/private/
+memories/public/knowledge/
 
 # Ignore htmlcov coverage output
 htmlcov/

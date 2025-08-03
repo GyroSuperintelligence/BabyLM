@@ -5,18 +5,20 @@ Shared contracts (protocols and type definitions) for the GyroSI S4 system.
 from typing import TypedDict, Protocol, Dict, Any, Optional
 
 
-class PhenotypeEntry(TypedDict):
+class PhenotypeEntry(TypedDict, total=False):
     """
     Minimal phenotype record.
       mask  : 8-bit Monodromic-Fold residue  (0-255)
       conf  : epistemic confidence           (0.0-1.0)  – monotone ↑ / decay ↓
       key   : composite key (state_idx, token_id)
+      direction: trajectory direction (0=pre, 1=post)
     Everything else is derivable on-the-fly.
     """
 
     mask: int  # uint8   (exon_mask)
     conf: float  # float32
     key: tuple[int, int]  # composite key
+    direction: int  # trajectory direction (0=pre, 1=post)
 
 
 class PreferencesConfig(TypedDict, total=False):
@@ -79,7 +81,7 @@ class CycleHookFunction(Protocol):
     def __call__(
         self,
         engine: Any,  # Would be IntelligenceEngine but avoiding circular import
-        phenotype_entry: PhenotypeEntry,
+        phenotype_entry: Optional[PhenotypeEntry],
         last_intron: int,
         token_id: Optional[int] = None,
         state_index: Optional[int] = None,
