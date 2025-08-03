@@ -679,7 +679,12 @@ class IntelligenceEngine:
             candidates.append((token_id, score, exon_product))
 
         if not candidates:
-            # No learned tokens for this state, generate random
+            # Instrument fallback rate (first 5 events only to avoid spam)
+            if not hasattr(self, "_fallback_count"):
+                self._fallback_count = 0
+            if self._fallback_count < 5:
+                print(f"[gen] Fallback: no candidates for state={rep_state_idx}")
+            self._fallback_count += 1
             return self._generate_random_token()
 
         # Always sort by score

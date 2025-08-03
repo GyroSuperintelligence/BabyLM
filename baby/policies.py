@@ -312,6 +312,11 @@ class OrbitStore:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
                         entry_buf = f.read(size)
+                
+                # Safety check for empty buffer
+                if len(entry_buf) == 0:
+                    return None
+                    
                 entry, _ = _unpack_phenotype(memoryview(entry_buf))
                 return entry
 

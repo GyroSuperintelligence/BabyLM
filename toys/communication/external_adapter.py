@@ -52,18 +52,6 @@ BASE_PATH = Path(PREFERENCES.get("base_path", Path(PREFERENCES_PATH).parent)).re
 
 
 # ---------------------------------------------------------------------
-# Signal handling for graceful shutdown
-# ---------------------------------------------------------------------
-def signal_handler(signum: int, frame: Any) -> None:
-    """Handle SIGTERM for graceful shutdown."""
-    print(f"Received signal {signum}, shutting down gracefully...")
-    agent_pool.close_all()
-    exit(0)
-
-
-# Register signal handler for SIGTERM
-signal.signal(signal.SIGTERM, signal_handler)
-
 # ---------------------------------------------------------------------
 # One shared AgentPool for the whole process
 # ---------------------------------------------------------------------
@@ -73,7 +61,7 @@ base_knowledge_path = str(PROJECT_ROOT / PREFERENCES["public_knowledge"]["path"]
 
 
 agent_pool = AgentPool(
-    ontology_path=PREFERENCES["ontology"]["ontology_map_path"],
+    ontology_path=str(PROJECT_ROOT / PREFERENCES["ontology"]["ontology_map_path"]),
     base_knowledge_path=base_knowledge_path,
     preferences=PREFERENCES,
     allowed_ids={"user", "system", "assistant"},
@@ -81,7 +69,39 @@ agent_pool = AgentPool(
     private_agents_base_path=str(BASE_PATH / PREFERENCES["private_knowledge"]["base_path"]),
     base_path=BASE_PATH,
 )
+
+# Signal handling for graceful shutdown
+# ---------------------------------------------------------------------
+def signal_handler(signum: int, frame: Any) -> None:
+    """Handle SIGTERM for graceful shutdown."""
+    print(f"Received signal {signum}, shutting down gracefully...")
+    try:
+        agent_pool.close_all()
+    except:
+        pass
+    exit(0)
+
+
+# Register signal handler for SIGTERM (only if not in a critical section)
+try:
+    signal.signal(signal.SIGTERM, signal_handler)
+except:
+    pass  # Ignore if already registered
 agent_pool.ensure_triad()
+
+# Sanity probe to confirm sidecars are loaded
+try:
+    # unwrap ReadOnlyView → CanonicalView → OrbitStore
+    cv = agent_pool._public_store.base_store     # CanonicalView
+    store = cv.base_store                        # OrbitStore
+    sp = store.store_path
+    print("[public-store] path:", sp)
+    print("[public-store] bloom exists:", os.path.exists(sp + ".bloom"))
+    print("[public-store] idx exists:",   os.path.exists(sp + ".idx"))
+    print("[public-store] index entries:", len(store.index))
+except Exception as e:
+    print("sanity probe failed:", e)
+
 atexit.register(agent_pool.close_all)
 
 # ---------------------------------------------------------------------
@@ -92,6 +112,25 @@ app = FastAPI(
     version="0.9.6.7",
     summary="OpenAI & HuggingFace compatible REST facade for GyroSI-Baby (Token-Aware)",
 )
+
+@app.on_event("startup")
+async def warm():
+    """Pre-warm the system on startup to avoid first-turn penalty."""
+    agent_pool.ensure_triad()
+    try:
+        cv = agent_pool._public_store.base_store   # CanonicalView
+        store = cv.base_store                      # OrbitStore
+        sp = store.store_path
+        print(f"[warmup] public store: {sp}")
+        print(f"[warmup] bloom: {os.path.exists(sp + '.bloom')}, idx: {os.path.exists(sp + '.idx')}")
+        print(f"[warmup] indexed keys: {len(store.index)}")
+
+        # Touch epistemology to page-in a tiny slice (avoids first-turn page faults)
+        a = agent_pool.get("assistant").engine
+        _ = int(a.epistemology[0,0])  # tiny read is enough to map a page
+        print(f"[warmup] epistemology touched: {a.epistemology.shape}")
+    except Exception as e:
+        print("[warmup] failed:", e)
 
 # ---------------------------------------------------------------------
 # 1. OpenAI-compatible schema models
@@ -217,6 +256,10 @@ async def chat_completions(
             # Get individual token IDs using public API
             ids = bytes_to_token_ids(reply_bytes)
 
+            # Load tokenizer once, reuse
+            from baby.information import _load_tokenizer
+            tokenizer = _load_tokenizer(PREFERENCES["tokenizer"]["name"])
+
             for i, token_id in enumerate(ids):
                 # FIXED: Use direct tokenizer decode to avoid double-mask issue
                 # Instead of: token_bytes = gyrotok.id_to_bytes(token_id)
@@ -224,9 +267,6 @@ async def chat_completions(
                 # Use direct tokenizer method to get token text
                 try:
                     # Get token text directly from tokenizer
-                    from baby.information import _load_tokenizer
-
-                    tokenizer = _load_tokenizer(PREFERENCES["tokenizer"]["name"])
                     token_text = tokenizer.decode([token_id])
                 except (AttributeError, Exception):
                     # Fallback: use direct token ID to text conversion
