@@ -22,3 +22,5 @@ toys/training/wikipedia_simple_data/ filter=lfs diff=lfs merge=lfs -text
 toys/training/knowledge/ filter=lfs diff=lfs merge=lfs -text
 toys/training/Archive/ filter=lfs diff=lfs merge=lfs -text
 memories/public/knowledge/ filter=lfs diff=lfs merge=lfs -text
+toys/training/wikipedia_full_data/** filter=lfs diff=lfs merge=lfs -text
+toys/training/wikipedia_simple_data/** filter=lfs diff=lfs merge=lfs -text

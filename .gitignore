@@ -77,13 +77,9 @@ coverage.xml
 toys/health/memories/
 toys/health/htmlcov/
 
-toys/training/wikipedia_full_data/
-toys/training/wikipedia_simple_data
-toys/training/knowledge/
 toys/training/checkpoints/
 toys/training/logs/
 toys/training/trash/
-toys/training/Archive/
 
 # Documentation builds
 guides/build/
