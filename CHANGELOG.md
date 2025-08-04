@@ -2,6 +2,84 @@
 
 ---
 
+## [0.9.6.7] – 2025-08-04
+
+### 🔧 Plumbing & Training Infrastructure Improvements
+
+This release focuses on critical plumbing fixes and training infrastructure improvements, addressing performance bottlenecks and system reliability issues identified through extensive testing and optimization work.
+
+#### 🚀 Performance Optimizations Implemented
+
+* **Candidate Lookup Optimization**
+  * Implemented O(1) state-indexed candidate retrieval in `OrbitStore`
+  * Added per-state candidate caching in `IntelligenceEngine` to reduce storage hits
+  * Eliminated full-store scans that were causing generation hangs at ~200-300MB
+
+* **Theta Calculation Optimization**
+  * Replaced binary search with direct index access in `measure_state_divergence_index()`
+  * Eliminated hundreds of binary searches per turn in `process_egress()`
+  * Fixed performance bottleneck in epistemology chunk processing
+
+* **Bulk Token Processing**
+  * Replaced per-byte feedback loops with vectorized `process_egress_bulk()` calls
+  * Eliminated N per-byte cycles where N = token byte length
+  * Significantly reduced latency on development hardware
+
+* **Tokenizer Caching**
+  * Fixed repeated disk loading of `tokenizer.json` on every encode/decode call
+  * Added tokenizer priming to warmup functions
+  * Eliminated first-turn tokenizer loading penalty
+
+* **Adapter Non-blocking Implementation**
+  * Added `run_in_threadpool` wrapper to chat completion endpoints
+  * Guaranteed event loop responsiveness during CPU-bound operations
+  * Prevented server from appearing "hung" during long operations
+
+#### 🧠 Training Infrastructure
+
+* **Wikipedia Simple Dataset Processing**
+  * Successfully processed 22,868 articles (39.8M tokens, 78.1MB)
+  * Completed compilation in 1h 35m with 4 arts/s processing rate
+  * Generated knowledge store for training experiments
+
+* **Replay System Validation**
+  * Successfully replayed 78.1MB training data in 45m 26s
+  * Validated knowledge store integration and learning pipeline
+  * Confirmed state evolution and storage mechanisms
+
+#### 🔧 Critical Plumbing Fixes
+
+* **Canonicalization Layer Optimization**
+  * Verified proper store composition without redundant canonicalization
+  * Confirmed correct `enable_phenomenology_storage` configuration
+  * Eliminated potential performance degradation from double canonicalization
+
+* **Token Divergence Origin Fix**
+  * Fixed hard-coded `archetypal_state = 0` assumption in `compute_token_divergence()`
+  * Added proper `origin_index` parameter for correct divergence calculations
+  * Restored correctness to divergence diagnostics and temperature gating
+
+* **Store Iteration Improvements**
+  * Fixed unreachable code in `OrbitStore.iter_entries()`
+  * Improved cycle counting accuracy in bulk processing
+  * Enhanced store consistency with proper index integration
+
+#### 📊 Current Status
+
+* **Model Responsiveness**: ✅ Model now responds to queries successfully
+* **Language Coherence**: 🔄 Still working on improving language coherence and generation quality
+* **Performance**: ✅ Critical performance bottlenecks resolved
+* **Training Pipeline**: ✅ Wikipedia simple training and replay working
+
+#### 🎯 Next Steps
+
+* Continue work on language coherence and generation quality
+* Optimize remaining performance bottlenecks
+* Expand training data processing capabilities
+* Improve model response quality and consistency
+
+---
+
 ## [0.9.6.7] – 2025-08-03
 
 ### 🚀 Performance Optimizations & Physics Alignment: Complete Implementation

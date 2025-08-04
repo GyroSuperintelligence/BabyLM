@@ -24,7 +24,11 @@ Performance Optimizations:
 Usage:
     # Simple Wikipedia to tape only (fastest) - uses default knowledge directory
     python toys/training/wikipedia_eng.py --simple
+    
+    # Simple Wikipedia to tape with learning - uses default knowledge directory
+    python toys/training/wikipedia_eng.py --simple --learn
 
+    # Simple Wikipedia to tape with learning - uses default knowledge directory
     python toys/training/wikipedia_eng.py --replay toys/training/knowledge/wikipedia_simple.gyro --learn
 
     # Full Wikipedia to tape with learning - uses default knowledge directory

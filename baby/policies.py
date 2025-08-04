@@ -668,8 +668,8 @@ class OrbitStore:
             _graceful_shutdown()
             sys.exit(0)
 
-        # Only register signal handlers if not in test environment
-        if not any("pytest" in arg for arg in sys.argv):
+        # Only register signal handlers if not in test environment or server environment
+        if not any("pytest" in arg for arg in sys.argv) and not any("uvicorn" in arg for arg in sys.argv):
             try:
                 signal.signal(signal.SIGINT, _signal_handler)
                 signal.signal(signal.SIGTERM, _signal_handler)
@@ -757,6 +757,7 @@ class OrbitStore:
             for s, t in self.pending_writes.keys():
                 if s == state_idx:
                     yield (s, t)
+            # O(1) lookup using index_by_state
             for tok_id in self.index_by_state.get(state_idx, ()):
                 yield (state_idx, tok_id)
 
@@ -851,14 +852,36 @@ class CanonicalView:
         if self.base_store is None:
             raise RuntimeError("CanonicalView: base_store is closed or None")
         rep = self.phen_map.get(state_idx, state_idx)
-        it = getattr(self.base_store, "iter_keys_for_state", None)
-        if callable(it):
-            yield from it(rep)  # (rep, tok_id)
+        
+        # Always try to use the base store's fast implementation first
+        if hasattr(self.base_store, "iter_keys_for_state"):
+            yield from self.base_store.iter_keys_for_state(rep)
             return
-        # Fallback: scan entries (slower, but correct)
-        for (s_idx, tok_id), _ in self.base_store.iter_entries():  # pyright: ignore
-            if s_idx == rep:
-                yield (s_idx, tok_id)
+            
+        # If base store doesn't have the method, check if it's an OverlayView
+        # and try to get the underlying stores
+        if hasattr(self.base_store, "public_store") and hasattr(self.base_store, "private_store"):
+            # It's an OverlayView, try both stores
+            seen = set()
+            
+            # Try private store first
+            if self.base_store.private_store and hasattr(self.base_store.private_store, "iter_keys_for_state"):
+                for key in self.base_store.private_store.iter_keys_for_state(rep):
+                    if key not in seen:
+                        seen.add(key)
+                        yield key
+                        
+            # Try public store
+            if self.base_store.public_store and hasattr(self.base_store.public_store, "iter_keys_for_state"):
+                for key in self.base_store.public_store.iter_keys_for_state(rep):
+                    if key not in seen:
+                        seen.add(key)
+                        yield key
+            return
+        
+        # If we get here, the base store doesn't support iter_keys_for_state
+        # This should not happen with OrbitStore, but provide a safe fallback
+        raise RuntimeError(f"Base store {type(self.base_store)} does not support iter_keys_for_state")
 
 
 class OverlayView:
@@ -1025,10 +1048,8 @@ class ReadOnlyView:
         if callable(it):
             yield from it(state_idx)
             return
-        # Fallback scan
-        for (s_idx, tok_id), _ in self.base_store.iter_entries():  # pyright: ignore
-            if s_idx == state_idx:
-                yield (s_idx, tok_id)
+        # If base store doesn't support iter_keys_for_state, this is an error
+        raise RuntimeError(f"Base store {type(self.base_store)} does not support iter_keys_for_state")
 
 
 def merge_phenotype_maps(

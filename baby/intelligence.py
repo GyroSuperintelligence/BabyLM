@@ -157,6 +157,11 @@ class IntelligenceEngine:
         # Reusable buffer for state trajectory computation (max 64K to prevent RAM explosion)
         self._state_buf = np.empty(65536, dtype=np.int32)
 
+        # --- candidate cache for O(1) lookup ----------------------------------
+        self._cand_cache: Dict[int, List[Tuple[int, float, int]]] = {}
+        self._cand_cache_limit = 65536
+        self._store_mutation_epoch = 0
+
     def _temperature_from_theta(self, theta: float) -> float:
         """
         Smooth sigmoid temperature schedule.
@@ -189,13 +194,29 @@ class IntelligenceEngine:
         """Select one token, emit its full LEB128 byte sequence, feed each byte through Egress.
         Returns (token_id, emitted_bytes)."""
         temperature = self._temperature_from_theta(theta)
+        
+        # Optional: very noisy; never on by default to avoid stdout stalls
+        if getattr(self, "debug_mode", False):
+            # Print only the first few times per request/agent to avoid floods
+            if not hasattr(self, "_dbg_seen"):
+                self._dbg_seen = 0
+            if self._dbg_seen < 3:
+                self._dbg_seen += 1
+                self.debug_candidates(state_idx)
+        
         tok_id = self.generate_token_exon(state_idx, temperature)
         from baby.information import token_id_to_bytes
 
         token_bytes = token_id_to_bytes(tok_id)
-        for byte_out in token_bytes:
-            # Feed back as *external* bytes; process_egress handles ψ and learning
-            self.process_egress(byte_out)
+        # Use bulk application instead of per-byte feedback
+        if not hasattr(self, "_probe_emit"):
+            self._probe_emit = 0
+        t0 = time.perf_counter()
+        self.process_egress_bulk(token_bytes)
+        t1 = time.perf_counter()
+        if self._probe_emit < 5:
+            self._probe_emit += 1
+            print(f"[probe] feedback bulk for {len(token_bytes)} bytes took {(t1-t0)*1e3:.2f} ms")
         return tok_id, token_bytes
 
     def process_egress(self, input_byte: int) -> int:
@@ -221,7 +242,7 @@ class IntelligenceEngine:
         assert self.gene_mac_m_int < (1 << 48)
         self.cycle_count += 1
 
-        div = self.s2.measure_state_divergence(self._cached_state_int)
+        div = self.s2.measure_state_divergence_index(self.current_state_index)
         self._θ_buf.append(div)
 
         if (intron & 0x80) == 0:  # Token complete
@@ -407,8 +428,7 @@ class IntelligenceEngine:
 
             # θ update: push at least the final divergence (cheap and keeps temperature sane)
             try:
-                final_state_int = self.s2.get_state_from_index(self.current_state_index)
-                div = self.s2.measure_state_divergence(final_state_int)
+                div = self.s2.measure_state_divergence_index(self.current_state_index)
                 self._θ_buf.append(div)
             except Exception:
                 pass
@@ -418,8 +438,7 @@ class IntelligenceEngine:
                 mid_i = n // 2
                 try:
                     mid_state = int(st[mid_i])
-                    mid_state_int = self.s2.get_state_from_index(mid_state)
-                    div_mid = self.s2.measure_state_divergence(mid_state_int)
+                    div_mid = self.s2.measure_state_divergence_index(mid_state)
                     self._θ_buf.append(div_mid)
                 except Exception:
                     pass
@@ -467,7 +486,7 @@ class IntelligenceEngine:
             Dictionary with state information
         """
         self._sync_state_fields_from_index()
-        angular_divergence = self.s2.measure_state_divergence(self.gene_mac_m_int)
+        angular_divergence = self.s2.measure_state_divergence_index(self.current_state_index)
         tensor_index = self.current_state_index
         agent_id: str = self.agent_id
         cycle_count: int = self.cycle_count
@@ -580,6 +599,19 @@ class IntelligenceEngine:
             if getattr(self, "debug_mode", False):
                 print(f"Warning: Auto-prune failed: {e}")
 
+    def debug_candidates(self, state_index: int):
+        """Debug candidate generation for a given state"""
+        rep = state_index
+        if self.phenomenology_map is not None:
+            rep = int(self.phenomenology_map[state_index])
+
+        ks_rep = list(self.operator.store.iter_keys_for_state(rep))[:10]
+        ks_raw = list(self.operator.store.iter_keys_for_state(state_index))[:10]
+
+        print(f"[cand] state={state_index} rep={rep} ks_rep={len(ks_rep)} ks_raw={len(ks_raw)}")
+        if ks_rep:
+            print("[cand] sample entry:", self.operator.store.get(ks_rep[0]))
+
     def generate_token_exon(self, state_index: int, temperature: float = 1.0) -> int:
         """
         Generate next token using exon-product physics and LEB128 token associations.
@@ -594,9 +626,6 @@ class IntelligenceEngine:
         Returns:
             Generated token_id
         """
-        # Get candidate phenotypes for this state
-        candidates = []
-
         # Canonicalize once to match CanonicalView's key space
         rep_state_idx = state_index
         if self.phenomenology_map is not None:
@@ -605,74 +634,106 @@ class IntelligenceEngine:
             except Exception:
                 pass
 
-        # Import governance function once at the beginning
-        from baby.governance import exon_product_from_metadata
+        # Check candidate cache first
+        if rep_state_idx in self._cand_cache and self._store_mutation_epoch == 0:
+            candidates = self._cand_cache[rep_state_idx]
+        else:
+            # Fetch and cache candidates
+            candidates = []
+            fetch_limit = 512
+            pulled = 0
 
-        fetch_limit = 512
-        pulled = 0
+            # Add time budget for candidate retrieval
+            import time
+            t0 = time.perf_counter()
+            max_time = 0.02  # 20ms budget
 
-        # First try: exact state match (pre-state entries only)
-        for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(rep_state_idx):
-            if pulled >= fetch_limit:
-                break
-            entry = self.operator.store.get((s_idx, token_id))
-            if not entry or entry.get("direction", 0) != DIR_PRE:
-                continue  # Skip post-state entries
-            pulled += 1
+            # Instrument candidate retrieval performance
+            if not hasattr(self, "_probe_iters"):
+                self._probe_iters = 0
 
-            confidence = entry.get("conf", 0.1)
-            mask = entry.get("mask", 0) & 0xFE  # Clear direction bit
-
-            orbit_v = 1
-            v_max = 1
-            if hasattr(self, "s2") and hasattr(self.s2, "orbit_cardinality"):
-                try:
-                    orbit_v = self.s2.orbit_cardinality[rep_state_idx]
-                    v_max = int(np.max(self.s2.orbit_cardinality))
-                except (IndexError, AttributeError):
-                    pass
-
-            exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
-            resonance = self._calculate_resonance(rep_state_idx, exon_product)
-
-            orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
-
-            # Add token frequency weighting to reduce common word dominance
-            # Higher score for rare tokens (anti-log frequency)
-            uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
-
-            score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
-
-            candidates.append((token_id, score, exon_product))
-
-        # Second try: if no candidates and state differs from its representative
-        if not candidates and state_index != rep_state_idx:
-            # Try original state directly
-            for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(state_index):
-                if pulled >= fetch_limit:
+            # First try: exact state match (pre-state entries only)
+            for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(rep_state_idx):
+                if pulled >= fetch_limit or (time.perf_counter() - t0) > max_time:
                     break
                 entry = self.operator.store.get((s_idx, token_id))
                 if not entry or entry.get("direction", 0) != DIR_PRE:
-                    continue
+                    continue  # Skip post-state entries
                 pulled += 1
 
                 confidence = entry.get("conf", 0.1)
-                mask = entry.get("mask", 0) & 0xFE
+                mask = entry.get("mask", 0) & 0xFE  # Clear direction bit
 
-                orbit_v = self.s2.orbit_cardinality[state_index]
-                v_max = int(np.max(self.s2.orbit_cardinality))
+                orbit_v = 1
+                v_max = 1
+                if hasattr(self, "s2") and hasattr(self.s2, "orbit_cardinality"):
+                    try:
+                        orbit_v = self.s2.orbit_cardinality[rep_state_idx]
+                        v_max = int(np.max(self.s2.orbit_cardinality))
+                    except (IndexError, AttributeError):
+                        pass
 
+                from baby.governance import exon_product_from_metadata
                 exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
-                resonance = self._calculate_resonance(state_index, exon_product)
+                resonance = self._calculate_resonance(rep_state_idx, exon_product)
 
                 orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
 
                 # Add token frequency weighting to reduce common word dominance
+                # Higher score for rare tokens (anti-log frequency)
                 uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
 
                 score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
 
                 candidates.append((token_id, score, exon_product))
+
+            # Second try: if no candidates and state differs from its representative
+            if not candidates and state_index != rep_state_idx:
+                # Try original state directly
+                for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(state_index):
+                    if pulled >= fetch_limit or (time.perf_counter() - t0) > max_time:
+                        break
+                    entry = self.operator.store.get((s_idx, token_id))
+                    if not entry or entry.get("direction", 0) != DIR_PRE:
+                        continue
+                    pulled += 1
+
+                    confidence = entry.get("conf", 0.1)
+                    mask = entry.get("mask", 0) & 0xFE
+
+                    orbit_v = self.s2.orbit_cardinality[state_index]
+                    v_max = int(np.max(self.s2.orbit_cardinality))
+
+                    from baby.governance import exon_product_from_metadata
+                    exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
+                    resonance = self._calculate_resonance(state_index, exon_product)
+
+                    orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
+
+                    # Add token frequency weighting to reduce common word dominance
+                    uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
+
+                    score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
+
+                    candidates.append((token_id, score, exon_product))
+
+            # Log performance metrics
+            t1 = time.perf_counter()
+            if self._probe_iters < 10:
+                self._probe_iters += 1
+                print(f"[probe] iter_keys_for_state(state={rep_state_idx}) took {(t1-t0)*1e3:.2f} ms, pulled={pulled}")
+
+            # Cache the results (keep top candidates)
+            if candidates:
+                candidates.sort(key=lambda x: x[1], reverse=True)
+                candidates = candidates[:min(100, len(candidates))]  # Keep top 100
+                self._cand_cache[rep_state_idx] = candidates
+                
+                # Evict old entries if cache is full
+                if len(self._cand_cache) > self._cand_cache_limit:
+                    # Simple LRU: remove oldest entries
+                    oldest_key = next(iter(self._cand_cache))
+                    del self._cand_cache[oldest_key]
 
         if not candidates:
             # Instrument fallback rate (first 5 events only to avoid spam)
@@ -841,14 +902,11 @@ class TokenSTT:
 
 
 def compute_token_divergence(
-    token_id: int, theta_map: np.ndarray[Any, Any], epistemology: np.ndarray[Any, Any]
+    token_id: int, theta_map: np.ndarray[Any, Any], epistemology: np.ndarray[Any, Any], origin_index: int
 ) -> float:
     """Compute the angular divergence introduced by a token."""
-    # Start from archetypal state
-    archetypal_state = 0  # GENE_Mac_S equivalent
-    final_state = apply_token_physics(archetypal_state, token_id, epistemology)
-
-    return theta_map[final_state] if final_state < len(theta_map) else 0.0
+    final_state = apply_token_physics(origin_index, token_id, epistemology)
+    return float(theta_map[final_state]) if final_state < len(theta_map) else 0.0
 
 
 def precompute_common_tokens(
@@ -1089,21 +1147,82 @@ class GyroSI:
             if hasattr(store, "commit"):
                 store.commit()
 
-    def respond(self, data: bytes, max_new_tokens: int = 64) -> bytes:
-        # 1) Ingest prompt bytes
-        for b in data:
-            self.engine.process_egress(b)
+    def respond(self, data: bytes, max_new_tokens: int = None) -> bytes:
+        import time, numpy as np
+        from baby.information import (
+            bytes_to_token_ids, decode_text, token_id_to_bytes, SEP_ID
+        )
+        # 1) Ingest prompt bytes (keeps physics correct)
+        self.engine.process_egress_bulk(data)
+
+        # Policy knobs (not "caps")
+        prefs = self.preferences if isinstance(self.preferences, dict) else {}
+        turn_cfg = prefs.get("turn_policy", {})
+        ratio     = float(turn_cfg.get("reply_len_ratio", 1.2))
+        min_reply = int(turn_cfg.get("min_reply_tokens", 8))
+        max_reply = int(turn_cfg.get("max_reply_tokens", 96))
+        wall_s    = float(turn_cfg.get("max_wall_time_s", 2.0))
+        theta_eps = float(turn_cfg.get("theta_std_epsilon", 0.01))
+        tok_name  = prefs.get("tokenizer", {}).get("name", "bert-base-uncased")
+
+        in_tok_len = 1
+        try:
+            in_tok_len = max(1, len(bytes_to_token_ids(data)))
+        except Exception:
+            pass
+        target = int(np.clip(int(ratio * in_tok_len + 2), min_reply, max_reply))
 
         out = bytearray()
         tokens_done = 0
-        while tokens_done < max_new_tokens:
+        t0 = time.perf_counter()
+        while True:
             state_idx = self.engine.current_state_index
             theta = self.engine._θ_buf[-1] if self.engine._θ_buf else 0.0
             tok_id, token_bytes = self.engine._emit_token_with_feedback(state_idx, theta)
             out.extend(token_bytes)
             tokens_done += 1
-            if tok_id == SEP_ID:  # [SEP] as EOS if desired
+
+            # (1) Physical stop
+            if tok_id == SEP_ID:
                 break
+
+            # (2) Caller-provided limit (kept working for tests; you can pass None)
+            if max_new_tokens is not None and tokens_done >= max_new_tokens:
+                break
+
+            # (3) Natural stop: enough tokens AND the text looks complete
+            if tokens_done >= target:
+                try:
+                    txt = decode_text(bytes(out), name=tok_name)
+                    if txt and txt[-1:] in ".!?…\n":
+                        break
+                except Exception:
+                    pass
+                # Respect physics: force a SEP if we must stop
+                sep = token_id_to_bytes(SEP_ID)
+                self.engine.process_egress_bulk(sep)
+                out.extend(sep)
+                break
+
+            # (4) Soft time guard (for your 2015 MBP edge case)
+            if time.perf_counter() - t0 > wall_s:
+                sep = token_id_to_bytes(SEP_ID)
+                self.engine.process_egress_bulk(sep)
+                out.extend(sep)
+                break
+
+            # (5) θ-settling (state stopped changing meaningfully)
+            if len(self.engine._θ_buf) >= 8 and tokens_done >= min_reply:
+                try:
+                    import numpy as _np
+                    rec = _np.array(list(self.engine._θ_buf)[-8:], dtype=_np.float32)
+                    if float(rec.std()) < theta_eps:
+                        sep = token_id_to_bytes(SEP_ID)
+                        self.engine.process_egress_bulk(sep)
+                        out.extend(sep)
+                        break
+                except Exception:
+                    pass
 
         self._commit_if_needed()
         return bytes(out)
@@ -1504,6 +1623,7 @@ def orchestrate_turn(
     assistant_id: str,
     user_input: str,
     tokenizer_name: str,  # Make this mandatory
+    max_new_tokens: int = None,  # No artificial limit
 ) -> str:
     """
     Orchestrate a single conversational turn between agents using a tokenizer.
@@ -1525,15 +1645,18 @@ def orchestrate_turn(
         raise RuntimeError(f"Missing required agent: {e}. Call pool.ensure_triad() or pool.create_agent() first.")
 
     # 1. Encode input using the specified tokenizer. No fallback.
-    from baby.information import encode_text, decode_text
+    from baby.information import encode_text, decode_text, sep_bytes
 
     in_bytes = encode_text(user_input, name=tokenizer_name)
 
-    # 2. User agent processes input, creating stimulus
-    stimulus = user_agent.respond(in_bytes)
+    # 2. User agent learns from the input (no generation)
+    user_agent.ingest_bulk(in_bytes)
+
+    # Physically mark end-of-user-turn to align the assistant's physics
+    stimulus = in_bytes + sep_bytes()
 
     # 3. Assistant responds to stimulus
-    response = assistant_agent.respond(stimulus)
+    response = assistant_agent.respond(stimulus, max_new_tokens=max_new_tokens)
 
     # 4. Decode response using the same tokenizer.
     #    The `decode` function already has a UTF-8 fallback for robustness.

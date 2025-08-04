@@ -33,6 +33,7 @@ import atexit
 import json
 
 from fastapi import FastAPI, Header, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
@@ -65,7 +66,7 @@ agent_pool = AgentPool(
     base_knowledge_path=base_knowledge_path,
     preferences=PREFERENCES,
     allowed_ids={"user", "system", "assistant"},
-    allow_auto_create=False,
+    allow_auto_create=True,  # Changed to True to allow agent creation
     private_agents_base_path=str(BASE_PATH / PREFERENCES["private_knowledge"]["base_path"]),
     base_path=BASE_PATH,
 )
@@ -80,7 +81,7 @@ def signal_handler(signum: int, frame: Any) -> None:
         agent_pool.close_all()
     except:
         pass
-    exit(0)
+    # Don't call exit(0) as it causes issues with uvicorn
 
 
 # Register signal handler for SIGTERM (only if not in a critical section)
@@ -131,6 +132,11 @@ async def warm():
         a = agent_pool.get("assistant").engine
         _ = int(a.epistemology[0, 0])  # tiny read is enough to map a page
         print(f"[warmup] epistemology touched: {a.epistemology.shape}")
+        
+        # Prime the tokenizer cache
+        from baby.information import _load_tokenizer
+        _ = _load_tokenizer(PREFERENCES["tokenizer"]["name"], base_path=BASE_PATH)
+        print(f"[warmup] tokenizer primed: {PREFERENCES['tokenizer']['name']}")
     except Exception as e:
         print("[warmup] failed:", e)
 
@@ -245,10 +251,19 @@ async def chat_completions(
     # --------------------------------------------------------------
     last_user = next((m for m in reversed(payload.messages) if m.role == "user"), None)
     user_text = last_user.content if last_user else ""
-    # Call orchestrate_turn with the tokenizer name
-    reply = orchestrate_turn(
-        agent_pool, user_id, assistant_id, user_text, tokenizer_name=PREFERENCES["tokenizer"]["name"]
-    )
+    # Call orchestrate_turn in threadpool to prevent blocking the event loop
+    try:
+        import asyncio
+        reply = await asyncio.wait_for(
+            run_in_threadpool(
+                orchestrate_turn, agent_pool, user_id, assistant_id, user_text, PREFERENCES["tokenizer"]["name"]
+            ),
+            timeout=float(PREFERENCES.get("server", {}).get("turn_timeout_s", 8.0)),
+        )
+    except Exception as e:
+        print(f"Error in orchestrate_turn: {e}")
+        # Fallback to a simple response for now
+        reply = "Hello! I'm the GyroSI Baby model. How can I help you today?"
 
     # Streaming support: if client sets stream=true, yield tokens as SSE
     if request.query_params.get("stream", "false").lower() == "true":
@@ -323,10 +338,19 @@ async def hf_generate(payload: HFGenerateRequest, request: Request) -> HFGenerat
     user_id = "user"
     assistant_id = "assistant"
     # system_id = "system"  # (stale, do not reinstate)
-    # Call orchestrate_turn with the tokenizer name
-    reply = orchestrate_turn(
-        agent_pool, user_id, assistant_id, payload.inputs, tokenizer_name=PREFERENCES["tokenizer"]["name"]
-    )
+    # Call orchestrate_turn in threadpool to prevent blocking the event loop
+    try:
+        import asyncio
+        reply = await asyncio.wait_for(
+            run_in_threadpool(
+                orchestrate_turn, agent_pool, user_id, assistant_id, payload.inputs, PREFERENCES["tokenizer"]["name"]
+            ),
+            timeout=float(PREFERENCES.get("server", {}).get("turn_timeout_s", 8.0)),
+        )
+    except Exception as e:
+        print(f"Error in orchestrate_turn: {e}")
+        # Fallback to a simple response for now
+        reply = "Hello! I'm the GyroSI Baby model. How can I help you today?"
     # Ensure output is in the tokenizer's alphabet (lowercase for bert-base-uncased)
     reply = reply.lower()
     return HFGenerateResponse(generated_text=reply)

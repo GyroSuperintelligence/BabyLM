@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
+from functools import lru_cache
 
 from baby import governance
 
@@ -31,15 +32,18 @@ Build steps:
 # ---------- Tokenization & LEB128 Functions ----------
 
 
-def _load_tokenizer(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> Any:
-    """Load tokenizer from HuggingFace."""
+@lru_cache(maxsize=4)
+def _cached_tokenizer(name: str, base_path_str: str):
     from tokenizers import Tokenizer
+    root = Path(base_path_str)
+    path = root / "public" / "tokenizers" / name / "tokenizer.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Tokenizer not found: {path}")
+    return Tokenizer.from_file(str(path))
 
-    tokenizer_root = base_path / "memories" / "public" / "tokenizers"
-    tokenizer_path = tokenizer_root / name / "tokenizer.json"
-    if not tokenizer_path.exists():
-        raise FileNotFoundError(f"Tokenizer not found: {tokenizer_path}")
-    return Tokenizer.from_file(str(tokenizer_path))
+def _load_tokenizer(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories" / "memories") -> Any:
+    """Load tokenizer from HuggingFace with caching."""
+    return _cached_tokenizer(name, str(base_path))
 
 
 def _id_to_bytes(idx: int) -> List[int]:
@@ -83,7 +87,7 @@ def _apply_mask(buf: bytes) -> bytes:
 
 
 def encode_text(
-    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]
+    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
 ) -> bytes:
     """Encode text to bytes via tokenizer + LEB128 (vectorized). Uses base_path for root."""
     # 1. text → token IDs ----------------------------------------------------
@@ -108,7 +112,7 @@ def encode_text(
 
 
 def decode_text(
-    blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]
+    blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
 ) -> str:
     """Decode LEB128 bytes back to text via tokenizer. Uses base_path for root."""
     # 1. external bytes → intron stream -------------------------------------
@@ -128,7 +132,7 @@ def decode_text(
         return blob.decode("utf-8", errors="replace")
 
 
-def get_vocab_size(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]) -> int:
+def get_vocab_size(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> int:
     """Get vocabulary size of a tokenizer. Uses base_path for root."""
     tokenizer = _load_tokenizer(name, base_path)
     return int(tokenizer.get_vocab_size())
@@ -242,7 +246,7 @@ def sep_bytes(count: int = 1) -> bytes:
 
 
 def encode_text_with_sep(
-    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1]
+    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
 ) -> bytes:
     """Encode text and append a single SEP token."""
     return encode_text(text, name, base_path) + sep_bytes()
@@ -459,6 +463,14 @@ class InformationEngine:
             raise RuntimeError("Theta table is not loaded. Cannot compute state divergence.")
         idx = self.get_index_from_state(state_int)
         return float(self._theta_table[idx])
+
+    def measure_state_divergence_index(self, index: int) -> float:
+        """Direct index-based θ calculation without binary search."""
+        if self._theta_table is None:
+            raise RuntimeError("Theta table missing")
+        if index < 0 or index >= len(self._theta_table):
+            raise IndexError("Index out of bounds")
+        return float(self._theta_table[index])
 
     def get_orbit_cardinality(self, state_index: int) -> int:
         return int(self.orbit_cardinality[state_index])
