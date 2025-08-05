@@ -12,6 +12,7 @@ class PhenotypeEntry(TypedDict, total=False):
       conf  : epistemic confidence           (0.0-1.0)  – monotone ↑ / decay ↓
       key   : composite key (state_idx, token_id)
       direction: trajectory direction (0=pre, 1=post)
+      _new  : flag indicating if this is a new entry
     Everything else is derivable on-the-fly.
     """
 
@@ -19,6 +20,7 @@ class PhenotypeEntry(TypedDict, total=False):
     conf: float  # float32
     key: tuple[int, int]  # composite key
     direction: int  # trajectory direction (0=pre, 1=post)
+    _new: bool  # flag indicating if this is a new entry
 
 
 class PreferencesConfig(TypedDict, total=False):

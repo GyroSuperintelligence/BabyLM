@@ -16,12 +16,14 @@ import math
 from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, TypedDict, cast, Iterator, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from baby import governance
 from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig, PhenotypeEntry
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine, SEP_ID
-from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView, DIR_PRE
+from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
+from baby.governance import exon_product_from_metadata
 
 
 class _TokBridge:
@@ -75,6 +77,33 @@ class IntelligenceEngine:
     and implements operational strategies. Handles adaptation to external demands.
     """
 
+    preferences: Dict[str, Any]
+    phenomenology_map: Optional[NDArray[Any]]
+    epistemology: NDArray[Any]
+    s2: Any
+    operator: Any
+    phenotype_store: Any
+    current_state_index: int
+    _θ_buf: Deque[float]
+    _θ_low: float
+    _θ_high: float
+    _cand_cache: Dict[int, List[Tuple[int, float, int]]]
+    _cand_cache_limit: int
+    _store_mutation_epoch: int
+    _state_buf: NDArray[np.int32]
+    _raw_leb_buf: List[int]
+    MAX_TOKEN_BYTES: int
+    _S: List[int]
+    post_cycle_hooks: List[CycleHookFunction]
+    cycle_count: int
+    _pain_streak: int
+    agent_id: str
+    hook_batch_interval: int
+    base_path: Path
+    ontology_path: str
+    gene_mac_m_int: int
+    _last_token_id: int
+
     def __init__(
         self,
         ontology_path: str,
@@ -84,7 +113,7 @@ class IntelligenceEngine:
         epistemology_path: Optional[str] = None,
         phenomenology_map_path: Optional[str] = None,
         base_path: Path = Path(__file__).resolve().parents[2],
-        preferences: Optional[PreferencesConfig] = None,
+        preferences: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize intelligence engine.
@@ -132,7 +161,6 @@ class IntelligenceEngine:
             s2_engine=self.s2,
             phenotype_store=self.phenotype_store,
             phenomenology_map=self.phenomenology_map,
-            s_buffer=self._S,
         )
 
         # --- token buffer for egress processing: stores introns (internal bytes) ---
@@ -188,13 +216,13 @@ class IntelligenceEngine:
         b3 = (s >> 24) & 0xFF
         b4 = (s >> 32) & 0xFF
         b5 = (s >> 40) & 0xFF
-        return b0 ^ b1 ^ b2 ^ b3 ^ b4 ^ b5
+        return int(b0 ^ b1 ^ b2 ^ b3 ^ b4 ^ b5)
 
     def _emit_token_with_feedback(self, state_idx: int, theta: float) -> Tuple[int, bytes]:
         """Select one token, emit its full LEB128 byte sequence, feed each byte through Egress.
         Returns (token_id, emitted_bytes)."""
         temperature = self._temperature_from_theta(theta)
-        
+
         # Optional: very noisy; never on by default to avoid stdout stalls
         if getattr(self, "debug_mode", False):
             # Print only the first few times per request/agent to avoid floods
@@ -203,7 +231,7 @@ class IntelligenceEngine:
             if self._dbg_seen < 3:
                 self._dbg_seen += 1
                 self.debug_candidates(state_idx)
-        
+
         tok_id = self.generate_token_exon(state_idx, temperature)
         from baby.information import token_id_to_bytes
 
@@ -251,12 +279,29 @@ class IntelligenceEngine:
                 token_id = TOK.bytes_to_id(tok_bytes)
 
                 if token_id == SEP_ID:
+                    # Learn SEP as a pre-state association so it can be chosen later
+                    self.operator.learn_token_preonly(token_id, pre_state_index, intron)
+                    # Drop cached candidates for this representative state
+                    rep = (
+                        int(self.phenomenology_map[pre_state_index])
+                        if self.phenomenology_map is not None
+                        else pre_state_index
+                    )
+                    self._cand_cache.pop(rep, None)
+                    self._last_token_id = token_id
                     self._raw_leb_buf.clear()
                     return intron
                 self._prev_token_id = token_id
 
-                # Learn with pre-only storage (physics-correct)
+                # Learn with pre-only storage
                 self.operator.learn_token_preonly(token_id, pre_state_index, intron)
+                # Drop cached candidates for this representative state
+                rep = (
+                    int(self.phenomenology_map[pre_state_index])
+                    if self.phenomenology_map is not None
+                    else pre_state_index
+                )
+                self._cand_cache.pop(rep, None)
 
                 # Get the pre-state entry for hooks
                 pre_entry = self.operator.store.get((pre_state_index, token_id))
@@ -383,6 +428,15 @@ class IntelligenceEngine:
                     token_id = TOK.bytes_to_id(tok_bytes)
 
                     if token_id == SEP_ID:
+                        # Get pre-state (start of this token)
+                        pre_state = int(st[token_start_idx])
+                        self.operator.learn_token_preonly(token_id, pre_state, int(intron))
+                        # Drop cached candidates for this representative state
+                        rep = (
+                            int(self.phenomenology_map[pre_state]) if self.phenomenology_map is not None else pre_state
+                        )
+                        self._cand_cache.pop(rep, None)
+                        self._last_token_id = token_id
                         self._raw_leb_buf.clear()
                         token_start_idx = i + 1
                         continue
@@ -391,8 +445,11 @@ class IntelligenceEngine:
                     # Get pre-state (where token started)
                     pre_state = int(st[token_start_idx])
 
-                    # Pre-only storage (physics-correct)
+                    # Pre-only storage
                     self.operator.learn_token_preonly(token_id, pre_state, int(intron))
+                    # Drop cached candidates for this representative state
+                    rep = int(self.phenomenology_map[pre_state]) if self.phenomenology_map is not None else pre_state
+                    self._cand_cache.pop(rep, None)
 
                     # Get the pre-state entry for hooks
                     pre_entry = self.operator.store.get((pre_state, token_id))
@@ -425,6 +482,12 @@ class IntelligenceEngine:
                     f"for epistemology matrix (size {epistemology_size})"
                 )
             self.current_state_index = new_state
+            # keep state integer in sync with index
+            try:
+                self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
+                self._cached_state_int = self.gene_mac_m_int
+            except Exception:
+                pass
 
             # θ update: push at least the final divergence (cheap and keeps temperature sane)
             try:
@@ -547,10 +610,10 @@ class IntelligenceEngine:
         try:
             return dict(result)
         except Exception:
-            if is_dataclass(result):
+            if is_dataclass(result) and not isinstance(result, type):
                 return asdict(result)
             if hasattr(result, "__dict__"):
-                return vars(result)
+                return cast(Dict[str, Any], vars(result))
             return {}
 
     def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
@@ -563,7 +626,7 @@ class IntelligenceEngine:
         Returns:
             Number of entries pruned
         """
-        return self.operator.prune_low_confidence_entries(confidence_threshold=confidence_threshold)
+        return cast(int, self.operator.prune_low_confidence_entries(confidence_threshold=confidence_threshold))
 
     def _register_auto_prune_hook(self) -> None:
         """
@@ -599,7 +662,7 @@ class IntelligenceEngine:
             if getattr(self, "debug_mode", False):
                 print(f"Warning: Auto-prune failed: {e}")
 
-    def debug_candidates(self, state_index: int):
+    def debug_candidates(self, state_index: int) -> None:
         """Debug candidate generation for a given state"""
         rep = state_index
         if self.phenomenology_map is not None:
@@ -645,6 +708,7 @@ class IntelligenceEngine:
 
             # Add time budget for candidate retrieval
             import time
+
             t0 = time.perf_counter()
             max_time = 0.02  # 20ms budget
 
@@ -657,12 +721,12 @@ class IntelligenceEngine:
                 if pulled >= fetch_limit or (time.perf_counter() - t0) > max_time:
                     break
                 entry = self.operator.store.get((s_idx, token_id))
-                if not entry or entry.get("direction", 0) != DIR_PRE:
-                    continue  # Skip post-state entries
+                if not entry:
+                    continue  # Skip missing entries
                 pulled += 1
 
                 confidence = entry.get("conf", 0.1)
-                mask = entry.get("mask", 0) & 0xFE  # Clear direction bit
+                mask = entry.get("mask", 0)
 
                 orbit_v = 1
                 v_max = 1
@@ -673,7 +737,6 @@ class IntelligenceEngine:
                     except (IndexError, AttributeError):
                         pass
 
-                from baby.governance import exon_product_from_metadata
                 exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
                 resonance = self._calculate_resonance(rep_state_idx, exon_product)
 
@@ -681,7 +744,18 @@ class IntelligenceEngine:
 
                 # Add token frequency weighting to reduce common word dominance
                 # Higher score for rare tokens (anti-log frequency)
-                uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
+                # Calculate actual frequency from store
+                token_frequency = 1  # Default frequency
+                try:
+                    # Count occurrences of this token across all states
+                    token_count = 0
+                    for _, entry in self.operator.store.iter_entries():
+                        if entry and entry.get("key") and entry["key"][1] == token_id:
+                            token_count += 1
+                    token_frequency = max(1, token_count)
+                except Exception:
+                    pass
+                uniqueness = 1.0 / (1.0 + math.log(token_frequency))
 
                 score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
 
@@ -694,7 +768,7 @@ class IntelligenceEngine:
                     if pulled >= fetch_limit or (time.perf_counter() - t0) > max_time:
                         break
                     entry = self.operator.store.get((s_idx, token_id))
-                    if not entry or entry.get("direction", 0) != DIR_PRE:
+                    if not entry:
                         continue
                     pulled += 1
 
@@ -704,14 +778,24 @@ class IntelligenceEngine:
                     orbit_v = self.s2.orbit_cardinality[state_index]
                     v_max = int(np.max(self.s2.orbit_cardinality))
 
-                    from baby.governance import exon_product_from_metadata
                     exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
                     resonance = self._calculate_resonance(state_index, exon_product)
 
                     orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
 
                     # Add token frequency weighting to reduce common word dominance
-                    uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
+                    # Calculate actual frequency from store
+                    token_frequency = 1  # Default frequency
+                    try:
+                        # Count occurrences of this token across all states
+                        token_count = 0
+                        for _, entry in self.operator.store.iter_entries():
+                            if entry and entry.get("key") and entry["key"][1] == token_id:
+                                token_count += 1
+                        token_frequency = max(1, token_count)
+                    except Exception:
+                        pass
+                    uniqueness = 1.0 / (1.0 + math.log(token_frequency))
 
                     score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
 
@@ -726,9 +810,9 @@ class IntelligenceEngine:
             # Cache the results (keep top candidates)
             if candidates:
                 candidates.sort(key=lambda x: x[1], reverse=True)
-                candidates = candidates[:min(100, len(candidates))]  # Keep top 100
+                candidates = candidates[: min(100, len(candidates))]  # Keep top 100
                 self._cand_cache[rep_state_idx] = candidates
-                
+
                 # Evict old entries if cache is full
                 if len(self._cand_cache) > self._cand_cache_limit:
                     # Simple LRU: remove oldest entries
@@ -736,13 +820,13 @@ class IntelligenceEngine:
                     del self._cand_cache[oldest_key]
 
         if not candidates:
-            # Instrument fallback rate (first 5 events only to avoid spam)
+            # No candidates in store for this state: *end the turn* by emitting SEP.
             if not hasattr(self, "_fallback_count"):
                 self._fallback_count = 0
             if self._fallback_count < 5:
-                print(f"[gen] Fallback: no candidates for state={rep_state_idx}")
+                print(f"[gen] Fallback: no candidates for state={rep_state_idx} → SEP")
             self._fallback_count += 1
-            return self._generate_random_token()
+            return SEP_ID
 
         # Always sort by score
         candidates.sort(key=lambda x: x[1], reverse=True)
@@ -967,23 +1051,25 @@ def process_text_stream_leb128(
     from baby.information import _load_tokenizer, token_to_introns
 
     tokenizer = _load_tokenizer(tokenizer_name)
-    current_state = 0  # Start from archetypal state
+    # Start from the archetypal state's actual index
+    origin_idx = engine.s2.get_index_from_state(engine.s2.tensor_to_int(governance.GENE_Mac_S))
+    current_state = origin_idx
 
     for text in text_stream:
         for token_id in tokenizer.encode(text).ids:
             introns = token_to_introns(token_id)
             last_intron = introns[-1]  # use real learning signal
 
-            # Cache pre-state before applying introns (physics-correct)
+            # Cache pre-state before applying introns
             pre_state = current_state
 
-            # Apply all introns to get to post-state
+            # Apply all introns to get final state
             for intron in introns:
                 current_state = (
                     engine.epistemology[current_state, intron] if hasattr(engine, "epistemology") else current_state
                 )
 
-            # Learn on pre-state (physics-correct, matches live path)
+            # Learn on pre-state
             engine.operator.learn_token_preonly(token_id, pre_state, last_intron)
 
             yield token_id
@@ -1018,6 +1104,12 @@ class GyroSI:
     Manages configuration, agent identity, and provides the stable external API.
     """
 
+    preferences: Dict[str, Any]
+    config: AgentConfig
+    agent_id: str
+    base_path: Path
+    engine: IntelligenceEngine
+
     def __init__(
         self,
         config: AgentConfig,
@@ -1031,7 +1123,7 @@ class GyroSI:
         """
         self.base_path = base_path.resolve()
         self.config = config.copy()
-        self.preferences = config.get("preferences", {})
+        self.preferences = cast(Dict[str, Any], config.get("preferences", {}))
         # Patch only allowed AgentConfig path keys to be absolute if not already
         if (
             "ontology_path" in self.config
@@ -1086,9 +1178,6 @@ class GyroSI:
         if phenotype_store is None:
             phenotype_store = self._create_default_store()
 
-        # Extract preferences from config
-        preferences = self.config.get("preferences", {})
-
         # Use local variables for extra paths
         onto = self.config.get("ontology_path")
         if onto is None:
@@ -1109,7 +1198,7 @@ class GyroSI:
             epistemology_path=epistemology_path,
             phenomenology_map_path=self.config["phenomenology_map_path"],
             base_path=self.base_path,
-            preferences=preferences,
+            preferences=self.preferences,  # Pass preferences to the agent
         )
 
     def ingest(self, data: bytes) -> None:
@@ -1147,23 +1236,34 @@ class GyroSI:
             if hasattr(store, "commit"):
                 store.commit()
 
-    def respond(self, data: bytes, max_new_tokens: int = None) -> bytes:
-        import time, numpy as np
-        from baby.information import (
-            bytes_to_token_ids, decode_text, token_id_to_bytes, SEP_ID
-        )
-        # 1) Ingest prompt bytes (keeps physics correct)
+    def respond(self, data: bytes, max_new_tokens: Optional[int] = None) -> bytes:
+        """Generate complete response and return as bytes."""
+        result = bytearray()
+        for token_bytes in self.respond_stream(data, max_new_tokens):
+            result.extend(token_bytes)
+        return bytes(result)
+
+    def respond_stream(self, data: bytes, max_new_tokens: Optional[int] = None) -> Iterator[bytes]:
+        """
+        Generate response token by token, yielding each token's bytes as it's generated.
+        This enables real streaming without pre-computing the entire response.
+        """
+        import time
+        import numpy as np
+        from baby.information import bytes_to_token_ids, decode_text, token_id_to_bytes, SEP_ID
+
+        # 1) Ingest prompt bytes
         self.engine.process_egress_bulk(data)
 
         # Policy knobs (not "caps")
         prefs = self.preferences if isinstance(self.preferences, dict) else {}
         turn_cfg = prefs.get("turn_policy", {})
-        ratio     = float(turn_cfg.get("reply_len_ratio", 1.2))
+        ratio = float(turn_cfg.get("reply_len_ratio", 1.2))
         min_reply = int(turn_cfg.get("min_reply_tokens", 8))
         max_reply = int(turn_cfg.get("max_reply_tokens", 96))
-        wall_s    = float(turn_cfg.get("max_wall_time_s", 2.0))
+        wall_s = float(turn_cfg.get("max_wall_time_s", 2.0))
         theta_eps = float(turn_cfg.get("theta_std_epsilon", 0.01))
-        tok_name  = prefs.get("tokenizer", {}).get("name", "bert-base-uncased")
+        tok_name = prefs.get("tokenizer", {}).get("name", "bert-base-uncased")
 
         in_tok_len = 1
         try:
@@ -1172,14 +1272,16 @@ class GyroSI:
             pass
         target = int(np.clip(int(ratio * in_tok_len + 2), min_reply, max_reply))
 
-        out = bytearray()
         tokens_done = 0
         t0 = time.perf_counter()
+
         while True:
             state_idx = self.engine.current_state_index
             theta = self.engine._θ_buf[-1] if self.engine._θ_buf else 0.0
             tok_id, token_bytes = self.engine._emit_token_with_feedback(state_idx, theta)
-            out.extend(token_bytes)
+
+            # Yield token bytes immediately for real streaming
+            yield token_bytes
             tokens_done += 1
 
             # (1) Physical stop
@@ -1193,39 +1295,40 @@ class GyroSI:
             # (3) Natural stop: enough tokens AND the text looks complete
             if tokens_done >= target:
                 try:
-                    txt = decode_text(bytes(out), name=tok_name)
-                    if txt and txt[-1:] in ".!?…\n":
+                    # Decode current token to check for completion
+                    token_text = decode_text(token_bytes, name=tok_name)
+                    if token_text and token_text[-1:] in ".!?…\n":
                         break
                 except Exception:
                     pass
                 # Respect physics: force a SEP if we must stop
                 sep = token_id_to_bytes(SEP_ID)
                 self.engine.process_egress_bulk(sep)
-                out.extend(sep)
+                yield sep
                 break
 
             # (4) Soft time guard (for your 2015 MBP edge case)
             if time.perf_counter() - t0 > wall_s:
                 sep = token_id_to_bytes(SEP_ID)
                 self.engine.process_egress_bulk(sep)
-                out.extend(sep)
+                yield sep
                 break
 
             # (5) θ-settling (state stopped changing meaningfully)
             if len(self.engine._θ_buf) >= 8 and tokens_done >= min_reply:
                 try:
                     import numpy as _np
+
                     rec = _np.array(list(self.engine._θ_buf)[-8:], dtype=_np.float32)
                     if float(rec.std()) < theta_eps:
                         sep = token_id_to_bytes(SEP_ID)
                         self.engine.process_egress_bulk(sep)
-                        out.extend(sep)
+                        yield sep
                         break
                 except Exception:
                     pass
 
         self._commit_if_needed()
-        return bytes(out)
 
     def _commit_if_needed(self) -> None:
         store = self.engine.operator.store
@@ -1283,60 +1386,57 @@ class GyroSI:
         self.engine.operator.store.close()
 
     def _create_default_store(self) -> Any:
-        """Create default storage based on configuration."""
-        # --- Honor store_options for binary_struct/append-only store ---
-        # cast self.config to a dict so .get is allowed
-        # Always use index-based mode for faster lookups
-        # Canonicalisation enablement consistency: autodetect if flag is None or missing
-        enable_phenomenology = cast(Dict[str, Any], self.config).get("enable_phenomenology_storage", None)
+        """Create the default knowledge store for this agent."""
+        learn_batch_size = 100
+        knowledge_path: Optional[str] = None
 
-        # Create base store
-        public_knowledge_path = self.config.get("public_knowledge_path")
-        learn_batch_size = self.config.get("learn_batch_size", 100)
-        if learn_batch_size is None:
-            learn_batch_size = 100
-        phenomenology_map_path: Optional[str] = None  # Ensure always defined
-        private_root = self.config.get("private_agents_base_path", str(self.base_path / "memories/private/agents"))
-        if public_knowledge_path is not None:
+        # Check if we should use multi-agent overlay
+        if self.config.get("private_knowledge_path"):
             # Multi-agent setup with public/private knowledge
             private_path = self.config.get("private_knowledge_path")
             if private_path is None:
-                if private_root is None:
-                    raise ValueError("private_agents_base_path must not be None")
-                private_path = os.path.join(str(private_root), f"{self.agent_id}/knowledge.bin")
-            # Multi-agent overlay using decorators
+                private_agents_base_path = self.config.get("private_agents_base_path")
+                if private_agents_base_path:
+                    private_path = os.path.join(str(private_agents_base_path), f"{self.agent_id}/knowledge.bin")
+                else:
+                    raise ValueError(
+                        "private_agents_base_path must be set in config if private_knowledge_path is provided"
+                    )
+            public_knowledge_path = self.config.get("public_knowledge_path")
+            if public_knowledge_path is None:
+                raise ValueError("public_knowledge_path must be set in config for multi-agent setup")
             public_store = ReadOnlyView(
                 OrbitStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
             )
             private_store = OrbitStore(private_path, write_threshold=learn_batch_size, base_path=self.base_path)
-            base_store: Any = OverlayView(public_store, private_store)
-            phenomenology_map_path = self.config.get("phenomenology_map_path")
+            return OverlayView(public_store, private_store)
         else:
             # Single-agent setup
             knowledge_path = self.config.get("knowledge_path")
             if knowledge_path is None:
                 # Use preferences if available, otherwise fallback to default
-                if self.preferences and isinstance(self.preferences, dict):
-                    prefs_dict = cast(Dict[str, Any], self.preferences)
-                    if "public_knowledge" in prefs_dict:
-                        knowledge_path = prefs_dict["public_knowledge"]["path"]
-                    else:
-                        base_path = self.config.get("base_path") or str(self.base_path / "memories/public/knowledge")
-                        knowledge_path = os.path.join(base_path, "knowledge.bin")  # binary_struct-based fallback path
+                prefs_dict = self.preferences
+                if "public_knowledge" in prefs_dict:
+                    knowledge_path = prefs_dict["public_knowledge"]["path"]
                 else:
                     base_path = self.config.get("base_path") or str(self.base_path / "memories/public/knowledge")
                     knowledge_path = os.path.join(base_path, "knowledge.bin")  # binary_struct-based fallback path
                     # Ensure the directory exists
                     os.makedirs(os.path.dirname(knowledge_path), exist_ok=True)
-            base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
 
-            # CanonicalView: enable if flag is True, or autodetect if None and file exists
-            phenomenology_map_path = self.config.get("phenomenology_map_path")
+        if knowledge_path is None:
+            raise RuntimeError("Failed to determine knowledge path")
+        base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
+
+        # CanonicalView: enable if flag is True, or autodetect if None and file exists
+        phenomenology_map_path = self.config.get("phenomenology_map_path")
         # Ensure phenomenology_map_path is always a str before use
         if phenomenology_map_path is None:
             phenomenology_map_path = str(self.base_path / "memories/public/meta/phenomenology_map.npy")
-        if enable_phenomenology or (
-            enable_phenomenology is None and phenomenology_map_path and os.path.exists(phenomenology_map_path)
+        if self.config.get("enable_phenomenology_storage") or (
+            self.config.get("enable_phenomenology_storage") is None
+            and phenomenology_map_path
+            and os.path.exists(phenomenology_map_path)
         ):
             if phenomenology_map_path and os.path.exists(phenomenology_map_path):
                 return CanonicalView(base_store, phenomenology_map_path, base_path=self.base_path)
@@ -1386,7 +1486,7 @@ class AgentPool:
         self,
         ontology_path: str,
         base_knowledge_path: str,
-        preferences: Optional[PreferencesConfig] = None,
+        preferences: Optional[Dict[str, Any]] = None,
         *,
         allowed_ids: Optional[set[str]] = None,
         allow_auto_create: bool = False,
@@ -1405,13 +1505,13 @@ class AgentPool:
         self.base_knowledge_path = _abs(base_knowledge_path, self.base_path)
         self.preferences = preferences or {}
         # cast preferences to a dict so .get is allowed
-        self.max_agents = cast(Dict[str, Any], self.preferences).get("max_agents_in_memory", 1000)
-        self.eviction_policy = cast(Dict[str, Any], self.preferences).get("agent_eviction_policy", "lru")
+        self.max_agents = self.preferences.get("max_agents_in_memory", 1000)
+        self.eviction_policy = self.preferences.get("agent_eviction_policy", "lru")
 
         # Initialize TTL settings
         self.agent_ttl_minutes = 0
         if self.eviction_policy == "ttl":
-            self.agent_ttl_minutes = cast(Dict[str, Any], self.preferences).get("agent_ttl_minutes", 30)
+            self.agent_ttl_minutes = self.preferences.get("agent_ttl_minutes", 30)
 
         self.allowed_ids = allowed_ids or {"user", "system", "assistant"}
         self.allow_auto_create = allow_auto_create
@@ -1424,9 +1524,25 @@ class AgentPool:
                 self._shards.append({"agents": LRUAgentCache(shard_size), "lock": RLock()})
             else:
                 self._shards.append({"agents": OrderedDict(), "lock": RLock()})
+        # Check if we should use multi-knowledge view
+        from baby.policies import create_multi_knowledge_view
+
+        # Check if there are multiple knowledge_*.bin files in the directory
+        knowledge_dir = os.path.dirname(self.base_knowledge_path)
+        multi_view = create_multi_knowledge_view(knowledge_dir, "knowledge_*.bin", self.base_path)
+
+        if multi_view.stores:  # If we found multiple knowledge files
+            print(f"Using MultiKnowledgeView with {len(multi_view.stores)} knowledge files")
+            base_store: Any = multi_view
+        else:
+            # Fall back to single file
+            print(f"Using single knowledge file: {os.path.basename(self.base_knowledge_path)}")
+            single_store: Any = OrbitStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path)
+            base_store = single_store
+
         self._public_store: Optional[ReadOnlyView] = ReadOnlyView(
             CanonicalView(
-                OrbitStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path),
+                base_store,
                 phenomenology_map_path=str(Path(self.ontology_path).with_name("phenomenology_map.npy")),
                 base_path=self.base_path,
             )
@@ -1437,7 +1553,6 @@ class AgentPool:
         return (hash(agent_id) if isinstance(agent_id, str) else agent_id) & (self.SHARD_COUNT - 1)
 
     def get_or_create_agent(self, agent_id: str, role_hint: Optional[str] = None) -> "GyroSI":
-        # legacy path – still here, but now obeys policy
         if not self.allow_auto_create and agent_id not in self.allowed_ids:
             raise PermissionError(f"Auto-create disabled and agent_id '{agent_id}' is not allowed.")
         return self._get_or_create(agent_id, role_hint)
@@ -1467,7 +1582,7 @@ class AgentPool:
                 # Multi-agent overlay using decorators, reuse cached public store
                 public_store = self._public_store
                 private_store = OrbitStore(private_path, write_threshold=100, base_path=self.base_path)
-                base_store: Any = OverlayView(public_store, private_store)
+                agent_store: Any = OverlayView(public_store, private_store)
 
                 # Create agent config
                 config: AgentConfig = {
@@ -1481,7 +1596,7 @@ class AgentPool:
                     "private_agents_base_path": str(self.private_agents_base_path),
                     "base_path": str(self.base_path),
                     "enable_phenomenology_storage": bool(self.preferences.get("enable_phenomenology_storage", False)),
-                    "preferences": self.preferences,  # Pass preferences to the agent
+                    "preferences": cast(PreferencesConfig, self.preferences),  # Pass preferences to the agent
                 }
 
                 # Add role hint to metadata if provided
@@ -1491,7 +1606,7 @@ class AgentPool:
                 agents[agent_id] = GyroSI(
                     config=config,
                     agent_id=agent_id,
-                    phenotype_store=base_store,
+                    phenotype_store=agent_store,
                     base_path=self.base_path,
                 )
                 # Track creation time for TTL eviction
@@ -1623,7 +1738,7 @@ def orchestrate_turn(
     assistant_id: str,
     user_input: str,
     tokenizer_name: str,  # Make this mandatory
-    max_new_tokens: int = None,  # No artificial limit
+    max_new_tokens: Optional[int] = None,  # No artificial limit
 ) -> str:
     """
     Orchestrate a single conversational turn between agents using a tokenizer.

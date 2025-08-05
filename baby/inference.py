@@ -6,7 +6,6 @@ converting physical state indices into semantic meanings and managing
 the learning process through Monodromic Fold.
 """
 
-import hashlib
 import math
 from typing import Any, Dict, Tuple, cast, Optional, List
 
@@ -15,7 +14,6 @@ import numpy as np
 from baby import governance
 from baby.contracts import PhenotypeEntry, ValidationReport
 from baby.information import InformationEngine
-from baby.policies import DIR_PRE, DIR_POST
 
 
 class InferenceEngine:
@@ -31,7 +29,6 @@ class InferenceEngine:
         s2_engine: InformationEngine,
         phenotype_store: Any,
         phenomenology_map: Optional[np.ndarray[Any, np.dtype[np.integer[Any]]]] = None,
-        s_buffer: Optional[List[int]] = None,
     ):
         """
         Initialize inference operator with measurement engine and storage.
@@ -40,22 +37,10 @@ class InferenceEngine:
             s2_engine: Information engine for state measurement
             phenotype_store: Storage interface for phenotype data
             phenomenology_map: Optional map from state indices to orbit IDs (0-255)
-            s_buffer: Optional reference to S-buffer for mask synchronization
+
         """
         self.s2 = s2_engine
         self.store = phenotype_store
-        self.s_buffer = s_buffer
-
-        # Fix orbit-ID lookup - map canonical indices to 0-255 range
-        if phenomenology_map is not None:
-            reps = np.unique(phenomenology_map)  # 256 canonical reps
-            self._orbit_of: Optional[np.ndarray[Any, np.dtype[np.unsignedinteger[Any]]]] = np.zeros_like(
-                phenomenology_map, dtype=np.uint8
-            )
-            for i, rep in enumerate(reps):
-                self._orbit_of[phenomenology_map == rep] = i  # 0‥255
-        else:
-            self._orbit_of = None
 
         self.phenomenology_map = phenomenology_map
 
@@ -114,16 +99,15 @@ class InferenceEngine:
     def learn(self, phenotype_entry: PhenotypeEntry, last_intron: int, state_index: int) -> PhenotypeEntry:
         """
         Update memory via the Monodromic Fold.
-        Now stores both pre-state and post-state entries for richer trajectory.
         """
         if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
             raise IndexError(f"state_index {state_index} out of bounds [0, {len(self.s2.orbit_cardinality)})")
 
         last_intron = last_intron & 0xFF
-        old_mask = phenotype_entry.get("mask", 0) & 0xFE  # Clear direction bit
+        old_mask = phenotype_entry.get("mask", 0)
 
         # Use Monodromic Fold
-        new_mask = governance.fold(old_mask, last_intron) & 0xFE  # Keep clean
+        new_mask = governance.fold(old_mask, last_intron)
 
         # Calculate learning rate and confidence
         novelty = bin(old_mask ^ new_mask).count("1") / 8.0
@@ -140,20 +124,14 @@ class InferenceEngine:
             x = max(0.0, min(1.0, float(x)))
             return int(round(x * 255.0))
 
-        if (new_mask == old_mask
-            and _q8(new_confidence) == _q8(current_confidence)
-            and not is_new):
+        if new_mask == old_mask and _q8(new_confidence) == _q8(current_confidence) and not is_new:
             return phenotype_entry  # safe to skip – already stored
 
-        assert 0 <= new_mask <= 0xFE  # Excluding direction bit
+        assert 0 <= new_mask <= 0xFF
         assert 0 <= new_confidence <= 1
 
         phenotype_entry["mask"] = new_mask
         phenotype_entry["conf"] = new_confidence
-
-        # Preserve direction bit
-        direction = phenotype_entry.get("direction", DIR_PRE)
-        phenotype_entry["direction"] = direction
 
         key = phenotype_entry.get("key")
         if key is None:
@@ -163,68 +141,23 @@ class InferenceEngine:
 
         return phenotype_entry
 
-    def learn_token(self, token_id: int, state_index: int, last_intron: int) -> PhenotypeEntry:
-        """
-        Token-level learning using LEB128 physics.
-
-        This method learns at the token level, applying the full token's
-        intron sequence to the state transition and learning the final state.
-
-        Args:
-            token_id: Token ID from tokenizer
-            state_index: Current state index
-            last_intron: Last intron from the token's sequence
-
-        Returns:
-            Updated phenotype entry
-
-        Raises:
-            IndexError: If state_index is out of bounds
-        """
-        # Validate state_index is within bounds
-        if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
-            raise IndexError(f"state_index {state_index} out of bounds [0, {len(self.s2.orbit_cardinality)})")
-
-        # Always store with the true physical state index; CanonicalView will canonicalize.
-        storage_key = (state_index, token_id)
-        context_key = (state_index, token_id)  # Preserve original state_index
-
-        entry = self.store.get(storage_key)
-
-        if entry is None:
-            entry = self._create_default_phenotype(context_key)
-            self.store.put(storage_key, entry)
-        else:
-            # Copy to avoid mutating shared dict references
-            entry = dict(entry)
-
-        # Ensure 'key' is always present with original state_index
-        if "key" not in entry:
-            entry["key"] = context_key
-
-        # Learn the token using LEB128 physics
-        return self.learn(cast(PhenotypeEntry, entry), last_intron, state_index)
-
     def learn_token_preonly(self, token_id: int, state_index_pre: int, last_intron: int) -> None:
         """
-        Learn pre-state association for a token (physics-correct).
-        This respects the BU hinge and avoids phase mixing.
+        Learn pre-state association for a token.
         """
         # Canonicalize to representative state
         rep_pre = state_index_pre
         if self.phenomenology_map is not None:
             rep_pre = int(self.phenomenology_map[state_index_pre])
-        
+
         key = (rep_pre, token_id)
         entry = self.store.get(key)
-        
+
         entry_new = entry is None
         if entry is None:
             entry = self._create_default_phenotype(key)
-            entry["direction"] = DIR_PRE
         else:
             entry = dict(entry)
-            entry["direction"] = DIR_PRE
 
         entry["key"] = key
         entry["_new"] = entry_new
@@ -290,12 +223,12 @@ class InferenceEngine:
             },
         )
 
-    def apply_confidence_decay(self, decay_factor: float = 0.001) -> Dict[str, Any]:
+    def apply_confidence_decay(self, decay_factor: float = 0.99) -> Dict[str, Any]:
         """
         Apply confidence decay to all phenotype entries.
 
         Args:
-            decay_factor: Decay factor (small value, e.g. 0.001)
+            decay_factor: Retention factor (0.0 to 1.0, e.g. 0.99 = keep 99% of confidence)
 
         Returns:
             Decay report
@@ -319,7 +252,9 @@ class InferenceEngine:
             total_entries += 1
             current_confidence = entry.get("conf", 0.0)
             if current_confidence > 0.0:
-                new_confidence = max(0.01, current_confidence - decay_factor)  # Apply minimum floor of 0.01
+                new_confidence = current_confidence * decay_factor  # Multiplicative decay
+                if new_confidence < 0.01:  # Apply minimum floor of 0.01
+                    new_confidence = 0.01
                 # Normalize confidence for consistent comparison
                 normalized_new_conf = round(new_confidence, 4)  # Same precision as normalize_confidence
                 normalized_current_conf = round(current_confidence, 4)
@@ -371,7 +306,18 @@ class InferenceEngine:
             for token_id, entry in tokens:
                 p = entry["conf"] / total_conf
                 # Higher score for rare tokens (anti-log frequency)
-                uniqueness = 1.0 / (1.0 + math.log(1 + token_id))
+                # Calculate actual frequency from store
+                token_frequency = 1  # Default frequency
+                try:
+                    # Count occurrences of this token across all states
+                    token_count = 0
+                    for _, entry in self.store.iter_entries():
+                        if entry and entry.get("key") and entry["key"][1] == token_id:
+                            token_count += 1
+                    token_frequency = max(1, token_count)
+                except Exception:
+                    pass
+                uniqueness = 1.0 / (1.0 + math.log(token_frequency))
                 score = p * uniqueness
                 scored_tokens.append((score, token_id, entry))
 
@@ -392,30 +338,6 @@ class InferenceEngine:
             self.store.commit()
 
         return removed_count
-
-    def _compute_semantic_address(self, context_key: Tuple[int, int]) -> int:
-        """
-        Compute deterministic semantic address for context.
-
-        NOTE: This is a utility method for semantic addressing. Currently unused
-        in the main learning pipeline but available for future routing needs.
-
-        Uses hash-based mapping to endogenous modulus for consistent
-        address assignment across restarts.
-
-        Args:
-            context_key: (state_index, token_id) tuple
-
-        Returns:
-            Semantic address within endogenous modulus
-        """
-        # Create deterministic hash of context
-        context_bytes = f"{context_key[0]}:{context_key[1]}".encode("utf-8")
-        hash_digest = hashlib.sha256(context_bytes).digest()
-
-        # Map to endogenous modulus with explicit bit handling
-        hash_int = int.from_bytes(hash_digest[:8], "big") & ((1 << 64) - 1)
-        return int(hash_int % self.endogenous_modulus)
 
     def _create_default_phenotype(self, context_key: Tuple[int, int]) -> PhenotypeEntry:
         """

@@ -2,6 +2,69 @@
 
 ---
 
+## [0.9.6.7] – 2025-08-05
+
+### 🔧 SEP Learning & Fallback Fixes
+
+This release implements critical fixes for SEP token learning and generation fallback behavior, addressing the core issues that were causing gibberish output and poor language coherence.
+
+#### 🧠 SEP Learning Implementation
+
+* **SEP Token Learning in Byte Path**
+  * Fixed `process_egress()` to learn SEP tokens using `learn_token_preonly()`
+  * SEP tokens now create pre-state associations for proper candidate generation
+  * Eliminates the issue where SEP was discarded without learning
+
+* **SEP Token Learning in Vectorized Path**
+  * Fixed `_process_epistemology_chunk()` to learn SEP tokens in bulk processing
+  * Properly captures pre-state for SEP learning in vectorized operations
+  * Ensures consistent SEP learning across both processing modes
+
+* **SEP Coverage Validation**
+  * Added `tools/check_sep_coverage.py` to verify SEP learning is working
+  * Added `tools/sep_for_prompt.py` to check SEP candidates for specific prompts
+  * Provides diagnostic tools to confirm SEP entries exist in knowledge store
+
+#### 🚫 Eliminated Random Token Fallback
+
+* **SEP-Only Fallback Implementation**
+  * Replaced `_generate_random_token()` fallback with `SEP_ID` return
+  * When no candidates exist for a state, generator now emits SEP to end turn
+  * Eliminates gibberish output like `twoaaaaaaa` and `itsa twoaa`
+
+* **Fallback Behavior Improvement**
+  * Generator now gracefully ends turns when store lacks coverage
+  * Provides honest signal of knowledge gaps rather than random noise
+  * Maintains physics correctness by using SEP as turn boundary
+
+#### 🔧 Bootstrap and Memory Fixes
+
+* **System Agent Bootstrap Fix**
+  * Fixed system agent to ingest text directly instead of generating responses
+  * Eliminates garbage generation during startup that pollutes assistant memory
+  * Uses `ingest_bulk()` with proper SEP termination for clean context
+
+* **Assistant Memory Ingestion Control**
+  * Temporarily disabled assistant memory ingestion to prevent pollution
+  * Prevents early gibberish from being learned back into assistant memory
+  * Can be re-enabled once store has proper coverage
+
+#### 📊 Expected Behavior After Fixes
+
+* **No More Gibberish**: Random token fallback eliminated
+* **Short/Empty Replies**: When store lacks coverage for prompt states
+* **SEP Learning**: SEP tokens now properly learned and available as candidates
+* **Clean Bootstrap**: System messages ingested without generation pollution
+
+#### 🎯 Next Steps
+
+* Rebuild knowledge store with SEP learning enabled
+* Test SEP coverage with diagnostic tools
+* Gradually re-enable assistant memory ingestion
+* Monitor generation quality as store coverage improves
+
+---
+
 ## [0.9.6.7] – 2025-08-04
 
 ### 🔧 Plumbing & Training Infrastructure Improvements

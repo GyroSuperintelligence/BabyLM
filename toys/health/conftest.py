@@ -217,7 +217,7 @@ def isolated_agent_factory(tmp_path: Path, test_env: TestEnvDict) -> Generator[C
 
 @pytest.fixture
 def gyrosi_agent(assistant_agent: GyroSI) -> GyroSI:
-    """Legacy alias for assistant_agent for backward compatibility."""
+    """Alias for assistant_agent."""
     return assistant_agent
 
 

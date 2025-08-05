@@ -621,9 +621,13 @@ Examples:
             replay_agent.close()
             if args.compact:
                 try:
-                    private_knowledge_path = tape_path.with_suffix(".bin")
+                    # Use knowledge_* pattern for the output file
+                    output_name = tape_path.stem
+                    private_knowledge_path = tape_path.parent / f"knowledge_{output_name}.bin"
                     report = prune_and_compact_store(str(private_knowledge_path))
-                    print(f"🗜️  Compaction: kept {report['entries_processed']-report['entries_modified']} / {report['entries_processed']}")
+                    print(
+                        f"🗜️  Compaction: kept {report['entries_processed']-report['entries_modified']} / {report['entries_processed']}"
+                    )
                 except Exception as e:
                     print(f"⚠️  Compaction failed: {e}")
 
@@ -659,7 +663,9 @@ Examples:
     # Create agent if learning is enabled
     agent: Optional[GyroSI] = None
     if args.learn:
-        private_knowledge_path = Path(args.output).with_suffix(".bin")
+        # Use knowledge_* pattern for the output file
+        output_name = Path(args.output).stem
+        private_knowledge_path = Path(args.output).parent / f"knowledge_{output_name}.bin"
         # Ensure the directory exists
         private_knowledge_path.parent.mkdir(parents=True, exist_ok=True)
         knowledge_msg = f"🧠 Creating private agent with knowledge store: " f"{private_knowledge_path}"
@@ -692,9 +698,13 @@ Examples:
         # Clean up agent if created
         if agent and args.compact:
             try:
-                priv = Path(args.output).with_suffix(".bin")
+                # Use knowledge_* pattern for the output file
+                output_name = Path(args.output).stem
+                priv = Path(args.output).parent / f"knowledge_{output_name}.bin"
                 report = prune_and_compact_store(str(priv))
-                print(f"🗜️  Compaction: kept {report['entries_processed']-report['entries_modified']} / {report['entries_processed']}")
+                print(
+                    f"🗜️  Compaction: kept {report['entries_processed']-report['entries_modified']} / {report['entries_processed']}"
+                )
             except Exception as e:
                 print(f"⚠️  Compaction failed: {e}")
         if agent:

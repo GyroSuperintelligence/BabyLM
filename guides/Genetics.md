@@ -405,8 +405,6 @@ Phenotype as a Gravitational Well: The token-level phenotype does not contain th
 
 ---
 
-Looking at your theory and this rich conversation, I can distill several profound theoretical extensions that emerged. Here's the formal theory content you should add to your foundations:
-
 ## **Theoretical Extensions: LEB128-GyroSI Unification and Dimensional Grounding**
 
 ### **6. The LEB128-Intron Isomorphism**

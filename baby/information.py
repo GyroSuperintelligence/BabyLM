@@ -33,15 +33,19 @@ Build steps:
 
 
 @lru_cache(maxsize=4)
-def _cached_tokenizer(name: str, base_path_str: str):
+def _cached_tokenizer(name: str, base_path_str: str) -> Any:
     from tokenizers import Tokenizer
+
     root = Path(base_path_str)
     path = root / "public" / "tokenizers" / name / "tokenizer.json"
     if not path.exists():
         raise FileNotFoundError(f"Tokenizer not found: {path}")
     return Tokenizer.from_file(str(path))
 
-def _load_tokenizer(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories" / "memories") -> Any:
+
+def _load_tokenizer(
+    name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
+) -> Any:
     """Load tokenizer from HuggingFace with caching."""
     return _cached_tokenizer(name, str(base_path))
 
@@ -132,7 +136,9 @@ def decode_text(
         return blob.decode("utf-8", errors="replace")
 
 
-def get_vocab_size(name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> int:
+def get_vocab_size(
+    name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
+) -> int:
     """Get vocabulary size of a tokenizer. Uses base_path for root."""
     tokenizer = _load_tokenizer(name, base_path)
     return int(tokenizer.get_vocab_size())

@@ -18,13 +18,14 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable, Union, Set
 import sys
 import numpy as np
+from numpy.typing import NDArray
 
 from baby.contracts import MaintenanceReport
 
 logger = logging.getLogger(__name__)
 
 # Singleton cache for phenomenology maps by path
-_phenomenology_map_cache: Dict[str, Dict[int, int]] = {}
+_phenomenology_map_cache: Dict[str, NDArray[Any]] = {}
 _phenomenology_map_lock = threading.Lock()
 
 # Add at module top (after imports)
@@ -38,8 +39,6 @@ _CONFIDENCE_PRECISION = 1e-4  # Tolerance for float16 precision differences
 _CONFIDENCE_ROUNDING_DIGITS = 4  # Round to 4 decimal places for consistency
 
 # Direction bit constants
-DIR_PRE = 0  # Pre-state entry (for generation)
-DIR_POST = 1  # Post-state entry (for diagnostics/reverse)
 
 
 def normalize_confidence(confidence: float) -> float:
@@ -143,10 +142,7 @@ def _pack_phenotype(entry: Dict[str, Any]) -> bytes:
         raise KeyError("Entry must have 'key' field")
     state_idx, token_id = entry["key"]
 
-    # Extract direction bit if present, default to DIR_PRE
-    direction = entry.get("direction", DIR_PRE)
-    raw_mask = entry["mask"] & 0xFE  # Clear bit 0
-    mask = raw_mask | (direction & 0x01)  # Set direction bit
+    mask = entry["mask"]
 
     conf = float(entry["conf"])
     conf_f16 = np.float16(conf)
@@ -160,16 +156,12 @@ def _unpack_phenotype(buf: memoryview, offset: int = 0) -> tuple[Dict[str, Any],
     raw_conf = float(conf_f16.item())
     normalized_conf = normalize_confidence(raw_conf)
 
-    # Extract direction bit and clear it from mask
-    direction = mask & 0x01
-    clean_mask = mask & 0xFE
-
-    entry = {"mask": clean_mask, "conf": normalized_conf, "key": (state_idx, token_id), "direction": direction}
+    entry = {"mask": mask, "conf": normalized_conf, "key": (state_idx, token_id)}
     return entry, offset + _STRUCT_SIZE
 
 
-def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJECT_ROOT) -> Dict[int, int]:
-    """Load and cache the phenomenology map from disk, shared between all CanonicalViews. Uses base_path for root."""
+def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJECT_ROOT) -> NDArray[Any]:
+    """Load and cache the phenomenology map from disk as numpy array for memory efficiency."""
     resolved_path = _abs(phenomenology_map_path, base_path)
     if not resolved_path:
         raise ValueError("phenomenology_map_path must not be None")
@@ -178,10 +170,9 @@ def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJEC
             return _phenomenology_map_cache[resolved_path]
         if not os.path.exists(resolved_path):
             raise FileNotFoundError(f"Phenomenology map not found: {resolved_path}")
-        arr = np.load(resolved_path, mmap_mode="r")
-        phen_map = {i: int(rep) for i, rep in enumerate(arr)}
-        _phenomenology_map_cache[resolved_path] = phen_map
-        return phen_map
+        arr = cast(NDArray[Any], np.load(resolved_path, mmap_mode="r"))
+        _phenomenology_map_cache[resolved_path] = arr
+        return arr
 
 
 class OrbitStore:
@@ -221,7 +212,7 @@ class OrbitStore:
         self._pending_fsync: Optional[concurrent.futures.Future[Any]] = None
         self._last_fsync = 0.0
         self._fsync_interval = 0.05  # 50ms or configurable
-        
+
         # Index write throttling to reduce I/O churn
         self._last_index_write = 0.0
         self._index_write_interval = 2.0  # Write index at most every 2 seconds
@@ -319,7 +310,7 @@ class OrbitStore:
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
-                    entry_buf = self._mmap[offset : offset + size]
+                    entry_buf = self._mmap[offset:offset + size]
                 else:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
@@ -441,14 +432,14 @@ class OrbitStore:
             new_keys_count = len(pending_keys)
 
             self._flush()
-            
+
             # Throttled index writes to reduce I/O churn
             now = time.time()
             should_write_index = (
-                now - self._last_index_write >= self._index_write_interval or
-                self._new_keys_since_index_write >= self._index_write_threshold
+                now - self._last_index_write >= self._index_write_interval
+                or self._new_keys_since_index_write >= self._index_write_threshold
             )
-            
+
             if should_write_index:
                 self._write_index()
                 self._last_index_write = now
@@ -539,7 +530,7 @@ class OrbitStore:
                         continue
 
                     try:
-                        # Parse "state_idx-token_id:offset,size" or legacy format
+                        # Parse "state_idx-token_id:offset,size" format
                         if ":" in line and "," in line:
                             # New format: "state_idx-token_id:offset,size"
                             key_part, offset_str = line.split(":", 1)
@@ -562,8 +553,8 @@ class OrbitStore:
                             self.index[(state_idx, token_id)] = (offset, size)
                             self.index_by_state.setdefault(state_idx, set()).add(token_id)
                         else:
-                            # Legacy format or malformed - skip
-                            print(f"Warning: Skipping legacy/malformed index line: {line}")
+                            # Malformed - skip
+                            print(f"Warning: Skipping malformed index line: {line}")
                             continue
                     except (ValueError, IndexError) as e:
                         # Skip malformed lines but log for debugging
@@ -737,7 +728,7 @@ class OrbitStore:
                 for context_key, (offset, size) in self.index.items():
                     if context_key in yielded:
                         continue
-                    entry_buf_mv = mv[offset : offset + size]
+                    entry_buf_mv = mv[offset:offset + size]
                     entry, _ = _unpack_phenotype(entry_buf_mv)
                     yield context_key, entry
             else:
@@ -775,7 +766,11 @@ class CanonicalView:
 
     def _get_phenomenology_key(self, context_key: Tuple[int, int]) -> Tuple[int, int]:
         tensor_index, token_id = context_key
-        phenomenology_index = self.phen_map.get(tensor_index, tensor_index)
+        # Use numpy array indexing for memory efficiency
+        if tensor_index < len(self.phen_map):
+            phenomenology_index = int(self.phen_map[tensor_index])
+        else:
+            phenomenology_index = tensor_index
         return (phenomenology_index, token_id)
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
@@ -851,26 +846,30 @@ class CanonicalView:
     def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
         if self.base_store is None:
             raise RuntimeError("CanonicalView: base_store is closed or None")
-        rep = self.phen_map.get(state_idx, state_idx)
-        
+        # Use numpy array indexing for memory efficiency
+        if state_idx < len(self.phen_map):
+            rep = int(self.phen_map[state_idx])
+        else:
+            rep = state_idx
+
         # Always try to use the base store's fast implementation first
         if hasattr(self.base_store, "iter_keys_for_state"):
             yield from self.base_store.iter_keys_for_state(rep)
             return
-            
+
         # If base store doesn't have the method, check if it's an OverlayView
         # and try to get the underlying stores
         if hasattr(self.base_store, "public_store") and hasattr(self.base_store, "private_store"):
             # It's an OverlayView, try both stores
             seen = set()
-            
+
             # Try private store first
             if self.base_store.private_store and hasattr(self.base_store.private_store, "iter_keys_for_state"):
                 for key in self.base_store.private_store.iter_keys_for_state(rep):
                     if key not in seen:
                         seen.add(key)
                         yield key
-                        
+
             # Try public store
             if self.base_store.public_store and hasattr(self.base_store.public_store, "iter_keys_for_state"):
                 for key in self.base_store.public_store.iter_keys_for_state(rep):
@@ -878,7 +877,7 @@ class CanonicalView:
                         seen.add(key)
                         yield key
             return
-        
+
         # If we get here, the base store doesn't support iter_keys_for_state
         # This should not happen with OrbitStore, but provide a safe fallback
         raise RuntimeError(f"Base store {type(self.base_store)} does not support iter_keys_for_state")
@@ -982,12 +981,16 @@ class OverlayView:
         if self.private_store is None or self.public_store is None:
             raise RuntimeError("OverlayView: store is closed or None")
         seen: set[Tuple[int, int]] = set()
-        it_priv = getattr(self.private_store, "iter_keys_for_state", None)
+        it_priv: Optional[Callable[[int], Iterator[Tuple[int, int]]]] = getattr(
+            self.private_store, "iter_keys_for_state", None
+        )
         if callable(it_priv):
             for k in it_priv(state_idx):
                 seen.add(k)
                 yield k
-        it_pub = getattr(self.public_store, "iter_keys_for_state", None)
+        it_pub: Optional[Callable[[int], Iterator[Tuple[int, int]]]] = getattr(
+            self.public_store, "iter_keys_for_state", None
+        )
         if callable(it_pub):
             for k in it_pub(state_idx):
                 if k not in seen:
@@ -1044,12 +1047,93 @@ class ReadOnlyView:
     def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
         if self.base_store is None:
             raise RuntimeError("ReadOnlyView: base_store is closed or None")
-        it = getattr(self.base_store, "iter_keys_for_state", None)
+        it: Optional[Callable[[int], Iterator[Tuple[int, int]]]] = getattr(self.base_store, "iter_keys_for_state", None)
         if callable(it):
             yield from it(state_idx)
             return
         # If base store doesn't support iter_keys_for_state, this is an error
         raise RuntimeError(f"Base store {type(self.base_store)} does not support iter_keys_for_state")
+
+
+class MultiKnowledgeView:
+    """
+    View that can read from multiple knowledge files simultaneously.
+    Uses a chain of OverlayViews to access multiple knowledge stores.
+    """
+
+    def __init__(self, knowledge_files: List[str], base_path: Path = PROJECT_ROOT):
+        """
+        Initialize with a list of knowledge file paths.
+        Files are loaded in order, with later files taking precedence.
+
+        Args:
+            knowledge_files: List of knowledge file paths
+            base_path: Base path for resolving relative paths
+        """
+        import threading
+
+        self.knowledge_files = knowledge_files
+        self.base_path = base_path
+        self.stores: List[Any] = []
+        self.lock = threading.RLock()
+
+        # Load all knowledge files
+        for file_path in knowledge_files:
+            resolved_path = _abs(file_path, base_path)
+            if os.path.exists(resolved_path):
+                try:
+                    store = OrbitStore(resolved_path, use_mmap=True)
+                    self.stores.append(store)
+                    print(f"Loaded knowledge file: {os.path.basename(file_path)} ({len(store.data)} entries)")
+                except Exception as e:
+                    print(f"Warning: Failed to load {file_path}: {e}")
+            else:
+                print(f"Warning: Knowledge file not found: {resolved_path}")
+
+    def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
+        """Get entry from the first store that contains it."""
+        with self.lock:
+            for store in self.stores:
+                entry = store.get(context_key)
+                if entry:
+                    return entry
+            return None
+
+    def iter_entries(self) -> Iterator[Tuple[Tuple[int, int], Any]]:
+        """Iterate through all entries from all stores."""
+        with self.lock:
+            yielded = set()
+            for store in self.stores:
+                for key, entry in store.iter_entries():
+                    if key not in yielded:
+                        yield key, entry
+                        yielded.add(key)
+
+    def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
+        """Get all candidates for a state from all stores."""
+        with self.lock:
+            seen = set()
+            for store in self.stores:
+                for key in store.iter_keys_for_state(state_idx):
+                    if key not in seen:
+                        yield key
+                        seen.add(key)
+
+    def close(self) -> None:
+        """Close all stores."""
+        with self.lock:
+            for store in self.stores:
+                store.close()
+            self.stores.clear()
+
+    @property
+    def data(self) -> Dict[Tuple[int, int], Any]:
+        """Get combined data from all stores (for compatibility)."""
+        with self.lock:
+            combined = {}
+            for store in self.stores:
+                combined.update(store.data)
+            return combined
 
 
 def merge_phenotype_maps(
@@ -1085,10 +1169,7 @@ def merge_phenotype_maps(
 
     for path in resolved_sources:
         try:
-            if path.endswith(".bin"):
-                store = OrbitStore(path)
-            else:
-                store = OrbitStore(path)
+            store = OrbitStore(path)
             source_data = store.data  # dict
             store.close()
         except Exception:
@@ -1155,7 +1236,7 @@ def merge_phenotype_maps(
 
 def apply_global_confidence_decay(
     store_path: str,
-    decay_factor: float = 0.999,
+    decay_factor: float = 0.99,
     time_threshold_days: float = 30.0,
     dry_run: bool = False,
     base_path: Path = PROJECT_ROOT,
@@ -1163,12 +1244,11 @@ def apply_global_confidence_decay(
     """
     Apply confidence decay to all entries in a knowledge store.
 
-    Uses the same exponential decay formula as the internal engine:
-        confidence = confidence * exp(-decay_factor * age_factor)
+    Uses multiplicative decay: confidence = confidence * decay_factor
 
     Args:
         store_path: Path to the phenotype store
-        decay_factor: Exponential decay rate per age unit (small value, e.g. 0.001)
+        decay_factor: Retention factor (0.0 to 1.0, e.g. 0.99 = keep 99% of confidence)
         time_threshold_days: Days without update to trigger decay
         dry_run: If True, calculate but don't apply changes
 
@@ -1596,14 +1676,54 @@ class BloomFilter:
         return bf
 
 
+def create_multi_knowledge_view(
+    knowledge_dir: str,
+    pattern: str = "knowledge_*.bin",
+    base_path: Path = PROJECT_ROOT,
+) -> MultiKnowledgeView:
+    """
+    Create a MultiKnowledgeView from all knowledge files matching a pattern.
+
+    Args:
+        knowledge_dir: Directory containing knowledge files
+        pattern: Glob pattern to match knowledge files (default: "knowledge_*.bin")
+        base_path: Base path for resolving relative paths
+
+    Returns:
+        MultiKnowledgeView that can read from all matching files
+    """
+    import glob
+
+    resolved_dir = _abs(knowledge_dir, base_path)
+    if not os.path.exists(resolved_dir):
+        print(f"Warning: Knowledge directory not found: {resolved_dir}")
+        return MultiKnowledgeView([], base_path)
+
+    # Find all matching files
+    search_pattern = os.path.join(resolved_dir, pattern)
+    knowledge_files = glob.glob(search_pattern)
+
+    if not knowledge_files:
+        print(f"Warning: No knowledge files found matching pattern: {search_pattern}")
+        return MultiKnowledgeView([], base_path)
+
+    # Sort files for consistent ordering
+    knowledge_files.sort()
+
+    print(f"Found {len(knowledge_files)} knowledge files: {[os.path.basename(f) for f in knowledge_files]}")
+
+    return MultiKnowledgeView(knowledge_files, base_path)
+
+
 # Module exports for static analysis
 __all__ = [
-    "DIR_PRE",
-    "DIR_POST",
+    # Direction constants intentionally removed (pre-only learning)
     "OrbitStore",
     "CanonicalView",
     "OverlayView",
     "ReadOnlyView",
+    "MultiKnowledgeView",
+    "create_multi_knowledge_view",
     "BloomFilter",
     "normalize_confidence",
     "confidence_equals",
