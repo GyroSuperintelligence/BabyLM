@@ -231,12 +231,14 @@ def introns_to_token(introns: List[int]) -> int:
 
 
 @lru_cache(maxsize=1)
-def _get_intron_trie(tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> Dict[Any, Any]:
+def _get_intron_trie(
+    tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
+) -> Dict[Any, Any]:
     """Build and cache a trie mapping intron sequences to token IDs."""
     tokenizer = _load_tokenizer(tokenizer_name, base_path)
     vocab_size = tokenizer.get_vocab_size()
-    
-    trie = {}
+
+    trie: Dict[Any, Any] = {}
     for token_id in range(vocab_size):
         try:
             introns = token_to_introns(token_id)
@@ -250,54 +252,61 @@ def _get_intron_trie(tokenizer_name: str = "bert-base-uncased", base_path: Path 
             node["tokens"].append(token_id)
         except (ValueError, IndexError):
             continue  # Skip invalid tokens
-            
+
     return trie
 
-def find_tokens_by_intron_prefix(intron_prefix: List[int], tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> List[int]:
+
+def find_tokens_by_intron_prefix(
+    intron_prefix: List[int],
+    tokenizer_name: str = "bert-base-uncased",
+    base_path: Path = Path(__file__).resolve().parents[1] / "memories",
+) -> List[int]:
     """Find all tokens whose intron sequence starts with the given prefix.
-    
+
     This implements efficient tokenizer trie lookup for the exon product sieve.
     Converts intron prefix to LEB128 bytes, then finds all tokens matching that prefix.
-    
+
     Args:
         intron_prefix: List of intron bytes (0-255) representing the prefix
         tokenizer_name: Name of the tokenizer to use
         base_path: Base path for tokenizer files
-        
+
     Returns:
         List of token IDs whose intron sequence starts with the given prefix
     """
     trie = _get_intron_trie(tokenizer_name, base_path)
-    
+
     node = trie
     for intron in intron_prefix:
         if intron in node:
             node = node[intron]
         else:
             return []  # No tokens with this prefix
-            
+
     # Collect all tokens from this node and its children
     matching_tokens = []
-    
-    def _collect_tokens(n):
+
+    def _collect_tokens(n: Dict[Any, Any]) -> None:
         if "tokens" in n:
             matching_tokens.extend(n["tokens"])
         for k, v in n.items():
             if k != "tokens":
                 _collect_tokens(v)
-                
+
     _collect_tokens(node)
-    
+
     return matching_tokens
 
 
 @lru_cache(maxsize=1)
-def _get_reverse_intron_trie(tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> Dict[Any, Any]:
+def _get_reverse_intron_trie(
+    tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
+) -> Dict[Any, Any]:
     """Build and cache a reverse trie mapping last introns to token IDs."""
     tokenizer = _load_tokenizer(tokenizer_name, base_path)
     vocab_size = tokenizer.get_vocab_size()
-    
-    trie = {}
+
+    trie: Dict[Any, Any] = {}
     for token_id in range(vocab_size):
         try:
             introns = token_to_introns(token_id)
@@ -308,25 +317,30 @@ def _get_reverse_intron_trie(tokenizer_name: str = "bert-base-uncased", base_pat
                 trie[last_intron].append(token_id)
         except (ValueError, IndexError):
             continue
-            
+
     return trie
 
-def find_tokens_by_last_intron(last_intron: int, tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> List[int]:
+
+def find_tokens_by_last_intron(
+    last_intron: int,
+    tokenizer_name: str = "bert-base-uncased",
+    base_path: Path = Path(__file__).resolve().parents[1] / "memories",
+) -> List[int]:
     """Find tokens whose last intron matches the given byte.
-    
+
     This is the core function for the exon product sieve generation.
     Efficiently finds tokens that could be generated from a specific exon product.
-    
+
     Args:
         last_intron: Single intron byte (0-255) to match
         tokenizer_name: Name of the tokenizer to use
         base_path: Base path for tokenizer files
-        
+
     Returns:
         List of token IDs whose last intron matches the given byte
     """
     trie = _get_reverse_intron_trie(tokenizer_name, base_path)
-    return trie.get(last_intron, [])
+    return trie.get(last_intron, [])  # type: ignore[no-any-return]
 
 
 # ---------- SEP Token Utilities ----------
@@ -384,12 +398,17 @@ class InformationEngine:
         import numpy as np
         from pathlib import Path
 
+        # Load ontology keys
         self._keys = np.load(keys_path, mmap_mode="r")
         self._inverse = self._keys
         self.ontology_map = None
         self.inverse_ontology_map = None
         self.use_array_indexing = True
+        
+        # Load epistemology
         self.ep = np.load(ep_path, mmap_mode="r")
+        
+        # Load phenomenology and orbit cardinality
         self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
         if phenomap_path:
             try:
@@ -404,6 +423,8 @@ class InformationEngine:
                 print("Continuing without phenomenology mapping...")
                 self.orbit_map = None
                 self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
+        
+        # Load theta table
         if theta_path:
             try:
                 self._theta_table = np.load(theta_path, mmap_mode="r")
@@ -411,7 +432,18 @@ class InformationEngine:
                 self._theta_table = None
         else:
             self._theta_table = None
+            
+        # Load stabiliser_order array
+        try:
+            stabiliser_order_path = str(Path(theta_path).parent / "stabiliser_order.npy")
+            self.stabiliser_order = np.load(stabiliser_order_path, mmap_mode="r")
+        except Exception as e:
+            print(f"Warning: Could not load stabiliser_order from {stabiliser_order_path}: {e}")
+            print("Continuing without stabiliser order data...")
+            self.stabiliser_order = None
+            
         self._v_max = 1 if self.orbit_cardinality is None else int(np.max(self.orbit_cardinality))
+        
         # Early fail if theta.npy is missing or corrupt
         if self._theta_table is None:
             raise RuntimeError(

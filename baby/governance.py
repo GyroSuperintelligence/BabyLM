@@ -353,9 +353,6 @@ def token_last_intron(token_id: int) -> int:
     return introns[-1] if introns else 0
 
 
-
-
-
 def validate_tensor_consistency() -> bool:
     """
     Validates that GENE_Mac_S has the correct structure and properties.

@@ -34,7 +34,6 @@ __all__ = [
     "OverlayView",
     "ReadOnlyView",
     "merge_phenotype_maps",
-
     "export_knowledge_statistics",
     "validate_ontology_integrity",
     "discover_and_save_ontology",

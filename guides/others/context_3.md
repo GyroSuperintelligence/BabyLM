@@ -117,7 +117,7 @@ def token_last_intron(token_id: int) -> int:
   Boundaries are already in bit 7; you don't pay a second time.
 
 • No big per-orbit token lists.
-  Candidates come from the tokenizer; a hot-set cache is an optimisation, not the store.
+Candidates come from the tokenizer; a hot-set cache is an optimisation, not the store.
 
 • No complex multi-tier architecture.
   Single file, single format, physics-driven generation.
@@ -161,3 +161,96 @@ Instead of massive datasets, test with:
 • **Physics-driven generation** → Verify that the exon product sieve produces coherent, contextually appropriate responses
 
 This approach leverages the model's natural ability to continue patterns rather than requiring it to "understand" different types of requests. It's aligned with the physics-based, pattern-continuation nature of GyroSI.
+
+
+## 🚀 **How We Achieve Speed with Large Data Structures**
+
+### ✅ **Memory-Mapped Files (mmap) for Large Maps**
+
+**Epistemology Matrix (788,986 × 256 states):**
+```python
+# In InformationEngine.__init__()
+self.ep = np.load(ep_path, mmap_mode="r")  # Memory-mapped, read-only
+```
+
+**Ontology Keys (788,986 states):**
+```python
+self._keys = np.load(keys_path, mmap_mode="r")  # Memory-mapped, read-only
+```
+
+**Phenomenology Map (788,986 states):**
+```python
+self.orbit_map = np.load(phenomap_path, mmap_mode="r")  # Memory-mapped, read-only
+```
+
+**Theta Table (788,986 divergence values):**
+```python
+self._theta_table = np.load(theta_path, mmap_mode="r")  # Memory-mapped, read-only
+```
+
+### ✅ **Knowledge Store Optimization**
+
+**Memory-Mapped Knowledge File:**
+```python
+# In OrbitStore._open_mmap()
+self._mmap = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+```
+
+**In-RAM Index for O(1) Lookups:**
+```python
+# Built from single scan at startup
+self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}  # (state, token) -> (offset, size)
+```
+
+### ✅ **Tokenizer Caching**
+
+**LRU Cache for Tokenizer:**
+```python
+@lru_cache(maxsize=4)
+def _cached_tokenizer(name: str, base_path_str: str) -> Any:
+    return Tokenizer.from_file(str(path))
+```
+
+**Trie Caching for Fast Lookups:**
+```python
+@lru_cache(maxsize=1)
+def _get_intron_trie(...) -> Dict[Any, Any]:
+    # Builds trie once, cached forever
+```
+
+### ✅ **Warmup Strategy**
+
+**Pre-warm on Startup:**
+```python
+# Touch epistemology to page-in a tiny slice (avoids first-turn page faults)
+_ = int(a.epistemology[0, 0])  # tiny read is enough to map a page
+
+# Prime the tokenizer cache
+_ = _load_tokenizer(PREFERENCES["tokenizer"]["name"], base_path=BASE_PATH)
+```
+
+### ✅ **Performance Optimizations**
+
+1. **Memory-Mapped Files**: All large maps (epistemology, ontology, phenomenology, theta) are memory-mapped, so they're loaded on-demand without consuming RAM.
+
+2. **Single Startup Scan**: The knowledge store builds an in-RAM index from a single scan at startup, enabling O(1) lookups.
+
+3. **Cached Tokenizer**: The tokenizer and its trie structures are cached in memory for fast token lookups.
+
+4. **Batch Processing**: Learning happens in batches with configurable write thresholds to minimize disk I/O.
+
+5. **Async Fsync**: Disk writes are buffered and flushed asynchronously to avoid blocking.
+
+### �� **The Result:**
+
+- **Epistemology Matrix** (~800MB): Memory-mapped, pages loaded on-demand
+- **Knowledge Store**: In-RAM index for O(1) lookups, memory-mapped data file
+- **Tokenizer**: Cached in memory for instant token operations
+- **First Turn**: Pre-warmed to avoid page faults
+
+This means each turn only needs to:
+1. Access the already-mapped epistemology matrix (O(1) array access)
+2. Look up phenotypes via in-RAM index (O(1) dict lookup)
+3. Use cached tokenizer for generation (O(1) trie lookup)
+
+The large data structures don't slow down individual turns because they're memory-mapped and cached appropriately!

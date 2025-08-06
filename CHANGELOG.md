@@ -1,9 +1,119 @@
 # 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
 
+---
+
+## [v0.9.6.8-alpha] – 2025-08-07 - Unstable Alpha Release
 
 ---
 
-## [v0.9.6.8-alpha] – 2025-08-05 - Unstable Alpha Release
+### Epistemology State Index Fixes and Stability Improvements
+
+**1. Root Cause Analysis and Fixes**
+
+* Diagnosed the cause of unbounded epistemology state indices: state buffer in `baby/intelligence.py` was uninitialized, resulting in garbage transitions.
+* Applied explicit state buffer zeroing before use to guarantee valid state transitions:
+
+  * Inserted `st.fill(0)` at buffer setup (line 387).
+
+**2. Self-Talk Prevention and Idempotent Learning**
+
+* Corrected the learning pipeline so the system does not learn from its own generated output.
+* Removed redundant calls and corrected logic in `respond_stream` (lines 990–1000) so SEP tokens and output generation do not trigger further learning.
+* The agent state is now properly reset before each ingestion, ensuring deterministic state progression for identical input.
+* Confirmed: repeated input no longer produces duplicate knowledge entries; Monodromic Fold and learning logic remain correct.
+
+**3. Verified Outcomes**
+
+* Self-talk learning: **fixed** (no knowledge growth from self-output).
+* Epistemology bounds: **fixed** (no out-of-bounds errors).
+* Idempotency: **fixed** (identical inputs → identical learning events, no duplication).
+* Monodromic Fold: **verified** (fold(a, a) = 0; path-dependent structure learning).
+
+---
+
+### Fractal Cycle Architecture Implementation
+
+**1. Full 8-Step Fractal Cycle Recognition and Control**
+
+* Added cycle step tracking with `_get_cycle_step()` and integrated this into state reporting.
+* Confirmed detection of "BU Eg" phase (maximal θ divergence), supporting cycle-aware generation and structural boundaries.
+
+**2. Bit Family Prioritization per Cycle Step**
+
+* Implemented priority weights for bit families (L0, LI, FG, BG) at each step in the cycle, directly following `Genetics.md`.
+* Token scoring and selection now reflect the physical role of each cycle phase.
+
+**3. Monodromic Fold in Learning and Generation**
+
+* Incorporated fold bonus into scoring: tokens are selected and learned based on entropy and path-dependence via the monodromic fold operator.
+* System now structurally prefers transitions that promote structural coherence.
+
+**4. Cycle Completion Detection**
+
+* Integrated full cycle detection (tracking cycle step history) and emit SEP boundaries on cycle closure.
+* Provides structural segmentation at semantically meaningful points.
+
+**5. Deterministic Temperature Function**
+
+* Replaced sigmoid-based sampling with deterministic function:
+
+  * Low or high θ values produce low temperature, stabilising output and preventing random, repetitive output loops.
+
+---
+
+### Sink State (State 0) Handling and Analysis
+
+* Identified that State 0 acts as a sink with 112/256 self-loops, leading to repetitive outputs in earlier releases.
+* Analysed seed text and token transitions; root cause of repetition was recurrent return to State 0 after every generation step.
+* Adjusted transition and scoring logic to penalise transitions leading to high self-loop (“sink”) states.
+
+---
+
+### Physics-Based Action Value and Stabiliser Order
+
+* Implemented A1’s action value proposal:
+
+  * Replaced previous temperature logic with brute-force search over all 256 introns.
+  * Included entropy reweighting and sink penalty in scoring.
+  * Excluded all `[unused##]` tokens from candidate set.
+* Precomputed and loaded stabiliser order array (`stabiliser_order.npy`) for all states:
+
+  * Used as penalty in token selection, ensuring the agent avoids sink states.
+* Confirmed: model now explores state space and does not get stuck in loops.
+
+---
+
+### Supporting Infrastructure and Debugging
+
+* Added `compute_stabiliser_order.py` to produce state stabiliser map; integrated loading and access in `baby/information.py`.
+* Updated auxiliary scripts to support state and fold calculations for debugging.
+* Refactored token filtering and candidate selection to ensure only meaningful words are generated.
+
+---
+
+### Current Status and Outstanding Issues
+
+**Working:**
+
+* State tracking, cycle step detection, deterministic temperature, bit family prioritisation, Monodromic Fold integration, state transition logic, and sink-avoidance are all functional.
+* System generates meaningful words and terminates generation properly.
+* No more infinite loops or repetitive placeholders.
+
+**Outstanding:**
+
+* **Semantic learning/generation remains non-functional.**
+
+  * The model generates plausible words but does not associate meaningfully with input content.
+  * Cause: semantic associations are not yet being formed or retrieved by the learning/generation pathway.
+  * This remains the principal unresolved issue for the next development phase.
+
+---
+
+> *All results remain provisional; the system is still under active investigation and validation. Further work is required to achieve semantic alignment and test against representative data.*
+
+---
+
+## [v0.9.6.8-alpha] – 2025-08-06 - Unstable Alpha Release
 
 > *Note: All metrics are estimations; this is an unstable alpha. Features and performance claims remain to be validated in rigorous testing.*
 

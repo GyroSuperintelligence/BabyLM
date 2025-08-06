@@ -5,17 +5,15 @@ Write/policy logic for GyroSI (S5): OrbitStore and storage decorators.
 from __future__ import annotations
 
 import concurrent.futures
-import hashlib
 import logging
 import mmap
 import os
 import json
-import struct
 import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable, Union, Set
+from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable, Set
 import sys
 import numpy as np
 from numpy.typing import NDArray
@@ -131,7 +129,7 @@ def _encode_uleb128(value: int) -> bytes:
     """Encode unsigned integer as LEB128 bytes."""
     if value < 0:
         raise ValueError("LEB128 encoding requires non-negative integers")
-    
+
     result = bytearray()
     while True:
         byte = value & 0x7F
@@ -141,32 +139,32 @@ def _encode_uleb128(value: int) -> bytes:
             break
         else:
             result.append(byte | 0x80)
-    
+
     return bytes(result)
 
 
 def _decode_uleb128(data: bytes, offset: int = 0) -> tuple[int, int]:
     """Decode unsigned LEB128 integer from bytes.
-    
+
     Returns:
         (value, bytes_consumed)
     """
     result = 0
     shift = 0
     bytes_consumed = 0
-    
+
     for i in range(offset, len(data)):
         byte = data[i]
         result |= (byte & 0x7F) << shift
         bytes_consumed += 1
-        
+
         if (byte & 0x80) == 0:
             break
-        
+
         shift += 7
         if shift >= 32:
             raise ValueError("LEB128 value too large")
-    
+
     return result, bytes_consumed
 
 
@@ -182,31 +180,31 @@ def _pack_phenotype(entry: Dict[str, Any]) -> bytes:
     n_pairs_bytes = _encode_uleb128(1)  # Single pair
     token_bytes = _encode_uleb128(token_id)
     mask_bytes = bytes([mask])
-    
+
     return state_bytes + n_pairs_bytes + token_bytes + mask_bytes
 
 
 def _unpack_phenotype(buf: memoryview, offset: int = 0) -> tuple[Dict[str, Any], int]:
     """Unpack phenotype entry from varint state-block format."""
     data = bytes(buf[offset:])
-    
+
     # Decode state_idx
     state_idx, state_bytes = _decode_uleb128(data, 0)
-    
+
     # Decode n_pairs
     n_pairs, n_bytes = _decode_uleb128(data, state_bytes)
-    
+
     # Decode token_id
     token_id, token_bytes = _decode_uleb128(data, state_bytes + n_bytes)
-    
+
     # Decode mask (single byte)
     if state_bytes + n_bytes + token_bytes >= len(data):
         raise ValueError("Incomplete phenotype data")
     mask = data[state_bytes + n_bytes + token_bytes]
-    
+
     entry = {"mask": mask, "key": (state_idx, token_id)}
     total_bytes = state_bytes + n_bytes + token_bytes + 1
-    
+
     return entry, offset + total_bytes
 
 
@@ -272,10 +270,6 @@ class OrbitStore:
         # O(1) candidate listing for a given state
         self.index_by_state: Dict[int, Set[int]] = {}
 
-        # Simple in-RAM index built from one-pass scan
-        self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
-        self.index_by_state: Dict[int, Set[int]] = {}
-        
         # Single file storage (no sidecars)
         self.log_path = self.store_path  # .bin file
 
@@ -296,42 +290,42 @@ class OrbitStore:
     # ---------- One-pass index scan ----------
     def _build_index_from_scan(self) -> None:
         """Build in-RAM index from one-pass scan of the data file.
-        
+
         This replaces Bloom filter and persistent index with a simple,
         fast linear scan that builds an ephemeral in-RAM index.
         """
         if not os.path.exists(self.log_path):
             return  # No data file to scan
-        
+
         try:
             with open(self.log_path, "rb") as f:
                 data = f.read()
-            
+
             offset = 0
             while offset < len(data):
                 try:
                     # Parse varint state-block format
                     entry, bytes_consumed = _unpack_phenotype(memoryview(data), offset)
                     key = entry["key"]
-                    
+
                     # Record offset and size for this entry
                     self.index[key] = (offset, bytes_consumed)
-                    
+
                     # Update state index
                     state_idx = key[0]
                     if state_idx not in self.index_by_state:
                         self.index_by_state[state_idx] = set()
                     self.index_by_state[state_idx].add(key[1])
-                    
+
                     offset += bytes_consumed
-                    
+
                 except (ValueError, IndexError) as e:
                     # Skip corrupted data and continue
                     print(f"Warning: Corrupted data at offset {offset}: {e}")
                     break
-            
+
             print(f"Built index from scan: {len(self.index)} entries, {len(self.index_by_state)} states")
-            
+
         except Exception as e:
             print(f"Warning: Failed to build index from scan: {e}")
             # Continue with empty index
@@ -356,7 +350,7 @@ class OrbitStore:
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
-                    entry_buf = self._mmap[offset : offset + size]
+                    entry_buf = self._mmap[offset:offset + size]
                 else:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
@@ -384,10 +378,6 @@ class OrbitStore:
                 pass
             del _append_only_cache_global[cache_key]
 
-
-
-
-
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
         pending_fsync = None
         with self.lock:
@@ -408,8 +398,6 @@ class OrbitStore:
     def commit(self) -> None:
         with self.lock:
             # Capture pending writes before flush for bloom filter update
-            pending_keys = list(self.pending_writes.keys())
-            new_keys_count = len(pending_keys)
 
             self._flush()
 
@@ -426,7 +414,7 @@ class OrbitStore:
                     self._last_remap = time.time()
 
             # Fine‑grain cache invalidation
-            for k in pending_keys:
+            for k in list(self.pending_writes.keys()):
                 self._cache_pop(k)
         # No blocking wait on fsync here; state will be updated asynchronously
 
@@ -546,13 +534,15 @@ class OrbitStore:
         with self.lock:
             if self.pending_writes:
                 logger.debug("Explicit flush: writing %d pending entries", len(self.pending_writes))
-                # Capture pending keys before flush for bloom filter update
+                # Capture pending keys before flush for cache invalidation
                 pending_keys = list(self.pending_writes.keys())
 
                 self._flush()
+
+                # Fine‑grain cache invalidation for flushed keys
+                for k in pending_keys:
+                    self._cache_pop(k)
                 # No blocking wait on fsync here; state will be updated asynchronously
-
-
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
@@ -593,7 +583,7 @@ class OrbitStore:
                 for context_key, (offset, size) in self.index.items():
                     if context_key in yielded:
                         continue
-                    entry_buf_mv = mv[offset : offset + size]
+                    entry_buf_mv = mv[offset:offset + size]
                     entry, _ = _unpack_phenotype(entry_buf_mv)
                     yield context_key, entry
             else:
@@ -1099,9 +1089,6 @@ def merge_phenotype_maps(
     }
 
 
-
-
-
 def export_knowledge_statistics(store_path: str, output_path: str, base_path: Path = PROJECT_ROOT) -> MaintenanceReport:
     """
     Export detailed statistics about a knowledge store.
@@ -1373,9 +1360,6 @@ def to_native(obj: Any) -> Any:
         return obj.item()
     else:
         return obj
-
-
-
 
 
 def create_multi_knowledge_view(
