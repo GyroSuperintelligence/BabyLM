@@ -1,8 +1,123 @@
 # 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
 
+
 ---
 
-## [0.9.6.7] – 2025-08-05
+## [v0.9.6.8-alpha] – 2025-08-05 - Unstable Alpha Release
+
+> *Note: All metrics are estimations; this is an unstable alpha. Features and performance claims remain to be validated in rigorous testing.*
+
+---
+
+### 1. Core Architecture & Principles
+
+* **Tokeniser as sole symbolic index**
+
+  * Text ↔ token\_id ↔ LEB128 reversible mapping
+  * Trie in `tokenizer.json` used directly for lookups
+* **Five meta-maps as world-model**
+
+  * Ontology, Epistemology, Phenomenology, Θ (angular divergence), Orbit Sizes
+  * No external metadata store; physics maps drive both learning and generation
+* **Sparse one-byte residues for “knowledge”**
+
+  * Phenotype = 8-bit `exon_mask` overlay only when deviating from baseline
+  * Confidence, counts, labels, timestamps derived at runtime
+
+---
+
+### 2. Storage Format
+
+* **Single append-only file**: `knowledge.bin`
+* **Varint state-block format**:
+
+  ```
+  [uLEB128 state_index][uLEB128 n_pairs][(uLEB128 token_id + mask_byte) * n_pairs]
+  ```
+* **Per-pair footprint**: est. 3–4 bytes vs. 9–16 bytes previously
+* **No stored confidences or timestamps**; recomputed from Θ and orbit size
+
+---
+
+### 3. Physics-Driven Functions (baby/governance.py)
+
+* `exon_product_from_state(state_index, theta, orbit_size)`:
+  Projects 48-bit state tensor → 8-bit exon product
+* `propose_resonant_introns(exon_product, max_candidates=3)`:
+  Generates candidate intron bytes via bit-family coherence
+* `token_last_intron(token_id)`:
+  Returns last intron byte via ψ (XOR 0xAA) isomorphism
+
+---
+
+### 4. Learning & Generation Flow
+
+1. **Ingress (learning)**
+
+   * Tokenise input, transform bytes → introns (ψ), update state via Epistemology
+   * Compute last intron and update `exon_mask` if deviating from baseline
+   * Append only changed (state, token, mask) entries
+2. **Egress (generation)**
+
+   * Compute baseline exon product from physics
+   * Overlay stored mask if present
+   * Generate intron candidates, lookup tokens in trie
+   * Score by resonance, orbit size, Θ(state) and sample
+
+---
+
+### 5. Module-Level Changes
+
+* **baby/contracts.py**
+
+  * Removed `conf: float` field; documentation updated for runtime confidence
+* **baby/policies.py**
+
+  * Switched from fixed 12-byte to varint format; removed confidence storage
+* **baby/inference.py**
+
+  * Cleaned learning logic; dropped confidence decay and metadata methods
+* **baby/intelligence.py**
+
+  * Overhauled `generate_token_exon()` to use exon-product sieve
+  * Added runtime confidence and tokenizer-trie integration
+* **baby/information.py**
+
+  * Introduced trie-based `find_tokens_by_intron_prefix()` and `…_last_intron()`
+* **Other directories**
+
+  * **toys/**: cleaned legacy code, updated path handling, removed Bloom filters
+  * **memories/**: pruned old confidence/pruning settings
+
+---
+
+### 6. Compression & Performance (Estimated)
+
+* **Storage reduction**: \~55–67% size decrease (from \~12 bytes to \~3–4 bytes per pair)
+* **Startup**: sub-second scan for multi-MB stores
+* **Generation**: O(prefix\_length) trie lookup vs. full-vocab sampling
+
+---
+
+### 7. Testing Strategy (Pending Validation)
+
+* **Single-article training** → recall & continuation checks
+* **Sentence completion** → prompt with known openings, assess coherence
+* **Context continuation** → historical fact prompts, flow evaluation
+* **Physics-driven generation tests** → verify intron-sieve outputs
+
+---
+
+### 8. Known Issues & Next Steps
+
+* Unstable alpha: behaviour and compression ratios unverified at scale
+* SEP-token storage bug remains under review; should be treated as physics boundary, not stored
+* Rigorous benchmarking and fuzz tests needed for reliability
+* Removal of bucket-based orbit storage demands individual pair testing
+
+---
+
+## [0.9.6.7] – 2025-08-05 - Unstable
 
 ### 🔧 SEP Learning & Fallback Fixes
 

@@ -99,6 +99,8 @@ class InferenceEngine:
     def learn(self, phenotype_entry: PhenotypeEntry, last_intron: int, state_index: int) -> PhenotypeEntry:
         """
         Update memory via the Monodromic Fold.
+
+        Only the mask is stored - confidence is computed at runtime from physics.
         """
         if state_index < 0 or state_index >= len(self.s2.orbit_cardinality):
             raise IndexError(f"state_index {state_index} out of bounds [0, {len(self.s2.orbit_cardinality)})")
@@ -109,29 +111,16 @@ class InferenceEngine:
         # Use Monodromic Fold
         new_mask = governance.fold(old_mask, last_intron)
 
-        # Calculate learning rate and confidence
-        novelty = bin(old_mask ^ new_mask).count("1") / 8.0
-        v = self.s2.orbit_cardinality[state_index]
-        alpha = (1 / 6) * math.sqrt(v / self._v_max)
-        current_confidence = phenotype_entry.get("conf", 0.1)
-        new_confidence = min(1.0, current_confidence + (1 - current_confidence) * alpha * novelty)
-
         # Check if this is a brand-new entry
         is_new = bool(phenotype_entry.pop("_new", False))
 
-        # Quantize to q8 for commit gating, to match storage precision and avoid jitter writes
-        def _q8(x: float) -> int:
-            x = max(0.0, min(1.0, float(x)))
-            return int(round(x * 255.0))
-
-        if new_mask == old_mask and _q8(new_confidence) == _q8(current_confidence) and not is_new:
-            return phenotype_entry  # safe to skip – already stored
+        # Only write if mask changed or this is a new entry
+        if new_mask == old_mask and not is_new:
+            return phenotype_entry
 
         assert 0 <= new_mask <= 0xFF
-        assert 0 <= new_confidence <= 1
 
         phenotype_entry["mask"] = new_mask
-        phenotype_entry["conf"] = new_confidence
 
         key = phenotype_entry.get("key")
         if key is None:
@@ -176,10 +165,8 @@ class InferenceEngine:
         _flush_store(self.store)
 
         total_entries = 0
-        confidence_sum = 0.0
         anomaly_count = 0
         seen: set[tuple[int, int]] = set()
-        unique_confidence_sum = 0.0
 
         # Walk down to the lowest OrbitStore (or anything that has an 'index') to inspect raw keys
         def _unwrap_raw_store(s: Any) -> Any:
@@ -206,18 +193,14 @@ class InferenceEngine:
             norm_key = _norm_key(store_key, entry)
             if norm_key in seen:
                 anomaly_count += 1
-            else:
-                # Only sum confidence for unique entries
-                unique_confidence_sum += float(entry["conf"])
             seen.add(norm_key)
             total_entries += 1
-            confidence_sum += float(entry["conf"])
 
         return cast(
             ValidationReport,
             {
                 "total_entries": len(seen),
-                "average_confidence": unique_confidence_sum / max(len(seen), 1),
+                "average_confidence": 0.0,  # Confidence no longer stored
                 "store_type": type(self.store).__name__,
                 "modified_entries": anomaly_count,
             },
@@ -225,13 +208,10 @@ class InferenceEngine:
 
     def apply_confidence_decay(self, decay_factor: float = 0.99) -> Dict[str, Any]:
         """
-        Apply confidence decay to all phenotype entries.
+        Legacy method for compatibility - confidence is now computed at runtime.
 
-        Args:
-            decay_factor: Retention factor (0.0 to 1.0, e.g. 0.99 = keep 99% of confidence)
-
-        Returns:
-            Decay report
+        Returns a report indicating no entries were modified since confidence
+        is no longer stored in phenotype entries.
         """
 
         def _flush_store(s: Any) -> None:
@@ -245,28 +225,13 @@ class InferenceEngine:
 
         _flush_store(self.store)
 
-        decayed_count = 0
         total_entries = 0
-
-        for key, entry in self.store.iter_entries():
+        for _ in self.store.iter_entries():
             total_entries += 1
-            current_confidence = entry.get("conf", 0.0)
-            if current_confidence > 0.0:
-                new_confidence = current_confidence * decay_factor  # Multiplicative decay
-                if new_confidence < 0.01:  # Apply minimum floor of 0.01
-                    new_confidence = 0.01
-                # Normalize confidence for consistent comparison
-                normalized_new_conf = round(new_confidence, 4)  # Same precision as normalize_confidence
-                normalized_current_conf = round(current_confidence, 4)
-                if normalized_new_conf != normalized_current_conf:
-                    entry["conf"] = new_confidence  # Keep original precision for storage
-                    # Persist the change back to the store
-                    self.store.put(key, entry)
-                    decayed_count += 1
 
         return {
             "total_entries": total_entries,
-            "decayed_entries": decayed_count,
+            "decayed_entries": 0,  # No decay applied since confidence not stored
             "decay_factor": decay_factor,
         }
 
@@ -296,29 +261,27 @@ class InferenceEngine:
             if len(tokens) <= max_tokens_per_orbit:
                 continue
 
-            # Calculate token probabilities within orbit
-            total_conf = sum(e["conf"] for _, e in tokens)
-            if total_conf == 0:
-                continue
-
-            # Score by confidence * uniqueness
+            # Score by mask entropy * uniqueness (confidence no longer stored)
             scored_tokens = []
             for token_id, entry in tokens:
-                p = entry["conf"] / total_conf
+                # Use mask bit diversity as a proxy for information content
+                mask = entry.get("mask", 0)
+                mask_entropy = bin(mask).count("1") / 8.0  # Normalized bit count
+
                 # Higher score for rare tokens (anti-log frequency)
                 # Calculate actual frequency from store
                 token_frequency = 1  # Default frequency
                 try:
                     # Count occurrences of this token across all states
                     token_count = 0
-                    for _, entry in self.store.iter_entries():
-                        if entry and entry.get("key") and entry["key"][1] == token_id:
+                    for _, entry_check in self.store.iter_entries():
+                        if entry_check and entry_check.get("key") and entry_check["key"][1] == token_id:
                             token_count += 1
                     token_frequency = max(1, token_count)
                 except Exception:
                     pass
                 uniqueness = 1.0 / (1.0 + math.log(token_frequency))
-                score = p * uniqueness
+                score = mask_entropy * uniqueness
                 scored_tokens.append((score, token_id, entry))
 
             # Keep top K by score
@@ -354,29 +317,15 @@ class InferenceEngine:
             PhenotypeEntry,
             {
                 "mask": 0x00,
-                "conf": 0.1,
                 "key": context_key,
             },
         )
 
     def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
         """
-        Remove phenotype entries with confidence below the threshold.
+        Legacy method for compatibility - confidence is now computed at runtime.
 
-        Args:
-            confidence_threshold: Minimum confidence to keep (default: 0.05)
-
-        Returns:
-            Number of entries removed
+        Since confidence is no longer stored, this method returns 0.
+        Use manage_orbit_entropy() for actual entry pruning based on physics.
         """
-        removed_count = 0
-
-        # Get all entries from the store
-        entries = list(self.store.iter_entries()) if hasattr(self.store, "iter_entries") else []
-
-        for key, entry in entries:
-            if isinstance(entry, dict) and entry.get("conf", 0.0) < confidence_threshold:
-                self.store.delete(key)
-                removed_count += 1
-
-        return removed_count
+        return 0

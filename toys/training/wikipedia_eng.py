@@ -24,7 +24,7 @@ Performance Optimizations:
 Usage:
     # Simple Wikipedia to tape only (fastest) - uses default knowledge directory
     python toys/training/wikipedia_eng.py --simple
-    
+
     # Simple Wikipedia to tape with learning - uses default knowledge directory
     python toys/training/wikipedia_eng.py --simple --learn
 
@@ -128,16 +128,8 @@ def build_agent(private_knowledge_path: Path) -> GyroSI:
         with open(prefs_path) as f:
             preferences = json.load(f)
     else:
-        # Default preferences (keep pruning nested)
-        preferences = {
-            "pruning": {
-                "confidence_threshold": 0.05,
-                "enable_auto_decay": True,
-                "decay_factor": 0.995,
-            },
-            # You can also add generation schedule knobs if desired:
-            # "theta_low": 0.05, "theta_high": 0.6, "temperature_floor": 0.2, "temperature_cap": 0.9
-        }
+        # Default preferences without legacy pruning settings
+        preferences = {}
 
     # Configure agent preferences (keep pruning nested)
     preferences_config = cast(PreferencesConfig, preferences)
@@ -313,9 +305,7 @@ def compile_stream(
     # Commit any pending changes to knowledge store
     if agent and hasattr(agent.engine.operator.store, "commit"):
         agent.engine.operator.store.commit()
-        # Save bloom filter for fast startup on next run
-        if hasattr(agent.engine.operator.store, "_save_bloom"):
-            agent.engine.operator.store._save_bloom()
+    # Removed Bloom filter saving as it's no longer used in the current architecture
 
     # Final statistics
     total_elapsed = time.time() - start_time
@@ -461,9 +451,7 @@ def replay_tape(
     # Commit changes at the end (not during the loop)
     if hasattr(agent.engine.operator.store, "commit"):
         agent.engine.operator.store.commit()
-        # Save bloom filter for fast startup on next run
-        if hasattr(agent.engine.operator.store, "_save_bloom"):
-            agent.engine.operator.store._save_bloom()
+    # Removed Bloom filter saving reference
 
     # Final state check
     final_state = agent.engine.get_state_info()["tensor_index"]

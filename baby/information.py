@@ -230,6 +230,105 @@ def introns_to_token(introns: List[int]) -> int:
     return token_ids[0]
 
 
+@lru_cache(maxsize=1)
+def _get_intron_trie(tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> Dict[Any, Any]:
+    """Build and cache a trie mapping intron sequences to token IDs."""
+    tokenizer = _load_tokenizer(tokenizer_name, base_path)
+    vocab_size = tokenizer.get_vocab_size()
+    
+    trie = {}
+    for token_id in range(vocab_size):
+        try:
+            introns = token_to_introns(token_id)
+            node = trie
+            for intron in introns:
+                if intron not in node:
+                    node[intron] = {}
+                node = node[intron]
+            if "tokens" not in node:
+                node["tokens"] = []
+            node["tokens"].append(token_id)
+        except (ValueError, IndexError):
+            continue  # Skip invalid tokens
+            
+    return trie
+
+def find_tokens_by_intron_prefix(intron_prefix: List[int], tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> List[int]:
+    """Find all tokens whose intron sequence starts with the given prefix.
+    
+    This implements efficient tokenizer trie lookup for the exon product sieve.
+    Converts intron prefix to LEB128 bytes, then finds all tokens matching that prefix.
+    
+    Args:
+        intron_prefix: List of intron bytes (0-255) representing the prefix
+        tokenizer_name: Name of the tokenizer to use
+        base_path: Base path for tokenizer files
+        
+    Returns:
+        List of token IDs whose intron sequence starts with the given prefix
+    """
+    trie = _get_intron_trie(tokenizer_name, base_path)
+    
+    node = trie
+    for intron in intron_prefix:
+        if intron in node:
+            node = node[intron]
+        else:
+            return []  # No tokens with this prefix
+            
+    # Collect all tokens from this node and its children
+    matching_tokens = []
+    
+    def _collect_tokens(n):
+        if "tokens" in n:
+            matching_tokens.extend(n["tokens"])
+        for k, v in n.items():
+            if k != "tokens":
+                _collect_tokens(v)
+                
+    _collect_tokens(node)
+    
+    return matching_tokens
+
+
+@lru_cache(maxsize=1)
+def _get_reverse_intron_trie(tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> Dict[Any, Any]:
+    """Build and cache a reverse trie mapping last introns to token IDs."""
+    tokenizer = _load_tokenizer(tokenizer_name, base_path)
+    vocab_size = tokenizer.get_vocab_size()
+    
+    trie = {}
+    for token_id in range(vocab_size):
+        try:
+            introns = token_to_introns(token_id)
+            if introns:
+                last_intron = introns[-1]
+                if last_intron not in trie:
+                    trie[last_intron] = []
+                trie[last_intron].append(token_id)
+        except (ValueError, IndexError):
+            continue
+            
+    return trie
+
+def find_tokens_by_last_intron(last_intron: int, tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories") -> List[int]:
+    """Find tokens whose last intron matches the given byte.
+    
+    This is the core function for the exon product sieve generation.
+    Efficiently finds tokens that could be generated from a specific exon product.
+    
+    Args:
+        last_intron: Single intron byte (0-255) to match
+        tokenizer_name: Name of the tokenizer to use
+        base_path: Base path for tokenizer files
+        
+    Returns:
+        List of token IDs whose last intron matches the given byte
+    """
+    trie = _get_reverse_intron_trie(tokenizer_name, base_path)
+    return trie.get(last_intron, [])
+
+
 # ---------- SEP Token Utilities ----------
 
 SEP_ID = 102

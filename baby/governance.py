@@ -219,39 +219,141 @@ def dual(x: int) -> int:
     return (x ^ 0xFF) & MASK
 
 
-def exon_product_from_metadata(mask: int, confidence: float, orbit_v: int, v_max: int) -> int:
+def exon_product_from_state(state_index: int, theta: float, orbit_size: int) -> int:
     """
-    Compress the minimal phenotype metadata into an 8‑bit exon‑product.
+    Project the 48-bit state tensor to an 8-bit exon product using theta and orbit size.
 
-    Returns an 8‑bit int using the same LI/FG/BG family layout
-    as exon_mask but **never persisted**.
+    This provides the baseline mask when no specific learning exists for a (state, token) pair.
+    The exon product encodes the state's intrinsic resonance characteristics.
 
-    Guarantee: never return 0 so that PAD is not emitted spuriously.
+    Args:
+        state_index: Canonical index of the physical state
+        theta: Angular divergence from the archetypal state (radians)
+        orbit_size: Cardinality of the state's phenomenological orbit
+
+    Returns:
+        8-bit exon product encoding state's baseline characteristics
     """
-    # Extract LI/FG/BG components from the mask
-    li = (mask >> 6) & 0x03  # bits 6-7
-    fg = (mask >> 4) & 0x03  # bits 4-5
-    bg = (mask >> 2) & 0x03  # bits 2-3
-    neutral = mask & 0x03  # bits 0-1
+    # Theta normalization: map [0, π] to [0, 1]
+    theta_norm = min(1.0, theta / math.pi)
 
-    tau = li - bg
-    eta = fg - neutral
+    # Orbit variety normalization: larger orbits have lower specificity
+    orbit_norm = min(1.0, orbit_size / 1000.0)  # Assume max orbit size ~1000
 
-    # v_max must be positive (it's the maximum orbit size)
-    if v_max <= 0:
-        raise ValueError("v_max must be positive")
+    # Extract bit families from state_index for deterministic projection
+    li_component = (state_index >> 6) & 0x03
+    fg_component = (state_index >> 4) & 0x03
+    bg_component = (state_index >> 2) & 0x03
+    neutral_component = state_index & 0x03
 
-    scale = confidence * math.sqrt(orbit_v / v_max)
+    # Apply theta modulation (cooling effect)
+    cooling_factor = 1.0 - theta_norm
+    heating_factor = theta_norm
 
-    A = int(round(tau * scale)) & 0x0F  # high nibble
-    B = int(round(eta * scale)) & 0x0F  # low  nibble
-    p = ((A << 4) | B) & 0xFF
+    # Compute weighted components
+    tau = int((li_component - bg_component) * cooling_factor) & 0x0F
+    eta = int((fg_component - neutral_component) * heating_factor) & 0x0F
 
-    # Fallback: inject minimal chirality if result would be 0
-    if p == 0:
-        p = 0b01000010  # LI bits set (0x42) == cooling intron
+    # Apply orbit size modulation
+    orbit_factor = int(orbit_norm * 15) & 0x0F
 
-    return p
+    # Combine into 8-bit product with bit family structure
+    exon_product = ((tau & 0x0F) << 4) | ((eta ^ orbit_factor) & 0x0F)
+
+    # Ensure non-zero result
+    if exon_product == 0:
+        exon_product = 0b01000010  # LI bits set (cooling intron)
+
+    return exon_product & 0xFF
+
+
+def propose_resonant_introns(exon_product: int, max_candidates: int = 3) -> List[int]:
+    """
+    Convert exon product to candidate intron bytes for tokenizer trie lookup.
+
+    Uses bit family coherence rules to generate 1-3 intron candidates that are
+    most likely to reduce divergence based on the current exon product state.
+
+    Args:
+        exon_product: 8-bit exon product from state physics or learned mask
+        max_candidates: Maximum number of intron candidates to return
+
+    Returns:
+        List of 1-3 intron bytes (0-255) for tokenizer trie lookup
+    """
+    candidates = []
+
+    # Extract bit families from exon product
+    high_nibble = (exon_product >> 4) & 0x0F
+    low_nibble = exon_product & 0x0F
+
+    # Primary candidate: direct resonance (minimal perturbation)
+    primary = exon_product
+    candidates.append(primary)
+
+    if max_candidates > 1:
+        # Secondary candidate: LI coherence (flip parity bits)
+        li_flip = exon_product ^ EXON_LI_MASK
+        candidates.append(li_flip & 0xFF)
+
+    if max_candidates > 2:
+        # Tertiary candidate: FG/BG stress relief (flip gyration bits with highest stress)
+        if high_nibble > low_nibble:
+            # High stress in tau component: apply FG correction
+            fg_correction = exon_product ^ EXON_FG_MASK
+        else:
+            # High stress in eta component: apply BG correction
+            fg_correction = exon_product ^ EXON_BG_MASK
+
+        candidates.append(fg_correction & 0xFF)
+
+    # Remove duplicates while preserving order
+    unique_candidates = []
+    seen = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            unique_candidates.append(candidate)
+            seen.add(candidate)
+
+    return unique_candidates[:max_candidates]
+
+
+def token_last_intron(token_id: int) -> int:
+    """
+    Get the last intron byte for a token ID using the ψ isomorphism.
+
+    Converts token_id to LEB128 bytes, applies XOR 0xAA transformation,
+    and returns the final byte which encodes the token's decisive action.
+
+    Args:
+        token_id: Token ID from the tokenizer
+
+    Returns:
+        Last intron byte (0-255) for this token
+    """
+    if token_id < 0:
+        raise ValueError("Token ID must be non-negative")
+
+    # Convert to LEB128 bytes
+    leb_bytes = []
+    val = token_id
+    while True:
+        byte = val & 0x7F
+        val >>= 7
+        if val == 0:
+            leb_bytes.append(byte)
+            break
+        else:
+            leb_bytes.append(byte | 0x80)
+
+    # Apply ψ isomorphism (XOR with 0xAA) to get introns
+    introns = [b ^ GENE_Mic_S for b in leb_bytes]
+
+    # Return the last (decisive) intron
+    return introns[-1] if introns else 0
+
+
+
 
 
 def validate_tensor_consistency() -> bool:

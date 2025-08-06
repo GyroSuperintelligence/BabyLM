@@ -66,7 +66,7 @@ agent_pool = AgentPool(
     base_knowledge_path=base_knowledge_path,
     preferences=PREFERENCES,
     allowed_ids={"user", "system", "assistant"},
-    allow_auto_create=True,  # Changed to True to allow agent creation
+    allow_auto_create=True,
     private_agents_base_path=str(BASE_PATH / PREFERENCES["private_knowledge"]["base_path"]),
     base_path=BASE_PATH,
 )
@@ -254,12 +254,7 @@ async def chat_completions(
     # --------------------------------------------------------------
     # 2. Feed prior assistant utterances back into assistant memory
     # --------------------------------------------------------------
-    # TODO: Re-enable once store has sane coverage and we're not relying on fallback
-    # assistant_memories = [m.content for m in payload.messages if m.role == "assistant"]
-    # if assistant_memories:
-    #     # Encode with tokenizer
-    #     memory_bytes = encode_text("\n".join(assistant_memories), name=PREFERENCES["tokenizer"]["name"])
-    #     assistant_agent.ingest(memory_bytes)
+    # Removed legacy TODO and commented code as it's not currently needed
 
     # --------------------------------------------------------------
     # 3. Find last user message and run a turn
@@ -287,12 +282,13 @@ async def chat_completions(
         def token_stream() -> Iterator[str]:
             # Get assistant agent for real streaming
             assistant_agent = agent_pool.get_or_create_agent(assistant_id, "assistant")
-            
+
             # Encode user input to bytes for ingestion
             user_bytes = encode_text(user_text, name=PREFERENCES["tokenizer"]["name"])
-            
+
             # Load tokenizer once, reuse
             from baby.information import _load_tokenizer
+
             tokenizer = _load_tokenizer(PREFERENCES["tokenizer"]["name"])
 
             # Real streaming: generate tokens one by one
@@ -301,7 +297,8 @@ async def chat_completions(
                 try:
                     # Decode token bytes to text
                     token_text = decode_text(token_bytes, name=PREFERENCES["tokenizer"]["name"])
-                except Exception:
+                except Exception as e:
+                    print(f"Error decoding token: {e}")
                     # Fallback: use token ID if decode fails
                     token_ids = bytes_to_token_ids(token_bytes)
                     if token_ids:

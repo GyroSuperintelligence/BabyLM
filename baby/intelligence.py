@@ -23,7 +23,7 @@ from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig, Ph
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine, SEP_ID
 from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
-from baby.governance import exon_product_from_metadata
+
 
 
 class _TokBridge:
@@ -408,8 +408,8 @@ class IntelligenceEngine:
             if new_state >= epistemology_size:
                 raise RuntimeError(
                     f"Transition to state {new_state} is out of bounds "
-                    f"for epistemology matrix (size {epistemology_size})"
-                )
+                f"for epistemology matrix (size {epistemology_size})"
+            )
             st[i] = new_state
 
         # Process tokens with correct phase
@@ -616,51 +616,7 @@ class IntelligenceEngine:
                 return cast(Dict[str, Any], vars(result))
             return {}
 
-    def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
-        """
-        Prune entries from the knowledge base with confidence below a threshold.
 
-        Args:
-            confidence_threshold: Minimum confidence for entry retention
-
-        Returns:
-            Number of entries pruned
-        """
-        return cast(int, self.operator.prune_low_confidence_entries(confidence_threshold=confidence_threshold))
-
-    def _register_auto_prune_hook(self) -> None:
-        """
-        Disabled: We now use orbit-entropy management instead of confidence pruning.
-        """
-        pass  # Pruning disabled to preserve trajectory richness
-
-    def _auto_prune_hook(
-        self,
-        engine: "IntelligenceEngine",
-        phenotype_entry: PhenotypeEntry,
-        last_intron: int,
-        token_id: Optional[int] = None,
-        state_index: Optional[int] = None,
-    ) -> None:
-        """
-        Auto-prune low-confidence entries to prevent memory bloat.
-        Called after each learning cycle.
-        """
-        if self.cycle_count % 100 != 0:
-            return
-
-        pruning_cfg = self.preferences.get("pruning", {})
-        if not pruning_cfg.get("enable_auto_decay", False):
-            return
-
-        thr = float(pruning_cfg.get("confidence_threshold", 0.05))
-        try:
-            removed = self.operator.prune_low_confidence_entries(confidence_threshold=thr)
-            if getattr(self, "debug_mode", False):
-                print(f"Auto-pruned {removed} low-confidence entries (threshold: {thr})")
-        except Exception as e:
-            if getattr(self, "debug_mode", False):
-                print(f"Warning: Auto-prune failed: {e}")
 
     def debug_candidates(self, state_index: int) -> None:
         """Debug candidate generation for a given state"""
@@ -677,10 +633,14 @@ class IntelligenceEngine:
 
     def generate_token_exon(self, state_index: int, temperature: float = 1.0) -> int:
         """
-        Generate next token using exon-product physics and LEB128 token associations.
-
-        The exon-product is computed from phenotype metadata and converted to LEB128
-        token associations through the governance physics.
+        Generate next token using physics-driven exon product sieve.
+        
+        Implements the core generation algorithm:
+        1. Get baseline exon product from state physics
+        2. Specialize with learned masks (if any exist)
+        3. Use exon product to generate candidate intron bytes
+        4. Find tokens matching those introns via tokenizer trie
+        5. Score and sample based on physics-derived confidence
 
         Args:
             state_index: Current state index
@@ -689,171 +649,120 @@ class IntelligenceEngine:
         Returns:
             Generated token_id
         """
-        # Canonicalize once to match CanonicalView's key space
-        rep_state_idx = state_index
-        if self.phenomenology_map is not None:
-            try:
-                rep_state_idx = int(self.phenomenology_map[state_index])
-            except Exception:
-                pass
-
-        # Check candidate cache first
-        if rep_state_idx in self._cand_cache and self._store_mutation_epoch == 0:
-            candidates = self._cand_cache[rep_state_idx]
+        # Get physics parameters for this state
+        try:
+            theta = self.s2.measure_state_divergence_index(state_index)
+            orbit_size = self.s2.get_orbit_cardinality(state_index)
+        except (AttributeError, IndexError):
+            # Fallback values if physics data unavailable
+            theta = 0.5
+            orbit_size = 100
+        
+        # Step 1: Get baseline exon product from state physics
+        baseline_exon_product = governance.exon_product_from_state(state_index, theta, orbit_size)
+        
+        # Step 2: Check for learned specializations for this state
+        specialized_candidates = []
+        
+        # Look for learned entries that override the baseline
+        for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(state_index):
+            entry = self.operator.store.get((s_idx, token_id))
+            if entry and "mask" in entry:
+                # Use learned mask instead of baseline
+                learned_mask = entry["mask"]
+                specialized_candidates.append((token_id, learned_mask))
+        
+        # Step 3: Generate candidate intron bytes using exon product sieve
+        if specialized_candidates:
+            # Use specialized masks for known tokens
+            candidate_tokens = []
+            for token_id, mask in specialized_candidates:
+                # Convert mask to intron candidates
+                intron_candidates = governance.propose_resonant_introns(mask)
+                
+                # Verify this token's last intron matches one of our candidates
+                token_last_intron = governance.token_last_intron(token_id)
+                if token_last_intron in intron_candidates:
+                    # Score based on physics alignment
+                    confidence = self._compute_runtime_confidence(state_index, mask, theta, orbit_size)
+                    resonance = self._calculate_resonance(state_index, mask)
+                    score = confidence * 0.6 + resonance * 0.4
+                    candidate_tokens.append((token_id, score, mask))
         else:
-            # Fetch and cache candidates
-            candidates = []
-            fetch_limit = 512
-            pulled = 0
-
-            # Add time budget for candidate retrieval
-            import time
-
-            t0 = time.perf_counter()
-            max_time = 0.02  # 20ms budget
-
-            # Instrument candidate retrieval performance
-            if not hasattr(self, "_probe_iters"):
-                self._probe_iters = 0
-
-            # First try: exact state match (pre-state entries only)
-            for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(rep_state_idx):
-                if pulled >= fetch_limit or (time.perf_counter() - t0) > max_time:
-                    break
-                entry = self.operator.store.get((s_idx, token_id))
-                if not entry:
-                    continue  # Skip missing entries
-                pulled += 1
-
-                confidence = entry.get("conf", 0.1)
-                mask = entry.get("mask", 0)
-
-                orbit_v = 1
-                v_max = 1
-                if hasattr(self, "s2") and hasattr(self.s2, "orbit_cardinality"):
-                    try:
-                        orbit_v = self.s2.orbit_cardinality[rep_state_idx]
-                        v_max = int(np.max(self.s2.orbit_cardinality))
-                    except (IndexError, AttributeError):
-                        pass
-
-                exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
-                resonance = self._calculate_resonance(rep_state_idx, exon_product)
-
-                orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
-
-                # Add token frequency weighting to reduce common word dominance
-                # Higher score for rare tokens (anti-log frequency)
-                # Calculate actual frequency from store
-                token_frequency = 1  # Default frequency
-                try:
-                    # Count occurrences of this token across all states
-                    token_count = 0
-                    for _, entry in self.operator.store.iter_entries():
-                        if entry and entry.get("key") and entry["key"][1] == token_id:
-                            token_count += 1
-                    token_frequency = max(1, token_count)
-                except Exception:
-                    pass
-                uniqueness = 1.0 / (1.0 + math.log(token_frequency))
-
-                score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
-
-                candidates.append((token_id, score, exon_product))
-
-            # Second try: if no candidates and state differs from its representative
-            if not candidates and state_index != rep_state_idx:
-                # Try original state directly
-                for s_idx, token_id in getattr(self.operator.store, "iter_keys_for_state", lambda _s: [])(state_index):
-                    if pulled >= fetch_limit or (time.perf_counter() - t0) > max_time:
-                        break
-                    entry = self.operator.store.get((s_idx, token_id))
-                    if not entry:
-                        continue
-                    pulled += 1
-
-                    confidence = entry.get("conf", 0.1)
-                    mask = entry.get("mask", 0) & 0xFE
-
-                    orbit_v = self.s2.orbit_cardinality[state_index]
-                    v_max = int(np.max(self.s2.orbit_cardinality))
-
-                    exon_product = exon_product_from_metadata(mask, confidence, orbit_v, v_max)
-                    resonance = self._calculate_resonance(state_index, exon_product)
-
-                    orbit_factor = min(1.0, orbit_v / v_max) if v_max > 0 else 0.1
-
-                    # Add token frequency weighting to reduce common word dominance
-                    # Calculate actual frequency from store
-                    token_frequency = 1  # Default frequency
-                    try:
-                        # Count occurrences of this token across all states
-                        token_count = 0
-                        for _, entry in self.operator.store.iter_entries():
-                            if entry and entry.get("key") and entry["key"][1] == token_id:
-                                token_count += 1
-                        token_frequency = max(1, token_count)
-                    except Exception:
-                        pass
-                    uniqueness = 1.0 / (1.0 + math.log(token_frequency))
-
-                    score = (confidence * 0.3) + (resonance * 0.3) + (orbit_factor * 0.2) + (uniqueness * 0.2)
-
-                    candidates.append((token_id, score, exon_product))
-
-            # Log performance metrics
-            t1 = time.perf_counter()
-            if self._probe_iters < 10:
-                self._probe_iters += 1
-                print(f"[probe] iter_keys_for_state(state={rep_state_idx}) took {(t1-t0)*1e3:.2f} ms, pulled={pulled}")
-
-            # Cache the results (keep top candidates)
-            if candidates:
-                candidates.sort(key=lambda x: x[1], reverse=True)
-                candidates = candidates[: min(100, len(candidates))]  # Keep top 100
-                self._cand_cache[rep_state_idx] = candidates
-
-                # Evict old entries if cache is full
-                if len(self._cand_cache) > self._cand_cache_limit:
-                    # Simple LRU: remove oldest entries
-                    oldest_key = next(iter(self._cand_cache))
-                    del self._cand_cache[oldest_key]
-
-        if not candidates:
-            # No candidates in store for this state: *end the turn* by emitting SEP.
-            if not hasattr(self, "_fallback_count"):
-                self._fallback_count = 0
-            if self._fallback_count < 5:
-                print(f"[gen] Fallback: no candidates for state={rep_state_idx} → SEP")
-            self._fallback_count += 1
+            # No learned specializations, use baseline exon product
+            intron_candidates = governance.propose_resonant_introns(baseline_exon_product)
+            candidate_tokens = self._find_tokens_by_intron_sieve(intron_candidates, state_index, baseline_exon_product)
+        
+        if not candidate_tokens:
+            # No physics-aligned candidates found, emit SEP to end turn
             return SEP_ID
-
-        # Always sort by score
-        candidates.sort(key=lambda x: x[1], reverse=True)
-
-        if temperature < 0.1 or len(candidates) <= 3:
-            return int(candidates[0][0])
+        
+        # Step 4: Score and sample based on temperature
+        candidate_tokens.sort(key=lambda x: x[1], reverse=True)  # Sort by score
+        
+        if temperature < 0.1:
+            # Deterministic: return highest-scoring token
+            return int(candidate_tokens[0][0])
         else:
-            # Probabilistic: sample based on scores and temperature
-            scores = np.array([score for _, score, _ in candidates])
-
-            # Apply temperature scaling with softmax-like normalization
-            if temperature > 0:
-                # Add neutrality at high τ by subtracting minimum score
-                scores = scores - scores.min()
-                # Use log-space for numerical stability
-                log_scores = np.log(scores + 1e-8)  # Add small epsilon to avoid log(0)
-                scaled_log_scores = log_scores / temperature
-                # Softmax normalization
-                exp_scores = np.exp(scaled_log_scores - np.max(scaled_log_scores))
+            # Probabilistic sampling
+            scores = np.array([score for _, score, _ in candidate_tokens])
+            
+            # Apply temperature scaling with softmax
+            if len(scores) > 1:
+                scores = scores - scores.min()  # Normalize to prevent overflow
+                scaled_scores = scores / temperature
+                exp_scores = np.exp(scaled_scores - np.max(scaled_scores))
                 probs = exp_scores / np.sum(exp_scores)
+                
+                # Sample from distribution
+                chosen_idx = int(np.random.choice(len(candidate_tokens), p=probs))
+                return int(candidate_tokens[chosen_idx][0])
             else:
-                # Fallback to simple normalization
-                probs = scores / np.sum(scores)
+                return int(candidate_tokens[0][0])
 
-            # Sample with replacement for diversity
-            chosen_idx = int(np.random.choice(len(candidates), p=probs))
-            return int(candidates[chosen_idx][0])
+    def _compute_runtime_confidence(self, state_index: int, mask: int, theta: float, orbit_size: int) -> float:
+        """
+        Compute confidence at runtime from physics parameters.
+        
+        Replaces stored confidence with physics-based calculation using
+        theta divergence, orbit cardinality, and mask entropy.
+        """
+        # Theta factor: higher divergence reduces confidence
+        theta_factor = max(0.1, 1.0 - (theta / math.pi))
+        
+        # Orbit factor: larger orbits provide more stability
+        max_orbit_size = getattr(self.s2, "_v_max", 1000)
+        orbit_factor = min(1.0, orbit_size / max_orbit_size)
+        
+        # Mask entropy: more diverse masks indicate higher information content
+        mask_entropy = bin(mask).count("1") / 8.0
+        
+        # Combine factors
+        confidence = (theta_factor * 0.4) + (orbit_factor * 0.3) + (mask_entropy * 0.3)
+        return min(1.0, max(0.1, confidence))
+    
+    def _find_tokens_by_intron_sieve(self, intron_candidates: List[int], state_index: int, exon_product: int) -> List[Tuple[int, float, int]]:
+        """
+        Find tokens whose last intron matches one of the candidate introns.
+        
+        Uses the tokenizer trie lookup functionality from information module.
+        """
+        from baby.information import find_tokens_by_last_intron
+        
+        candidate_tokens = []
+        
+        for intron in intron_candidates:
+            # Find tokens matching this intron
+            matching_tokens = find_tokens_by_last_intron(intron)
+            
+            for token_id in matching_tokens:
+                # Score based on physics alignment
+                confidence = self._compute_runtime_confidence(state_index, exon_product, 0.5, 100)
+                resonance = self._calculate_resonance(state_index, exon_product)
+                score = confidence * 0.6 + resonance * 0.4
+                candidate_tokens.append((token_id, score, exon_product))
+        
+        return candidate_tokens
 
     def _calculate_resonance(self, state_index: int, mask: int) -> float:
         """Calculate token-level resonance between state and phenotype mask."""
@@ -896,201 +805,13 @@ class IntelligenceEngine:
 
         return float(result)
 
-    def _generate_random_token(self) -> int:
-        """Generate a random token ID using cached vocabulary size."""
-        # FIXED: Cache vocabulary size to avoid repeated calls and OOV leaks
-        if not hasattr(self, "_cached_vocab_size"):
-            try:
-                # Try to get actual vocabulary size from tokenizer
-                from baby.information import get_vocab_size
-
-                self._cached_vocab_size = get_vocab_size()
-            except (ImportError, Exception):
-                # Fallback to BERT vocab size if tokenizer not available
-                self._cached_vocab_size = 30522  # BERT vocab size approx
-
-        # Generate a valid token ID within the vocabulary range
-        # Use smaller range to ensure LEB128 encoding works properly
-        max_safe_token = min(self._cached_vocab_size, 8191)  # 2^13 - 1 for safe LEB128
-        return int(np.random.randint(1, max_safe_token))
 
 
-# ---------- Token Physics Functions ----------
 
 
-def apply_token_physics(state_index: int, token_id: int, epistemology: np.ndarray[Any, Any]) -> int:
-    """Apply token-level physics to evolve state through the token's intron sequence.
-
-    This is more efficient than applying introns one-by-one because it uses
-    the token's complete intron sequence in a single operation.
-
-    Args:
-        state_index: Current state index
-        token_id: Token ID to apply
-        epistemology: State transition table (STT)
-
-    Returns:
-        Final state index after applying the token's physics
-    """
-    from baby.information import token_to_introns
-
-    introns = token_to_introns(token_id)
-    current_state = state_index
-
-    # Walk through the token's intron sequence
-    for intron in introns:
-        current_state = epistemology[current_state, intron]
-
-    return current_state
 
 
-class TokenSTT:
-    """Pre-computed token-level state transition table.
 
-    NOTE: This is an optional utility for future token-level acceleration.
-    Currently unused in the main learning pipeline.
-    """
-
-    def __init__(self, epistemology: np.ndarray[Any, Any], vocab_size: int):
-        self.epistemology = epistemology  # pass engine.s2.ep if you use it
-        self.vocab_size = vocab_size
-        self.cache: Dict[Tuple[int, int], int] = {}  # Lazy loading of token transitions
-
-    def get_token_transition(self, state_index: int, token_id: int) -> int:
-        """Get the final state after applying a token's intron sequence."""
-        key = (state_index, token_id)
-
-        if key not in self.cache:
-            # Compute the full token walk
-            from baby.information import token_to_introns
-
-            introns = token_to_introns(token_id)
-            final_state = state_index
-
-            for intron in introns:
-                final_state = self.epistemology[final_state, intron]
-
-            self.cache[key] = final_state
-
-        return self.cache[key]
-
-    def precompute_common_tokens(self, token_frequencies: Dict[int, float], threshold: float = 0.01) -> None:
-        """Pre-compute transitions for frequently used tokens."""
-        total_freq = sum(token_frequencies.values())
-
-        for token_id, freq in token_frequencies.items():
-            if freq / total_freq > threshold:
-                # Pre-compute for all states
-                for state in range(self.epistemology.shape[0]):
-                    self.get_token_transition(state, token_id)
-
-
-def compute_token_divergence(
-    token_id: int, theta_map: np.ndarray[Any, Any], epistemology: np.ndarray[Any, Any], origin_index: int
-) -> float:
-    """Compute the angular divergence introduced by a token."""
-    final_state = apply_token_physics(origin_index, token_id, epistemology)
-    return float(theta_map[final_state]) if final_state < len(theta_map) else 0.0
-
-
-def precompute_common_tokens(
-    epistemology: np.ndarray[Any, Any], token_frequencies: Dict[int, float], threshold: float = 0.01
-) -> Dict[Tuple[int, int], int]:
-    """Pre-compute transitions for frequently used tokens."""
-    token_stt_cache = {}
-    total_freq = sum(token_frequencies.values())
-
-    for token_id, freq in token_frequencies.items():
-        if freq / total_freq > threshold:
-            # Pre-compute for all states
-            for state in range(epistemology.shape[0]):
-                key = (state, token_id)
-                if key not in token_stt_cache:
-                    token_stt_cache[key] = apply_token_physics(state, token_id, epistemology)
-
-    return token_stt_cache
-
-
-# ---------- Stream Processing Functions ----------
-
-
-def text_to_intron_stream(text: str, tokenizer_name: str = "bert-base-uncased") -> Iterator[int]:
-    """Convert text to intron stream using tokenizer + LEB128 + ψ."""
-    from baby.information import _load_tokenizer, token_to_introns
-
-    tokenizer = _load_tokenizer(tokenizer_name)
-    for token_id in tokenizer.encode(text).ids:
-        for intron in token_to_introns(token_id):
-            yield intron
-
-
-def intron_stream_to_text(intron_stream: Iterator[int], tokenizer_name: str = "bert-base-uncased") -> str:
-    """Convert intron stream back to text."""
-    from baby.information import _load_tokenizer, ψ_inv, bytes_to_token_id
-
-    tokenizer = _load_tokenizer(tokenizer_name)
-    current_token_bytes = []
-    tokens = []
-
-    for intron in intron_stream:
-        byte = ψ_inv(intron)
-        current_token_bytes.append(byte)
-
-        if (byte & 0x80) == 0:  # Token complete
-            token_id = bytes_to_token_id(bytes(current_token_bytes))
-            tokens.append(token_id)
-            current_token_bytes.clear()
-
-    return str(tokenizer.decode(tokens))
-
-
-def process_text_stream_leb128(
-    text_stream: Iterator[str], engine: Any, tokenizer_name: str = "bert-base-uncased"
-) -> Iterator[int]:
-    """Process text stream using LEB128 physics."""
-    from baby.information import _load_tokenizer, token_to_introns
-
-    tokenizer = _load_tokenizer(tokenizer_name)
-    # Start from the archetypal state's actual index
-    origin_idx = engine.s2.get_index_from_state(engine.s2.tensor_to_int(governance.GENE_Mac_S))
-    current_state = origin_idx
-
-    for text in text_stream:
-        for token_id in tokenizer.encode(text).ids:
-            introns = token_to_introns(token_id)
-            last_intron = introns[-1]  # use real learning signal
-
-            # Cache pre-state before applying introns
-            pre_state = current_state
-
-            # Apply all introns to get final state
-            for intron in introns:
-                current_state = (
-                    engine.epistemology[current_state, intron] if hasattr(engine, "epistemology") else current_state
-                )
-
-            # Learn on pre-state
-            engine.operator.learn_token_preonly(token_id, pre_state, last_intron)
-
-            yield token_id
-
-
-def generate_text_stream_leb128(
-    engine: Any, initial_prompt: str, max_tokens: int = 50, tokenizer_name: str = "bert-base-uncased"
-) -> Iterator[str]:
-    """Generate text stream using LEB128 physics."""
-    from baby.information import _load_tokenizer, encode_text
-
-    tokenizer = _load_tokenizer(tokenizer_name)
-    # Prime engine with the prompt through the exact same boundary law
-    for b in encode_text(initial_prompt, name=tokenizer_name):
-        engine.process_egress(b)
-
-    for _ in range(max_tokens):
-        state_idx = engine.current_state_index
-        theta = engine._θ_buf[-1] if getattr(engine, "_θ_buf", None) else 0.0
-        tok_id, _ = engine._emit_token_with_feedback(state_idx, theta)
-        yield tokenizer.decode([tok_id])
 
 
 # ---------- Intelligence Engine ----------

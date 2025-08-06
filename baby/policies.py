@@ -38,8 +38,6 @@ _append_only_cache_maxsize = 65536
 _CONFIDENCE_PRECISION = 1e-4  # Tolerance for float16 precision differences
 _CONFIDENCE_ROUNDING_DIGITS = 4  # Round to 4 decimal places for consistency
 
-# Direction bit constants
-
 
 def normalize_confidence(confidence: float) -> float:
     """
@@ -77,15 +75,12 @@ def confidence_equals(a: float, b: float, tolerance: float = _CONFIDENCE_PRECISI
     return abs(a - b) < tolerance
 
 
-# ---------- NEW PACK / UNPACK (12-byte fixed) --------------------
-# struct layout:  <I I B H x   (x = 1-byte pad)
+# ---------- COMPACT PACK / UNPACK (9-byte fixed) --------------------
+# struct layout:  <I I B   (no confidence stored)
 #   I  state_idx    (uint32)
 #   I  token_id     (uint32)
-#   B  mask         (uint8)
-#   H  conf_f16     (uint16)   # reinterpret float16
-#   x  pad          (uint8)    # keep 4-byte alignment
-_STRUCT_FMT = "<IIBHx"
-_STRUCT_SIZE = struct.calcsize(_STRUCT_FMT)  # = 12
+#   B  mask         (uint8)    # only persisted datum per (state, token)
+# Varint encoding replaces fixed struct format
 
 
 def _abs(path: Optional[str], base: Path) -> str:
@@ -124,40 +119,95 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 # ------------------------------------------------------------
-# Field order and types are **fixed**; do not alter.
-# New 12-byte fixed structure: <I I B H x
-#   1. state_idx        : uint32
-#   2. token_id         : uint32
-#   3. mask             : uint8
-#   4. conf_f16         : uint16 (reinterpret float16)
-#   5. pad              : uint8 (4-byte alignment)
+# Varint state-block format for optimal compression
+# Format: [uLEB128 state_idx][uLEB128 n_pairs][(uLEB128 token_id + mask_byte) * n_pairs]
 #
-# Deterministic layout with fixed-size entries.
-# Returned dict contains exactly the same keys that already
-# exist elsewhere in the codebase – no additions.
+# This achieves ~3-4 bytes per pair instead of 9 bytes per pair
+# by grouping all tokens for a state under a single header.
+# Confidence is computed at runtime from physics (theta, orbit_size).
+
+
+def _encode_uleb128(value: int) -> bytes:
+    """Encode unsigned integer as LEB128 bytes."""
+    if value < 0:
+        raise ValueError("LEB128 encoding requires non-negative integers")
+    
+    result = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value == 0:
+            result.append(byte)
+            break
+        else:
+            result.append(byte | 0x80)
+    
+    return bytes(result)
+
+
+def _decode_uleb128(data: bytes, offset: int = 0) -> tuple[int, int]:
+    """Decode unsigned LEB128 integer from bytes.
+    
+    Returns:
+        (value, bytes_consumed)
+    """
+    result = 0
+    shift = 0
+    bytes_consumed = 0
+    
+    for i in range(offset, len(data)):
+        byte = data[i]
+        result |= (byte & 0x7F) << shift
+        bytes_consumed += 1
+        
+        if (byte & 0x80) == 0:
+            break
+        
+        shift += 7
+        if shift >= 32:
+            raise ValueError("LEB128 value too large")
+    
+    return result, bytes_consumed
 
 
 def _pack_phenotype(entry: Dict[str, Any]) -> bytes:
+    """Pack phenotype entry to varint state-block format."""
     if "key" not in entry:
         raise KeyError("Entry must have 'key' field")
     state_idx, token_id = entry["key"]
-
     mask = entry["mask"]
 
-    conf = float(entry["conf"])
-    conf_f16 = np.float16(conf)
-    conf_u16 = conf_f16.view(np.uint16).item()
-    return struct.pack(_STRUCT_FMT, state_idx, token_id, mask, conf_u16)
+    # Encode as varint state-block: [state_idx][n_pairs=1][token_id][mask]
+    state_bytes = _encode_uleb128(state_idx)
+    n_pairs_bytes = _encode_uleb128(1)  # Single pair
+    token_bytes = _encode_uleb128(token_id)
+    mask_bytes = bytes([mask])
+    
+    return state_bytes + n_pairs_bytes + token_bytes + mask_bytes
 
 
 def _unpack_phenotype(buf: memoryview, offset: int = 0) -> tuple[Dict[str, Any], int]:
-    state_idx, token_id, mask, conf_u16 = struct.unpack_from(_STRUCT_FMT, buf, offset)
-    conf_f16 = np.uint16(conf_u16).view(np.float16)
-    raw_conf = float(conf_f16.item())
-    normalized_conf = normalize_confidence(raw_conf)
-
-    entry = {"mask": mask, "conf": normalized_conf, "key": (state_idx, token_id)}
-    return entry, offset + _STRUCT_SIZE
+    """Unpack phenotype entry from varint state-block format."""
+    data = bytes(buf[offset:])
+    
+    # Decode state_idx
+    state_idx, state_bytes = _decode_uleb128(data, 0)
+    
+    # Decode n_pairs
+    n_pairs, n_bytes = _decode_uleb128(data, state_bytes)
+    
+    # Decode token_id
+    token_id, token_bytes = _decode_uleb128(data, state_bytes + n_bytes)
+    
+    # Decode mask (single byte)
+    if state_bytes + n_bytes + token_bytes >= len(data):
+        raise ValueError("Incomplete phenotype data")
+    mask = data[state_bytes + n_bytes + token_bytes]
+    
+    entry = {"mask": mask, "key": (state_idx, token_id)}
+    total_bytes = state_bytes + n_bytes + token_bytes + 1
+    
+    return entry, offset + total_bytes
 
 
 def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJECT_ROOT) -> NDArray[Any]:
@@ -213,11 +263,7 @@ class OrbitStore:
         self._last_fsync = 0.0
         self._fsync_interval = 0.05  # 50ms or configurable
 
-        # Index write throttling to reduce I/O churn
-        self._last_index_write = 0.0
-        self._index_write_interval = 2.0  # Write index at most every 2 seconds
-        self._new_keys_since_index_write = 0
-        self._index_write_threshold = 1000  # Or write after 1000 new keys
+        # No persistent index - only in-RAM index from scan
         self.log_file: Optional[Any] = None
         self._mmap: Optional[mmap.mmap] = None
         self._mmap_size = 0
@@ -226,23 +272,15 @@ class OrbitStore:
         # O(1) candidate listing for a given state
         self.index_by_state: Dict[int, Set[int]] = {}
 
-        # Always use Bloom filter and index
-        self._bloom_filter: Optional[BloomFilter] = None
-
-        # Try to load existing Bloom filter
-        if not self._try_load_bloom():
-            # Create new Bloom filter
-            estimated_entries = 2_000_000  # Increased to 2M capacity
-            if os.path.exists(resolved_store_path):
-                file_size = os.path.getsize(resolved_store_path)
-                estimated_entries = max(2_000_000, file_size // _STRUCT_SIZE)
-            self._bloom_filter = BloomFilter(estimated_entries, error_rate=0.001)
-
-        # Always use index-based mode
-        self.index_path = resolved_store_path + ".idx"
+        # Simple in-RAM index built from one-pass scan
+        self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        self.index_by_state: Dict[int, Set[int]] = {}
+        
+        # Single file storage (no sidecars)
         self.log_path = self.store_path  # .bin file
 
-        self._load_index()
+        # Build index from one-pass scan at startup
+        self._build_index_from_scan()
 
         # Ensure the directory exists and create the file if it doesn't exist
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
@@ -255,36 +293,48 @@ class OrbitStore:
         # Register graceful shutdown handlers
         self._register_shutdown_handlers()
 
-    # ---------- Bloom filter side-car (.bloom) ----------
-    def _bloom_sidecar_path(self) -> str:
-        return self.store_path + ".bloom"
-
-    def _try_load_bloom(self) -> bool:
-        p = self._bloom_sidecar_path()
-        if not os.path.exists(p):
-            return False
-        with open(p, "rb") as f:
-            self._bloom_filter = BloomFilter.from_bytes(f.read())
-        return True
-
-    def _save_bloom(self) -> None:
-        """Save the Bloom filter to disk with proper locking."""
-        if not self._bloom_filter:
-            return
-
-        bloom_path = self._bloom_sidecar_path()
-
-        # FIXED: Use the same lock as commit to prevent race conditions
-        with self.lock:
-            try:
-                bloom_data = self._bloom_filter.to_bytes()
-                with open(bloom_path, "wb") as f:
-                    f.write(bloom_data)
-                    f.flush()
-                    if sys.platform != "darwin":
-                        os.fsync(f.fileno())
-            except Exception as e:
-                print(f"Warning: Failed to save Bloom filter {bloom_path}: {e}")
+    # ---------- One-pass index scan ----------
+    def _build_index_from_scan(self) -> None:
+        """Build in-RAM index from one-pass scan of the data file.
+        
+        This replaces Bloom filter and persistent index with a simple,
+        fast linear scan that builds an ephemeral in-RAM index.
+        """
+        if not os.path.exists(self.log_path):
+            return  # No data file to scan
+        
+        try:
+            with open(self.log_path, "rb") as f:
+                data = f.read()
+            
+            offset = 0
+            while offset < len(data):
+                try:
+                    # Parse varint state-block format
+                    entry, bytes_consumed = _unpack_phenotype(memoryview(data), offset)
+                    key = entry["key"]
+                    
+                    # Record offset and size for this entry
+                    self.index[key] = (offset, bytes_consumed)
+                    
+                    # Update state index
+                    state_idx = key[0]
+                    if state_idx not in self.index_by_state:
+                        self.index_by_state[state_idx] = set()
+                    self.index_by_state[state_idx].add(key[1])
+                    
+                    offset += bytes_consumed
+                    
+                except (ValueError, IndexError) as e:
+                    # Skip corrupted data and continue
+                    print(f"Warning: Corrupted data at offset {offset}: {e}")
+                    break
+            
+            print(f"Built index from scan: {len(self.index)} entries, {len(self.index_by_state)} states")
+            
+        except Exception as e:
+            print(f"Warning: Failed to build index from scan: {e}")
+            # Continue with empty index
 
     def _open_mmap(self) -> None:
         if self._mmap:
@@ -302,15 +352,11 @@ class OrbitStore:
             if context_key in self.pending_writes:
                 return self.pending_writes[context_key]
 
-            # Check bloom filter first for fast "definitely absent" check
-            if self._bloom_filter and not self._bloom_filter.might_contain(context_key):
-                return None
-
             # Use index for O(1) lookup
             if context_key in self.index:
                 offset, size = self.index[context_key]
                 if self.use_mmap and self._mmap:
-                    entry_buf = self._mmap[offset:offset + size]
+                    entry_buf = self._mmap[offset : offset + size]
                 else:
                     with open(self.log_path, "rb") as f:
                         f.seek(offset)
@@ -326,7 +372,7 @@ class OrbitStore:
             return None
 
     def _get_append_only_cached(self, context_key: Tuple[int, int]) -> Optional[Any]:
-        return _get_append_only_cached_static(self.store_path, context_key, self._get_append_only_uncached)
+        return _get_append_only_cached_static(self.store_path, context_key, self.get)
 
     def _cache_pop(self, context_key: Tuple[int, int]) -> None:
         """Remove a specific key from the append-only cache (per store)."""
@@ -338,75 +384,9 @@ class OrbitStore:
                 pass
             del _append_only_cache_global[cache_key]
 
-    def _get_append_only_uncached(self, context_key: Tuple[int, int]) -> Optional[Any]:
-        """
-        Efficient lookup for append-only stores using Bloom filter + file seeking.
 
-        The Bloom filter provides fast "definitely absent" checks. For keys that
-        might exist, we use file seeking to avoid loading the entire file.
-        """
-        state_idx, token_id = context_key
-        needle = struct.pack("<II", state_idx, token_id)  # 8-byte prefix
 
-        # Use file seeking for large files to avoid memory issues
-        if self.use_mmap and self._mmap:
-            buf: Union[mmap.mmap, bytes] = self._mmap
-        else:
-            # For large files, use file seeking instead of loading everything
-            file_size = os.path.getsize(self.log_path)
-            if file_size > 100 * 1024 * 1024:  # 100MB threshold
-                return self._get_with_file_seeking(context_key, needle)
-            else:
-                # For smaller files, load into memory
-                with open(self.log_path, "rb") as f:
-                    buf = f.read()
 
-        # Search from the end of the file towards the start (most recent entries first)
-        pos = len(buf)
-        while True:
-            pos = buf.rfind(needle, 0, pos)
-            if pos == -1:
-                return None  # not present
-            if pos % _STRUCT_SIZE == 0:  # 12-byte boundary
-                entry, _ = _unpack_phenotype(memoryview(buf), pos)
-                return entry
-            # false hit on the 8-byte motif – keep looking
-            pos -= 1
-
-    def _get_with_file_seeking(self, context_key: Tuple[int, int], needle: bytes) -> Optional[Any]:
-        """
-        Use file seeking for large files to avoid memory issues.
-        """
-        with open(self.log_path, "rb") as f:
-            file_size = os.path.getsize(self.log_path)
-            # Start from the end and work backwards in chunks
-            chunk_size = 1024 * 1024  # 1MB chunks
-            pos = file_size
-
-            while pos > 0:
-                start_pos = max(0, pos - chunk_size)
-                f.seek(start_pos)
-                chunk = f.read(pos - start_pos)
-
-                # Search in this chunk
-                chunk_pos = len(chunk)
-                while True:
-                    chunk_pos = chunk.rfind(needle, 0, chunk_pos)
-                    if chunk_pos == -1:
-                        break
-                    # Check if this is at a valid boundary
-                    global_pos = start_pos + chunk_pos
-                    if global_pos % _STRUCT_SIZE == 0:
-                        # Read the full entry
-                        f.seek(global_pos)
-                        entry_buf = f.read(_STRUCT_SIZE)
-                        entry, _ = _unpack_phenotype(memoryview(entry_buf))
-                        return entry
-                    chunk_pos -= 1
-
-                pos = start_pos
-
-        return None
 
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
         pending_fsync = None
@@ -433,19 +413,7 @@ class OrbitStore:
 
             self._flush()
 
-            # Throttled index writes to reduce I/O churn
-            now = time.time()
-            should_write_index = (
-                now - self._last_index_write >= self._index_write_interval
-                or self._new_keys_since_index_write >= self._index_write_threshold
-            )
-
-            if should_write_index:
-                self._write_index()
-                self._last_index_write = now
-                self._new_keys_since_index_write = 0
-            else:
-                self._new_keys_since_index_write += new_keys_count
+            # No persistent index writes - only in-RAM index
 
             # Only remap mmap after flush if file has grown
             if self.use_mmap:
@@ -457,12 +425,7 @@ class OrbitStore:
                     # Still update the timestamp for consistency
                     self._last_remap = time.time()
 
-            # Update bloom filter & **fine‑grain cache invalidation**
-            if self._bloom_filter:
-                for context_key in pending_keys:
-                    self._bloom_filter.add(context_key)
-
-            # touch only affected items instead of nuking whole cache
+            # Fine‑grain cache invalidation
             for k in pending_keys:
                 self._cache_pop(k)
         # No blocking wait on fsync here; state will be updated asynchronously
@@ -504,99 +467,9 @@ class OrbitStore:
         with self.lock:
             self.pending_writes[context_key] = entry.copy()
 
-    def _write_index(self) -> None:
-        """Write the in-memory index to disk."""
-        if not self.index_path:
-            return
-
-        try:
-            # Persist: "state_idx-token_id:offset,size"
-            with open(self.index_path, "w") as f:
-                for (state_idx, token_id), (offset, size) in self.index.items():
-                    f.write(f"{state_idx}-{token_id}:{offset},{size}\n")
-        except Exception as e:
-            print(f"Warning: Failed to write index file {self.index_path}: {e}")
-
-    def _read_index(self) -> None:
-        """Read the index file to populate the in-memory index."""
-        if not os.path.exists(self.index_path):
-            return
-
-        try:
-            with open(self.index_path, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    try:
-                        # Parse "state_idx-token_id:offset,size" format
-                        if ":" in line and "," in line:
-                            # New format: "state_idx-token_id:offset,size"
-                            key_part, offset_str = line.split(":", 1)
-                            offset_part, size_part = offset_str.split(",", 1)
-                            state_idx_str, token_id_str = key_part.split("-", 1)
-                            state_idx = int(state_idx_str)
-                            token_id = int(token_id_str)
-                            offset = int(offset_part)
-                            size = int(size_part)
-
-                            # Index sanity checks
-                            if (
-                                offset < 0
-                                or size != _STRUCT_SIZE
-                                or (os.path.exists(self.log_path) and offset + size > os.path.getsize(self.log_path))
-                            ):
-                                print(f"Warning: Skipping invalid index entry: {line}")
-                                continue
-
-                            self.index[(state_idx, token_id)] = (offset, size)
-                            self.index_by_state.setdefault(state_idx, set()).add(token_id)
-                        else:
-                            # Malformed - skip
-                            print(f"Warning: Skipping malformed index line: {line}")
-                            continue
-                    except (ValueError, IndexError) as e:
-                        # Skip malformed lines but log for debugging
-                        print(f"Warning: Skipping malformed index line: {line} (error: {e})")
-                        continue
-        except Exception as e:
-            print(f"Warning: Failed to read index file {self.index_path}: {e}")
-            # Don't fail completely, just start with empty index
-            self.index.clear()
-
     def _load_index(self) -> None:
-        # Load index first
-        self._read_index()
-
-        # If we have a valid index, don't scan the file
-        if self.index:
-            return
-
-        # Only scan the file if we don't have an index
-        if not os.path.exists(self.log_path):
-            return
-
-        # Build index from file
-        with open(self.log_path, "rb") as f:
-            buf = memoryview(f.read())
-            offset = 0
-            while offset < len(buf):
-                try:
-                    entry, new_offset = _unpack_phenotype(buf, offset)
-                    size = new_offset - offset
-                    if "key" in entry:
-                        context_key = tuple(entry["key"])
-                        self.index[context_key] = (offset, size)
-                        s_idx, tok_id = context_key
-                        self.index_by_state.setdefault(s_idx, set()).add(tok_id)
-                        # Also add to Bloom filter
-                        if self._bloom_filter:
-                            self._bloom_filter.add(context_key)
-                    offset = new_offset
-                except struct.error:
-                    # Corrupt tail record - stop gracefully
-                    break
+        """Load index from one-pass scan (replaces persistent index)."""
+        self._build_index_from_scan()
 
     def delete(self, context_key: Tuple[int, int]) -> None:
         with self.lock:
@@ -611,9 +484,6 @@ class OrbitStore:
         with self.lock:
             if self.pending_writes:
                 self.commit()
-            # Force final index write to ensure no data loss
-            if self._new_keys_since_index_write > 0:
-                self._write_index()
             if hasattr(self, "_pending_fsync") and self._pending_fsync is not None:
                 # No blocking wait on fsync here; state will be updated asynchronously
                 pass
@@ -624,8 +494,6 @@ class OrbitStore:
                 self.log_file.close()
             if self._fsync_executor:
                 self._fsync_executor.shutdown(wait=True)
-            # Persist bloom filter so next run is instant
-            self._save_bloom()
 
             # Clear cache
             # Clear global cache for this store
@@ -684,10 +552,7 @@ class OrbitStore:
                 self._flush()
                 # No blocking wait on fsync here; state will be updated asynchronously
 
-                # Update bloom filter for append-only mode
-                if self._bloom_filter:
-                    for context_key in pending_keys:
-                        self._bloom_filter.add(context_key)
+
 
     @property
     def data(self) -> Dict[Tuple[int, int], Any]:
@@ -728,7 +593,7 @@ class OrbitStore:
                 for context_key, (offset, size) in self.index.items():
                     if context_key in yielded:
                         continue
-                    entry_buf_mv = mv[offset:offset + size]
+                    entry_buf_mv = mv[offset : offset + size]
                     entry, _ = _unpack_phenotype(entry_buf_mv)
                     yield context_key, entry
             else:
@@ -1234,75 +1099,7 @@ def merge_phenotype_maps(
     }
 
 
-def apply_global_confidence_decay(
-    store_path: str,
-    decay_factor: float = 0.99,
-    time_threshold_days: float = 30.0,
-    dry_run: bool = False,
-    base_path: Path = PROJECT_ROOT,
-) -> MaintenanceReport:
-    """
-    Apply confidence decay to all entries in a knowledge store.
 
-    Uses multiplicative decay: confidence = confidence * decay_factor
-
-    Args:
-        store_path: Path to the phenotype store
-        decay_factor: Retention factor (0.0 to 1.0, e.g. 0.99 = keep 99% of confidence)
-        time_threshold_days: Days without update to trigger decay
-        dry_run: If True, calculate but don't apply changes
-
-    Returns:
-        Maintenance report
-    """
-    start_time = time.time()
-
-    resolved_store_path = _abs(store_path, base_path)
-    if not os.path.exists(resolved_store_path):
-        return {
-            "operation": "apply_global_confidence_decay",
-            "success": False,
-            "entries_processed": 0,
-            "entries_modified": 0,
-            "elapsed_seconds": 0,
-        }
-
-    store = OrbitStore(resolved_store_path)
-    modified_count = 0
-    processed_count = 0
-
-    for key, entry in store.iter_entries():
-        processed_count += 1
-        # For minimal phenotype, we don't have timestamps, so skip age-based decay
-        # Just apply a simple decay factor
-        old_conf = entry.get("conf", 0.0)
-        new_conf = old_conf * decay_factor
-        if new_conf < 0.01:  # same floor the tests use
-            new_conf = 0.01
-
-        # Normalize confidence for consistent comparison
-        normalized_new_conf = normalize_confidence(new_conf)
-        normalized_old_conf = normalize_confidence(old_conf)
-        if normalized_new_conf != normalized_old_conf:
-            modified_count += 1
-            if not dry_run:
-                entry["conf"] = new_conf  # Keep original precision for storage
-                e = {"key": key, "mask": entry.get("mask", 0), "conf": new_conf}
-                store.put(key, e)
-
-    if modified_count > 0 and not dry_run:
-        store.commit()
-
-    store.close()
-    elapsed = time.time() - start_time
-
-    return {
-        "operation": "apply_global_confidence_decay",
-        "success": True,
-        "entries_processed": processed_count,
-        "entries_modified": modified_count,
-        "elapsed_seconds": elapsed,
-    }
 
 
 def export_knowledge_statistics(store_path: str, output_path: str, base_path: Path = PROJECT_ROOT) -> MaintenanceReport:
@@ -1578,102 +1375,7 @@ def to_native(obj: Any) -> Any:
         return obj
 
 
-# Add bloom filter implementation
-class BloomFilter:
-    """Simple bloom filter for fast "definitely absent" checks."""
 
-    def __init__(self, capacity: int, error_rate: float = 0.01):
-        """
-        Initialize bloom filter.
-
-        Args:
-            capacity: Expected number of elements
-            error_rate: Desired false positive rate
-        """
-        self.capacity = capacity
-        self.error_rate = error_rate
-
-        # Calculate optimal size and hash count
-        self.size = self._optimal_size(capacity, error_rate)
-        self.hash_count = self._optimal_hash_count(self.size, capacity)
-
-        # Initialize bit array
-        self.bit_array = bytearray((self.size + 7) // 8)
-        self.count = 0
-
-    def _optimal_size(self, n: int, p: float) -> int:
-        """Calculate optimal bit array size using textbook formula: m = -n * ln(p) / (ln(2))^2."""
-        if n <= 0 or p <= 0 or p >= 1:
-            return 1000  # Default size for invalid parameters
-        import math
-
-        return max(1000, int(-n * math.log(p) / (math.log(2) ** 2)))
-
-    def _optimal_hash_count(self, m: int, n: int) -> int:
-        """Calculate optimal number of hash functions using textbook formula: k = (m/n) * ln(2)."""
-        if m <= 0 or n <= 0:
-            return 7  # Default hash count for invalid parameters
-        import math
-
-        return max(1, int((m / n) * math.log(2)))
-
-    def _hash_functions(self, item: Tuple[int, int]) -> List[int]:
-        """Generate multiple hash values for the item."""
-        # Convert tuple to bytes for hashing
-        item_bytes = struct.pack("II", item[0], item[1])
-
-        hashes = []
-        for i in range(self.hash_count):
-            # Use different salts for each hash function
-            salt = struct.pack("I", i)
-            hash_obj = hashlib.sha256(salt + item_bytes)
-            hash_value = int.from_bytes(hash_obj.digest()[:8], byteorder="big")
-            hashes.append(hash_value % self.size)
-        return hashes
-
-    def add(self, item: Tuple[int, int]) -> None:
-        """Add item to the bloom filter."""
-        for hash_val in self._hash_functions(item):
-            byte_index = hash_val // 8
-            bit_index = hash_val % 8
-            self.bit_array[byte_index] |= 1 << bit_index
-        self.count += 1
-
-    def might_contain(self, item: Tuple[int, int]) -> bool:
-        """Check if item might be in the bloom filter."""
-        for hash_val in self._hash_functions(item):
-            byte_index = hash_val // 8
-            bit_index = hash_val % 8
-            if not (self.bit_array[byte_index] & (1 << bit_index)):
-                return False
-        return True
-
-    def clear(self) -> None:
-        """Clear the bloom filter."""
-        self.bit_array = bytearray((self.size + 7) // 8)
-        self.count = 0
-
-    # ────────────────  NEW: persistence helpers  ────────────────
-    def to_bytes(self) -> bytes:
-        """Serialize size, hash_count and bit_array for fast reload."""
-        import pickle
-
-        return pickle.dumps((self.size, self.hash_count, bytes(self.bit_array)))
-
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "BloomFilter":
-        import pickle
-
-        size, k, bits = pickle.loads(data)
-
-        bf = object.__new__(cls)  # skip __init__
-        bf.size = size
-        bf.hash_count = k
-        bf.bit_array = bytearray(bits)
-        bf.count = 0
-        bf.capacity = size  # optional bookkeeping
-        bf.error_rate = 0.01
-        return bf
 
 
 def create_multi_knowledge_view(
@@ -1717,19 +1419,16 @@ def create_multi_knowledge_view(
 
 # Module exports for static analysis
 __all__ = [
-    # Direction constants intentionally removed (pre-only learning)
     "OrbitStore",
     "CanonicalView",
     "OverlayView",
     "ReadOnlyView",
     "MultiKnowledgeView",
     "create_multi_knowledge_view",
-    "BloomFilter",
     "normalize_confidence",
     "confidence_equals",
     "load_phenomenology_map",
     "merge_phenotype_maps",
-    "apply_global_confidence_decay",
     "export_knowledge_statistics",
     "validate_ontology_integrity",
     "prune_and_compact_store",

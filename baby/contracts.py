@@ -7,19 +7,15 @@ from typing import TypedDict, Protocol, Dict, Any, Optional
 
 class PhenotypeEntry(TypedDict, total=False):
     """
-    Minimal phenotype record.
-      mask  : 8-bit Monodromic-Fold residue  (0-255)
-      conf  : epistemic confidence           (0.0-1.0)  – monotone ↑ / decay ↓
+    Minimal phenotype record for learned knowledge.
+      mask  : 8-bit Monodromic-Fold residue  (0-255) - the only persisted datum
       key   : composite key (state_idx, token_id)
-      direction: trajectory direction (0=pre, 1=post)
       _new  : flag indicating if this is a new entry
-    Everything else is derivable on-the-fly.
+    All confidence and scoring is computed at runtime from physics (theta, orbit_size).
     """
 
     mask: int  # uint8   (exon_mask)
-    conf: float  # float32
     key: tuple[int, int]  # composite key
-    direction: int  # trajectory direction (0=pre, 1=post)
     _new: bool  # flag indicating if this is a new entry
 
 
@@ -32,13 +28,6 @@ class PreferencesConfig(TypedDict, total=False):
     max_file_size_mb: int
 
     # Maintenance preferences
-    enable_auto_decay: bool
-    decay_interval_hours: float
-    decay_factor: float
-    confidence_threshold: float
-
-    # Pruning preferences
-    pruning: Dict[str, Any]  # Contains confidence_threshold, decay_factor, decay_interval_hours, enable_auto_decay
 
     # Agent pool preferences
     max_agents_in_memory: int
@@ -72,7 +61,6 @@ class ValidationReport(TypedDict):
     """Report structure for system validation."""
 
     total_entries: int
-    average_confidence: float
     store_type: str
     modified_entries: int
 

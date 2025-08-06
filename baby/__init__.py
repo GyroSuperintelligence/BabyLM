@@ -17,7 +17,6 @@ from baby.policies import (
     CanonicalView,
     OverlayView,
     ReadOnlyView,
-    apply_global_confidence_decay,
     export_knowledge_statistics,
     merge_phenotype_maps,
     validate_ontology_integrity,
@@ -35,7 +34,7 @@ __all__ = [
     "OverlayView",
     "ReadOnlyView",
     "merge_phenotype_maps",
-    "apply_global_confidence_decay",
+
     "export_knowledge_statistics",
     "validate_ontology_integrity",
     "discover_and_save_ontology",
