@@ -4,7 +4,55 @@
 
 ## [v0.9.6.8-alpha] – 2025-08-07 - Unstable Alpha Release
 
+### Critical Architecture Fixes and Spectral Neighborhood Implementation
+
+**1. Repetitive Output Diagnosis and State Advancement Fix**
+
+* Identified root cause of repetitive token generation ("the the the..."): guard in `IntelligenceEngine._emit_token_with_feedback()` preventing physics state advancement during generation when `learning_enabled=False`.
+* Applied 2-line fix removing conditional guard around `process_egress_bulk(token_bytes)` to ensure physics state always advances during token emission.
+* Confirmed physics state evolution is restored during generation while preserving learning suppression.
+
+**2. Physics-Pure Core Loop Cleanup**
+
+Based on theoretical framework analysis, removed superficial engineering patches accumulated over recent iterations:
+
+* **Removed from `baby/intelligence.py`**: theta buffers, cycle step history, temperature heuristics, timing printouts, candidate caches, tokenizer filtering, hand-tuned weights, SEP-forcing logic, confidence validation calls.
+* **Removed from `baby/inference.py`**: endogenous modulus, token STT placeholders, v_max cache, confidence decay mechanisms, orbit entropy management, low-confidence pruning.
+* **Removed from `baby/policies.py`**: confidence normalization, append-only cache layers, async fsync executors (replaced with synchronous `os.fsync()`), phenomenology map caching, TTL/LFU maintenance utilities.
+* **Updated imports**: Cleaned `baby/__init__.py` to reflect removed functions and maintain module coherence.
+
+**3. Stimulus Processing Architecture Fix**
+
+* Fixed critical gap in stimulus ingestion: `respond()` method now calls `self.engine.process_egress_bulk(data)` to ensure user input drives physics state before generation.
+* Modified `test_archetypal_continuation.py` to rely on proper stimulus processing rather than manual state manipulation.
+* Removed archetypal state reset after ingestion to maintain learned context continuity.
+
+**4. Memory-Physics Bridge Diagnosis**
+
+* Identified fundamental architectural gap: phenomenology map too aggressively collapses rich 6-byte state space into few representative states, breaking bridge between short-term physics and long-term memory.
+* Confirmed through debugging that physics states advance correctly (549871 → 68423 → 305816 → 476 → 736148) but most patterns learned during ingestion are stored under representative state 0.
+* During generation, model visits different state orbits (649274, 626853, 178385) where no learned patterns exist, forcing fallback to deterministic physics.
+
+**5. Spectral Neighborhood Retrieval Implementation**
+
+* Implemented `_neighbourhood()` method using θ-distance filtering with stabilizer-order constraints for spectral neighborhood retrieval.
+* Enhanced `generate_token_exon()` to use neighborhood retrieval instead of single representative state lookup.
+* Combined physics-derived resonant candidates with learned patterns from local state manifold using interference terms.
+* Added proper formal docstrings following PEP8 standards throughout implementation.
+
+**6. Bit Extraction Logic Corrections**
+
+* Fixed `exon_product_from_state()` bit extraction to use correct bit masking: `(state_index >> 6) & 0x03` instead of bit counting.
+* Removed artificial scaling/clamping that was "annihilating entropy" - restored raw exon product calculation.
+* Moved `exon_product_from_state` and `orbit` functions from `baby/governance.py` to `baby/inference.py` for proper module organization.
+
+**Notes**: Implementation requires syntax/indentation fixes before testing. Spectral neighborhood approach theoretically sound but pending validation.
+
 ---
+
+## [v0.9.6.8-alpha] – 2025-08-06 - Unstable Alpha Release
+
+## Round 1
 
 ### Epistemology State Index Fixes and Stability Improvements
 
@@ -113,8 +161,7 @@
 
 ---
 
-## [v0.9.6.8-alpha] – 2025-08-06 - Unstable Alpha Release
-
+## Round 2
 > *Note: All metrics are estimations; this is an unstable alpha. Features and performance claims remain to be validated in rigorous testing.*
 
 ---

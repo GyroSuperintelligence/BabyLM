@@ -12,6 +12,11 @@ from functools import lru_cache
 
 from baby import governance
 
+# ------------------------------------------------------------------
+#  Common Source integer exported for tooling
+# ------------------------------------------------------------------
+CS_INT = governance.CS_INT  # re-use constant from physics
+
 warnings.filterwarnings("ignore", message=".*found in sys.modules after import of package.*")
 """
 S2: Information - Measurement & Storage
@@ -404,10 +409,10 @@ class InformationEngine:
         self.ontology_map = None
         self.inverse_ontology_map = None
         self.use_array_indexing = True
-        
+
         # Load epistemology
         self.ep = np.load(ep_path, mmap_mode="r")
-        
+
         # Load phenomenology and orbit cardinality
         self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
         if phenomap_path:
@@ -423,7 +428,7 @@ class InformationEngine:
                 print("Continuing without phenomenology mapping...")
                 self.orbit_map = None
                 self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
-        
+
         # Load theta table
         if theta_path:
             try:
@@ -432,18 +437,18 @@ class InformationEngine:
                 self._theta_table = None
         else:
             self._theta_table = None
-            
+
         # Load stabiliser_order array
+        stabiliser_order_path = str(Path(theta_path).parent / "stabiliser_order.npy")
         try:
-            stabiliser_order_path = str(Path(theta_path).parent / "stabiliser_order.npy")
             self.stabiliser_order = np.load(stabiliser_order_path, mmap_mode="r")
         except Exception as e:
             print(f"Warning: Could not load stabiliser_order from {stabiliser_order_path}: {e}")
             print("Continuing without stabiliser order data...")
             self.stabiliser_order = None
-            
+
         self._v_max = 1 if self.orbit_cardinality is None else int(np.max(self.orbit_cardinality))
-        
+
         # Early fail if theta.npy is missing or corrupt
         if self._theta_table is None:
             raise RuntimeError(

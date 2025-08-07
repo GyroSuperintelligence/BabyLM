@@ -8,12 +8,10 @@ coordinating the entire GyroSI learning process.
 import os
 import time
 import uuid
-from collections import OrderedDict, deque
-from dataclasses import asdict, is_dataclass
+from collections import OrderedDict
 from pathlib import Path
 from threading import RLock
-import math
-from typing import TYPE_CHECKING, Any, Deque, Dict, List, Optional, TypedDict, cast, Iterator, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, cast, Iterator, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -84,11 +82,6 @@ class IntelligenceEngine:
     operator: Any
     phenotype_store: Any
     current_state_index: int
-    _θ_buf: Deque[float]
-    _θ_low: float
-    _θ_high: float
-    _cand_cache: Dict[int, List[Tuple[int, float, int]]]
-    _cand_cache_limit: int
     _store_mutation_epoch: int
     _state_buf: NDArray[np.int32]
     _raw_leb_buf: List[int]
@@ -104,8 +97,6 @@ class IntelligenceEngine:
     gene_mac_m_int: int
     _last_token_id: int
     learning_enabled: bool  # New flag to control learning
-    _cycle_step_history: Deque[str]
-    _cycle_complete_trigger: bool
 
     def __init__(
         self,
@@ -134,8 +125,6 @@ class IntelligenceEngine:
         self.cycle_count = 0
         self._pain_streak: int = 0
         self.learning_enabled = True  # Enable learning by default
-        self._cycle_step_history = deque(maxlen=8)  # Track last 8 steps for cycle detection
-        self._cycle_complete_trigger = False  # Flag to indicate cycle completion
 
         self.current_state_index = 0
 
@@ -179,61 +168,86 @@ class IntelligenceEngine:
         self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
         self._last_token_id = 0
 
-        # --- theta tracking --------------------------------------------------
-        self._θ_buf: Deque[float] = deque(maxlen=8)
-        self._θ_low = float(cast(float, self.preferences.get("theta_low", 0.05)))
-        self._θ_high = float(cast(float, self.preferences.get("theta_high", 0.6)))
-
-        # Auto-prune removed - no longer needed with physics-driven confidence
-
         # --- vectorized epistemology buffer ----------------------------------
         # Reusable buffer for state trajectory computation (max 64K to prevent RAM explosion)
         self._state_buf = np.empty(65536, dtype=np.int32)
-
-        # --- candidate cache for O(1) lookup ----------------------------------
-        self._cand_cache: Dict[int, List[Tuple[int, float, int]]] = {}
-        self._cand_cache_limit = 65536
-        self._store_mutation_epoch = 0
 
     def _action_value(self, state_idx: int, intron: int, mask: int) -> float:
         """
         Pure-physics utility for choosing the next token.
         No temperature, no stochasticity.
-        
+
         Args:
             state_idx: Current state index
             intron: Intron byte that would be applied
             mask: Learned mask for the candidate token
-            
+
         Returns:
             Action value (higher is better)
         """
         import math
-        
+
         next_state = int(self.epistemology[state_idx, intron])
-        
-        # 1) cooling term (Δθ = θ' - θ)
+
+        # 1) cooling term (Δθ = θ - θ')
         θ_now = self.s2._theta_table[state_idx]
         θ_next = self.s2._theta_table[next_state]
-        dθ = θ_next - θ_now  # we want negative (cooling)
-        
+        dθ = θ_now - θ_next  # we want positive (cooling)
+
         # 2) stabiliser release |Σ_before| → |Σ_after|
         stab_before = self.s2.stabiliser_order[state_idx]
         stab_after = self.s2.stabiliser_order[next_state]
         stab_gain = math.log(stab_before + 1e-9) - math.log(stab_after + 1e-9)
-        
-        # 3) information injected by Fold (weighted to reduce dominance)
+
+        # 3) information injected by Fold
         current_mask = self._state_byte_projection(state_idx)
         fold_result = governance.fold(current_mask, mask)
         H_before = bin(current_mask).count("1")
         H_after = bin(fold_result).count("1")
-        ENTROPY_WEIGHT = 0.3
-        fold_entropy = (H_after - H_before) * ENTROPY_WEIGHT
-        
+        fold_entropy = H_after - H_before
+
         # 4) sink penalty - discourage transitions to states with many self-loops
         sink_penalty = self.s2.stabiliser_order[next_state] / 256.0
-        
-        return (-dθ) + stab_gain + fold_entropy - 2.0 * sink_penalty
+
+        return float(dθ + stab_gain + fold_entropy - sink_penalty)
+
+    def _neighbourhood(self, state_idx: int, max_theta: float = 0.30) -> List[int]:
+        """
+        Return representative indices whose θ-distance to the current state
+        is ≤ max_theta and belong to the same stabiliser-order family.
+
+        This implements spectral neighborhood retrieval for accessing learned
+        patterns from nearby states in the manifold topology.
+
+        Args:
+            state_idx: Current state index
+            max_theta: Maximum angular distance (radians) for neighborhood inclusion
+
+        Returns:
+            List of representative state indices in the local neighborhood
+        """
+        if self.s2._theta_table is None or self.s2.stabiliser_order is None:
+            # Fallback to single representative if tables are missing
+            if self.operator.phenomenology_map is not None:
+                return [int(self.operator.phenomenology_map[state_idx])]
+            return [state_idx]
+
+        # Get reference values for current state
+        θ0 = self.s2._theta_table[state_idx]
+        stab0 = self.s2.stabiliser_order[state_idx]
+
+        # Vectorized filter over the whole manifold
+        θ = self.s2._theta_table
+        stab = self.s2.stabiliser_order
+        mask = (np.abs(θ - θ0) <= max_theta) & (stab == stab0)
+
+        # Apply phenomenology projection to get representatives
+        if self.operator.phenomenology_map is not None:
+            candidate_indices = np.nonzero(mask)[0]
+            reps = self.operator.phenomenology_map[candidate_indices]
+            return list(np.unique(reps).tolist())
+        else:
+            return list(np.nonzero(mask)[0].tolist())
 
     def _state_byte_projection(self, state_index: int) -> int:
         """Stable 8-bit projection of 48-bit state via XOR-fold; invariant under bit shifts that preserve parity."""
@@ -262,48 +276,17 @@ class IntelligenceEngine:
                 self._dbg_seen += 1
                 self.debug_candidates(state_idx)
 
-        # Debug: Log what's happening for state 0
-        if state_idx == 0:
-            print(f"[DEBUG] _emit_token_with_feedback: state_idx={state_idx}, theta={theta}")
-
-        # Update cycle step history
-        current_step = self._get_cycle_step()
-        self._cycle_step_history.append(current_step)
-
-        # Check for cycle completion (only if history is full)
-        if len(self._cycle_step_history) == 8:
-            cycle_steps = ["CS", "UNA", "ONA", "BU In", "BU Eg", "ONA", "UNA", "CS"]
-            history_list = list(self._cycle_step_history)
-            # Check if we've gone through all steps in order or wrapped around
-            if history_list == cycle_steps or (history_list[-1] == "CS" and history_list[0] != "CS"):
-                self._cycle_complete_trigger = True
-
         tok_id = self.generate_token_exon(state_idx)
-
-        # Debug: Log the generated token for state 0
-        if state_idx == 0:
-            print(f"[DEBUG] _emit_token_with_feedback: generated token_id={tok_id}")
 
         from baby.information import token_id_to_bytes
 
         token_bytes = token_id_to_bytes(tok_id)
-        # Use bulk application instead of per-byte feedback
-        if not hasattr(self, "_probe_emit"):
-            self._probe_emit = 0
-        t0 = time.perf_counter()
 
-        # Only process egress if learning is enabled (prevents self-talk)
-        if self.learning_enabled:
-            self.process_egress_bulk(token_bytes)
-        
-        # Debug: Log the state after transition
-        if state_idx == 0:
-            print(f"[DEBUG] _emit_token_with_feedback: state_after_transition={self.current_state_index}")
-        
-        t1 = time.perf_counter()
-        if self._probe_emit < 5:
-            self._probe_emit += 1
-            print(f"[probe] feedback bulk for {len(token_bytes)} bytes took {(t1-t0)*1e3:.2f} ms")
+        # Always advance the physics.  process_egress_bulk() itself
+        # skips memory writes when learning_enabled is False, so it is
+        # safe (and necessary) to call unconditionally.
+        self.process_egress_bulk(token_bytes)
+
         return tok_id, token_bytes
 
     def process_egress(self, input_byte: int) -> int:
@@ -325,13 +308,9 @@ class IntelligenceEngine:
         new_state_index = self.epistemology[self.current_state_index, intron]
         self.current_state_index = new_state_index
         self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
-        self._cached_state_int = self.gene_mac_m_int
 
         assert self.gene_mac_m_int < (1 << 48)
         self.cycle_count += 1
-
-        div = self.s2.measure_state_divergence_index(self.current_state_index)
-        self._θ_buf.append(div)
 
         if (intron & 0x80) == 0:  # Token complete
             try:
@@ -341,13 +320,6 @@ class IntelligenceEngine:
                 if token_id == SEP_ID:
                     # Learn SEP as a pre-state association so it can be chosen later
                     self.operator.learn_token_preonly(token_id, pre_state_index, intron)
-                    # Drop cached candidates for this representative state
-                    rep = (
-                        int(self.phenomenology_map[pre_state_index])
-                        if self.phenomenology_map is not None
-                        else pre_state_index
-                    )
-                    self._cand_cache.pop(rep, None)
                     self._last_token_id = token_id
                     self._raw_leb_buf.clear()
                     return intron
@@ -358,13 +330,6 @@ class IntelligenceEngine:
 
                 token_last_intron_byte = token_last_intron(token_id)
                 self.operator.learn_token_preonly(token_id, pre_state_index, token_last_intron_byte)
-                # Drop cached candidates for this representative state
-                rep = (
-                    int(self.phenomenology_map[pre_state_index])
-                    if self.phenomenology_map is not None
-                    else pre_state_index
-                )
-                self._cand_cache.pop(rep, None)
 
                 # Get the pre-state entry for hooks
                 pre_entry = self.operator.store.get((pre_state_index, token_id))
@@ -396,11 +361,20 @@ class IntelligenceEngine:
         Handles state updates in C/NumPy, then walks the token
         boundaries just once per byte for learning.
         """
-        import numpy as np
-
         if not blob:
             return
 
+        # Thread safety: use store lock to prevent data races on _state_buf
+        store_lock = getattr(self.operator.store, "lock", None)
+        if store_lock is not None:
+            with store_lock:
+                self._process_egress_bulk_internal(blob)
+        else:
+            # Fallback if no lock available
+            self._process_egress_bulk_internal(blob)
+
+    def _process_egress_bulk_internal(self, blob: bytes) -> None:
+        """Internal implementation of process_egress_bulk without thread safety."""
         arr = np.frombuffer(blob, dtype=np.uint8)  # masked bytes (external)
         introns = arr ^ 0xAA  # unmask once → true introns
 
@@ -509,7 +483,10 @@ class IntelligenceEngine:
                         rep = (
                             int(self.phenomenology_map[pre_state]) if self.phenomenology_map is not None else pre_state
                         )
-                        self._cand_cache.pop(rep, None)
+                        # Drop cached candidates for this representative state (if cache exists)
+                        cand_cache = getattr(self, "_cand_cache", None)
+                        if cand_cache is not None:
+                            cand_cache.pop(rep, None)
                         self._last_token_id = token_id
                         self._raw_leb_buf.clear()
                         token_start_idx = i + 1
@@ -522,9 +499,6 @@ class IntelligenceEngine:
                     # Pre-only storage (only if learning is enabled)
                     if self.learning_enabled:
                         self.operator.learn_token_preonly(token_id, pre_state, int(intron))
-                    # Drop cached candidates for this representative state
-                    rep = int(self.phenomenology_map[pre_state]) if self.phenomenology_map is not None else pre_state
-                    self._cand_cache.pop(rep, None)
 
                     # Get the pre-state entry for hooks
                     pre_entry = self.operator.store.get((pre_state, token_id))
@@ -541,7 +515,7 @@ class IntelligenceEngine:
                     self._raw_leb_buf.clear()
                     token_start_idx = i + 1  # Next token starts here
 
-        # --- 4. persist new head state + θ updates
+        # --- 4. persist new head state
         if n > 0:
             final_pre_state = int(st[n - 1])  # state *before* applying the last intron
             final_intron = int(introns[-1])
@@ -564,31 +538,13 @@ class IntelligenceEngine:
             # keep state integer in sync with index
             try:
                 self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
-                self._cached_state_int = self.gene_mac_m_int
             except Exception:
                 pass
-
-            # θ update: push at least the final divergence (cheap and keeps temperature sane)
-            try:
-                div = self.s2.measure_state_divergence_index(self.current_state_index)
-                self._θ_buf.append(div)
-            except Exception:
-                pass
-
-            # OPTIONAL: for very long chunks, add a mid-sample to smooth temperature changes
-            if n > 1024:
-                mid_i = n // 2
-                try:
-                    mid_state = int(st[mid_i])
-                    div_mid = self.s2.measure_state_divergence_index(mid_state)
-                    self._θ_buf.append(div_mid)
-                except Exception:
-                    pass
 
     def process_ingress(self) -> tuple[int, int]:
         """Emit exactly one token and return (last_byte, last_intron) of that token."""
         state_idx = self.current_state_index
-        theta = self._θ_buf[-1] if self._θ_buf else 0.0
+        theta = 0.0  # Removed theta tracking
         tok_id, token_bytes = self._emit_token_with_feedback(state_idx, theta)
         # Derive last intron from last byte via ψ
         last_byte = token_bytes[-1]
@@ -637,7 +593,7 @@ class IntelligenceEngine:
         angular_divergence_radians: float = float(angular_divergence)
         angular_divergence_degrees: float = float(angular_divergence * 180 / 3.14159)
         active_hooks: int = len(self.post_cycle_hooks)
-        cycle_step: str = self._get_cycle_step()
+        cycle_step: str = "CS"  # Default since we removed cycle tracking
         info: StateInfo = {
             "agent_id": agent_id,
             "cycle_count": cycle_count,
@@ -658,44 +614,9 @@ class IntelligenceEngine:
 
     def _sync_state_fields_from_index(self) -> None:
         self.gene_mac_m_int = self.s2.get_state_from_index(self.current_state_index)
-        self._cached_state_int = self.gene_mac_m_int
 
     def _sync_index_from_state_int(self) -> None:
         self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
-
-    def validate_knowledge_integrity(self) -> bool:
-        """
-        Validate the integrity of the knowledge base.
-
-        Returns:
-            True if integrity is maintained, False otherwise
-        """
-        result = self.operator.validate_knowledge_integrity()
-        if isinstance(result, bool):
-            return result
-        if hasattr(result, "success"):
-            return bool(getattr(result, "success"))
-        # If result is a Mapping (e.g., ValidationReport TypedDict), treat as True if total_entries > 0
-        try:
-            from collections.abc import Mapping
-
-            if isinstance(result, Mapping):
-                # mypy requires the cast on the same line as .get
-                return bool(cast(Mapping[str, Any], result).get("total_entries", 0) > 0)
-        except ImportError:
-            pass
-        return False
-
-    def apply_confidence_decay(self, decay_rate: float = 0.001) -> Dict[str, Any]:
-        result = self.operator.apply_confidence_decay(decay_rate)
-        try:
-            return dict(result)
-        except Exception:
-            if is_dataclass(result) and not isinstance(result, type):
-                return asdict(result)
-            if hasattr(result, "__dict__"):
-                return cast(Dict[str, Any], vars(result))
-            return {}
 
     def debug_candidates(self, state_index: int) -> None:
         """Debug candidate generation for a given state"""
@@ -712,119 +633,105 @@ class IntelligenceEngine:
 
     def generate_token_exon(self, state_index: int) -> int:
         """
-        Generate next token using physics-native action value maximization.
-        Evaluates all 256 possible introns directly - no heuristic sieves.
+        Generate next token using spectral neighborhood retrieval and physics.
+
+        Implements the theoretical approach:
+        1. Compute exon product from current state physics
+        2. Use spectral neighborhood retrieval for learned patterns
+        3. Integrate physics-native action values with interference terms
+        4. Select token using constructive overlap between state and memory
         """
-        from baby.information import find_tokens_by_last_intron, _load_tokenizer
-        
-        # Load tokenizer for filtering unused tokens
-        tokenizer = _load_tokenizer()
-        
+        from baby.information import find_tokens_by_last_intron
+        from baby.inference import orbit, exon_product_from_state
+
         best_tok: int = SEP_ID
         best_A: float = -1e9
-        
-        # Debug: Show top action values for state 0
-        if state_index == 0:
-            print(f"[DEBUG] State 0: computing action values for all 256 introns")
-            top_actions = []
-        
-        for intron in range(256):  # try every move
+
+        # Step 1: Compute exon product from current state physics
+        theta = self.s2.measure_state_divergence_index(state_index)
+        orbit_size = self.s2.get_orbit_cardinality(state_index)
+        exon_product = exon_product_from_state(state_index, theta, orbit_size)
+
+        # Step 2: Get spectral neighborhood for learned pattern retrieval
+        neighborhood_reps = self._neighbourhood(state_index, max_theta=0.30)
+
+        # Step 3: Collect candidate tokens from both physics and learned patterns
+        candidate_tokens = set()
+
+        # Physics-derived candidates from resonant introns
+        resonant_introns = orbit(exon_product)
+        for intron in resonant_introns:
             tokens = find_tokens_by_last_intron(intron)
-            if not tokens:
-                continue
-            
-            # Filter out [unused##] tokens - only consider meaningful vocabulary
-            meaningful_tokens = []
-            for token_id in tokens:
-                try:
-                    text = tokenizer.decode([token_id])
-                    if not text.startswith("[unused") and not text.startswith("[UNK]"):
-                        meaningful_tokens.append(token_id)
-                except:
-                    pass
-            
-            if not meaningful_tokens:
-                continue  # Skip if no meaningful tokens for this intron
-            
-            # Use the first meaningful token for this intron
-            token_id = meaningful_tokens[0]
-            
-            # mask = intron itself interpreted as 8-bit family mask
-            mask = intron
-            
-            # pre-compute state-invariant parts to save work
-            A_common = self._action_value(state_index, intron, mask)
-            
-            # Debug: Track top action values for state 0
-            if state_index == 0 and len(top_actions) < 5:
-                top_actions.append((intron, A_common, token_id))
-                top_actions.sort(key=lambda x: x[1], reverse=True)
-                top_actions = top_actions[:5]
-            
-            if A_common <= best_A:
-                continue  # no token can beat current best
-            
-            # pick the meaningful token with this intron
-            best_tok = token_id
-            best_A = A_common
-        
-        # Debug: Show top action values for state 0
-        if state_index == 0:
-            print(f"[DEBUG] State 0: top 5 action values (meaningful tokens only):")
-            for intron, action_val, token_id in top_actions:
-                try:
-                    text = tokenizer.decode([token_id])
-                    print(f"  Intron {intron:3d} -> Token {token_id:4d} (\"{text}\"), A={action_val:.3f}")
-                except:
-                    print(f"  Intron {intron:3d} -> Token {token_id:4d} (<error>), A={action_val:.3f}")
-            
-            # Find which intron led to the selected token
-            selected_intron = None
-            for intron in range(256):
-                tokens = find_tokens_by_last_intron(intron)
-                if tokens and best_tok in tokens:
-                    selected_intron = intron
-                    break
+            candidate_tokens.update(tokens[:10])  # Limit per intron
+
+        # Learned candidates from spectral neighborhood
+        for rep_state in neighborhood_reps:
             try:
-                selected_text = tokenizer.decode([best_tok])
-                print(f"[DEBUG] State 0: selected token_id={best_tok} (\"{selected_text}\"), intron={selected_intron}")
-            except:
-                print(f"[DEBUG] State 0: selected token_id={best_tok} (<error>), intron={selected_intron}")
-        
-        return int(best_tok)
+                for _, token_id in self.operator.store.iter_keys_for_state(rep_state):
+                    candidate_tokens.add(token_id)
+                    if len(candidate_tokens) > 100:  # Reasonable limit
+                        break
+            except Exception:
+                continue
 
-    def _get_cycle_step(self) -> str:
-        """
-        Determine the current step in the 8-step fractal cycle based on angular divergence (theta).
-        The cycle is: CS -> UNA -> ONA -> BU In -> BU Eg -> ONA -> UNA -> CS.
-        Theta ranges from 0 to pi, and we map this to the 8 steps.
+        # Ensure we have at least some candidates
+        if not candidate_tokens:
+            return SEP_ID
 
-        Returns:
-            str: The current step in the cycle (e.g., 'CS', 'UNA', 'ONA', 'BU In', 'BU Eg').
-        """
-        if not self._θ_buf:
-            return "CS"  # Default to start if no theta data
-        theta = self._θ_buf[-1]  # Use the most recent theta value
-        # Map theta (0 to pi) to 8 steps
-        step_index = int((theta / math.pi) * 8) % 8  # Scale to 0-7 range and wrap around
-        cycle_steps = ["CS", "UNA", "ONA", "BU In", "BU Eg", "ONA", "UNA", "CS"]
-        return cycle_steps[step_index]
+        # Step 4: Evaluate each candidate token
+        for token_id in candidate_tokens:
+            # Get the token's last intron for physics evaluation
+            try:
+                from baby.governance import token_last_intron
+
+                intron = token_last_intron(token_id)
+            except Exception:
+                continue
+
+            # Physics component: base action value
+            mask = exon_product  # Use computed exon product as mask
+            A_physics = self._action_value(state_index, intron, mask)
+
+            # Memory component: interference from learned patterns
+            interference = 0.0
+            for rep_state in neighborhood_reps:
+                try:
+                    phenotype_entry = self.operator.get_phenotype(rep_state, token_id)
+                    learned_mask = phenotype_entry.get("mask", 0)
+                    if learned_mask != 0:
+                        # Constructive interference: overlap between current exon and learned mask
+                        overlap = bin(exon_product & learned_mask).count("1") / 8.0
+                        interference += overlap
+                except Exception:
+                    continue
+
+            # Normalize interference by neighborhood size
+            if len(neighborhood_reps) > 0:
+                interference /= len(neighborhood_reps)
+
+            # Final action value: physics + spectral interference
+            final_A = A_physics + interference * 2.0  # Scale factor for learned patterns
+
+            if final_A > best_A:
+                best_A = final_A
+                best_tok = token_id
+
+        return best_tok
 
     def is_cycle_complete(self) -> bool:
         """
-            Check if a full 8-step cycle has been completed.
+                Check if a full 8-step cycle has been completed.
 
-    Returns:
-                bool: True if cycle is complete, False otherwise.
+        Returns:
+                    bool: True if cycle is complete, False otherwise.
         """
-        return self._cycle_complete_trigger
+        return False  # Removed cycle completion trigger
 
     def reset_cycle_trigger(self) -> None:
         """
         Reset the cycle completion trigger after it has been handled.
         """
-        self._cycle_complete_trigger = False
-        self._cycle_step_history.clear()
+        pass  # Removed cycle completion trigger
 
 
 # ---------- Intelligence Engine ----------
@@ -974,48 +881,31 @@ class GyroSI:
 
     def respond(self, data: bytes, max_new_tokens: Optional[int] = None) -> bytes:
         """Generate complete response and return as bytes."""
-        self.engine.learning_enabled = False  # Disable learning for generation
+        # 0. let physics ingest the stimulus (no learning while responding)
+        self.engine.learning_enabled = False
+        self.engine.reset_token_buffer()  # flush any partial token
+        self.engine.process_egress_bulk(data)  # the missing call - process stimulus through physics
+
+        # 1. now generate
         result = bytearray()
-        for token_bytes in self.respond_stream(data, max_new_tokens):
+        for token_bytes in self.respond_stream(max_new_tokens):  # no data needed now
             result.extend(token_bytes)
         return bytes(result)
 
-    def respond_stream(self, data: bytes, max_new_tokens: Optional[int] = None) -> Iterator[bytes]:
+    def respond_stream(self, max_new_tokens: Optional[int] = None) -> Iterator[bytes]:
         """
         Generate response token by token, yielding each token's bytes as it's generated.
         This enables real streaming without pre-computing the entire response.
         """
-        import time
-        import numpy as np
-        from baby.information import bytes_to_token_ids, decode_text, token_id_to_bytes, SEP_ID
 
-        # Input was already processed during initial ingestion
         # Disable learning during generation to prevent self-talk
         self.engine.learning_enabled = False
 
-        # Policy knobs (not "caps")
-        prefs = self.preferences if isinstance(self.preferences, dict) else {}
-        turn_cfg = prefs.get("turn_policy", {})
-        ratio = float(turn_cfg.get("reply_len_ratio", 1.2))
-        min_reply = int(turn_cfg.get("min_reply_tokens", 8))
-        max_reply = int(turn_cfg.get("max_reply_tokens", 96))
-        wall_s = float(turn_cfg.get("max_wall_time_s", 2.0))
-        theta_eps = float(turn_cfg.get("theta_std_epsilon", 0.01))
-        tok_name = prefs.get("tokenizer", {}).get("name", "bert-base-uncased")
-
-        in_tok_len = 1
-        try:
-            in_tok_len = max(1, len(bytes_to_token_ids(data)))
-        except Exception:
-            pass
-        target = int(np.clip(int(ratio * in_tok_len + 2), min_reply, max_reply))
-
         tokens_done = 0
-        t0 = time.perf_counter()
 
         while True:
             state_idx = self.engine.current_state_index
-            theta = self.engine._θ_buf[-1] if self.engine._θ_buf else 0.0
+            theta = 0.0  # Removed theta tracking
             tok_id, token_bytes = self.engine._emit_token_with_feedback(state_idx, theta)
 
             # Yield token bytes immediately for real streaming
@@ -1028,50 +918,6 @@ class GyroSI:
 
             # (2) Caller-provided limit (kept working for tests; you can pass None)
             if max_new_tokens is not None and tokens_done >= max_new_tokens:
-                break
-
-            # (3) Natural stop: enough tokens AND the text looks complete
-            if tokens_done >= target:
-                try:
-                    # Decode current token to check for completion
-                    token_text = decode_text(token_bytes, name=tok_name)
-                    if token_text and token_text[-1:] in ".!?…\n":
-                        break
-                except Exception:
-                    pass
-                # Respect physics: force a SEP if we must stop
-                sep = token_id_to_bytes(SEP_ID)
-                # Don't learn the SEP during generation (learning is already disabled)
-                yield sep
-                break
-
-            # (4) Soft time guard (for your 2015 MBP edge case)
-            if time.perf_counter() - t0 > wall_s:
-                sep = token_id_to_bytes(SEP_ID)
-                # Don't learn the SEP during generation (learning is already disabled)
-                yield sep
-                break
-
-            # (5) θ-settling (state stopped changing meaningfully)
-            if len(self.engine._θ_buf) >= 8 and tokens_done >= min_reply:
-                try:
-                    import numpy as _np
-
-                    rec = _np.array(list(self.engine._θ_buf)[-8:], dtype=_np.float32)
-                    if float(rec.std()) < theta_eps:
-                        sep = token_id_to_bytes(SEP_ID)
-                        # Don't learn the SEP during generation (learning is already disabled)
-                        yield sep
-                        break
-                except Exception:
-                    pass
-
-            # (6) Cycle completion: if a full 8-step cycle is complete, emit SEP
-            if self.engine.is_cycle_complete():
-                sep = token_id_to_bytes(SEP_ID)
-                # Don't learn the SEP during generation (learning is already disabled)
-                yield sep
-                self.engine.reset_cycle_trigger()
                 break
 
         self._commit_if_needed()
@@ -1093,7 +939,6 @@ class GyroSI:
         return {
             **state_info,
             "config": self.config,
-            "system_integrity": self.engine.validate_knowledge_integrity(),
         }
 
     def get_knowledge_store_size(self) -> int:
@@ -1121,18 +966,8 @@ class GyroSI:
         Returns:
             Maintenance report
         """
-        # Apply confidence decay
-        decay_report = self.engine.apply_confidence_decay(decay_rate)
-
-        # Manage orbit entropy (replaces confidence-based pruning)
-        orbit_entropy_removed = self.engine.operator.manage_orbit_entropy(max_tokens_per_orbit)
-
-        # Commit changes to persist maintenance operations
-        store = self.engine.operator.store
-        if hasattr(store, "commit"):
-            store.commit()
-
-        return {"decay_applied": decay_report, "orbit_entropy_removed": orbit_entropy_removed, "timestamp": time.time()}
+        # Maintenance operations removed - focus on core physics
+        return {"timestamp": time.time()}
 
     def close(self) -> None:
         """Clean shutdown of the agent."""

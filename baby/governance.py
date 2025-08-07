@@ -8,7 +8,6 @@ This module implements the fundamental operations of the Common Governance Model
 - Byte transcription and transformation
 """
 
-import math
 from functools import reduce
 from typing import List, Tuple, cast
 
@@ -96,6 +95,15 @@ for i in range(256):
         m ^= BG_MASK
     XFORM_MASK[i] = m
 
+# ------------------------------------------------------------------
+# ❶  Common Source (CS) constants
+# ------------------------------------------------------------------
+
+# CS is the **unique** state whose 48-bit integer is 0.  It already
+# appears as ontology index 0 after sorting, so we keep that identity.
+CS_INT = 0  # integer value
+CS_STANDING_MSK = EXON_FG_MASK | EXON_BG_MASK  # introns *without* these bits are "standing"
+
 # Note: Full activation (LI + FG + BG) results in mask = 0 due to cancellation:
 # LI applies FULL_MASK, FG applies FG_MASK, BG applies BG_MASK
 # Since FG_MASK ^ BG_MASK = FULL_MASK, the result is FULL_MASK ^ FULL_MASK = 0
@@ -120,6 +128,23 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     state_int = int(state_int)
     intron = int(intron)
     intron &= 0xFF  # Defensive masking
+
+    # ------------------------------------------------------------------
+    # ❷  Special-case the Common Source
+    # ------------------------------------------------------------------
+    if state_int == CS_INT:
+        if (intron & CS_STANDING_MSK) == 0:
+            # standing intron → perfect reflection (partial absorber)
+            return CS_INT
+        else:
+            # driving intron → *radiative kick* : copy intron pattern
+            kick = int(INTRON_BROADCAST_MASKS[intron]) & ((1 << 48) - 1)
+            # never allow the kick to cancel to 0
+            return kick if kick else 1
+
+    # ------------------------------------------------------------------
+    # ❸  Generic path – unchanged physics
+    # ------------------------------------------------------------------
     # Step 1: Gyro-addition (applying transformational forces) using precomputed mask
     temp_state = state_int ^ int(XFORM_MASK[intron])
 
@@ -143,7 +168,16 @@ def apply_gyration_and_transform_batch(states: NDArray[np.uint64], intron: int) 
     mask = XFORM_MASK[intron]
     pattern = INTRON_BROADCAST_MASKS[intron]
     temp = states ^ mask
-    return cast("NDArray[np.uint64]", (temp ^ (temp & pattern)).astype(np.uint64))
+    result = temp ^ (temp & pattern)
+
+    # fast vectorised CS fix
+    if (intron & CS_STANDING_MSK) != 0:
+        cs_rows = states == CS_INT
+        kick = INTRON_BROADCAST_MASKS[intron] & ((1 << 48) - 1)
+        # never allow the kick to cancel to 0
+        result[cs_rows] = kick if kick else 1
+
+    return cast("NDArray[np.uint64]", result.astype(np.uint64))
 
 
 def apply_gyration_and_transform_all_introns(states: NDArray[np.uint64]) -> NDArray[np.uint64]:
@@ -152,7 +186,18 @@ def apply_gyration_and_transform_all_introns(states: NDArray[np.uint64]) -> NDAr
     Memory-heavy; prefer intron loop for large batches.
     """
     temp = states[:, np.newaxis] ^ XFORM_MASK[np.newaxis, :]
-    return cast("NDArray[np.uint64]", (temp ^ (temp & INTRON_BROADCAST_MASKS[np.newaxis, :])).astype(np.uint64))
+    res = temp ^ (temp & INTRON_BROADCAST_MASKS[np.newaxis, :])
+
+    # Fix every [row = CS_INT, intron with drive bits]
+    cs_rows = np.where(states == CS_INT)[0]
+    if cs_rows.size:
+        drive_cols = np.where((np.arange(256) & CS_STANDING_MSK) != 0)[0]
+        kicks = INTRON_BROADCAST_MASKS[drive_cols] & ((1 << 48) - 1)
+        # never allow the kick to cancel to 0
+        kicks[kicks == 0] = 1
+        res[np.ix_(cs_rows, drive_cols)] = kicks
+
+    return cast("NDArray[np.uint64]", res.astype(np.uint64))
 
 
 def transcribe_byte(byte: int) -> int:
@@ -219,55 +264,7 @@ def dual(x: int) -> int:
     return (x ^ 0xFF) & MASK
 
 
-def exon_product_from_state(state_index: int, theta: float, orbit_size: int) -> int:
-    """
-    Project the 48-bit state tensor to an 8-bit exon product using theta and orbit size.
-
-    This provides the baseline mask when no specific learning exists for a (state, token) pair.
-    The exon product encodes the state's intrinsic resonance characteristics.
-
-    Args:
-        state_index: Canonical index of the physical state
-        theta: Angular divergence from the archetypal state (radians)
-        orbit_size: Cardinality of the state's phenomenological orbit
-
-    Returns:
-        8-bit exon product encoding state's baseline characteristics
-    """
-    # Theta normalization: map [0, π] to [0, 1]
-    theta_norm = min(1.0, theta / math.pi)
-
-    # Orbit variety normalization: larger orbits have lower specificity
-    orbit_norm = min(1.0, orbit_size / 1000.0)  # Assume max orbit size ~1000
-
-    # Extract bit families from state_index for deterministic projection
-    li_component = (state_index >> 6) & 0x03
-    fg_component = (state_index >> 4) & 0x03
-    bg_component = (state_index >> 2) & 0x03
-    neutral_component = state_index & 0x03
-
-    # Apply theta modulation (cooling effect)
-    cooling_factor = 1.0 - theta_norm
-    heating_factor = theta_norm
-
-    # Compute weighted components
-    tau = int((li_component - bg_component) * cooling_factor) & 0x0F
-    eta = int((fg_component - neutral_component) * heating_factor) & 0x0F
-
-    # Apply orbit size modulation
-    orbit_factor = int(orbit_norm * 15) & 0x0F
-
-    # Combine into 8-bit product with bit family structure
-    exon_product = ((tau & 0x0F) << 4) | ((eta ^ orbit_factor) & 0x0F)
-
-    # Ensure non-zero result
-    if exon_product == 0:
-        exon_product = 0b01000010  # LI bits set (cooling intron)
-
-    return exon_product & 0xFF
-
-
-def propose_resonant_introns(exon_product: int, max_candidates: int = 3) -> List[int]:
+def propose_resonant_introns(exon_product: int, max_candidates: int = 8) -> List[int]:
     """
     Convert exon product to candidate intron bytes for tokenizer trie lookup.
 

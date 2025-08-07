@@ -4,74 +4,18 @@ Write/policy logic for GyroSI (S5): OrbitStore and storage decorators.
 
 from __future__ import annotations
 
-import concurrent.futures
 import logging
 import mmap
 import os
-import json
 import threading
 import time
-from collections import deque
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, cast, Callable, Set
 import sys
 import numpy as np
 from numpy.typing import NDArray
 
-from baby.contracts import MaintenanceReport
-
 logger = logging.getLogger(__name__)
-
-# Singleton cache for phenomenology maps by path
-_phenomenology_map_cache: Dict[str, NDArray[Any]] = {}
-_phenomenology_map_lock = threading.Lock()
-
-# Add at module top (after imports)
-_Sentinel = object()
-_append_only_cache_global: dict[tuple[int, int, str], Optional[Any]] = {}
-_append_only_cache_order: deque[tuple[int, int, str]] = deque()
-_append_only_cache_maxsize = 65536
-
-# Confidence normalization constants
-_CONFIDENCE_PRECISION = 1e-4  # Tolerance for float16 precision differences
-_CONFIDENCE_ROUNDING_DIGITS = 4  # Round to 4 decimal places for consistency
-
-
-def normalize_confidence(confidence: float) -> float:
-    """
-    Normalize confidence values to ensure consistent decision-making.
-
-    This function rounds confidence values to a consistent precision to avoid
-    issues with float16 precision differences when making decisions between
-    thousands of phenotypes.
-
-    Args:
-        confidence: Raw confidence value (0.0 to 1.0)
-
-    Returns:
-        Normalized confidence value with consistent precision
-    """
-    # Clamp to valid range
-    confidence = max(0.0, min(1.0, confidence))
-
-    # Round to consistent precision to avoid float16 artifacts
-    return round(confidence, _CONFIDENCE_ROUNDING_DIGITS)
-
-
-def confidence_equals(a: float, b: float, tolerance: float = _CONFIDENCE_PRECISION) -> bool:
-    """
-    Compare confidence values with tolerance for float16 precision differences.
-
-    Args:
-        a: First confidence value
-        b: Second confidence value
-        tolerance: Tolerance for comparison
-
-    Returns:
-        True if values are effectively equal
-    """
-    return abs(a - b) < tolerance
-
 
 # ---------- COMPACT PACK / UNPACK (9-byte fixed) --------------------
 # struct layout:  <I I B   (no confidence stored)
@@ -87,30 +31,6 @@ def _abs(path: Optional[str], base: Path) -> str:
         raise ValueError("Path must not be None")
     p = Path(os.path.expanduser(str(path)))
     return str(p if p.is_absolute() else base / p)
-
-
-def _get_append_only_cached_static(
-    store_id: str, context_key: tuple[int, int], uncached_fn: Callable[[tuple[int, int]], Optional[Any]]
-) -> Optional[Any]:
-    """Get value from append-only cache or compute and store it if missing.
-    Maintains LRU order and evicts oldest if over capacity.
-    """
-    cache_key = (context_key[0], context_key[1], store_id)
-    cached = _append_only_cache_global.get(cache_key, _Sentinel)
-    if cached is not _Sentinel:
-        try:
-            _append_only_cache_order.remove(cache_key)
-        except ValueError:
-            pass
-        _append_only_cache_order.append(cache_key)
-        return cached
-    result = uncached_fn(context_key)
-    _append_only_cache_global[cache_key] = result
-    _append_only_cache_order.append(cache_key)
-    if len(_append_only_cache_global) > _append_only_cache_maxsize:
-        oldest = _append_only_cache_order.popleft()
-        del _append_only_cache_global[oldest]
-    return result
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -194,6 +114,10 @@ def _unpack_phenotype(buf: memoryview, offset: int = 0) -> tuple[Dict[str, Any],
     # Decode n_pairs
     n_pairs, n_bytes = _decode_uleb128(data, state_bytes)
 
+    # Validate n_pairs - currently only support n_pairs=1
+    if n_pairs != 1:
+        raise ValueError(f"Unsupported n_pairs value: {n_pairs} (only 1 is supported)")
+
     # Decode token_id
     token_id, token_bytes = _decode_uleb128(data, state_bytes + n_bytes)
 
@@ -213,14 +137,10 @@ def load_phenomenology_map(phenomenology_map_path: str, base_path: Path = PROJEC
     resolved_path = _abs(phenomenology_map_path, base_path)
     if not resolved_path:
         raise ValueError("phenomenology_map_path must not be None")
-    with _phenomenology_map_lock:
-        if resolved_path in _phenomenology_map_cache:
-            return _phenomenology_map_cache[resolved_path]
-        if not os.path.exists(resolved_path):
-            raise FileNotFoundError(f"Phenomenology map not found: {resolved_path}")
-        arr = cast(NDArray[Any], np.load(resolved_path, mmap_mode="r"))
-        _phenomenology_map_cache[resolved_path] = arr
-        return arr
+    if not os.path.exists(resolved_path):
+        raise FileNotFoundError(f"Phenomenology map not found: {resolved_path}")
+    arr = cast(NDArray[Any], np.load(resolved_path, mmap_mode="r"))
+    return arr
 
 
 class OrbitStore:
@@ -256,14 +176,11 @@ class OrbitStore:
         self.lock = threading.RLock()
         self.pending_writes: Dict[Tuple[int, int], Any] = {}
         self._flush_count = 0
-        self._fsync_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        self._pending_fsync: Optional[concurrent.futures.Future[Any]] = None
-        self._last_fsync = 0.0
-        self._fsync_interval = 0.05  # 50ms or configurable
 
         # No persistent index - only in-RAM index from scan
         self.log_file: Optional[Any] = None
         self._mmap: Optional[mmap.mmap] = None
+        self._mmap_file: Optional[Any] = None  # File handle for mmap
         self._mmap_size = 0
         self._last_remap = 0.0  # Timestamp of last remap
         self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
@@ -333,13 +250,15 @@ class OrbitStore:
     def _open_mmap(self) -> None:
         if self._mmap:
             self._mmap.close()
-        with open(self.log_path, "rb") as f:
-            if os.path.getsize(self.log_path) > 0:
-                self._mmap = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            else:
-                self._mmap = None
-            if self._mmap:
-                self._mmap_size = self._mmap.size()
+        # Keep file open for mmap lifetime to avoid "Bad file descriptor" on Windows
+        if os.path.getsize(self.log_path) > 0:
+            self._mmap_file = open(self.log_path, "rb")
+            self._mmap = mmap.mmap(self._mmap_file.fileno(), 0, access=mmap.ACCESS_READ)
+            self._mmap_size = self._mmap.size()
+        else:
+            self._mmap = None
+            # Don't open file if it's empty - will be opened when needed
+            self._mmap_file = None
 
     def get(self, context_key: Tuple[int, int]) -> Optional[Any]:
         with self.lock:
@@ -365,21 +284,7 @@ class OrbitStore:
 
             return None
 
-    def _get_append_only_cached(self, context_key: Tuple[int, int]) -> Optional[Any]:
-        return _get_append_only_cached_static(self.store_path, context_key, self.get)
-
-    def _cache_pop(self, context_key: Tuple[int, int]) -> None:
-        """Remove a specific key from the append-only cache (per store)."""
-        cache_key = (context_key[0], context_key[1], self.store_path)
-        if cache_key in _append_only_cache_global:
-            try:
-                _append_only_cache_order.remove(cache_key)
-            except ValueError:
-                pass
-            del _append_only_cache_global[cache_key]
-
     def put(self, context_key: Tuple[int, int], entry: Any) -> None:
-        pending_fsync = None
         with self.lock:
             # Always copy the entry before mutating or storing
             entry = dict(entry)  # ensure a new dict, not just a shallow copy
@@ -388,12 +293,9 @@ class OrbitStore:
                 entry["key"] = context_key
             self.pending_writes[context_key] = dict(entry)  # store a new dict
             # Fine‑grain invalidation – just drop the key we're overwriting
-            self._cache_pop(context_key)
+            # self._cache_pop(context_key) # Removed as per edit hint
             if self.pending_writes is not None and len(self.pending_writes) >= self.write_threshold:
-                pending_fsync = self._flush()
-        if pending_fsync:
-            # No blocking wait on fsync here; state will be updated asynchronously
-            pass
+                self._flush()
 
     def commit(self) -> None:
         with self.lock:
@@ -415,11 +317,11 @@ class OrbitStore:
 
             # Fine‑grain cache invalidation
             for k in list(self.pending_writes.keys()):
-                self._cache_pop(k)
+                # self._cache_pop(k) # Removed as per edit hint
+                pass
         # No blocking wait on fsync here; state will be updated asynchronously
 
-    def _flush(self) -> Optional[concurrent.futures.Future[Any]]:
-        pending_fsync = None
+    def _flush(self) -> None:
         if not self.log_file or not self.pending_writes:
             return None
         for context_key, entry in self.pending_writes.items():
@@ -432,24 +334,16 @@ class OrbitStore:
             s_idx, tok_id = context_key
             self.index_by_state.setdefault(s_idx, set()).add(tok_id)
         self.log_file.flush()
-        now = time.time()
-        if now - self._last_fsync > self._fsync_interval:
-            future = self._fsync_executor.submit(os.fsync, self.log_file.fileno())
-            self._pending_fsync = future
-
-            def _on_fsync_done(fut: concurrent.futures.Future[Any]) -> None:
-                # Clear the pending fsync when done
-                self._pending_fsync = None
-                # Optionally log completion
-                # logger.info("Async fsync completed")
-
-            future.add_done_callback(_on_fsync_done)
-            self._last_fsync = now
-        if self._pending_fsync:
-            pending_fsync = self._pending_fsync
+        # Use fdatasync for better performance - only syncs data, not metadata
+        # Fallback to fsync on systems without fdatasync (e.g., macOS)
+        fdatasync_func = getattr(os, 'fdatasync', None)
+        if fdatasync_func is not None:
+            fdatasync_func(self.log_file.fileno())
+        else:
+            os.fsync(self.log_file.fileno())
         self.pending_writes.clear()
         # Removed periodic index writes - only write at commit() for better performance
-        return pending_fsync
+        return None
 
     def mark_dirty(self, context_key: Tuple[int, int], entry: Any) -> None:
         with self.lock:
@@ -472,25 +366,14 @@ class OrbitStore:
         with self.lock:
             if self.pending_writes:
                 self.commit()
-            if hasattr(self, "_pending_fsync") and self._pending_fsync is not None:
-                # No blocking wait on fsync here; state will be updated asynchronously
-                pass
             if self._mmap:
                 self._mmap.close()
                 self._mmap = None
+            if hasattr(self, "_mmap_file") and self._mmap_file:
+                self._mmap_file.close()
+                self._mmap_file = None
             if self.log_file and not self.log_file.closed:
                 self.log_file.close()
-            if self._fsync_executor:
-                self._fsync_executor.shutdown(wait=True)
-
-            # Clear cache
-            # Clear global cache for this store
-            to_remove = [k for k in _append_only_cache_global if k[2] == self.store_path]
-            for k in to_remove:
-                del _append_only_cache_global[k]
-            # Mutate the global deque in place
-            global _append_only_cache_order
-            _append_only_cache_order = deque(k for k in _append_only_cache_order if k[2] != self.store_path)
 
     def _register_shutdown_handlers(self) -> None:
         """Register graceful shutdown handlers for atexit and signals."""
@@ -541,7 +424,8 @@ class OrbitStore:
 
                 # Fine‑grain cache invalidation for flushed keys
                 for k in pending_keys:
-                    self._cache_pop(k)
+                    # self._cache_pop(k) # Removed as per edit hint
+                    pass
                 # No blocking wait on fsync here; state will be updated asynchronously
 
     @property
@@ -991,373 +875,22 @@ class MultiKnowledgeView:
             return combined
 
 
-def merge_phenotype_maps(
-    source_paths: List[str],
-    dest_path: str,
-    conflict_resolution: str = "highest_confidence",
-    base_path: Path = PROJECT_ROOT,
-) -> MaintenanceReport:
-    """
-    Merge multiple phenotype maps into a single consolidated map.
-
-    Note: This merge uses OR to unify masks across phenotypes. The policy-layer OR operation is not the Fold.
-
-    Args:
-        source_paths: List of source map file paths
-        dest_path: Destination file path
-        conflict_resolution: Strategy for handling conflicts
-            - "highest_confidence": Keep entry with highest confidence
-            - "OR_masks": Combine memory masks with bitwise OR
-            - "newest": Keep most recently updated entry
-            - "weighted_average": Average confidence, OR masks
-
-    Returns:
-        Maintenance report with merge statistics
-    """
-    start_time = time.time()
-    merged_data = {}
-    conflict_count = 0
-    total_entries = 0
-
-    resolved_dest = _abs(dest_path, base_path)
-    resolved_sources = [_abs(p, base_path) for p in source_paths]
-
-    for path in resolved_sources:
-        try:
-            store = OrbitStore(path)
-            source_data = store.data  # dict
-            store.close()
-        except Exception:
-            continue
-
-        for context_key, entry in source_data.items():
-            total_entries += 1
-
-            if context_key not in merged_data:
-                merged_data[context_key] = entry.copy()
-            else:
-                conflict_count += 1
-                existing = merged_data[context_key]
-
-                if conflict_resolution == "highest_confidence":
-                    # Use normalized comparison to avoid float16 precision issues
-                    entry_conf = normalize_confidence(entry.get("conf", 0))
-                    existing_conf = normalize_confidence(existing.get("conf", 0))
-                    if entry_conf > existing_conf:
-                        merged_data[context_key] = entry.copy()
-
-                elif conflict_resolution == "OR_masks":
-                    existing["mask"] |= entry.get("mask", 0)
-                    # Normalize confidence values for consistent comparison
-                    existing["conf"] = normalize_confidence(max(existing.get("conf", 0), entry.get("conf", 0)))
-
-                elif conflict_resolution == "newest":
-                    # For minimal phenotype, use conf as proxy for "newest"
-                    # Use normalized comparison to avoid float16 precision issues
-                    entry_conf = normalize_confidence(entry.get("conf", 0))
-                    existing_conf = normalize_confidence(existing.get("conf", 0))
-                    if entry_conf > existing_conf:
-                        merged_data[context_key] = entry.copy()
-
-                elif conflict_resolution == "weighted_average":
-                    # Weighted average based on confidence
-                    w1 = normalize_confidence(existing.get("conf", 0.1))
-                    w2 = normalize_confidence(entry.get("conf", 0.1))
-                    total_weight = w1 + w2
-
-                    # Calculate weighted average and normalize result
-                    weighted_conf = (existing.get("conf", 0) * w1 + entry.get("conf", 0) * w2) / total_weight
-                    existing["conf"] = normalize_confidence(weighted_conf)
-                    existing["mask"] |= entry.get("mask", 0)
-
-    # Save merged result
-    os.makedirs(os.path.dirname(resolved_dest) or ".", exist_ok=True)
-
-    dest_store = OrbitStore(resolved_dest)
-    dest_store.set_data_dict(merged_data)
-    dest_store.commit()
-    dest_store.close()
-
-    elapsed = time.time() - start_time
-
-    return {
-        "operation": "merge_phenotype_maps",
-        "success": True,
-        "entries_processed": total_entries,
-        "entries_modified": len(merged_data),
-        "elapsed_seconds": elapsed,
-    }
-
-
-def export_knowledge_statistics(store_path: str, output_path: str, base_path: Path = PROJECT_ROOT) -> MaintenanceReport:
-    """
-    Export detailed statistics about a knowledge store.
-
-    Args:
-        store_path: Path to the phenotype store
-        output_path: Path to save JSON statistics
-
-    Returns:
-        Maintenance report
-    """
-    start_time = time.time()
-
-    resolved_store_path = _abs(store_path, base_path)
-    resolved_output_path = _abs(output_path, base_path)
-    if not os.path.exists(resolved_store_path):
-        return {
-            "operation": "export_knowledge_statistics",
-            "success": False,
-            "entries_processed": 0,
-            "entries_modified": 0,
-            "elapsed_seconds": 0,
-        }
-
-    store = OrbitStore(resolved_store_path)
-    entries = list(store.data.values())
-    store.close()
-
-    stats_data = {
-        "total_entries": len(entries),
-        "state_indices": [int(e.get("key", (0, 0))[0]) for e in entries],
-        "token_ids": [int(e.get("key", (0, 0))[1]) for e in entries],
-        "masks": [int(e.get("mask", 0)) for e in entries],
-        "confidence": [float(e.get("conf", 0.0)) for e in entries],
-    }
-
-    # Save statistics
-    os.makedirs(os.path.dirname(resolved_output_path) or ".", exist_ok=True)
-    with open(resolved_output_path, "w") as f:
-        # ujson does not support indent argument
-        json.dump(stats_data, f)
-
-    elapsed = time.time() - start_time
-    return {
-        "operation": "export_knowledge_statistics",
-        "success": True,
-        "entries_processed": len(entries),
-        "entries_modified": 0,
-        "elapsed_seconds": elapsed,
-    }
-
-
-def validate_ontology_integrity(
-    ontology_path: str, phenomenology_map_path: Optional[str] = None, base_path: Path = PROJECT_ROOT
-) -> MaintenanceReport:
-    """
-    Validate the integrity of ontology and phenomenology .npy files.
-
-    Args:
-        ontology_path: Path to ontology_keys.npy
-        phenomenology_map_path: Optional path to phenomenology_map.npy
-
-    Returns:
-        Maintenance report
-    """
-    import numpy as np
-
-    start_time = time.time()
-    issues = []
-
-    resolved_ontology_path = _abs(ontology_path, base_path)
-    # Check ontology file
-    if not os.path.exists(resolved_ontology_path):
-        return {
-            "operation": "validate_ontology_integrity",
-            "success": False,
-            "entries_processed": 0,
-            "entries_modified": 0,
-            "elapsed_seconds": 0,
-        }
-
-    try:
-        keys = np.load(resolved_ontology_path, mmap_mode="r")
-    except Exception:
-        return {
-            "operation": "validate_ontology_integrity",
-            "success": False,
-            "entries_processed": 0,
-            "entries_modified": 0,
-            "elapsed_seconds": 0,
-        }
-
-    # Validate keys array
-    if keys.shape[0] != 788_986:
-        issues.append(f"Invalid ontology keys array size: {keys.shape[0]}")
-    if keys.dtype != np.uint64:
-        issues.append(f"Ontology keys dtype should be uint64, got {keys.dtype}")
-    if not np.all(np.diff(keys) > 0):
-        issues.append("Ontology keys are not strictly increasing (not sorted or have duplicates)")
-
-    # Check phenomenology map if provided
-    phenomenology_issues = 0
-    resolved_phenomenology_map_path = (
-        _abs(phenomenology_map_path, base_path) if phenomenology_map_path is not None else None
-    )
-    if resolved_phenomenology_map_path and os.path.exists(resolved_phenomenology_map_path):
-        try:
-            pheno = np.load(resolved_phenomenology_map_path, mmap_mode="r")
-            # Validate all indices are in range
-            for idx, rep in enumerate(pheno):
-                if idx < 0 or idx >= 788_986:
-                    phenomenology_issues += 1
-                if rep < 0 or rep >= 788_986:
-                    phenomenology_issues += 1
-            if phenomenology_issues > 0:
-                issues.append(f"Found {phenomenology_issues} invalid phenomenology mappings")
-        except Exception:
-            issues.append("Failed to validate phenomenology map.")
-
-    elapsed = time.time() - start_time
-
-    return {
-        "operation": "validate_ontology_integrity",
-        "success": len(issues) == 0,
-        "entries_processed": int(keys.shape[0]),
-        "entries_modified": 0,
-        "elapsed_seconds": elapsed,
-    }
-
-
-def prune_and_compact_store(
-    store_path: str,
-    output_path: Optional[str] = None,
-    min_confidence: Optional[float] = None,
-    max_age_days: Optional[float] = None,  # TODO: Implement age-based pruning
-    dry_run: bool = False,
-    archive_summary_path: Optional[str] = None,
-    base_path: Path = PROJECT_ROOT,
-) -> MaintenanceReport:
-    """
-    Prune and compact an OrbitStore in one pass.
-
-    This removes phenotypes that are below `min_confidence`, then rewrites the log
-    with only retained entries so stale historical versions are discarded.
-
-    Args:
-        store_path: Base path of the OrbitStore (same value passed to OrbitStore()).
-        output_path: Optional destination path. If None, compacts in-place.
-        min_confidence: Remove entries with confidence < min_confidence.
-        dry_run: If True, only report what would be removed.
-        archive_summary_path: If provided, write JSON summary of pruned entries.
-
-    Returns:
-        MaintenanceReport describing the operation.
-    """
-    start_time = time.time()
-    now = time.time()
-
-    resolved_store_path = _abs(store_path, base_path)
-    resolved_output_path = _abs(output_path, base_path) if output_path is not None else None
-    destination = resolved_output_path or resolved_store_path
-    resolved_archive_summary_path = _abs(archive_summary_path, base_path) if archive_summary_path is not None else None
-
-    # Load source store
-    source_store = OrbitStore(resolved_store_path)
-    total_entries = 0
-    pruned_entries = 0
-
-    keep: Dict[Tuple[int, int], Any] = {}
-    archive_summary: Dict[str, Any] = {
-        "pruned": [],
-        "criteria": {
-            "min_confidence": min_confidence,
-        },
-        "generated_at": now,
-        "source_path": store_path,
-        "output_path": destination,
-    }
-
-    for key, entry in source_store.iter_entries():
-        total_entries += 1
-        conf = entry.get("conf", 0.0)
-
-        remove = False
-        if min_confidence is not None and conf < min_confidence:
-            remove = True
-
-        if remove:
-            pruned_entries += 1
-            if archive_summary_path:
-                archive_summary["pruned"].append(
-                    {
-                        "key": list(key),
-                        "confidence": float(conf),
-                        "mask": int(entry.get("mask", 0)),
-                    }
-                )
-        else:
-            keep[key] = entry
-
-    # If dry-run, do not modify anything
-    if dry_run:
-        source_store.close()
-        elapsed = time.time() - start_time
-        if resolved_archive_summary_path:
-            os.makedirs(os.path.dirname(resolved_archive_summary_path) or ".", exist_ok=True)
-            with open(resolved_archive_summary_path, "w") as f:
-                json.dump(archive_summary, f)
-        return {
-            "operation": "prune_and_compact_store",
-            "success": True,
-            "entries_processed": total_entries,
-            "entries_modified": pruned_entries,
-            "elapsed_seconds": elapsed,
-        }
-
-    # Perform compaction into destination
-    # If destination == store_path we reuse the existing instance
-    if destination == resolved_store_path:
-        # Rewrite in-place using existing store API
-        source_store.set_data_dict(keep)
-        source_store.commit()
-        source_store.close()
-    else:
-        # Write to new path
-        source_store.close()
-        dest_store = OrbitStore(destination)
-        dest_store.set_data_dict(keep)
-        dest_store.commit()
-        dest_store.close()
-
-    if resolved_archive_summary_path:
-        os.makedirs(os.path.dirname(resolved_archive_summary_path) or ".", exist_ok=True)
-        with open(resolved_archive_summary_path, "w") as f:
-            json.dump(archive_summary, f)
-
-    elapsed = time.time() - start_time
-    return {
-        "operation": "prune_and_compact_store",
-        "success": True,
-        "entries_processed": total_entries,
-        "entries_modified": pruned_entries,
-        "elapsed_seconds": elapsed,
-    }
-
-
-"""
-NOTE: To ensure all stores/views are safely closed on process exit, register their close methods with atexit
-at the point where you instantiate them, e.g.:
-
-    import atexit
-    store = OrbitStore(...)
-    atexit.register(store.close)
-
-This avoids referencing undefined variables at the module level.
-"""
-
-
 def to_native(obj: Any) -> Any:
-    import numpy as np
+    """
+    Convert numpy types to native Python types for JSON serialization.
 
-    if isinstance(obj, dict):
-        return {k: to_native(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [to_native(v) for v in obj]
-    elif isinstance(obj, tuple):
-        return tuple(to_native(v) for v in obj)
-    elif isinstance(obj, np.generic):
-        return obj.item()
+    Args:
+        obj: Object to convert
+
+    Returns:
+        Native Python object
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
     else:
         return obj
 
@@ -1409,11 +942,5 @@ __all__ = [
     "ReadOnlyView",
     "MultiKnowledgeView",
     "create_multi_knowledge_view",
-    "normalize_confidence",
-    "confidence_equals",
     "load_phenomenology_map",
-    "merge_phenotype_maps",
-    "export_knowledge_statistics",
-    "validate_ontology_integrity",
-    "prune_and_compact_store",
 ]

@@ -7,13 +7,82 @@ the learning process through Monodromic Fold.
 """
 
 import math
-from typing import Any, Dict, Tuple, cast, Optional, List
+from typing import Any, Tuple, cast, Optional
 
 import numpy as np
 
 from baby import governance
-from baby.contracts import PhenotypeEntry, ValidationReport
+from baby.contracts import PhenotypeEntry
 from baby.information import InformationEngine
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ---------- EXON PRODUCT COMPUTATION --------------------
+
+
+def exon_product_from_state(state_index: int, theta: float, orbit_size: int) -> int:
+    """
+    Project the 48-bit state tensor to an 8-bit exon product using theta and orbit size.
+
+    This provides the baseline mask when no specific learning exists for a (state, token) pair.
+    The exon product encodes the state's intrinsic resonance characteristics.
+
+    Args:
+        state_index: Canonical index of the physical state
+        theta: Angular divergence from the archetypal state (radians)
+        orbit_size: Cardinality of the state's phenomenological orbit
+
+    Returns:
+        8-bit exon product encoding state's baseline characteristics
+    """
+    # Theta normalization: map [0, π] to [0, 1]
+    theta_norm = min(1.0, theta / math.pi)
+
+    # Orbit variety normalization: larger orbits have lower specificity
+    orbit_norm = min(1.0, orbit_size / 1000.0)
+
+    # Map state_index to the correct intron range where tokens are available (0x80-0xf0)
+    # Use the lower 8 bits of state_index to map to the range 128-240
+    base_intron = 128 + (state_index & 0xFF) % 113  # 113 = 240 - 128 + 1
+
+    # Apply theta and orbit size modulation
+    theta_factor = int(theta_norm * 7)  # 0-7 range
+    orbit_factor = int(orbit_norm * 7)  # 0-7 range
+
+    # Combine into final intron with bit family structure
+    exon_product = base_intron ^ (theta_factor << 4) ^ orbit_factor
+
+    # Return raw product - no scaling, no clamping
+    return exon_product & 0xFF
+
+
+def orbit(intron: int) -> list[int]:
+    """
+    Compute the deterministic orbit of an 8-bit intron under (LI, FG, BG) masks.
+
+    This provides endogenous variety through the group action of CGM on one byte.
+
+    Args:
+        intron: 8-bit intron value
+
+    Returns:
+        List of introns in the orbit (up to 4 elements, no RNG)
+    """
+    from baby.governance import EXON_LI_MASK, EXON_FG_MASK, EXON_BG_MASK
+
+    seen = {intron}
+    out = [intron]
+    for m in (EXON_LI_MASK, EXON_FG_MASK, EXON_BG_MASK):
+        v = intron ^ m
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+# ---------- COMPACT PACK / UNPACK (9-byte fixed) --------------------
 
 
 class InferenceEngine:
@@ -43,22 +112,6 @@ class InferenceEngine:
         self.store = phenotype_store
 
         self.phenomenology_map = phenomenology_map
-
-        assert self.s2._keys is not None
-        self.endogenous_modulus = len(self.s2._keys)
-
-        # Cache the maximum variety to avoid recomputation
-        oc = self.s2.orbit_cardinality
-        if hasattr(oc, "max"):
-            self._v_max = oc.max()
-        else:
-            self._v_max = max(oc)
-        if self._v_max == 0:
-            raise ValueError("S2 orbit cardinality cannot be zero.")
-
-        # Initialize TokenSTT for efficient token-level state transitions
-        # Note: TokenSTT is not currently used - keeping for future integration
-        self.token_stt = None
 
     def get_phenotype(self, state_index: int, token_id: int) -> PhenotypeEntry:
         """
@@ -150,157 +203,16 @@ class InferenceEngine:
 
         entry["key"] = key
         entry["_new"] = entry_new
+
+        # Check if mask would change before calling learn()
+        old_mask = entry.get("mask", 0)
+        new_mask = governance.fold(old_mask, last_intron & 0xFF)
+
+        # Early return if mask unchanged and not a new entry
+        if new_mask == old_mask and not entry_new:
+            return
+
         self.learn(cast(PhenotypeEntry, entry), last_intron & 0xFF, rep_pre)
-
-    def validate_knowledge_integrity(self) -> ValidationReport:
-        def _flush_store(s: Any) -> None:
-            if hasattr(s, "_flush"):
-                s._flush()
-            if hasattr(s, "commit"):
-                s.commit()
-            for attr in ("private_store", "public_store", "base_store"):
-                if hasattr(s, attr):
-                    _flush_store(getattr(s, attr))
-
-        _flush_store(self.store)
-
-        total_entries = 0
-        anomaly_count = 0
-        seen: set[tuple[int, int]] = set()
-
-        # Walk down to the lowest OrbitStore (or anything that has an 'index') to inspect raw keys
-        def _unwrap_raw_store(s: Any) -> Any:
-            for attr in ("base_store", "private_store", "public_store"):
-                if hasattr(s, attr):
-                    return _unwrap_raw_store(getattr(s, attr))
-            return s
-
-        raw_store = _unwrap_raw_store(self.store)
-        raw_pairs: list[tuple[tuple[int, int], Any]] = []
-        if hasattr(raw_store, "iter_entries"):
-            # raw_store.iter_entries() on OrbitStore yields the key used in its index (true raw key)
-            try:
-                raw_pairs = list(raw_store.iter_entries())
-            except Exception:
-                raw_pairs = []
-
-        def _norm_key(store_key: tuple[int, int], entry: Any) -> tuple[int, int]:
-            # Used only for deduplication, not for anomaly detection
-            # For token-aware keys, the key is already (state_index, token_id)
-            return store_key
-
-        for store_key, entry in raw_pairs:
-            norm_key = _norm_key(store_key, entry)
-            if norm_key in seen:
-                anomaly_count += 1
-            seen.add(norm_key)
-            total_entries += 1
-
-        return cast(
-            ValidationReport,
-            {
-                "total_entries": len(seen),
-                "average_confidence": 0.0,  # Confidence no longer stored
-                "store_type": type(self.store).__name__,
-                "modified_entries": anomaly_count,
-            },
-        )
-
-    def apply_confidence_decay(self, decay_factor: float = 0.99) -> Dict[str, Any]:
-        """
-        Legacy method for compatibility - confidence is now computed at runtime.
-
-        Returns a report indicating no entries were modified since confidence
-        is no longer stored in phenotype entries.
-        """
-
-        def _flush_store(s: Any) -> None:
-            if hasattr(s, "_flush"):
-                s._flush()
-            if hasattr(s, "commit"):
-                s.commit()
-            for attr in ("private_store", "public_store", "base_store"):
-                if hasattr(s, attr):
-                    _flush_store(getattr(s, attr))
-
-        _flush_store(self.store)
-
-        total_entries = 0
-        for _ in self.store.iter_entries():
-            total_entries += 1
-
-        return {
-            "total_entries": total_entries,
-            "decayed_entries": 0,  # No decay applied since confidence not stored
-            "decay_factor": decay_factor,
-        }
-
-    def manage_orbit_entropy(self, max_tokens_per_orbit: int = 64) -> int:
-        """
-        Manage phenotype storage by orbit entropy instead of raw confidence.
-        Keeps the most informative tokens per orbit.
-        """
-        # Group entries by orbit
-        orbit_tokens: Dict[int, List[Tuple[int, Any]]] = {}  # orbit_id -> [(token_id, entry)]
-
-        for key, entry in self.store.iter_entries():
-            state_idx, token_id = key
-
-            # Get orbit representative
-            orbit_id = state_idx
-            if self.phenomenology_map is not None:
-                orbit_id = int(self.phenomenology_map[state_idx])
-
-            if orbit_id not in orbit_tokens:
-                orbit_tokens[orbit_id] = []
-            orbit_tokens[orbit_id].append((token_id, entry))
-
-        removed_count = 0
-
-        for orbit_id, tokens in orbit_tokens.items():
-            if len(tokens) <= max_tokens_per_orbit:
-                continue
-
-            # Score by mask entropy * uniqueness (confidence no longer stored)
-            scored_tokens = []
-            for token_id, entry in tokens:
-                # Use mask bit diversity as a proxy for information content
-                mask = entry.get("mask", 0)
-                mask_entropy = bin(mask).count("1") / 8.0  # Normalized bit count
-
-                # Higher score for rare tokens (anti-log frequency)
-                # Calculate actual frequency from store
-                token_frequency = 1  # Default frequency
-                try:
-                    # Count occurrences of this token across all states
-                    token_count = 0
-                    for _, entry_check in self.store.iter_entries():
-                        if entry_check and entry_check.get("key") and entry_check["key"][1] == token_id:
-                            token_count += 1
-                    token_frequency = max(1, token_count)
-                except Exception:
-                    pass
-                uniqueness = 1.0 / (1.0 + math.log(token_frequency))
-                score = mask_entropy * uniqueness
-                scored_tokens.append((score, token_id, entry))
-
-            # Keep top K by score
-            scored_tokens.sort(reverse=True)
-
-            # Remove excess tokens
-            for _, token_id, entry in scored_tokens[max_tokens_per_orbit:]:
-                key = entry["key"]
-                if hasattr(self.store, "delete"):
-                    try:
-                        self.store.delete(key)
-                        removed_count += 1
-                    except Exception:
-                        pass
-
-        if hasattr(self.store, "commit"):
-            self.store.commit()
-
-        return removed_count
 
     def _create_default_phenotype(self, context_key: Tuple[int, int]) -> PhenotypeEntry:
         """
@@ -320,12 +232,3 @@ class InferenceEngine:
                 "key": context_key,
             },
         )
-
-    def prune_low_confidence_entries(self, confidence_threshold: float = 0.05) -> int:
-        """
-        Legacy method for compatibility - confidence is now computed at runtime.
-
-        Since confidence is no longer stored, this method returns 0.
-        Use manage_orbit_entropy() for actual entry pruning based on physics.
-        """
-        return 0
