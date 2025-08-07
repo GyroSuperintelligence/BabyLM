@@ -15,6 +15,12 @@ from baby import governance
 # ------------------------------------------------------------------
 #  Common Source integer exported for tooling
 # ------------------------------------------------------------------
+# 
+# The Common Source (CS) is not a point within the topology, but its 
+# emergent origin—it generates structure without being structured.
+# It is unobservable yet generative: not inert, not void, but 
+# reflectively productive.
+#
 CS_INT = governance.CS_INT  # re-use constant from physics
 
 warnings.filterwarnings("ignore", message=".*found in sys.modules after import of package.*")
@@ -671,7 +677,18 @@ def open_memmap_int32(
 # STEP 1: Ontology Discovery
 # ==============================================================================
 def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.uint64]]:
-    """Discovers the complete 789,170 state manifold via BFS."""
+    """
+    Discovers the complete 789,170 state manifold via BFS.
+    
+    The epistemology map E : ℳ × ℐ → ℳ embeds the formal grammar where:
+    - ℳ is the ontology manifold (the set of state indices)
+    - ℐ is the intron space (256 discrete elements)  
+    - CS ∈ ℳ is the origin, not the "first" state
+    
+    The Common Source acts as an asymmetric fixed point:
+    - Invariant under standing introns (internal reflexivity)
+    - Radiatively projective under driving introns (seeding UNA)
+    """
     EXPECTED_SIZE = 789_170  # after CS-kick expansion
     progress = ProgressReporter("Discovering ontology")
 

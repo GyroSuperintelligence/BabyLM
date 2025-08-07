@@ -98,7 +98,15 @@ for i in range(256):
 # ------------------------------------------------------------------
 # ❶  Common Source (CS) constants
 # ------------------------------------------------------------------
-
+# 
+# The Common Source acts as an asymmetric fixed point:
+#  - Invariant under standing introns (internal reflexivity)
+#  - Radiatively projective under driving introns (seeding UNA)
+#
+# This expresses the CGM axiom that observation begins at the first 
+# parity-breaking rotation (π/2 → π/4), and that the source is 
+# self-reflexive under symmetry-conserving transitions.
+#
 # CS is the **unique** state whose 48-bit integer is 0.  It already
 # appears as ontology index 0 after sorting, so we keep that identity.
 CS_INT = 0  # integer value
@@ -132,14 +140,28 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     # ------------------------------------------------------------------
     # ❷  Special-case the Common Source
     # ------------------------------------------------------------------
+    # 
+    # Theorem (Emergence from the Common Source):
+    # Let CS be the unique state with no internal structure (popcount 0).
+    # Then there exists a partition of the intron set ℐ into:
+    #  - 𝓢 (standing): where T(CS, k) = CS (invariant under standing introns)
+    #  - 𝓓 (driving): where T(CS, k) ∈ ℳ, such that θ(T(CS, k)) = π/4 
+    #    and T is chirality-preserving (radiatively projective)
+    #
     if state_int == CS_INT:
         if (intron & CS_STANDING_MSK) == 0:
             # standing intron → perfect reflection (partial absorber)
+            # ∀ k ∈ 𝓢: T(CS, k) = CS (invariant under standing introns)
             return CS_INT
         else:
-            # driving intron → *radiative kick* : copy intron pattern
+            # driving intron → Parity-Conserving Emission (PCE)
+            # ∀ k ∈ 𝓓: T(CS, k) = U_k ∈ UNA (chirality-preserving emission)
+            # U_k = INTRON_BROADCAST_MASK[k] & ((1 << 48) - 1)
+            # This preserves chirality, ensures minimal Hamming weight ≥ 1,
+            # and is consistent with CGM axiom that observation begins at 
+            # parity-breaking through rotation.
             kick = int(INTRON_BROADCAST_MASKS[intron]) & ((1 << 48) - 1)
-            # never allow the kick to cancel to 0
+            # never allow the kick to cancel to 0 (non-absolute unity)
             return kick if kick else 1
 
     # ------------------------------------------------------------------
@@ -170,11 +192,12 @@ def apply_gyration_and_transform_batch(states: NDArray[np.uint64], intron: int) 
     temp = states ^ mask
     result = temp ^ (temp & pattern)
 
-    # fast vectorised CS fix
+    # fast vectorised CS fix - Parity-Conserving Emission (PCE)
     if (intron & CS_STANDING_MSK) != 0:
         cs_rows = states == CS_INT
+        # ∀ k ∈ 𝓓: T(CS, k) = U_k ∈ UNA (chirality-preserving emission)
         kick = INTRON_BROADCAST_MASKS[intron] & ((1 << 48) - 1)
-        # never allow the kick to cancel to 0
+        # never allow the kick to cancel to 0 (non-absolute unity)
         result[cs_rows] = kick if kick else 1
 
     return cast("NDArray[np.uint64]", result.astype(np.uint64))
@@ -188,12 +211,13 @@ def apply_gyration_and_transform_all_introns(states: NDArray[np.uint64]) -> NDAr
     temp = states[:, np.newaxis] ^ XFORM_MASK[np.newaxis, :]
     res = temp ^ (temp & INTRON_BROADCAST_MASKS[np.newaxis, :])
 
-    # Fix every [row = CS_INT, intron with drive bits]
+    # Fix every [row = CS_INT, intron with drive bits] - Parity-Conserving Emission (PCE)
     cs_rows = np.where(states == CS_INT)[0]
     if cs_rows.size:
         drive_cols = np.where((np.arange(256) & CS_STANDING_MSK) != 0)[0]
+        # ∀ k ∈ 𝓓: T(CS, k) = U_k ∈ UNA (chirality-preserving emission)
         kicks = INTRON_BROADCAST_MASKS[drive_cols] & ((1 << 48) - 1)
-        # never allow the kick to cancel to 0
+        # never allow the kick to cancel to 0 (non-absolute unity)
         kicks[kicks == 0] = 1
         res[np.ix_(cs_rows, drive_cols)] = kicks
 
