@@ -671,7 +671,8 @@ def open_memmap_int32(
 # STEP 1: Ontology Discovery
 # ==============================================================================
 def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.uint64]]:
-    """Discovers the complete 788,986 state manifold via BFS."""
+    """Discovers the complete 789,170 state manifold via BFS."""
+    EXPECTED_SIZE = 789_170  # after CS-kick expansion
     progress = ProgressReporter("Discovering ontology")
 
     origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
@@ -694,7 +695,7 @@ def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.
             break
         depth += 1
         layer_sizes.append(len(current_level))
-        progress.update(len(discovered), total=788_986, extra=f"depth={depth}")
+        progress.update(len(discovered), total=EXPECTED_SIZE, extra=f"depth={depth}")
 
     progress.done()
 
@@ -703,8 +704,10 @@ def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.
     assert sum(layer_sizes) + 1 == len(discovered), "Layer sizes do not sum to total states (including origin)"
 
     # Validate
-    if len(discovered) != 788_986:
-        raise RuntimeError(f"Expected 788,986 states, found {len(discovered):,}")
+    if len(discovered) != EXPECTED_SIZE:
+        raise RuntimeError(
+            f"Expected {EXPECTED_SIZE:,} states, found {len(discovered):,}"
+        )
 
     if depth != 6:
         raise RuntimeError(f"Expected diameter 6, found {depth}")
