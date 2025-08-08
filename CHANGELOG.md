@@ -2,6 +2,42 @@
 
 ---
 
+## [v0.9.6.9-alpha] – 2025-08-08
+
+### Physics-First Kernel Implementation
+
+**Core Achievement**: Implemented a minimal, self-contained `baby/kernel.py` that demonstrates physics-based text generation without the complexity of the full system.
+
+**Kernel Features**:
+- **Real Physics Tables**: Integrates actual epistemology (789,170 × 256), ontology, and theta tables from the production system
+- **Dual Generation Modes**:
+  - *Parrot Mode*: Perfect reproduction of learned sequences (works 100%)
+  - *Resonance Mode*: Physics-based generation using endogenous resonance without scoring
+- **LEB128 + ψ Isomorphism**: Complete token-to-intron physics mapping using LEB128 encoding and ψ(b) = b XOR 0xAA boundary transcription
+- **CGM Cycle Stages**: Implements 8-step Common Governance Model cycle detection from theta values (CS → UNA → ONA → BU_IN → BU_EG → CLOSURE)
+
+**Physics Implementation**:
+- **Cycle Gating**: Forward-only stage transitions prevent trivial loops
+- **CS Asymmetric Emission**: Common Source distinguishes standing vs driving introns, preferentially emits [CLS] tokens to initiate sequences
+- **Theta-Window Neighborhoods**: Retrieval based on angular divergence windows rather than exact state matching
+- **Mask Interference**: Neural-like firing condition based on bitwise overlap between exon products and learned masks
+- **Special Token Stages**: [CLS] restricted to CS stage, [SEP] to closure stages (BU_EG/CLOSURE)
+- **6-Step Memory**: Active context limited to diameter of state-graph as per theory
+
+**Testing Switches**: Each physics component can be independently enabled/disabled for ablation studies
+
+**Breakthrough Results**:
+- Eliminated repetitive [CLS] loops that plagued previous versions
+- Achieved diverse token generation: [CLS], content tokens, [SEP] in proper sequence
+- Stage-aware progression visible: CS (θ=0.000) → BU_IN (θ=1.318) → BU_EG (θ=1.487)
+- Physics-driven selection without confidence scores, penalties, or rewards
+
+**Status**: Kernel demonstrates that endogenous resonance can drive text generation. Ready for integration with main system.
+
+**Legacy Note**: Previous approaches using confidence scoring and engineering patches have been superseded by this physics-first implementation. Legacy Code has been left on the side until the kernel is perfected.
+
+---
+
 ## [v0.9.6.8-alpha] – 2025-08-07 - Unstable
 
 ### Major Architecture Overhaul Aligned with CGM Theory
