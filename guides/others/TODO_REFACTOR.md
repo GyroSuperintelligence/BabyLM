@@ -47,7 +47,7 @@
 - [x] **BloomFilter hashing**: Remove uint8 clamp on `context_key[1]` (token IDs may exceed 255)
 - [x] **Cache keys**: Update comments to reflect `(state_idx, token_id, store_id)` uses ints, not uint8
 - [x] **Maintenance utilities**: Replace any remaining field reads with new names and add fallback defaults
-- [x] **OrbitStore index**: Update `_load_index` / `_write_index` to handle `(uint32, uint32)` tuples
+- [x] **PhenotypeStore index**: Update `_load_index` / `_write_index` to handle `(uint32, uint32)` tuples
 - [x] **View classes**: Update comments to use "token_id" instead of "intron"
 
 ### 2.2 Enhance `toys/communication/tokenizer.py` ✅ COMPLETED

@@ -13,7 +13,7 @@ project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 from baby.information import SEP_ID, encode_text
-from baby.policies import OrbitStore
+from baby.policies import PhenotypeStore
 
 
 def check_prompt_candidates(store_path: str, prompt: str) -> None:
@@ -22,7 +22,7 @@ def check_prompt_candidates(store_path: str, prompt: str) -> None:
     print(f"Store: {store_path}")
 
     # Open the store
-    store = OrbitStore(store_path)
+    store = PhenotypeStore(store_path)
 
     # Encode the prompt
     prompt_bytes = encode_text(prompt, name="bert-base-uncased")

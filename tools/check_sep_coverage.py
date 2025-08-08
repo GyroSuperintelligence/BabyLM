@@ -14,7 +14,7 @@ project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 from baby.information import SEP_ID
-from baby.policies import OrbitStore
+from baby.policies import PhenotypeStore
 
 
 def check_sep_coverage(store_path: str) -> None:
@@ -22,7 +22,7 @@ def check_sep_coverage(store_path: str) -> None:
     print(f"Checking SEP coverage in: {store_path}")
 
     # Open the store
-    store = OrbitStore(store_path)
+    store = PhenotypeStore(store_path)
 
     # Count SEP entries
     sep_entries = 0

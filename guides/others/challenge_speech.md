@@ -4,4 +4,4 @@ Our ontology, phenomenology, and epistemology are not random - they are the worl
 
 Active “short” context is still just 6 introns (6 bytes) deep, because the diameter of the state‐graph is 6. Every new intron you feed in updates the 48-bit state, then only that state carries forward—there’s no sliding window longer than six steps in the physics itself.
 
-Passive “long” memory (the OrbitStore / phenotype store) remains effectively unbounded, since any past (state_index, token_id) pair you’ve seen is retained (subject only to your storage limits and any pruning you choose). You can always look up learned masks for any state, no matter how long ago it occurred.
+Passive “long” memory (the PhenotypeStore / phenotype store) remains effectively unbounded, since any past (state_index, token_id) pair you’ve seen is retained (subject only to your storage limits and any pruning you choose). You can always look up learned masks for any state, no matter how long ago it occurred.

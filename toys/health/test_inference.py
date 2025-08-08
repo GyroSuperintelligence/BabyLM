@@ -14,14 +14,14 @@ import numpy as np
 from baby import governance
 from baby.contracts import PhenotypeEntry, AgentConfig
 from baby.information import InformationEngine
-from baby.policies import OrbitStore
+from baby.policies import PhenotypeStore
 from baby.intelligence import GyroSI
 
 
 @pytest.fixture
-def temp_store(tmp_path: Path) -> Generator[OrbitStore, None, None]:
-    """Simple OrbitStore for testing, completely isolated."""
-    store = OrbitStore(str(tmp_path / "test_store.bin"))
+def temp_store(tmp_path: Path) -> Generator[PhenotypeStore, None, None]:
+    """Simple PhenotypeStore for testing, completely isolated."""
+    store = PhenotypeStore(str(tmp_path / "test_store.bin"))
     yield store
     store.close()
 
@@ -29,7 +29,7 @@ def temp_store(tmp_path: Path) -> Generator[OrbitStore, None, None]:
 class TestInferenceEngineInitialization:
     """Test InferenceEngine initialization and setup."""
 
-    def test_initialization_with_real_components(self, test_env: Dict[str, Any], temp_store: OrbitStore) -> None:
+    def test_initialization_with_real_components(self, test_env: Dict[str, Any], temp_store: PhenotypeStore) -> None:
         """Test engine initializes correctly with real components."""
         # Load real ontology data
         keys = test_env["main_meta_files"]["ontology"]
@@ -50,7 +50,7 @@ class TestInferenceEngineInitialization:
         assert s3_engine.endogenous_modulus == len(s2_engine._keys)
         assert s3_engine._v_max is not None and s3_engine._v_max > 0
 
-    def test_initialization_validates_orbit_cardinality(self, test_env: Dict[str, Any], temp_store: OrbitStore) -> None:
+    def test_initialization_validates_orbit_cardinality(self, test_env: Dict[str, Any], temp_store: PhenotypeStore) -> None:
         """Test initialization fails with zero orbit cardinality."""
         keys = test_env["main_meta_files"]["ontology"]
         ep = test_env["main_meta_files"]["epistemology"]
@@ -68,7 +68,7 @@ class TestInferenceEngineInitialization:
             with pytest.raises(ValueError, match="orbit cardinality cannot be zero"):
                 InferenceEngine(s2_engine, temp_store)
 
-    def test_v_max_calculation(self, test_env: Dict[str, Any], temp_store: OrbitStore) -> None:
+    def test_v_max_calculation(self, test_env: Dict[str, Any], temp_store: PhenotypeStore) -> None:
         """Test _v_max is correctly calculated from orbit cardinality."""
         keys = test_env["main_meta_files"]["ontology"]
         ep = test_env["main_meta_files"]["epistemology"]

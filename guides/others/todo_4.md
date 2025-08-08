@@ -30,7 +30,7 @@
 - [x] **COMPLETED ROUND 3: CLEAN SLATE IMPLEMENTATION**
   - Removed non-STT branch, using only `self.s2.ep` as single source of truth
   - Renamed `_byte_buf` to `_raw_leb_buf` with clear comments about LEB bytes
-  - Added `index_by_state` to OrbitStore for O(k) candidate lookup (partially implemented)
+  - Added `index_by_state` to PhenotypeStore for O(k) candidate lookup (partially implemented)
   - Updated all resonance calculations to use canonical representative state
   - Marked TokenSTT as optional utility for future acceleration
   - Added 48-bit state bounds assertion
@@ -391,9 +391,9 @@ diff --git a/baby/intelligence.py b/baby/intelligence.py
 
 ---
 
-### 2) Generation always random unless the store is a raw `OrbitStore`
+### 2) Generation always random unless the store is a raw `PhenotypeStore`
 
-`generate_token_exon()` calls `self.operator.store.iter_keys_for_state(...)`. That method exists only on `OrbitStore`. In practice your store is wrapped (usually `CanonicalView(OverlayView(...))`), so **no candidates are ever returned** and generation falls back to `_generate_random_token()`.
+`generate_token_exon()` calls `self.operator.store.iter_keys_for_state(...)`. That method exists only on `PhenotypeStore`. In practice your store is wrapped (usually `CanonicalView(OverlayView(...))`), so **no candidates are ever returned** and generation falls back to `_generate_random_token()`.
 
 **Fix — implement `iter_keys_for_state` on the view wrappers:**
 

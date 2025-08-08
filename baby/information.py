@@ -11,14 +11,17 @@ from pathlib import Path
 from functools import lru_cache
 
 from baby import governance
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
 #  Common Source integer exported for tooling
 # ------------------------------------------------------------------
-# 
-# The Common Source (CS) is not a point within the topology, but its 
+#
+# The Common Source (CS) is not a point within the topology, but its
 # emergent origin—it generates structure without being structured.
-# It is unobservable yet generative: not inert, not void, but 
+# It is unobservable yet generative: not inert, not void, but
 # reflectively productive.
 #
 CS_INT = governance.CS_INT  # re-use constant from physics
@@ -430,8 +433,8 @@ class InformationEngine:
                 else:
                     self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
             except Exception as e:
-                print(f"Warning: Could not load phenomenology map from {phenomap_path}: {e}")
-                print("Continuing without phenomenology mapping...")
+                logger.warning("Could not load phenomenology map from %s: %s", phenomap_path, e)
+                logger.info("Continuing without phenomenology mapping...")
                 self.orbit_map = None
                 self.orbit_cardinality = np.ones(len(self._keys) if self._keys is not None else 0, dtype=np.uint32)
 
@@ -444,14 +447,7 @@ class InformationEngine:
         else:
             self._theta_table = None
 
-        # Load stabiliser_order array
-        stabiliser_order_path = str(Path(theta_path).parent / "stabiliser_order.npy")
-        try:
-            self.stabiliser_order = np.load(stabiliser_order_path, mmap_mode="r")
-        except Exception as e:
-            print(f"Warning: Could not load stabiliser_order from {stabiliser_order_path}: {e}")
-            print("Continuing without stabiliser order data...")
-            self.stabiliser_order = None
+
 
         self._v_max = 1 if self.orbit_cardinality is None else int(np.max(self.orbit_cardinality))
 
@@ -679,12 +675,12 @@ def open_memmap_int32(
 def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.uint64]]:
     """
     Discovers the complete 789,170 state manifold via BFS.
-    
+
     The epistemology map E : ℳ × ℐ → ℳ embeds the formal grammar where:
     - ℳ is the ontology manifold (the set of state indices)
-    - ℐ is the intron space (256 discrete elements)  
+    - ℐ is the intron space (256 discrete elements)
     - CS ∈ ℳ is the origin, not the "first" state
-    
+
     The Common Source acts as an asymmetric fixed point:
     - Invariant under standing introns (internal reflexivity)
     - Radiatively projective under driving introns (seeding UNA)
@@ -717,14 +713,12 @@ def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.
     progress.done()
 
     # Print expansion pattern for verification
-    print(f"Layer sizes (expansion pattern): {layer_sizes}")
+    logger.info("Layer sizes (expansion pattern): %s", layer_sizes)
     assert sum(layer_sizes) + 1 == len(discovered), "Layer sizes do not sum to total states (including origin)"
 
     # Validate
     if len(discovered) != EXPECTED_SIZE:
-        raise RuntimeError(
-            f"Expected {EXPECTED_SIZE:,} states, found {len(discovered):,}"
-        )
+        raise RuntimeError(f"Expected {EXPECTED_SIZE:,} states, found {len(discovered):,}")
 
     if depth != 6:
         raise RuntimeError(f"Expected diameter 6, found {depth}")
@@ -741,7 +735,7 @@ def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.
     #   archetypal_index = np.where(keys == archetypal_int)[0][0]
     # Example (current ontology):
     #   Archetypal state (GENE_Mac_S) is at index 549871 in the sorted ontology (position 549872 of 788986).
-    print(f"✓ Saved ontology keys to: {output_path}")
+    logger.info("Saved ontology keys to: %s", output_path)
 
     return keys
 
@@ -880,7 +874,7 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
         keys_path: Path to ontology_keys.npy
         output_path: Path to save phenomenology_map.npy
     """
-    print("=== [Phenomenology Core Builder] ===")
+    logger.info("[Phenomenology Core Builder]")
 
     # Load data
     ep = np.load(ep_path, mmap_mode="r")
@@ -891,10 +885,10 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
     idx_to_state = keys
 
     # Core: Compute canonical phenomenology (all 256 introns)
-    print("Computing canonical phenomenology (all 256 introns)...")
+    logger.info("Computing canonical phenomenology (all 256 introns)...")
     all_introns = list(range(256))
     canonical, orbit_sizes, _ = _compute_sccs(ep, idx_to_state, all_introns)
-    print(f"  Found {len(np.unique(canonical))} canonical orbits (expected 256)")
+    logger.info("Found %d canonical orbits (expected 256)", len(np.unique(canonical)))
 
     # Save canonical as .npy
     np.save(output_path, canonical.astype(np.int32))
@@ -905,7 +899,7 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
         rep = canonical[i]  # Get the representative for this state
         sizes[i] = orbit_sizes[rep]  # Set the cardinality of this state's orbit
     np.save(str(Path(output_path).with_name("orbit_sizes.npy")), sizes)
-    print(f"\n✓ Saved canonical phenomenology to: {output_path}")
+    logger.info("Saved canonical phenomenology to: %s", output_path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -954,28 +948,28 @@ if __name__ == "__main__":
 
     try:
         if args.command == "ontology":
-            print("=== [Step 1] Ontology Generation ===")
+            logger.info("[Step 1] Ontology Generation")
             ontology_map = discover_and_save_ontology(args.output)
-            print(f"\n✓ Saved: {args.output}")
-            print(f"✓ Total states discovered: {len(ontology_map):,}\n")
+            logger.info("Saved: %s", args.output)
+            logger.info("Total states discovered: %s", f"{len(ontology_map):,}")
 
         elif args.command == "epistemology":
-            print("=== [Step 2] Epistemology Table ===")
+            logger.info("[Step 2] Epistemology Table")
             build_state_transition_table(args.keys, args.output)
             file_size = os.path.getsize(args.output) / 1024**2
-            print(f"\n✓ Saved: {args.output}")
-            print(f"✓ File size: {file_size:.1f} MB\n")
+            logger.info("Saved: %s", args.output)
+            logger.info("File size: %.1f MB", file_size)
 
         elif args.command == "phenomenology":
-            print("=== [Step 3] Phenomenology Mapping ===")
+            logger.info("[Step 3] Phenomenology Mapping")
             build_phenomenology_map(args.ep, args.keys, args.output)
             # No final summary, as output is now a .npy file
 
         else:
-            print("Unknown command", file=sys.stderr)
+            logger.error("Unknown command")
             sys.exit(1)
 
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.exception("Error: %s", e)
         # Re-raise to preserve stack trace for debugging
         raise

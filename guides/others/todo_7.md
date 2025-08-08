@@ -38,7 +38,7 @@
 
 * `self.operator.store.iter_keys_for_state(rep_state_idx)`
 
-for every token you try to emit. If the underlying store or decorator (OverlayView → ReadOnlyView → CanonicalView → OrbitStore) does not implement a true **state-indexed iterator**, it must filter by scanning either the in-RAM index or the file. With 28,827 entries this should not “hang”, but the effect compounds: you call this per emitted token, per agent, and also during ingestion feedback. On a 2015 laptop with mmapped assets and Python dispatch overhead, this becomes indistinguishable from a hang.
+for every token you try to emit. If the underlying store or decorator (OverlayView → ReadOnlyView → CanonicalView → PhenotypeStore) does not implement a true **state-indexed iterator**, it must filter by scanning either the in-RAM index or the file. With 28,827 entries this should not “hang”, but the effect compounds: you call this per emitted token, per agent, and also during ingestion feedback. On a 2015 laptop with mmapped assets and Python dispatch overhead, this becomes indistinguishable from a hang.
 
 2. **You repeatedly perform O(log N) binary searches to compute θ even though you already have the state index.**
    In `IntelligenceEngine.process_egress()`:
@@ -59,7 +59,7 @@ div = self.s2.measure_state_divergence(self._cached_state_int)
 * the token’s complete LEB128 sequence
 
 5. **A slow or recursive `iter_keys_for_state` implementation can deadlock via decorator layering.**
-   OverlayView → ReadOnlyView → CanonicalView → OrbitStore is fine provided *each layer* implements `iter_keys_for_state(state)` without falling back to `iter_entries()` or re-calling the overlay. If any layer (particularly CanonicalView) delegates incorrectly, you can get recursion or a near-infinite traversal. You have evidence of this risk: the endpoint “hangs” but the process stays alive and CPU mostly idle.
+   OverlayView → ReadOnlyView → CanonicalView → PhenotypeStore is fine provided *each layer* implements `iter_keys_for_state(state)` without falling back to `iter_entries()` or re-calling the overlay. If any layer (particularly CanonicalView) delegates incorrectly, you can get recursion or a near-infinite traversal. You have evidence of this risk: the endpoint “hangs” but the process stays alive and CPU mostly idle.
 
 6. **`compute_token_divergence()` uses the wrong origin.**
    You hard-code `archetypal_state = 0` (index), but the archetype is not guaranteed to be index 0 (your own comment shows it can be 549,871). This does not cause the hang, but it invalidates diagnostics and any policy using that function.
@@ -73,7 +73,7 @@ div = self.s2.measure_state_divergence(self._cached_state_int)
 You need a **state-indexed view** in the store layer, and a small **per-state candidate cache** in S4 to avoid re-hitting storage every token.
 
 1. **Store: add a true state index and a dedicated iterator.**
-   In `OrbitStore` (in `baby.policies`), ensure you build a map:
+   In `PhenotypeStore` (in `baby.policies`), ensure you build a map:
 
 ```python
 # Built once when opening the store or loading its .idx:

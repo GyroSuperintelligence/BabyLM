@@ -140,7 +140,7 @@ def build_agent(private_knowledge_path: Path) -> GyroSI:
         "epistemology_path": str(PROJECT_ROOT / "memories/public/meta/epistemology.npy"),
         "public_knowledge_path": str(dummy_public),
         "private_knowledge_path": str(private_knowledge_path),
-        "learn_batch_size": 5000,  # write threshold for OrbitStore (optimized for bulk replay)
+        "learn_batch_size": 5000,  # write threshold for PhenotypeStore (optimized for bulk replay)
         "enable_phenomenology_storage": True,  # <-- top-level (so CanonicalView is enabled explicitly)
         "preferences": preferences_config,
     }

@@ -314,7 +314,7 @@ All system-wide types, configuration, and maintenance protocols are declared in 
 
 ### 6.5.2 Storage and Policy Layer
 
-The canonical knowledge store is **OrbitStore**, implemented as a single-file, append-only stream (`.bin`), supporting atomic get/put/close interfaces. It guarantees the following:
+The canonical knowledge store is **PhenotypeStore**, implemented as a single-file, append-only stream (`.bin`), supporting atomic get/put/close interfaces. It guarantees the following:
 
 - **Storage contract:**
     - `get(context_key: Tuple[int, int]) -> Optional[Any]`  # (state_index, token_id)
@@ -329,7 +329,7 @@ The canonical knowledge store is **OrbitStore**, implemented as a single-file, a
 - **CanonicalView** applies canonicalisation (using a phenomenology map) for all key lookups, so each unique operational orbit is consistently addressed regardless of its physical context. The original context is retained in `_original_context` for provenance.  
   - All lookups and puts are transparently normalised.
 
-- **OverlayView** composes private (agent) and public (shared) stores, always writing to the private overlay, and reading from private first, then public. Both overlays must implement the OrbitStore interface.
+- **OverlayView** composes private (agent) and public (shared) stores, always writing to the private overlay, and reading from private first, then public. Both overlays must implement the PhenotypeStore interface.
 
 - **ReadOnlyView** wraps any store, disabling writes and allowing only retrieval and iteration.
 
@@ -383,7 +383,7 @@ The GyroSI system enforces strict separation between the core physics kernel, ru
 │   ├── inference.py          # Interpretation, Maintenance & Validation
 │   ├── information.py        # Measurement, Storage, Knowledge Curation
 │   ├── intelligence.py       # API, Orchestration, Protocol Adapters
-│   └── policies.py           # OrbitStore, storage overlays, policy and maintenance functions
+│   └── policies.py           # PhenotypeStore, storage overlays, policy and maintenance functions
 ├── baby.sh
 ├── guides/
 │   ├── Genetics.md
@@ -420,7 +420,7 @@ The GyroSI system enforces strict separation between the core physics kernel, ru
 
 **Knowledge Storage:**
 
-* Knowledge storage is managed via canonical OrbitStore instances and overlays, as defined in Section 6.5.
+* Knowledge storage is managed via canonical PhenotypeStore instances and overlays, as defined in Section 6.5.
 * Physical state, ontology, and phenomenology maps are located under `memories/public/meta/`.
 * Public and private overlays maintain agent-specific and shared knowledge, indexed by canonical context keys.
 

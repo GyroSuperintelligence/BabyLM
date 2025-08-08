@@ -631,7 +631,7 @@ No stage scales super-linearly; everything is constant-time per token, or linear
   < 1 MB for counters, rolling buffers, and hooks.  
   The only live physics is the current 48-bit state tensor and 6 introns for active context.
 
-- **OrbitStore (phenotype index)**  
+- **PhenotypeStore (phenotype index)**  
   On disk: ≈ **12 B/phenotype** (record: mask, conf, key).  
   In RAM:  
     - **Optimised C index:** ≈ 28 B per entry (two 32-bit ints + pointer).  
@@ -661,7 +661,7 @@ No stage scales super-linearly; everything is constant-time per token, or linear
 - 32 parallel agents: **14–16 million tokens/sec** in aggregate.
 
 **Disk/flash writes:**  
-- OrbitStore append log: **~150 MB/s** on NVMe at default batch size.  
+- PhenotypeStore append log: **~150 MB/s** on NVMe at default batch size.  
 - Increasing batch to 1,000 reduces fsync overhead for heavy ingest.
 
 **Startup cost:**  
@@ -691,7 +691,7 @@ No stage scales super-linearly; everything is constant-time per token, or linear
 GyroSI has two memory domains:
 
 1. **Active working state**: always 48 bits (6 bytes) + a 6-intron sliding window.
-2. **Passive long-term memory (OrbitStore)**: grows with experience, one entry per (state_index, token_id) pair seen.
+2. **Passive long-term memory (PhenotypeStore)**: grows with experience, one entry per (state_index, token_id) pair seen.
 
 This means even microcontrollers need only a 6-byte working state.  
 Everything else can reside on SD/flash and be fetched on demand.

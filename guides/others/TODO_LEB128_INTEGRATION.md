@@ -25,7 +25,7 @@
 - [x] **LEB128GyroSI class**: Integrated LEB128 physics with core pipeline
 - [x] **Token-level learning**: `learn_token_leb128()` with proper mask evolution
 - [x] **Token-level generation**: `generate_token_leb128()` using learned phenotypes
-- [x] **Store integration**: Works with actual OrbitStore (28,943 entries)
+- [x] **Store integration**: Works with actual PhenotypeStore (28,943 entries)
 - [x] **Real tokenizer**: Integration with BERT tokenizer successful
 
 ### 5. Testing and Validation ✅
@@ -131,7 +131,7 @@
 - [x] **External adapter**: Ensure API still works with LEB128 integration
 - [ ] **Diagnostic scripts**: Update `diagnose_trained_model.py` for LEB128
 - [x] **Hook system**: Ensure hooks work with token-level processing
-- [x] **Store compatibility**: Ensure OrbitStore works with new phenotype format
+- [x] **Store compatibility**: Ensure PhenotypeStore works with new phenotype format
 - [ ] **Configuration**: Update any config files for LEB128 settings
 
 ## 🎯 TODO - Performance and Optimization

@@ -84,7 +84,7 @@ if temperature < 0.1 or len(candidates) <= 3:
 **Impact**: Ensures best candidate is always selected.
 
 ### 6. Confidence Decay Helpers - FIXED
-**Issue**: Check for `.log` file that OrbitStore never creates.
+**Issue**: Check for `.log` file that PhenotypeStore never creates.
 
 **Fix**: Updated `baby/policies.py` lines 1052-1053 and 1116-1117 to use direct file existence checks:
 ```python
@@ -167,7 +167,7 @@ self.s2 = InformationEngine(
 
 **Fix**: Added fast helper to iterate keys by state and used it:
 ```python
-# In OrbitStore class:
+# In PhenotypeStore class:
 def iter_keys_for_state(self, state_idx: int) -> Iterator[Tuple[int, int]]:
     with self.lock:
         for (s_idx, tok_id) in self.index.keys():

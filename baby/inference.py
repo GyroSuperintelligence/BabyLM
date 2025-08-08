@@ -24,38 +24,26 @@ logger = logging.getLogger(__name__)
 
 def exon_product_from_state(state_index: int, theta: float, orbit_size: int) -> int:
     """
-    Project the 48-bit state tensor to an 8-bit exon product using theta and orbit size.
+    Physics-native projection of 48-bit state to 8-bit exon product via bit-family extraction.
 
-    This provides the baseline mask when no specific learning exists for a (state, token) pair.
-    The exon product encodes the state's intrinsic resonance characteristics.
+    The 8-bit product encodes (LI | FG | BG) as (2 | 3 | 3) bits taken from the
+    state's canonical index. This preserves family structure without heuristic scaling.
 
     Args:
-        state_index: Canonical index of the physical state
-        theta: Angular divergence from the archetypal state (radians)
-        orbit_size: Cardinality of the state's phenomenological orbit
+        state_index: Canonical index of the physical state (48-bit manifold index)
+        theta: Unused here (retained for signature compatibility)
+        orbit_size: Unused here (retained for signature compatibility)
 
     Returns:
-        8-bit exon product encoding state's baseline characteristics
+        8-bit exon product encoding the state's family composition
     """
-    # Theta normalization: map [0, π] to [0, 1]
-    theta_norm = min(1.0, theta / math.pi)
+    # Extract family components deterministically from the state index
+    li_component = (state_index >> 6) & 0x03   # 2 bits
+    fg_component = (state_index >> 12) & 0x07  # 3 bits
+    bg_component = (state_index >> 21) & 0x07  # 3 bits
 
-    # Orbit variety normalization: larger orbits have lower specificity
-    orbit_norm = min(1.0, orbit_size / 1000.0)
-
-    # Map state_index to the correct intron range where tokens are available (0x80-0xf0)
-    # Use the lower 8 bits of state_index to map to the range 128-240
-    base_intron = 128 + (state_index & 0xFF) % 113  # 113 = 240 - 128 + 1
-
-    # Apply theta and orbit size modulation
-    theta_factor = int(theta_norm * 7)  # 0-7 range
-    orbit_factor = int(orbit_norm * 7)  # 0-7 range
-
-    # Combine into final intron with bit family structure
-    exon_product = base_intron ^ (theta_factor << 4) ^ orbit_factor
-
-    # Return raw product - no scaling, no clamping
-    return exon_product & 0xFF
+    exon_product = ((li_component << 6) | (fg_component << 3) | bg_component) & 0xFF
+    return int(exon_product)
 
 
 def orbit(intron: int) -> list[int]:

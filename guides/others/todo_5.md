@@ -10,7 +10,7 @@ clean slate, no half-migrated paths, and keep only what earns its keep. I read t
 * **Learning remains token-level** (fold on the **last intron** of each token) — it’s the cleanest, consistent signal with LEB128 boundaries.
 * **Temperature is a pure function of θ** now (`_temperature_from_theta`); we remove hidden constants elsewhere.
 * **Kill unused emission buffer** and vestigial helpers (\_choose\_intron, etc.). We have a single **unified emission path**: pick token → emit its LEB128 bytes → feed them back through the same egress path.
-* **Speed up candidate lookup** during generation: add a lightweight `index_by_state` in the `OrbitStore` and use it in `iter_keys_for_state` (O(k) instead of scanning the whole index dict). No new dependencies; tiny memory overhead.
+* **Speed up candidate lookup** during generation: add a lightweight `index_by_state` in the `PhenotypeStore` and use it in `iter_keys_for_state` (O(k) instead of scanning the whole index dict). No new dependencies; tiny memory overhead.
 * **One STT source of truth**: don’t keep both `self.epistemology` and `self.epistemology`. Use `self.epistemology` everywhere.
 * **Math/physics audit**: governance masks, Monodromic Fold, θ lookup, token boundary checks are consistent and correct as implemented; keep them and add a few sanity asserts.
 
@@ -160,12 +160,12 @@ Also drop `_sync_index_from_state_int` / `_sync_state_fields_from_index` bodies 
 
 ### 3) Candidate fetch: make it O(k)
 
-Right now `OrbitStore.iter_keys_for_state` scans the entire `index` dict. For generation, this is the hot path. Add and maintain `index_by_state: Dict[int, list[int]]`, update it in `_load_index` and `put`, and then take candidates directly.
+Right now `PhenotypeStore.iter_keys_for_state` scans the entire `index` dict. For generation, this is the hot path. Add and maintain `index_by_state: Dict[int, list[int]]`, update it in `_load_index` and `put`, and then take candidates directly.
 
 **Patch (policies.py)** — add the state index:
 
 ```diff
-@@ class OrbitStore.__init__
+@@ class PhenotypeStore.__init__
          self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
 +        self.index_by_state: Dict[int, List[int]] = {}
 @@ _load_index (when building from file)
@@ -297,7 +297,7 @@ These are worth asserting in code or tests (cheap):
 ## Minor hygiene / cleanup
 
 * In `IntelligenceEngine.__init__`, you can get rid of `self.use_phenomenology` — just check `self.phenomenology_map is not None`.
-* In `policies.OrbitStore.get`, you already short-circuit via Bloom filter; good. Consider documenting that index + mmap give you O(1) I/O.
+* In `policies.PhenotypeStore.get`, you already short-circuit via Bloom filter; good. Consider documenting that index + mmap give you O(1) I/O.
 * In `inference.InferenceEngine`, the `token_stt` attribute is currently unused — leave it `None` by default and don’t allocate it. It’s fine to keep the class for future precompute experiments.
 
 ---
@@ -419,12 +419,12 @@ Below are the two most impactful patches in full context (so you can drop them i
          self._last_token_id = 0
 ```
 
-### B) OrbitStore: fast per-state keys
+### B) PhenotypeStore: fast per-state keys
 
 ```diff
 *** a/baby/policies.py
 --- b/baby/policies.py
-@@ class OrbitStore.__init__
+@@ class PhenotypeStore.__init__
          self.index: Dict[Tuple[int, int], Tuple[int, int]] = {}
          # O(1) candidate listing for a given state
          self.index_by_state: Dict[int, List[int]] = {}
@@ -526,7 +526,7 @@ def test_theta_bounds():
 - ✅ Kept `process_ingress` minimal and unified
 
 ### 3) Candidate fetch: make it O(k)
-- ✅ `index_by_state` optimization already implemented in OrbitStore
+- ✅ `index_by_state` optimization already implemented in PhenotypeStore
 - ✅ Fast per-state candidate lookup working
 
 ### 4) Use the representative index consistently
@@ -551,7 +551,7 @@ def test_theta_bounds():
 
 ### Minor hygiene / cleanup
 - [ ] Remove `self.use_phenomenology` → just check `self.phenomenology_map is not None`
-- [ ] Document O(1) I/O in OrbitStore.get
+- [ ] Document O(1) I/O in PhenotypeStore.get
 - [ ] Leave `token_stt` attribute as `None` by default
 
 ## 🎯 PERFORMANCE IMPROVEMENTS ACHIEVED

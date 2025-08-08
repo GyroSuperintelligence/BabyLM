@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from baby.contracts import PreferencesConfig, AgentConfig
 from baby.intelligence import AgentPool, GyroSI
-from baby.policies import OrbitStore
+from baby.policies import PhenotypeStore
 from contextlib import ExitStack
 import uuid
 
@@ -87,7 +87,7 @@ def test_env(tmp_path_factory: pytest.TempPathFactory) -> TestEnvDict:
     prefs_path.write_text(json.dumps(test_preferences, indent=2))
 
     # Initialize the public knowledge file so it exists
-    store = OrbitStore(test_preferences["public_knowledge"]["path"], base_path=Path(test_preferences["base_path"]))
+    store = PhenotypeStore(test_preferences["public_knowledge"]["path"], base_path=Path(test_preferences["base_path"]))
     store.close()
 
     return {
@@ -111,7 +111,7 @@ def agent_pool(test_env: TestEnvDict) -> Generator[AgentPool, None, None]:
 
     # Initialize empty public store
     public_path = prefs["public_knowledge"]["path"]
-    store = OrbitStore(public_path, base_path=Path(prefs["base_path"]))
+    store = PhenotypeStore(public_path, base_path=Path(prefs["base_path"]))
     store.close()
 
     pool = AgentPool(

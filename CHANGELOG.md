@@ -2,51 +2,118 @@
 
 ---
 
-## [v0.9.6.8-alpha] – 2025-08-07 - Unstable Alpha Release
+## [v0.9.6.8-alpha] – 2025-08-07 - Unstable
 
-### Critical Architecture Fixes and Spectral Neighborhood Implementation
+### Major Architecture Overhaul Aligned with CGM Theory
 
-**1. Repetitive Output Diagnosis and State Advancement Fix**
+This release represents a complete refactoring of the intelligence engine to eliminate "engineering patches" and implement a theory-driven, physics-pure approach to text generation based on the Common Governance Model (CGM).
 
-* Identified root cause of repetitive token generation ("the the the..."): guard in `IntelligenceEngine._emit_token_with_feedback()` preventing physics state advancement during generation when `learning_enabled=False`.
-* Applied 2-line fix removing conditional guard around `process_egress_bulk(token_bytes)` to ensure physics state always advances during token emission.
-* Confirmed physics state evolution is restored during generation while preserving learning suppression.
+**1. Root Cause Analysis and Initial Fix**
 
-**2. Physics-Pure Core Loop Cleanup**
+* **Identified repetitive output bug**: Guard in `_emit_token_with_feedback()` prevented physics state advancement during generation when `learning_enabled=False`, causing model to generate "the the the..." repeatedly.
+* **Applied physics restoration fix**: Removed conditional guard around `process_egress_bulk(token_bytes)` to ensure physics state always advances during token emission while preserving learning suppression during generation.
 
-Based on theoretical framework analysis, removed superficial engineering patches accumulated over recent iterations:
+**2. Comprehensive Cleanup of Non-Physics Code**
 
-* **Removed from `baby/intelligence.py`**: theta buffers, cycle step history, temperature heuristics, timing printouts, candidate caches, tokenizer filtering, hand-tuned weights, SEP-forcing logic, confidence validation calls.
-* **Removed from `baby/inference.py`**: endogenous modulus, token STT placeholders, v_max cache, confidence decay mechanisms, orbit entropy management, low-confidence pruning.
-* **Removed from `baby/policies.py`**: confidence normalization, append-only cache layers, async fsync executors (replaced with synchronous `os.fsync()`), phenomenology map caching, TTL/LFU maintenance utilities.
-* **Updated imports**: Cleaned `baby/__init__.py` to reflect removed functions and maintain module coherence.
+Systematically removed accumulated "superficial patches" across three core modules:
 
-**3. Stimulus Processing Architecture Fix**
+* **`baby/intelligence.py`**: Removed θ-buffers, cycle detection, temperature heuristics, probe timing, candidate caches, tokenizer filtering, hand-tuned weights, SEP-forcing logic, confidence validation calls, and debugging noise.
+* **`baby/inference.py`**: Removed endogenous modulus, token STT placeholders, v_max cache, confidence decay mechanisms, orbit entropy management, low-confidence pruning stubs, and maintenance helpers.
+* **`baby/policies.py`**: Removed confidence normalization functions, append-only cache layers, async fsync executors (replaced with synchronous approach), phenomenology map caching, and TTL/LFU maintenance.
 
-* Fixed critical gap in stimulus ingestion: `respond()` method now calls `self.engine.process_egress_bulk(data)` to ensure user input drives physics state before generation.
-* Modified `test_archetypal_continuation.py` to rely on proper stimulus processing rather than manual state manipulation.
-* Removed archetypal state reset after ingestion to maintain learned context continuity.
+**3. Common Source (CS) Physics Implementation**
 
-**4. Memory-Physics Bridge Diagnosis**
+Implemented A1's proposal for Common Source behavior aligned with CGM theory:
 
-* Identified fundamental architectural gap: phenomenology map too aggressively collapses rich 6-byte state space into few representative states, breaking bridge between short-term physics and long-term memory.
-* Confirmed through debugging that physics states advance correctly (549871 → 68423 → 305816 → 476 → 736148) but most patterns learned during ingestion are stored under representative state 0.
-* During generation, model visits different state orbits (649274, 626853, 178385) where no learned patterns exist, forcing fallback to deterministic physics.
+* **CS Partial Absorption**: State 0 (CS_INT) now reflects "standing introns" (those without FG/BG bits) back to itself.
+* **CS Radiative Emission**: "Driving introns" (with FG/BG bits) trigger Parity-Conserving Emission (PCE) using `INTRON_BROADCAST_MASKS` to seed the UNA ring.
+* **Applied to all variants**: Updated `apply_gyration_and_transform`, `apply_gyration_and_transform_batch`, and `apply_gyration_and_transform_all_introns` with CS-specific logic.
+* **Updated ontology size**: Modified `discover_and_save_ontology` to expect 789,170 states (up from 788,986) due to CS kick expansion.
 
-**5. Spectral Neighborhood Retrieval Implementation**
+**4. Stimulus Processing Architecture**
 
-* Implemented `_neighbourhood()` method using θ-distance filtering with stabilizer-order constraints for spectral neighborhood retrieval.
-* Enhanced `generate_token_exon()` to use neighborhood retrieval instead of single representative state lookup.
-* Combined physics-derived resonant candidates with learned patterns from local state manifold using interference terms.
-* Added proper formal docstrings following PEP8 standards throughout implementation.
+* **Fixed stimulus ingestion gap**: `respond()` method now calls `self.engine.process_egress_bulk(data)` to ensure user input drives physics state before generation.
+* **Updated test setup**: Modified `test_archetypal_continuation.py` to not reset agent state after ingestion, maintaining learned context continuity.
+* **Removed manual processing**: Eliminated manual byte-by-byte seed processing in favor of proper stimulus ingestion.
 
-**6. Bit Extraction Logic Corrections**
+**5. State Canonicalization and Memory Alignment**
 
-* Fixed `exon_product_from_state()` bit extraction to use correct bit masking: `(state_index >> 6) & 0x03` instead of bit counting.
-* Removed artificial scaling/clamping that was "annihilating entropy" - restored raw exon product calculation.
-* Moved `exon_product_from_state` and `orbit` functions from `baby/governance.py` to `baby/inference.py` for proper module organization.
+* **Diagnosed learning/retrieval mismatch**: Learning occurred at direct `state_index` while retrieval used `phenomenology_map[state_index]`, causing memory gaps.
+* **Fixed retrieval canonicalization**: Modified `generate_token_exon` to use representative states (`self._get_pheno_rep(succ_index)`) when querying OrbitStore.
+* **Aligned token scoring**: Changed `_cached_tok_tail` to return first byte's intron (used for state transition) instead of last intron, ensuring scoring alignment with physics.
 
-**Notes**: Implementation requires syntax/indentation fixes before testing. Spectral neighborhood approach theoretically sound but pending validation.
+**6. Spectral Neighborhood Implementation**
+
+* **Implemented `_neighbourhood()` method**: Uses θ-distance filtering (max_theta=0.15) with stabilizer-order constraints for learned pattern retrieval.
+* **Enhanced candidate generation**: Combined physics-derived resonant introns with learned patterns from local state manifold.
+* **Expanded candidate diversity**: Added nearby exon products (`(exon_product + i) % 256 for i in [-2, -1, 1, 2]`) and even-spread sampling to reduce `[unusedX]` token bias.
+* **Filtered problematic tokens**: Removed `[unusedX]` tokens from candidate sets and deprioritized self-loops and CS collapses.
+
+**7. Learning Process Realignment**
+
+* **Implemented post-state learning**: Modified `_process_epistemology_chunk` to learn phenotype entries at the final post-state after a token's full byte sequence processing, aligning with CGM memory principles.
+* **Added `learn_token_postonly`**: New method for post-state phenotype learning with proper OrbitStore key management.
+* **Memory retrieval at predicted post-state**: Generation now queries memory using the predicted successor state rather than current state.
+
+**8. Vectorized Physics Scoring**
+
+* **Enhanced action value calculation**: Implemented vectorized computation of cooling term (`dθ = θ_now - θ_next`) and fold entropy using `governance.fold()`.
+* **Added UNA alignment**: Included `theta_alignment = -np.square(θ_next - una)` to favor successor states near π/4 threshold.
+* **Removed engineering artifacts**: Eliminated `stabiliser_order`, `sink_penalty`, reinforcement terms, and cycle avoidance logic.
+
+**9. Performance and Caching Optimizations**
+
+* **Hoisted LRU caches**: Moved `_get_token_bytes`, `_get_token_first_intron`, `_get_full_mask`, `_get_pheno_rep`, `_get_neighborhood_reps`, `_get_tokens_by_tail` from local functions to instance-level methods.
+* **Thread safety**: Added lock around `_process_egress_bulk_internal` to prevent data races on `_state_buf`.
+* **Fixed mmap lifetime**: Ensured file handles remain open for mmap object lifetime to prevent "Bad file descriptor" errors.
+
+**10. Code Quality and Type Safety**
+
+* **Fixed all indentation errors**: Corrected multiple indentation and syntax issues across `baby/intelligence.py`.
+* **Resolved mypy/pyright errors**: Added proper type hints, `Optional[Any]` declarations, and `getattr` fallbacks for OS-specific functions.
+* **Added robust error handling**: Improved `commit()` robustness with existence checks before file operations.
+* **Cleaned debug output**: Removed excessive debug prints while maintaining essential state transition logging.
+
+**11. Module Organization**
+
+* **Function relocation**: Moved `exon_product_from_state` and `orbit` from `governance.py` to `inference.py` for proper separation of concerns.
+* **Fixed bit extraction logic**: Corrected to use proper bit masking (`(state_index >> 6) & 0x03`) instead of bit counting.
+* **Export consistency**: Added `CS_INT` export to `information.py` for tooling consistency.
+
+### Key Theoretical Advances
+
+This release implements several breakthrough insights:
+
+1. **Physics-Pure Generation**: Eliminated all heuristics, randomness, and "patches" in favor of deterministic physics-based token selection.
+2. **Memory-State Alignment**: Aligned learning and retrieval processes with CGM's temporal evolution principles.
+3. **Common Source Behavior**: Transformed CS from a problematic sink into a theoretically correct partial absorber and UNA ring generator.
+4. **Spectral Neighborhoods**: Implemented true θ-distance based pattern retrieval for learned associations.
+
+**10. External Interface Modernization**
+
+* **Centralized streaming**: Added `stream_turn()` in `baby/intelligence.py` for token-by-token generation, mirroring `orchestrate_turn()` but yielding bytes for Server-Sent Events (SSE).
+* **Adapter simplification**: Refactored `toys/communication/external_adapter.py` to use centralized streaming instead of duplicating priming/decoding logic; removed async timeout wrappers that were causing client timeouts.
+* **Knowledge store preferences integration**: Wired `write_threshold`, `use_mmap`, and `max_file_size_mb` from preferences into `PhenotypeStore` with automatic rollover to `knowledge_YYYYMMDD.bin` when size caps are exceeded.
+
+**11. Storage Layer Cleanup**
+
+* **Legacy code removal**: Cleaned `baby/policies.py` by removing outdated comments about "bloom filters", "9-byte fixed structs", and "async fsync thread-pools"; simplified to reflect actual minimal record format: `<ULEB128 state_idx> <ULEB128 n_pairs=1> <ULEB128 token_id> <uint8 mask>`.
+* **Fixed corruption warnings**: Corrected `_unpack_phenotype()` to return bytes consumed relative to offset, eliminating "Unsupported n_pairs value" warnings during index rebuilds.
+* **Phenomenology key optimization**: Simplified `CanonicalView._get_phenomenology_key()` to use direct numpy indexing without fallback checks.
+* **Thread safety**: Made threading explicit with `from threading import RLock` across all view decorators.
+
+**12. Testing Infrastructure**
+
+* **Model test modernization**: Renamed and redesigned `toys/experiments/test_external_adapter_e2e.py` → `toys/experiments/test_model.py` with emoji-rich output, clearer phases (Learning → Testing → Evaluation), and proper test structure for untrained model validation.
+* **Removed legacy artifacts**: Cleaned up old test files and improved user experience with formatted console output.
+
+### Known Limitations
+
+* **Performance**: Generation may be slower due to vectorized physics calculations and neighborhood retrieval.
+* **Memory Usage**: Expanded candidate sets and caching may increase memory footprint.
+* **Convergence**: Model behavior under the new physics requires empirical validation.
+
+This represents the most significant architectural change since the project's inception, moving from engineering-driven to theory-driven implementation.
 
 ---
 
@@ -346,7 +413,7 @@ This release focuses on critical plumbing fixes and training infrastructure impr
 #### 🚀 Performance Optimizations Implemented
 
 * **Candidate Lookup Optimization**
-  * Implemented O(1) state-indexed candidate retrieval in `OrbitStore`
+  * Implemented O(1) state-indexed candidate retrieval in `PhenotypeStore`
   * Added per-state candidate caching in `IntelligenceEngine` to reduce storage hits
   * Eliminated full-store scans that were causing generation hangs at ~200-300MB
 
@@ -395,7 +462,7 @@ This release focuses on critical plumbing fixes and training infrastructure impr
   * Restored correctness to divergence diagnostics and temperature gating
 
 * **Store Iteration Improvements**
-  * Fixed unreachable code in `OrbitStore.iter_entries()`
+  * Fixed unreachable code in `PhenotypeStore.iter_entries()`
   * Improved cycle counting accuracy in bulk processing
   * Enhanced store consistency with proper index integration
 
@@ -505,19 +572,19 @@ This release addresses critical correctness issues, focusing on store iteration,
 
 #### 🚨 Critical Fixes
 
-* **OrbitStore.iter_entries() - Fixed Unreachable Code**
+* **PhenotypeStore.iter_entries() - Fixed Unreachable Code**
   * Fixed unreachable code after `return` statement
   * Now properly yields pending writes first, then committed entries via index
   * No more full file scanning - uses O(1) index lookups
   * Includes defensive copies to prevent mutation issues
 
-* **OrbitStore.index_by_state - Fixed Synchronization Issues**
+* **PhenotypeStore.index_by_state - Fixed Synchronization Issues**
   * Fixed `index_by_state` not being updated during writes and deletes
   * Now properly maintains `index_by_state` in `_flush()` and `delete()` methods
   * Prevents stale token IDs and ensures `iter_keys_for_state()` sees new tokens immediately
   * O(k) candidate lookup performance maintained with complete data
 
-* **OrbitStore.iter_keys_for_state - Added Pending Writes**
+* **PhenotypeStore.iter_keys_for_state - Added Pending Writes**
   * Now includes pending writes first (most recent), then committed keys
   * Ensures generation and learning see consistent data
   * Prevents missing recent tokens during active writing
@@ -536,7 +603,7 @@ This release addresses critical correctness issues, focusing on store iteration,
   * All state access now uses `self.current_state_index` consistently
   * Simplified sync methods and removed vestigial code
 
-* **OrbitStore.data Property - Simplified to Reuse iter_entries()**
+* **PhenotypeStore.data Property - Simplified to Reuse iter_entries()**
   * Removed duplicate code and dead code paths
   * Now consistently uses the optimized iter_entries() method
   * Eliminates code duplication and potential inconsistencies
@@ -599,9 +666,9 @@ This release resolves the critical correctness issues that were causing hanging 
 
 ## [0.9.6.7] – 2025-08-01
 
-### 🚀 OrbitStore Simplification: Performance & Reliability Overhaul
+### 🚀 PhenotypeStore Simplification: Performance & Reliability Overhaul
 
-This release completely simplifies the OrbitStore system by removing the complex `append_only` mode and always using index-based lookups with Bloom filters. This eliminates hanging issues, improves performance dramatically, and makes the system much more reliable.
+This release completely simplifies the PhenotypeStore system by removing the complex `append_only` mode and always using index-based lookups with Bloom filters. This eliminates hanging issues, improves performance dramatically, and makes the system much more reliable.
 
 #### 🔧 Core Changes
 
@@ -611,7 +678,7 @@ This release completely simplifies the OrbitStore system by removing the complex
   * Always use Bloom filters for fast negative checks
   * Always use mmap for better file access performance
 
-* **Simplified OrbitStore Constructor**
+* **Simplified PhenotypeStore Constructor**
   * Removed `append_only` parameter from `__init__()`
   * Set `use_mmap=True` by default for better performance
   * Always create index files (`.idx`) for fast lookups
@@ -640,7 +707,7 @@ This release completely simplifies the OrbitStore system by removing the complex
 
 * **All Test Files**: Removed `append_only` parameter from all test scripts
 * **Diagnostic Script**: Updated to work with simplified system
-* **AgentPool**: Updated to use simplified OrbitStore
+* **AgentPool**: Updated to use simplified PhenotypeStore
 * **Intelligence Engine**: Removed append_only conditional logic
 * **All Store Views**: Updated to work with unified approach
 
@@ -683,7 +750,7 @@ This release implements persistent bloom filter serialization to eliminate the 1
   * Uses pickle for efficient storage of size, hash_count, and bit_array
   * Maintains exact false-positive rate and filter properties across reloads
 
-* **OrbitStore Side-Car Integration**
+* **PhenotypeStore Side-Car Integration**
   * Added `_bloom_sidecar_path()` to generate `.bloom` file path alongside `.bin` files
   * Added `_try_load_bloom()` for fast-path loading of pre-built filters
   * Added `_save_bloom()` to persist filters after training completion
@@ -710,8 +777,8 @@ If the side-car is deleted or millions of new phenotypes are added, regeneration
 
 ```bash
 python - <<'PY'
-from baby.policies import OrbitStore
-s = OrbitStore("toys/training/Archive/wikipedia_simple.bin", append_only=True)
+from baby.policies import PhenotypeStore
+s = PhenotypeStore("toys/training/Archive/wikipedia_simple.bin", append_only=True)
 s.commit()      # flush pending if any
 s._save_bloom() # rebuild & store
 s.close()
@@ -970,23 +1037,23 @@ The entire storage layer has been re-engineered for performance, durability, and
         7.  `governance_signature`: 5 × `uint8`
         8.  `context_signature`: `uint32`, `uint8`
         9.  `_original_context`: `uint32`, `uint8`
-    *   **Implementation:** Handled by new `_pack_phenotype` and `_unpack_phenotype` helpers in `baby.policies`. The `OrbitStore` index file format has been changed from MessagePack to JSON to handle tuple-key serialization.
+    *   **Implementation:** Handled by new `_pack_phenotype` and `_unpack_phenotype` helpers in `baby.policies`. The `PhenotypeStore` index file format has been changed from MessagePack to JSON to handle tuple-key serialization.
     *   **Migration Note:** No data migration is required for `.bin` files. Old index files will be automatically regenerated in the new JSON format on first load.
 
-*   **New: Append-Only `OrbitStore` Performance Optimizations**
+*   **New: Append-Only `PhenotypeStore` Performance Optimizations**
     *   **Bloom Filter:** Integrated for fast "definitely absent" checks, providing O(1) lookups for non-existent keys and avoiding expensive disk scans on large files. The filter capacity is estimated automatically from file size.
     *   **Memory-Mapping (mmap):** Now enabled by default for append-only stores, providing faster sequential scanning for lookups and iteration compared to standard file I/O. The mmap is intelligently re-opened on `commit()` to include new data.
     *   **Token-Level Training Cache:** A global micro-LRU cache (`maxsize=8192`) has been added for `get()` operations in append-only mode. It dramatically speeds up training workloads with repeated key lookups and features intelligent invalidation on `put()` and `commit()` to ensure data consistency.
 
-*   **New: `OrbitStore` Durability and Crash Safety**
-    *   **Graceful Shutdown:** `OrbitStore` now automatically registers `atexit` and signal handlers (SIGINT/SIGTERM). This forces a final flush of any pending writes before process termination, guaranteeing zero data loss on clean shutdowns (e.g., in containerized environments).
+*   **New: `PhenotypeStore` Durability and Crash Safety**
+    *   **Graceful Shutdown:** `PhenotypeStore` now automatically registers `atexit` and signal handlers (SIGINT/SIGTERM). This forces a final flush of any pending writes before process termination, guaranteeing zero data loss on clean shutdowns (e.g., in containerized environments).
     *   **Explicit `flush()` API:** A new `flush()` method is now available on all store and view layers for high-value writes that require immediate disk durability. This allows critical operations to bypass the standard write-behind batching.
     *   **Risk Profile:** With these changes, data loss is limited to a maximum of `write_threshold - 1` records only in the event of a hard crash or power failure.
 
 ### ✅ Preserved Functionality and Compatibility
 
 *   **No Schema Change:** The `PhenotypeEntry` contract remains unchanged. The new generative and storage logic reuses all existing metadata fields.
-*   **No Breaking API Changes:** All public APIs for `OrbitStore`, its views (`CanonicalView`, `OverlayView`, `ReadOnlyView`), and the core engines remain fully compatible.
+*   **No Breaking API Changes:** All public APIs for `PhenotypeStore`, its views (`CanonicalView`, `OverlayView`, `ReadOnlyView`), and the core engines remain fully compatible.
 *   **`.npy` Assets Unchanged:** All meta-files (`epistemology.npy`, `theta.npy`, etc.) continue to function identically.
 
 
@@ -1015,7 +1082,7 @@ Completed unsupervised ingestion of the full English Wikipedia dump using the `G
 #### 🛠️ Engine Configuration
 
 * Physics backend: CanonicalView + θ divergence + phenomenology map (enabled)
-* Storage: `OrbitStore` (append-only), with auto-compaction and confidence decay
+* Storage: `PhenotypeStore` (append-only), with auto-compaction and confidence decay
 * State transition kernel: JIT‑accelerated (Numba), STT loaded at runtime
 * Ingestion parallelism: `batch_size=512 KB`, `parallel_workers=2`
 
@@ -1285,7 +1352,7 @@ Training now hopefully will run at hardware‑limited throughput. Storage is por
 We authored and landed the full test suite below, and everything is green as of today. The codebase is also clean under `flake8`, `pyright`, and `mypy` (zero errors, zero warnings).
 
 **toys/health/conftest.py**
-Session‑scoped and per‑test fixtures to isolate all artefacts in temporary directories. Provides ready‑to‑use `GyroSI`, `AgentPool`, `OrbitStore`, and helper assertions for ontology/phenotype validity. Ensures no pollution of shared meta files and auto‑cleans temp state.
+Session‑scoped and per‑test fixtures to isolate all artefacts in temporary directories. Provides ready‑to‑use `GyroSI`, `AgentPool`, `PhenotypeStore`, and helper assertions for ontology/phenotype validity. Ensures no pollution of shared meta files and auto‑cleans temp state.
 
 **toys/health/test\_governance.py**
 Exhaustive checks for the physics layer (`governance.py`): constants, bit masks, and tensor structure; governance signature maths; Monodromic Fold properties (identity, absorber, annihilation, non‑commutativity/associativity); dual operator involution; 48‑bit transform bounds; batch consistency; transcription XOR/involution; tensor validation routines; and assorted edge cases.
@@ -1316,7 +1383,7 @@ No further action required for this cycle.
   - Replaced tensor-based θ calculation with fast XOR+bit_count+LUT approach.
   - Auto-generate `theta.npy` if missing for robust operation.
 
-- **OrbitStore and Storage:**
+- **PhenotypeStore and Storage:**
   - Changed `pending_writes` to dict for O(1) access.
   - Added time-based `fsync` fuse and `mark_dirty` for in-memory updates.
   - Optimized log replay and switched to `msgpack` serialization.
@@ -1384,7 +1451,7 @@ No further action required for this cycle.
   - Adds a REST façade integration test: starts the FastAPI app, POSTs to `/generate`, and asserts a 200 response, using fixtures to avoid data litter.
 
 * **Maintenance utilities**:
-  - **`prune_and_compact_store`** (`baby/policies.py`): Prunes and compacts an `OrbitStore` in one pass, with support for age/confidence thresholds, dry-run, and archiving pruned entries.
+  - **`prune_and_compact_store`** (`baby/policies.py`): Prunes and compacts an `PhenotypeStore` in one pass, with support for age/confidence thresholds, dry-run, and archiving pruned entries.
   - **CLI script** (`toys/maintenance/prune_compact.py`): Command-line tool to prune/compact stores, with flexible options.
   - **Exported** `prune_and_compact_store` in `baby/__init__.py` for easy import.
 
@@ -1491,8 +1558,8 @@ Here's a concise changelog entry capturing the essence of that addition:
 ## [0.9.6.2] – 2025-07-16
 
 ### Major Refactoring and Architecture Improvements
-- **Storage Layer Consolidation**: OrbitStore is now the single canonical storage class. All overlays and canonicalization are handled via decorators (CanonicalView, OverlayView, ReadOnlyView). Legacy/duplicate storage classes and factories removed.
-- **Async and Streaming Optimizations**: OrbitStore flush now uses async fsync (background thread). Batch learning uses O(1) memory streaming coaddition.
+- **Storage Layer Consolidation**: PhenotypeStore is now the single canonical storage class. All overlays and canonicalization are handled via decorators (CanonicalView, OverlayView, ReadOnlyView). Legacy/duplicate storage classes and factories removed.
+- **Async and Streaming Optimizations**: PhenotypeStore flush now uses async fsync (background thread). Batch learning uses O(1) memory streaming coaddition.
 - **Protocol and Type Hygiene**: PhenotypeStore protocol and all shared types (PhenotypeEntry, ManifoldData, AgentConfig, etc.) are now in baby/contracts.py (renamed from types.py). All storage implementations are in baby/policies.py (renamed from maintenance.py).
 - **Import and Packaging Consistency**: All imports now use absolute paths (from baby.*). No more relative imports for shared types or storage classes. Circular imports and shadowing issues resolved.
 - **PEP8 and Linting**: All major linter errors fixed (unused imports/variables, blank lines, whitespace, long lines). Guidance provided for using black and autoflake for future formatting.
@@ -1503,7 +1570,7 @@ Here's a concise changelog entry capturing the essence of that addition:
 ```
 baby/
   contracts.py      # All protocols and shared types (PhenotypeStore, etc.)
-  policies.py       # OrbitStore, CanonicalView, OverlayView, ReadOnlyView, and policy/maintenance functions
+  policies.py       # PhenotypeStore, CanonicalView, OverlayView, ReadOnlyView, and policy/maintenance functions
   information.py    # InformationEngine and related logic
   intelligence.py   # IntelligenceEngine, GyroSI, and orchestration logic
   inference.py      # Inference logic

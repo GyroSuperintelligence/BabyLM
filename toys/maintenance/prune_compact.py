@@ -1,5 +1,5 @@
 """
-Prune + compact an OrbitStore.
+Prune + compact an PhenotypeStore.
 
 Usage examples:
 ---------------
@@ -22,8 +22,8 @@ from baby.policies import prune_and_compact_store
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Prune and compact a GyroSI OrbitStore.")
-    p.add_argument("--store", required=True, help="Path passed originally to OrbitStore (without .log/.idx).")
+    p = argparse.ArgumentParser(description="Prune and compact a GyroSI PhenotypeStore.")
+    p.add_argument("--store", required=True, help="Path passed originally to PhenotypeStore (without .log/.idx).")
     p.add_argument("--output", help="Optional destination path; if omitted, compacts in-place.")
     p.add_argument("--max-age-days", type=float, help="Prune entries last updated more than this many days ago.")
     p.add_argument("--min-confidence", type=float, help="Prune entries with confidence below this value.")

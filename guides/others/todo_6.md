@@ -652,7 +652,7 @@ def _register_auto_prune_hook(self) -> None:
   - **Status**: Compaction option added with proper error handling
   - **Impact**: Realizes 12-byte phenotype promise and reduces storage bloat
 
-- [x] Increase Bloom filter capacity to 2M in OrbitStore.__init__
+- [x] Increase Bloom filter capacity to 2M in PhenotypeStore.__init__
   - **Status**: Bloom filter capacity increased from 1M to 2M entries
   - **Impact**: Reduces false positives and improves lookup performance
 - [x] Add token frequency weighting to reduce common word dominance

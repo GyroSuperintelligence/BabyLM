@@ -20,7 +20,7 @@ from baby import governance
 from baby.contracts import AgentConfig, CycleHookFunction, PreferencesConfig, PhenotypeEntry
 from baby.inference import InferenceEngine
 from baby.information import InformationEngine, SEP_ID
-from baby.policies import CanonicalView, OrbitStore, OverlayView, ReadOnlyView
+from baby.policies import CanonicalView, PhenotypeStore, OverlayView, ReadOnlyView
 
 
 class _TokBridge:
@@ -172,49 +172,46 @@ class IntelligenceEngine:
         # Reusable buffer for state trajectory computation (max 64K to prevent RAM explosion)
         self._state_buf = np.empty(65536, dtype=np.int32)
 
+        # --- hot-path caches ---------------------------------------------------
+        self._neigh_cache: Dict[Tuple[int, int], Tuple[int, ...]] = {}
+        self._cache_full_mask: Dict[int, int] = {}
+        self._cache_tok_first_intron: Dict[int, int] = {}
+        self._cache_tokens_by_tail: Dict[int, Tuple[int, ...]] = {}
+        self._cache_token_bytes: Dict[int, bytes] = {}
+
     def _action_value(self, state_idx: int, intron: int, mask: int) -> float:
         """
         Pure-physics utility for choosing the next token.
         No temperature, no stochasticity.
-
+        
         Args:
             state_idx: Current state index
             intron: Intron byte that would be applied
             mask: Learned mask for the candidate token
-
+            
         Returns:
             Action value (higher is better)
         """
-        import math
-
         next_state = int(self.epistemology[state_idx, intron])
-
+        
         # 1) cooling term (Δθ = θ - θ')
         θ_now = self.s2._theta_table[state_idx]
         θ_next = self.s2._theta_table[next_state]
         dθ = θ_now - θ_next  # we want positive (cooling)
 
-        # 2) stabiliser release |Σ_before| → |Σ_after|
-        stab_before = self.s2.stabiliser_order[state_idx]
-        stab_after = self.s2.stabiliser_order[next_state]
-        stab_gain = math.log(stab_before + 1e-9) - math.log(stab_after + 1e-9)
-
-        # 3) information injected by Fold
+        # 2) information injected by Fold
         current_mask = self._state_byte_projection(state_idx)
         fold_result = governance.fold(current_mask, mask)
         H_before = bin(current_mask).count("1")
         H_after = bin(fold_result).count("1")
         fold_entropy = H_after - H_before
 
-        # 4) sink penalty - discourage transitions to states with many self-loops
-        sink_penalty = self.s2.stabiliser_order[next_state] / 256.0
-
-        return float(dθ + stab_gain + fold_entropy - sink_penalty)
+        return float(dθ + fold_entropy)
 
     def _neighbourhood(self, state_idx: int, max_theta: float = 0.30) -> List[int]:
         """
         Return representative indices whose θ-distance to the current state
-        is ≤ max_theta and belong to the same stabiliser-order family.
+        is ≤ max_theta.
 
         This implements spectral neighborhood retrieval for accessing learned
         patterns from nearby states in the manifold topology.
@@ -226,20 +223,18 @@ class IntelligenceEngine:
         Returns:
             List of representative state indices in the local neighborhood
         """
-        if self.s2._theta_table is None or self.s2.stabiliser_order is None:
-            # Fallback to single representative if tables are missing
+        if self.s2._theta_table is None:
+            # Fallback to single representative if theta table is missing
             if self.operator.phenomenology_map is not None:
                 return [int(self.operator.phenomenology_map[state_idx])]
             return [state_idx]
 
-        # Get reference values for current state
+        # Get reference value for current state
         θ0 = self.s2._theta_table[state_idx]
-        stab0 = self.s2.stabiliser_order[state_idx]
 
         # Vectorized filter over the whole manifold
         θ = self.s2._theta_table
-        stab = self.s2.stabiliser_order
-        mask = (np.abs(θ - θ0) <= max_theta) & (stab == stab0)
+        mask = np.abs(θ - θ0) <= max_theta
 
         # Apply phenomenology projection to get representatives
         if self.operator.phenomenology_map is not None:
@@ -265,29 +260,60 @@ class IntelligenceEngine:
         return int(b0 ^ b1 ^ b2 ^ b3 ^ b4 ^ b5)
 
     def _emit_token_with_feedback(self, state_idx: int, theta: float) -> Tuple[int, bytes]:
-        """Select one token, emit its full LEB128 byte sequence, feed each byte through Egress.
+        """Select one token, emit its full LEB128 byte sequence, and advance physics.
         Returns (token_id, emitted_bytes)."""
-        # Optional: very noisy; never on by default to avoid stdout stalls
-        if getattr(self, "debug_mode", False):
-            # Print only the first few times per request/agent to avoid floods
-            if not hasattr(self, "_dbg_seen"):
-                self._dbg_seen = 0
-            if self._dbg_seen < 3:
-                self._dbg_seen += 1
-                self.debug_candidates(state_idx)
-
         tok_id = self.generate_token_exon(state_idx)
 
         from baby.information import token_id_to_bytes
 
         token_bytes = token_id_to_bytes(tok_id)
-
-        # Always advance the physics.  process_egress_bulk() itself
-        # skips memory writes when learning_enabled is False, so it is
-        # safe (and necessary) to call unconditionally.
+        # Advance physics unconditionally. Learning writes are gated by `learning_enabled`.
         self.process_egress_bulk(token_bytes)
 
         return tok_id, token_bytes
+
+    # ---------------- hot-path helpers (cached) ----------------
+    def _get_token_bytes(self, tok_id: int) -> bytes:
+        bs = self._cache_token_bytes.get(tok_id)
+        if bs is None:
+            bs = TOK.id_to_bytes(int(tok_id))
+            # simple cap to avoid unbounded growth
+            if len(self._cache_token_bytes) > 16384:
+                self._cache_token_bytes.clear()
+            self._cache_token_bytes[tok_id] = bs
+        return bs
+
+    def _get_token_first_intron(self, tok_id: int) -> int:
+        v = self._cache_tok_first_intron.get(tok_id)
+        if v is None:
+            data = self._get_token_bytes(tok_id)
+            v = governance.transcribe_byte(data[0]) & 0xFF if data else 0
+            if len(self._cache_tok_first_intron) > 32768:
+                self._cache_tok_first_intron.clear()
+            self._cache_tok_first_intron[tok_id] = v
+        return v
+
+    def _get_full_mask(self, tok_id: int) -> int:
+        m = self._cache_full_mask.get(tok_id)
+        if m is None:
+            from baby.information import token_to_introns
+
+            m = governance.fold_sequence(token_to_introns(int(tok_id))) & 0xFF
+            if len(self._cache_full_mask) > 32768:
+                self._cache_full_mask.clear()
+            self._cache_full_mask[tok_id] = m
+        return m
+
+    def _get_tokens_by_tail(self, intron: int) -> Tuple[int, ...]:
+        out = self._cache_tokens_by_tail.get(intron)
+        if out is None:
+            from baby.information import find_tokens_by_last_intron
+
+            out = tuple(find_tokens_by_last_intron(int(intron)))
+            if len(self._cache_tokens_by_tail) > 1024:
+                self._cache_tokens_by_tail.clear()
+            self._cache_tokens_by_tail[intron] = out
+        return out
 
     def process_egress(self, input_byte: int) -> int:
         input_byte &= 0xFF
@@ -325,17 +351,18 @@ class IntelligenceEngine:
                     return intron
                 self._prev_token_id = token_id
 
-                # Learn with pre-only storage using the token's last intron
+                # Learn at post-state using the token's last intron (Genetics §7.1/§5.5.4)
                 from baby.governance import token_last_intron
 
                 token_last_intron_byte = token_last_intron(token_id)
-                self.operator.learn_token_preonly(token_id, pre_state_index, token_last_intron_byte)
+                post_state_index = self.current_state_index
+                self.operator.learn_token_postonly(token_id, post_state_index, token_last_intron_byte)
 
-                # Get the pre-state entry for hooks
-                pre_entry = self.operator.store.get((pre_state_index, token_id))
+                # Get the post-state entry for hooks
+                post_entry = self.operator.store.get((post_state_index, token_id))
                 for hook in self.post_cycle_hooks:
                     try:
-                        hook(self, cast(PhenotypeEntry, pre_entry), intron, token_id, pre_state_index)
+                        hook(self, cast(PhenotypeEntry, post_entry), intron, token_id, post_state_index)
                     except Exception:
                         pass
 
@@ -478,7 +505,9 @@ class IntelligenceEngine:
                         pre_state = int(st[token_start_idx])
                         # Only learn if learning is enabled
                         if self.learning_enabled:
-                            self.operator.learn_token_preonly(token_id, pre_state, int(intron))
+                            # Learn post-state association at token closure
+                            post_state = int(st[i])  # state after applying this intron
+                            self.operator.learn_token_postonly(token_id, post_state, int(intron))
                         # Drop cached candidates for this representative state
                         rep = (
                             int(self.phenomenology_map[pre_state]) if self.phenomenology_map is not None else pre_state
@@ -496,15 +525,16 @@ class IntelligenceEngine:
                     # Get pre-state (where token started)
                     pre_state = int(st[token_start_idx])
 
-                    # Pre-only storage (only if learning is enabled)
+                    # Post-state storage (only if learning is enabled)
                     if self.learning_enabled:
-                        self.operator.learn_token_preonly(token_id, pre_state, int(intron))
+                        post_state = int(st[i])
+                        self.operator.learn_token_postonly(token_id, post_state, int(intron))
 
-                    # Get the pre-state entry for hooks
-                    pre_entry = self.operator.store.get((pre_state, token_id))
+                    # Get the post-state entry for hooks
+                    post_entry = self.operator.store.get((post_state, token_id))
                     for hook in self.post_cycle_hooks:
                         try:
-                            hook(self, cast(PhenotypeEntry, pre_entry), int(intron), token_id, pre_state)
+                            hook(self, cast(PhenotypeEntry, post_entry), int(intron), token_id, post_state)
                         except Exception:
                             pass
 
@@ -534,6 +564,7 @@ class IntelligenceEngine:
                     f"Final transition to state {new_state} is out of bounds "
                     f"for epistemology matrix (size {epistemology_size})"
                 )
+
             self.current_state_index = new_state
             # keep state integer in sync with index
             try:
@@ -618,19 +649,6 @@ class IntelligenceEngine:
     def _sync_index_from_state_int(self) -> None:
         self.current_state_index = self.s2.get_index_from_state(self.gene_mac_m_int)
 
-    def debug_candidates(self, state_index: int) -> None:
-        """Debug candidate generation for a given state"""
-        rep = state_index
-        if self.phenomenology_map is not None:
-            rep = int(self.phenomenology_map[state_index])
-
-        ks_rep = list(self.operator.store.iter_keys_for_state(rep))[:10]
-        ks_raw = list(self.operator.store.iter_keys_for_state(state_index))[:10]
-
-        print(f"[cand] state={state_index} rep={rep} ks_rep={len(ks_rep)} ks_raw={len(ks_raw)}")
-        if ks_rep:
-            print("[cand] sample entry:", self.operator.store.get(ks_rep[0]))
-
     def generate_token_exon(self, state_index: int) -> int:
         """
         Generate next token using spectral neighborhood retrieval and physics.
@@ -641,28 +659,92 @@ class IntelligenceEngine:
         3. Integrate physics-native action values with interference terms
         4. Select token using constructive overlap between state and memory
         """
-        from baby.information import find_tokens_by_last_intron
-        from baby.inference import orbit, exon_product_from_state
+        import math
+        import numpy as np
+        from functools import lru_cache
 
-        best_tok: int = SEP_ID
-        best_A: float = -1e9
+        from baby.inference import orbit, exon_product_from_state
+        from baby import governance  # for fold in entropy term
+
+        # --- Cache helpers for performance ---
+        @lru_cache(maxsize=1 << 15)
+        def _tok_first_intron(tok_id: int) -> int:
+            """Return the intron corresponding to the first emitted byte of the token.
+            This aligns scoring with the immediate STT update used during egress.
+            """
+            from baby.information import token_id_to_bytes
+            from baby.governance import transcribe_byte
+
+            data = token_id_to_bytes(tok_id)
+            if data:
+                return transcribe_byte(data[0]) & 0xFF
+            return 0
+
+        @lru_cache(maxsize=1 << 15)
+        def _tok_full_mask(tok_id: int) -> int:
+            from baby.information import token_to_introns
+            from baby.governance import fold_sequence
+
+            return fold_sequence(token_to_introns(tok_id))
+
+        @lru_cache(maxsize=256)
+        def _tokens_by_tail(intron: int) -> tuple[int, ...]:
+            from baby.information import find_tokens_by_last_intron
+
+            return tuple(find_tokens_by_last_intron(intron))
 
         # Step 1: Compute exon product from current state physics
         theta = self.s2.measure_state_divergence_index(state_index)
         orbit_size = self.s2.get_orbit_cardinality(state_index)
         exon_product = exon_product_from_state(state_index, theta, orbit_size)
 
-        # Step 2: Get spectral neighborhood for learned pattern retrieval
-        neighborhood_reps = self._neighbourhood(state_index, max_theta=0.30)
+        # Step 2: Get spectral neighborhood for learned pattern retrieval (cached per-instance)
+        if not hasattr(self, "_neigh_cache"):
+            self._neigh_cache = {}
+        neigh_key = (int(state_index), 10)  # 10 => 0.10 scaled
+        neighborhood_reps = self._neigh_cache.get(neigh_key)
+        if neighborhood_reps is None:
+            neighborhood_reps = tuple(self._neighbourhood(state_index, max_theta=0.10))
+            # simple capacity control
+            if len(self._neigh_cache) > 4096:
+                self._neigh_cache.clear()
+            self._neigh_cache[neigh_key] = neighborhood_reps
+        # Neighborhood computed; no debug output
 
         # Step 3: Collect candidate tokens from both physics and learned patterns
-        candidate_tokens = set()
+        candidate_tokens: set[int] = set()
 
-        # Physics-derived candidates from resonant introns
+        # Physics-derived candidates from resonant introns (expanded search)
         resonant_introns = orbit(exon_product)
+
+        # Add primary resonant introns using even-spread deterministic sampling
         for intron in resonant_introns:
-            tokens = find_tokens_by_last_intron(intron)
-            candidate_tokens.update(tokens[:10])  # Limit per intron
+            tokens = self._get_tokens_by_tail(intron)
+            n = len(tokens)
+            k = 30
+            if n:
+                stride = max(1, n // k)
+                sampled = tokens[::stride][:k]
+            else:
+                sampled = ()
+            candidate_tokens.update(sampled)
+
+        # Expand search to nearby exon products for vocabulary diversity
+        nearby_exons = [(exon_product + i) % 256 for i in [-2, -1, 1, 2]]  # Nearby exon products
+        for nearby_exon in nearby_exons:
+            nearby_introns = orbit(nearby_exon)
+            for intron in nearby_introns[:2]:  # Just first 2 introns from each nearby exon
+                tokens = self._get_tokens_by_tail(intron)
+                n = len(tokens)
+                k = 10
+                if n:
+                    stride = max(1, n // k)
+                    sampled = tokens[::stride][:k]
+                else:
+                    sampled = ()
+                candidate_tokens.update(sampled)
+
+        # Physics expansion complete
 
         # Learned candidates from spectral neighborhood
         for rep_state in neighborhood_reps:
@@ -674,64 +756,124 @@ class IntelligenceEngine:
             except Exception:
                 continue
 
+        # Candidate collection complete
+
         # Ensure we have at least some candidates
         if not candidate_tokens:
             return SEP_ID
 
-        # Step 4: Evaluate each candidate token
-        for token_id in candidate_tokens:
-            # Get the token's last intron for physics evaluation
+        # Step 4: Vectorized evaluation of all candidates
+        # Convert to list for indexing and filter out tokenizer-reserved [unusedX] ids
+        from functools import lru_cache
+        from baby.information import decode_text
+
+        @lru_cache(maxsize=1 << 15)
+        def _is_unused(tok_id: int) -> bool:
             try:
-                from baby.governance import token_last_intron
-
-                intron = token_last_intron(token_id)
+                txt = decode_text(self._get_token_bytes(int(tok_id)))
+                return txt.startswith("[unused")
             except Exception:
-                continue
+                return False
 
-            # Physics component: base action value
-            mask = exon_product  # Use computed exon product as mask
-            A_physics = self._action_value(state_index, intron, mask)
+        filtered = [t for t in candidate_tokens if not _is_unused(t)]
+        candidates = filtered if filtered else list(candidate_tokens)
 
-            # Memory component: interference from learned patterns
-            interference = 0.0
-            for rep_state in neighborhood_reps:
-                try:
-                    phenotype_entry = self.operator.get_phenotype(rep_state, token_id)
-                    learned_mask = phenotype_entry.get("mask", 0)
-                    if learned_mask != 0:
-                        # Constructive interference: overlap between current exon and learned mask
-                        overlap = bin(exon_product & learned_mask).count("1") / 8.0
-                        interference += overlap
-                except Exception:
+        # Special-case at CS: drop candidate tokens whose intron sequence is entirely standing
+        # (no FG/BG drive bits). This enforces PCE: emergence to UNA under driving introns.
+        try:
+            state_int = int(self.s2.get_state_from_index(state_index))
+        except Exception:
+            state_int = -1
+        if state_int == 0:  # governance.CS_INT, using integer value 0
+            driven: list[int] = []
+            for tok in candidates:
+                bs = self._get_token_bytes(int(tok))
+                has_drive = False
+                for b in bs:
+                    intr = governance.transcribe_byte(int(b)) & 0xFF
+                    if (intr & (governance.EXON_FG_MASK | governance.EXON_BG_MASK)) != 0:
+                        has_drive = True
+                        break
+                if has_drive:
+                    driven.append(int(tok))
+            if driven:
+                candidates = driven
+
+        # Pre-gather data for physics computation using full token sequences
+        full_masks = np.array([self._get_full_mask(t) for t in candidates], dtype=np.uint8)
+
+        # Successor states after applying all introns of the token (sequence-aware)
+        succ_list: list[int] = []
+        for tok in candidates:
+            s = int(state_index)
+            data = self._get_token_bytes(int(tok))
+            # Apply each byte's intron in order, matching egress
+            for b in data:
+                intr = governance.transcribe_byte(int(b)) & 0xFF
+                s = int(self.epistemology[s, intr])
+            succ_list.append(s)
+        succ_indices = np.array(succ_list, dtype=np.int64)
+
+        # Vectorized θ computation
+        θ_now = self.s2._theta_table[state_index]
+        θ_next = self.s2._theta_table[succ_indices]
+        dθ = θ_now - θ_next
+
+        # Fold-entropy computed against current state via Monodromic Fold
+        current_mask = self._state_byte_projection(state_index) & 0xFF
+        H_before = bin(current_mask).count("1")
+        # Apply fold(current_mask, candidate_full_mask) per candidate
+        folded_masks = [(governance.fold(current_mask, int(m) & 0xFF)) for m in full_masks]
+        H_after = np.array([bin(m & 0xFF).count("1") for m in folded_masks])
+        fold_entropy = H_after - H_before
+
+        # Vectorized action values: physics using full sequence path-dependency
+        # Prefer proximity to UNA threshold (π/4) rather than collapse to CS.
+        una = math.pi / 4.0
+        theta_alignment = -np.square(θ_next - una)
+        A_physics = theta_alignment + fold_entropy
+
+        # Physically exclude standing emissions (no successor movement) if any
+        same_state = (succ_indices == int(state_index))
+        if np.any(~same_state):
+            A_physics = np.where(same_state, -1e9, A_physics)
+
+        # Deprioritize transitions that collapse to CS (θ_next ~ 0) when viable alternatives exist
+        if np.any(θ_next > 1e-3):
+            A_physics = np.where(θ_next <= 1e-3, A_physics - 1e6, A_physics)
+
+        # Spectral memory interference: constructive overlap with learned masks
+        # for neighborhood representatives. This is physics-native (mask overlap),
+        # not a heuristic, and mirrors how learning stores the monodromic fold.
+        # Read-only spectral interference evaluated at candidate post-states (rep of succ)
+        if neighborhood_reps:
+            interference = np.zeros_like(A_physics, dtype=np.float32)
+            fm_int = full_masks.astype(int)
+            for i, tok in enumerate(candidates):
+                succ_idx = int(succ_indices[i])
+                rep_succ = succ_idx
+                if self.operator.phenomenology_map is not None:
+                    rep_succ = int(self.operator.phenomenology_map[succ_idx])
+                entry = self.operator.store.get((rep_succ, int(tok)))
+                if entry is None:
                     continue
+                learned_mask = int(entry.get("mask", 0)) & 0xFF
+                if learned_mask:
+                    overlap = bin((fm_int[i] & learned_mask) & 0xFF).count("1") / 8.0
+                    interference[i] = float(overlap)
+            A_physics = A_physics + interference * 2.0
 
-            # Normalize interference by neighborhood size
-            if len(neighborhood_reps) > 0:
-                interference /= len(neighborhood_reps)
+        # Find best candidate preferring successors that advance the state
+        order = np.argsort(A_physics)[::-1]
+        best_idx = int(order[0])
+        for idx in order:
+            if int(succ_indices[int(idx)]) != int(state_index):
+                best_idx = int(idx)
+                break
+        best_tok = candidates[best_idx]
+        best_A = float(A_physics[best_idx])
 
-            # Final action value: physics + spectral interference
-            final_A = A_physics + interference * 2.0  # Scale factor for learned patterns
-
-            if final_A > best_A:
-                best_A = final_A
-                best_tok = token_id
-
-        return best_tok
-
-    def is_cycle_complete(self) -> bool:
-        """
-                Check if a full 8-step cycle has been completed.
-
-        Returns:
-                    bool: True if cycle is complete, False otherwise.
-        """
-        return False  # Removed cycle completion trigger
-
-    def reset_cycle_trigger(self) -> None:
-        """
-        Reset the cycle completion trigger after it has been handled.
-        """
-        pass  # Removed cycle completion trigger
+        return int(best_tok)
 
 
 # ---------- Intelligence Engine ----------
@@ -785,7 +927,7 @@ class GyroSI:
             and not os.path.isabs(str(self.config["public_knowledge_path"]))
         ):
             self.config["public_knowledge_path"] = str(self.base_path / str(self.config["public_knowledge_path"]))
-        # Don't modify private_knowledge_path - let OrbitStore resolve it with its own base_path
+        # Don't modify private_knowledge_path - let PhenotypeStore resolve it with its own base_path
         # if (
         #     "private_knowledge_path" in self.config
         #     and self.config["private_knowledge_path"]
@@ -994,9 +1136,9 @@ class GyroSI:
             if public_knowledge_path is None:
                 raise ValueError("public_knowledge_path must be set in config for multi-agent setup")
             public_store = ReadOnlyView(
-                OrbitStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
+                PhenotypeStore(public_knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
             )
-            private_store = OrbitStore(private_path, write_threshold=learn_batch_size, base_path=self.base_path)
+            private_store = PhenotypeStore(private_path, write_threshold=learn_batch_size, base_path=self.base_path)
             return OverlayView(public_store, private_store)
         else:
             # Single-agent setup
@@ -1014,7 +1156,7 @@ class GyroSI:
 
         if knowledge_path is None:
             raise RuntimeError("Failed to determine knowledge path")
-        base_store = OrbitStore(knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
+        base_store = PhenotypeStore(knowledge_path, write_threshold=learn_batch_size, base_path=self.base_path)
 
         # CanonicalView: enable if flag is True, or autodetect if None and file exists
         phenomenology_map_path = self.config.get("phenomenology_map_path")
@@ -1028,9 +1170,7 @@ class GyroSI:
         ):
             if phenomenology_map_path and os.path.exists(phenomenology_map_path):
                 return CanonicalView(base_store, phenomenology_map_path, base_path=self.base_path)
-            else:
-                print(f"Warning: phenomenology map not found at {phenomenology_map_path}")
-                pass
+            # Phenomenology map not found; proceed without canonical view
 
         return base_store
 
@@ -1120,12 +1260,11 @@ class AgentPool:
         multi_view = create_multi_knowledge_view(knowledge_dir, "knowledge_*.bin", self.base_path)
 
         if multi_view.stores:  # If we found multiple knowledge files
-            print(f"Using MultiKnowledgeView with {len(multi_view.stores)} knowledge files")
+            # Informational: using multiple knowledge files
             base_store: Any = multi_view
         else:
             # Fall back to single file
-            print(f"Using single knowledge file: {os.path.basename(self.base_knowledge_path)}")
-            single_store: Any = OrbitStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path)
+            single_store: Any = PhenotypeStore(self.base_knowledge_path, write_threshold=100, base_path=self.base_path)
             base_store = single_store
 
         self._public_store: Optional[ReadOnlyView] = ReadOnlyView(
@@ -1169,7 +1308,7 @@ class AgentPool:
 
                 # Multi-agent overlay using decorators, reuse cached public store
                 public_store = self._public_store
-                private_store = OrbitStore(private_path, write_threshold=100, base_path=self.base_path)
+                private_store = PhenotypeStore(private_path, write_threshold=100, base_path=self.base_path)
                 agent_store: Any = OverlayView(public_store, private_store)
 
                 # Create agent config
@@ -1313,8 +1452,8 @@ class AgentPool:
                         agent = shard["agents"].pop(agent_id)
                         if hasattr(agent, "close"):
                             agent.close()
-                    except Exception as e:
-                        print(f"Warning: Failed to evict agent {agent_id}: {e}")
+                    except Exception:
+                        pass
                     finally:
                         self.agent_access_times.pop(agent_id, None)
                         self.agent_created_at.pop(agent_id, None)
@@ -1365,3 +1504,50 @@ def orchestrate_turn(
     #    The `decode` function already has a UTF-8 fallback for robustness.
     result = decode_text(response, name=tokenizer_name)
     return result
+
+
+def stream_turn(
+    pool: AgentPool,
+    user_id: str,
+    assistant_id: str,
+    user_input: str,
+    tokenizer_name: str,
+    max_new_tokens: Optional[int] = None,
+) -> Iterator[bytes]:
+    """Stream a response token-by-token as raw bytes.
+
+    This mirrors `orchestrate_turn` but yields each token's bytes for SSE.
+    It performs the same steps:
+    - encode user text
+    - learn on the user agent
+    - append SEP to form the stimulus
+    - prime assistant physics without learning
+    - stream tokens from the assistant
+    """
+    try:
+        user_agent = pool.get(user_id)
+        assistant_agent = pool.get(assistant_id)
+    except KeyError as e:
+        raise RuntimeError(f"Missing required agent: {e}. Call pool.ensure_triad() or pool.create_agent() first.")
+
+    from baby.information import encode_text, sep_bytes
+
+    # Encode and learn on user
+    in_bytes = encode_text(user_input, name=tokenizer_name)
+    user_agent.ingest_bulk(in_bytes)
+
+    # Prime assistant physics without learning
+    stimulus = in_bytes + sep_bytes()
+    eng = assistant_agent.engine
+    eng.learning_enabled = False
+    eng.reset_token_buffer()
+    eng.process_egress_bulk(stimulus)
+
+    # Stream tokens (derive default length if needed)
+    if max_new_tokens is None:
+        try:
+            tp = cast(Dict[str, Any], pool.preferences.get("turn_policy", {}))
+            max_new_tokens = int(tp.get("max_reply_tokens", 96))
+        except Exception:
+            max_new_tokens = 96
+    yield from assistant_agent.respond_stream(max_new_tokens=max_new_tokens)

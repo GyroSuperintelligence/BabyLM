@@ -334,10 +334,10 @@ Run a small script to see if SEP is even present:
 
 ```python
 # tools/sep_coverage.py
-from baby.policies import OrbitStore
+from baby.policies import PhenotypeStore
 from pathlib import Path
 
-store = OrbitStore("memories/public/knowledge/knowledge.bin", use_mmap=True)
+store = PhenotypeStore("memories/public/knowledge/knowledge.bin", use_mmap=True)
 count, unique_states = 0, set()
 for (s, t), e in store.iter_entries():
     if t == 102 and e.get("direction", 0) == 0:

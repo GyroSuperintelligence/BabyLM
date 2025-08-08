@@ -98,13 +98,13 @@ for i in range(256):
 # ------------------------------------------------------------------
 # ❶  Common Source (CS) constants
 # ------------------------------------------------------------------
-# 
+#
 # The Common Source acts as an asymmetric fixed point:
 #  - Invariant under standing introns (internal reflexivity)
 #  - Radiatively projective under driving introns (seeding UNA)
 #
-# This expresses the CGM axiom that observation begins at the first 
-# parity-breaking rotation (π/2 → π/4), and that the source is 
+# This expresses the CGM axiom that observation begins at the first
+# parity-breaking rotation (π/2 → π/4), and that the source is
 # self-reflexive under symmetry-conserving transitions.
 #
 # CS is the **unique** state whose 48-bit integer is 0.  It already
@@ -140,12 +140,12 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     # ------------------------------------------------------------------
     # ❷  Special-case the Common Source
     # ------------------------------------------------------------------
-    # 
+    #
     # Theorem (Emergence from the Common Source):
     # Let CS be the unique state with no internal structure (popcount 0).
     # Then there exists a partition of the intron set ℐ into:
     #  - 𝓢 (standing): where T(CS, k) = CS (invariant under standing introns)
-    #  - 𝓓 (driving): where T(CS, k) ∈ ℳ, such that θ(T(CS, k)) = π/4 
+    #  - 𝓓 (driving): where T(CS, k) ∈ ℳ, such that θ(T(CS, k)) = π/4
     #    and T is chirality-preserving (radiatively projective)
     #
     if state_int == CS_INT:
@@ -158,7 +158,7 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
             # ∀ k ∈ 𝓓: T(CS, k) = U_k ∈ UNA (chirality-preserving emission)
             # U_k = INTRON_BROADCAST_MASK[k] & ((1 << 48) - 1)
             # This preserves chirality, ensures minimal Hamming weight ≥ 1,
-            # and is consistent with CGM axiom that observation begins at 
+            # and is consistent with CGM axiom that observation begins at
             # parity-breaking through rotation.
             kick = int(INTRON_BROADCAST_MASKS[intron]) & ((1 << 48) - 1)
             # never allow the kick to cancel to 0 (non-absolute unity)

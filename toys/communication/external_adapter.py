@@ -37,7 +37,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
-from baby.intelligence import AgentPool, orchestrate_turn
+from baby.intelligence import AgentPool, orchestrate_turn, stream_turn
 
 # Import the tokenizer bridge
 from baby.information import encode_text, decode_text, bytes_to_token_ids, sep_bytes
@@ -91,24 +91,7 @@ except:
     pass  # Ignore if already registered
 agent_pool.ensure_triad()
 
-# Sanity probe to confirm sidecars are loaded
-try:
-    # unwrap ReadOnlyView → CanonicalView → OrbitStore
-    if agent_pool._public_store is not None:
-        cv = agent_pool._public_store.base_store  # CanonicalView
-        if cv is not None:
-            store = cv.base_store  # OrbitStore
-            sp = store.store_path
-            print("[public-store] path:", sp)
-            print("[public-store] bloom exists:", os.path.exists(sp + ".bloom"))
-            print("[public-store] idx exists:", os.path.exists(sp + ".idx"))
-            print("[public-store] index entries:", len(store.index))
-        else:
-            print("[public-store] CanonicalView not available")
-    else:
-        print("[public-store] not available")
-except Exception as e:
-    print("sanity probe failed:", e)
+
 
 atexit.register(agent_pool.close_all)
 
@@ -126,32 +109,17 @@ app = FastAPI(
 async def warm():
     """Pre-warm the system on startup to avoid first-turn penalty."""
     agent_pool.ensure_triad()
+    # Pre-warm core components
     try:
-        if agent_pool._public_store is not None:
-            cv = agent_pool._public_store.base_store  # CanonicalView
-            if cv is not None:
-                store = cv.base_store  # OrbitStore
-                sp = store.store_path
-                print(f"[warmup] public store: {sp}")
-                print(f"[warmup] bloom: {os.path.exists(sp + '.bloom')}, idx: {os.path.exists(sp + '.idx')}")
-                print(f"[warmup] indexed keys: {len(store.index)}")
-            else:
-                print("[warmup] CanonicalView not available")
-        else:
-            print("[warmup] public store not available")
-
-        # Touch epistemology to page-in a tiny slice (avoids first-turn page faults)
+        # Touch epistemology to page-in a tiny slice
         a = agent_pool.get("assistant").engine
-        _ = int(a.epistemology[0, 0])  # tiny read is enough to map a page
-        print(f"[warmup] epistemology touched: {a.epistemology.shape}")
+        _ = int(a.epistemology[0, 0])
 
         # Prime the tokenizer cache
         from baby.information import _load_tokenizer
-
         _ = _load_tokenizer(PREFERENCES["tokenizer"]["name"], base_path=BASE_PATH)
-        print(f"[warmup] tokenizer primed: {PREFERENCES['tokenizer']['name']}")
-    except Exception as e:
-        print("[warmup] failed:", e)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------
@@ -263,49 +231,26 @@ async def chat_completions(
     user_text = last_user.content if last_user else ""
     # Call orchestrate_turn in threadpool to prevent blocking the event loop
     try:
-        import asyncio
-
-        reply = await asyncio.wait_for(
-            run_in_threadpool(
-                orchestrate_turn, agent_pool, user_id, assistant_id, user_text, PREFERENCES["tokenizer"]["name"]
-            ),
-            timeout=float(PREFERENCES.get("server", {}).get("turn_timeout_s", 8.0)),
+        reply = await run_in_threadpool(
+            orchestrate_turn, agent_pool, user_id, assistant_id, user_text, PREFERENCES["tokenizer"]["name"]
         )
     except Exception as e:
         print(f"Error in orchestrate_turn: {e}")
-        # Fallback to a simple response for now
-        reply = "Hello! I'm the GyroSI Baby model. How can I help you today?"
+        raise  # Re-raise so we can see what's wrong
 
     # Streaming support: if client sets stream=true, yield tokens as SSE
     if request.query_params.get("stream", "false").lower() == "true":
 
         def token_stream() -> Iterator[str]:
-            # Get assistant agent for real streaming
-            assistant_agent = agent_pool.get_or_create_agent(assistant_id, "assistant")
-
-            # Encode user input to bytes for ingestion
-            user_bytes = encode_text(user_text, name=PREFERENCES["tokenizer"]["name"])
-
-            # Load tokenizer once, reuse
-            from baby.information import _load_tokenizer
-
-            tokenizer = _load_tokenizer(PREFERENCES["tokenizer"]["name"])
-
-            # Real streaming: generate tokens one by one
-            token_count = 0
-            for token_bytes in assistant_agent.respond_stream(user_bytes, max_new_tokens=None):
-                try:
-                    # Decode token bytes to text
-                    token_text = decode_text(token_bytes, name=PREFERENCES["tokenizer"]["name"])
-                except Exception as e:
-                    print(f"Error decoding token: {e}")
-                    # Fallback: use token ID if decode fails
-                    token_ids = bytes_to_token_ids(token_bytes)
-                    if token_ids:
-                        token_text = tokenizer.decode([token_ids[0]])
-                    else:
-                        token_text = "[UNKNOWN]"
-
+            for token_bytes in stream_turn(
+                agent_pool,
+                user_id,
+                assistant_id,
+                user_text,
+                PREFERENCES["tokenizer"]["name"],
+                max_new_tokens=None,
+            ):
+                token_text = decode_text(token_bytes, name=PREFERENCES["tokenizer"]["name"])
                 # OpenAI-compatible SSE chunk
                 chunk = {
                     "id": "chatcmpl-stream",
@@ -321,7 +266,6 @@ async def chat_completions(
                     ],
                 }
                 yield f"data: {json.dumps(chunk)}\n\n"
-                token_count += 1
 
             # Send final completion signal
             final_chunk = {
@@ -372,18 +316,12 @@ async def hf_generate(payload: HFGenerateRequest, request: Request) -> HFGenerat
     # system_id = "system"  # (stale, do not reinstate)
     # Call orchestrate_turn in threadpool to prevent blocking the event loop
     try:
-        import asyncio
-
-        reply = await asyncio.wait_for(
-            run_in_threadpool(
-                orchestrate_turn, agent_pool, user_id, assistant_id, payload.inputs, PREFERENCES["tokenizer"]["name"]
-            ),
-            timeout=float(PREFERENCES.get("server", {}).get("turn_timeout_s", 8.0)),
+        reply = await run_in_threadpool(
+            orchestrate_turn, agent_pool, user_id, assistant_id, payload.inputs, PREFERENCES["tokenizer"]["name"]
         )
     except Exception as e:
         print(f"Error in orchestrate_turn: {e}")
-        # Fallback to a simple response for now
-        reply = "Hello! I'm the GyroSI Baby model. How can I help you today?"
+        raise  # Re-raise so we can see what's wrong
     # Ensure output is in the tokenizer's alphabet (lowercase for bert-base-uncased)
     reply = reply.lower()
     return HFGenerateResponse(generated_text=reply)

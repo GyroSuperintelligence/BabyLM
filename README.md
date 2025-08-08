@@ -226,7 +226,7 @@ The system consists of four interconnected engines aligned with the Viable Syste
 │   ├── inference.py        # Interpretation, Maintenance & Validation
 │   ├── information.py      # Measurement, Storage, Knowledge Curation
 │   ├── intelligence.py     # API, Orchestration, Protocol Adapters
-│   └── policies.py         # OrbitStore, storage overlays, and maintenance functions
+│   └── policies.py         # PhenotypeStore, storage overlays, and maintenance functions
 ├── guides/                 # In-depth documentation
 ├── memories/               # Persistent state and knowledge
 │   ├── public/
@@ -246,7 +246,7 @@ The GyroSI system enforces strict separation between:
 - **Runtime data** (`memories/`) - Persistent state with learned knowledge and meta-assets
 - **Auxiliary applications** (`toys/`) - Testing and development tools
 
-Knowledge is managed via canonical OrbitStore instances, with public and private overlays maintaining agent-specific and shared knowledge indexed by canonical context keys.
+Knowledge is managed via canonical PhenotypeStore instances, with public and private overlays maintaining agent-specific and shared knowledge indexed by canonical context keys.
 
 ---
 

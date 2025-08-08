@@ -192,7 +192,7 @@ self._theta_table = np.load(theta_path, mmap_mode="r")  # Memory-mapped, read-on
 
 **Memory-Mapped Knowledge File:**
 ```python
-# In OrbitStore._open_mmap()
+# In PhenotypeStore._open_mmap()
 self._mmap = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
 ```
 
