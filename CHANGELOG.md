@@ -2,6 +2,42 @@
 
 ---
 
+## [v0.9.6.9-Kernel] – 2025-08-08 - Kernel
+
+> Note: We are now focusing solely on developing the Kernel - all Legacy code has been put aside.
+
+* **Core Architecture**
+  • Fully integrated all five physics maps (ontology, epistemology, theta, phenomenology, orbit sizes) into the kernel initialisation.
+  • Retained Monodromic Fold as the sole non-associative, path-dependent operator across learning and memory tracking.
+  • Maintained clean separation between *REPRODUCTION* (exact replay) and *RECOLLECTION* (stage-aware, resonance-driven generation).
+
+* **State & Stage Mechanics**
+  • Theta thresholds and orbit mapping now consistently determine CGM stage labels (CS, UNA, ONA, BU\_EG, BU\_IN, CLOSURE).
+  • State evolution remains strictly table-driven via epistemology lookups, preserving manifold closure.
+
+* **Learning Path**
+  • Tokens converted to LEB128 and transcribed via ψ isomorphism before state evolution.
+  • Path memory updated per token using Monodromic Fold; learned patterns indexed by orbit representative.
+  • Valid token set constructed directly from tokenizer vocabulary with `[unused]` entries excluded.
+
+* **Generation Logic**
+  • Boundary conditions in recollection mode emit \[CLS] at CS stage and \[SEP] at CLOSURE when no continuation is found.
+  • Mid-flow transitions can use stored Hebbian connections or trajectory resonance checks to select next tokens.
+  • Nearby-orbit resonance search enables cross-orbit continuation when current orbit yields no candidate.
+
+* **Demo Enhancements**
+  • Added clear demonstration of both modes, including learning from file and top-orbit reporting.
+  • Debug mode prints stage transitions and trajectory changes for inspection.
+
+* **Known Limitations (acknowledged in-release)**
+  • Recollection still uses fixed thresholds for resonance and inhibition, introducing heuristic behaviour alongside physics-based elements.
+  • CS asymmetric emission and strictly resonance-only generation are not yet implemented.
+  • Hebbian connections are retained for flow but are not part of the pure CGM formalism.
+  • Learning stores full trajectories rather than compressed/sparse exon masks.
+  • Some outputs in recollection mode show repetition loops due to current flow logic.
+
+---
+
 ## [v0.9.6.9-alpha] – 2025-08-08
 
 ### Physics-First Kernel Implementation

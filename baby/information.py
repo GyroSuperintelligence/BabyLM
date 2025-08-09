@@ -734,7 +734,7 @@ def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.
     #   archetypal_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
     #   archetypal_index = np.where(keys == archetypal_int)[0][0]
     # Example (current ontology):
-    #   Archetypal state (GENE_Mac_S) is at index 549871 in the sorted ontology (position 549872 of 788986).
+    #   Archetypal state (GENE_Mac_S) is at index 549993 in the sorted ontology (position 549993 of 789,170).
     logger.info("Saved ontology keys to: %s", output_path)
 
     return keys

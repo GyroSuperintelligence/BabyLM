@@ -79,6 +79,3 @@
   - whether the winner has non-zero overlaps.
   This tells us if learning is present and not being used, or missing.
 
-If you agree, I’ll strip back to this minimal core (CanonicalView-centered learning, pure physics scoring with interference, no exact-state or ad-hoc boosts), add the instrumentation, and re-run the test to verify that tokens learned at the current representative actually dominate the candidate selection when appropriate.
-
-- I will keep edits to existing files only (`baby/intelligence.py`, `baby/inference.py`, `baby/policies.py`) and ensure PEP8, clean docstrings, and zero lint errors.
