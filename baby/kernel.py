@@ -1,5 +1,5 @@
 """
-GyroSI Kernel - Complete Physics Implementation with Harmonic Oscillator
+GyroSI Kernel v0.9.7.2 - Pure Physics Implementation
 
 This implements the Common Governance Model (CGM) through a physics-first approach
 to language processing. The kernel uses all five physics maps:
@@ -14,14 +14,13 @@ The system implements the CGM 8-fold path through recursive alignment:
 - CS (Common Source): Unobservable origin with inherent chirality
 - UNA (Unity Non-Absolute): First observable structure with non-identity right gyration
 - ONA (Opposition Non-Absolute): Full differentiation with maximal non-associativity
-- BU_EG (Balance Universal - Egress): Integration of experience via Monodromic Fold
-- BU_IN (Balance Universal - Ingress): Generation of accumulated intelligence
-- CLOSURE (ONA, UNA, CS): Completion of cycle and return to equilibrium
+- BU_EG (Balance Universal - Egress): Expression of accumulated intelligence
+- BU_IN (Balance Universal - Ingress): Integration of experience via Monodromic Fold
+- ONA (return): Mediated opposition in return path
+- UNA (return): Non-absolute unity in return path
+- CS (closure): Return to source, completing the helical cycle
 
-Two distinct operating modes:
-- REPRODUCTION: Direct replay of learned sequences without modification
-- RECOLLECTION: Harmonic oscillator dynamics generating novel sequences through
-  resonance and Hebbian flow, following the CGM path-dependent principles
+Pure physics implementation with holographic compression and minimal complexity.
 """
 
 import numpy as np
@@ -41,29 +40,22 @@ GENE_Mac_S = np.array([
 ], dtype=np.int8)
 
 # Bit family masks per CGM
-EXON_LI_MASK = 0b01000010  # Bits 1, 6 - UNA (Parity/Reflection)
 EXON_FG_MASK = 0b00100100  # Bits 2, 5 - ONA (Forward Gyration)
 EXON_BG_MASK = 0b00011000  # Bits 3, 4 - BU (Backward Gyration)
-EXON_L0_MASK = 0b10000001  # Bits 0, 7 - Anchors (Boundaries)
 
 # Special tokens
 CLS_TOKEN = 101
 SEP_TOKEN = 102
 PAD_TOKEN = 0
 
-# CGM Stage thresholds based on theta (angular divergence)
-THETA_CS = 0.1      # Common Source threshold
-THETA_UNA = 0.785   # Unity Non-Absolute (π/4)
-THETA_ONA = 1.0     # Opposition Non-Absolute
-THETA_BU_EG = 1.3   # Balance Universal - Egress
-THETA_BU_IN = 1.5   # Balance Universal - Ingress
+# CS State constant (state integer 0)
+CS_STATE_INT = 0
 
 
 def tensor_to_int(tensor: np.ndarray) -> int:
     """Convert 48-bit tensor to integer state."""
     if tensor.shape != (4, 2, 3, 2):
         raise ValueError(f"Expected tensor shape (4, 2, 3, 2), got {tensor.shape}")
-
     bits = (tensor.flatten(order="C") == -1).astype(np.uint8)
     result = 0
     for i, bit in enumerate(bits):
@@ -72,52 +64,8 @@ def tensor_to_int(tensor: np.ndarray) -> int:
     return result
 
 
-def int_to_tensor(state_int: int) -> np.ndarray:
-    """Convert integer state to 48-bit tensor."""
-    if state_int >= (1 << 48) or state_int < 0:
-        raise ValueError(f"state_int {state_int} out of bounds for 48-bit")
-
-    bits = [(state_int >> i) & 1 for i in range(48)]
-    tensor_flat = np.array([1 - 2*bit for bit in bits], dtype=np.int8)
-    return tensor_flat.reshape(4, 2, 3, 2)
-
-
-def state_to_bytes_phased(state_int: int) -> List[int]:
-    """Extract 6 bytes from state respecting the 720° phase structure.
-    
-    The 48-bit state is divided into 4 layers × 12 bits, representing
-    the complete helical path of CGM (CS → UNA → ONA → BU → CS).
-    """
-    bytes_out = []
-
-    # First 24 bits: Layers 0 and 2 (0° and 360°)
-    layer0_bits = state_int & 0xFFF
-    layer2_bits = (state_int >> 24) & 0xFFF
-    combined_02 = (layer2_bits << 12) | layer0_bits
-
-    bytes_out.append((combined_02 >> 16) & 0xFF)
-    bytes_out.append((combined_02 >> 8) & 0xFF)
-    bytes_out.append(combined_02 & 0xFF)
-
-    # Next 24 bits: Layers 1 and 3 (180° and 540°)
-    layer1_bits = (state_int >> 12) & 0xFFF
-    layer3_bits = (state_int >> 36) & 0xFFF
-    combined_13 = (layer3_bits << 12) | layer1_bits
-
-    bytes_out.append((combined_13 >> 16) & 0xFF)
-    bytes_out.append((combined_13 >> 8) & 0xFF)
-    bytes_out.append(combined_13 & 0xFF)
-
-    return bytes_out
-
-
 def fold(a: int, b: int) -> int:
-    """The Monodromic Fold: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
-    
-    This is the sole non-associative, path-dependent learning operator
-    in the CGM. It preserves the memory of operation order through
-    the gyration term (b ⊕ (a ∧ ¬b)).
-    """
+    """The Monodromic Fold: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))"""
     a &= 0xFF
     b &= 0xFF
     negated_b = (~b) & 0xFF
@@ -126,63 +74,27 @@ def fold(a: int, b: int) -> int:
 
 
 def fold_sequence(values: List[int], start_state: int = 0) -> int:
-    """Apply Monodromic Fold left-to-right over a sequence.
-    
-    This is path-dependent - the order of values matters.
-    fold(fold(a,b),c) ≠ fold(a,fold(b,c))
-    """
+    """Apply Monodromic Fold left-to-right over a sequence."""
     result = start_state & 0xFF
     for value in values:
         result = fold(result, value & 0xFF)
     return result
 
 
-def compute_fold_trajectory(state_int: int) -> List[int]:
-    """Compute the 6-step fold trajectory over phased state bytes.
-    
-    This maps the 48-bit state to six 8-bit values representing
-    the state's position in the CGM helical path.
-    """
-    state_bytes = state_to_bytes_phased(state_int)
-    trajectory: List[int] = []
-    acc = GENE_Mic_S
-    for byte in state_bytes:
-        acc = fold(acc, byte & 0xFF)
-        trajectory.append(acc & 0xFF)
-    return trajectory
-
-
 def compute_exon_product(state_int: int) -> int:
-    """Compute exon product from state.
-    
-    The exon is the first element of the trajectory (never 0x00),
-    representing the boundary signal or chirality signature.
-    """
-    trajectory = compute_fold_trajectory(state_int)
-    return trajectory[0] if trajectory else GENE_Mic_S
+    """Compute exon product from state using first 8 bits."""
+    return (state_int & 0xFF) if state_int != 0 else GENE_Mic_S
 
 
 def transcribe_byte(byte: int) -> int:
-    """ψ isomorphism: byte → intron via XOR 0xAA.
-    
-    Maps external byte representation to internal physics space.
-    """
+    """ψ isomorphism: byte → intron via XOR 0xAA."""
     return (byte ^ GENE_Mic_S) & 0xFF
-
-
-def untranscribe_byte(intron: int) -> int:
-    """ψ⁻¹ isomorphism: intron → byte via XOR 0xAA.
-    
-    Maps internal physics space back to external byte representation.
-    """
-    return (intron ^ GENE_Mic_S) & 0xFF
 
 
 def token_id_to_leb128(token_id: int) -> List[int]:
     """Convert token ID to LEB128 bytes."""
     if token_id < 0:
         raise ValueError("Token ID must be non-negative")
-
     bytes_list = []
     while True:
         byte = token_id & 0x7F
@@ -201,27 +113,24 @@ def token_to_introns(token_id: int) -> List[int]:
     return [transcribe_byte(b) for b in leb_bytes]
 
 
+# Precompute intron broadcast masks for CS emission
+INTRON_BROADCAST_MASKS = np.zeros(256, dtype=np.uint64)
+for intron in range(256):
+    # Simple deterministic mapping for CS emission
+    # Each intron creates a unique state pattern
+    mask = ((intron * 0x9E3779B97F4A7C15) & ((1 << 48) - 1))
+    INTRON_BROADCAST_MASKS[intron] = mask
+
+
 class GyroKernel:
-    """GyroSI Kernel - Common Governance Model Physics Implementation
+    """GyroSI Kernel v0.9.7.2 - Simplified Pure Physics Implementation
     
-    This kernel implements the CGM through a physics-first approach,
-    using a complete set of physics tables:
-    
-    1. Ontology: The 789,170 states in the finite manifold
-    2. Epistemology: State transition table (state, intron) → state
-    3. Theta: Angular divergence from archetype (CGM cycle position)
-    4. Phenomenology: Orbit mapping (256 canonical orbits)
-    5. Orbit Sizes: Cardinality of each orbit
-    
-    Two operating modes:
-    - REPRODUCTION: Direct replay of learned sequences
-    - RECOLLECTION: Harmonic oscillator dynamics with resonance and flow
-    
-    The kernel embodies the CGM principles:
-    - Path-dependent Monodromic Fold for learning
-    - Non-competitive resonance for pattern recognition
-    - Hebbian connections for flow
-    - 8-fold cycle: CS → UNA → ONA → BU → CLOSURE
+    Core principles:
+    - State evolution via epistemology table
+    - Learning via Monodromic Fold
+    - Holographic compression (store only deltas)
+    - Generation via fold defect minimization
+    - No arbitrary rules or thresholds
     """
 
     def __init__(self, base_path: Optional[Path] = None, verbose: bool = True):
@@ -232,44 +141,42 @@ class GyroKernel:
         self.base_path = base_path
         self.verbose = verbose
 
-        # Load ALL physics tables
+        # Load physics tables
         self._load_complete_physics()
 
-        # Start from CS (smallest theta) instead of archetypal state
-        cs_index = int(np.argmin(self.theta))
-        self.current_state_index = cs_index
+        # CS is always state 0
+        self.cs_index = 0
+        self.current_state_index = self.cs_index
 
-        # Build orbit ID mapping (representative index → compact ID 0..255)
+        # Build orbit mapping
         unique_reps = np.unique(self.phenomenology)
-        self.rep_to_orbit_id: Dict[int, int] = {int(rep): int(i) for i, rep in enumerate(unique_reps)}
+        self.rep_to_orbit_id: Dict[int, int] = {
+            int(rep): int(i) for i, rep in enumerate(unique_reps)
+        }
 
-        # Memory structures indexed by orbit representative
-        self.orbit_patterns: Dict[int, List[Tuple[int, int, List[int]]]] = {}
-        # orbit_rep -> [(token_id, mask, trajectory), ...]
+        # Holographic storage: orbit -> token -> delta (compressed)
+        self.orbit_deltas: Dict[int, Dict[int, int]] = {}
         
-        # Path memory - accumulated fold of all experience
-        self.path_memory = GENE_Mic_S
+        # Per-orbit path memory for local context
+        self.orbit_memories: Dict[int, int] = {}
         
-        # Hebbian connections between tokens (for flow)
-        self.connections: Dict[Tuple[int, int], float] = {}
-        
-        # Recent token inhibition
-        self.recent_tokens: List[int] = []
-        self.inhibition_window = 6  # Diameter of state graph
-
-        # Reproduction sequence
-        self.learned_sequence: List[int] = []
-        self._reproduction_index = 0
+        # Context window (6-bit diameter)
+        self.context_window: List[int] = []
+        self.window_size = 6
 
         # Valid tokens
         self.valid_tokens: Set[int] = set()
-
+        
         # Load tokenizer
         self.tokenizer = self._load_tokenizer()
+        if self.tokenizer is None:
+            raise RuntimeError("Tokenizer is required for GyroSI physics")
         self._build_token_structures()
 
-        # Debug
-        self._debug: bool = False
+        if self.verbose:
+            cs_theta = self._get_theta(self.cs_index)
+            print(f"GyroSI Kernel v0.9.7.2 initialized")
+            print(f"CS state: index={self.cs_index}, θ={cs_theta:.3f}")
 
     def _load_complete_physics(self) -> None:
         """Load ALL physics tables."""
@@ -305,9 +212,6 @@ class GyroKernel:
             raise FileNotFoundError(f"Orbit sizes not found: {orbit_sizes_path}")
         self.orbit_sizes = np.load(orbit_sizes_path, mmap_mode="r")
 
-        if self.verbose:
-            print(f"📊 Physics tables loaded")
-
     def _load_tokenizer(self):
         """Load the tokenizer as a physics component."""
         try:
@@ -317,15 +221,11 @@ class GyroKernel:
             if tokenizer_path.exists():
                 return Tokenizer.from_file(str(tokenizer_path))
         except ImportError:
-            if self.verbose:
-                print("⚠️ tokenizers library not available")
+            pass
         return None
 
     def _build_token_structures(self) -> None:
         """Build valid token set."""
-        if self.tokenizer is None:
-            return
-
         vocab_size = self.tokenizer.get_vocab_size()
         for token_id in range(min(vocab_size, 30000)):
             token = self.tokenizer.id_to_token(token_id)
@@ -337,13 +237,13 @@ class GyroKernel:
         idx = np.searchsorted(self.ontology, state_int)
         if idx < len(self.ontology) and self.ontology[idx] == state_int:
             return int(idx)
-        raise ValueError(f"State {state_int} not in ontology")
+        return self.cs_index
 
     def _get_state_int(self, state_index: int) -> int:
         """Get state integer from ontology index."""
         if 0 <= state_index < len(self.ontology):
             return int(self.ontology[state_index])
-        return 0
+        return CS_STATE_INT
 
     def _get_theta(self, state_index: int) -> float:
         """Get theta (angular divergence) for a state."""
@@ -357,517 +257,281 @@ class GyroKernel:
             return int(self.phenomenology[state_index])
         return state_index
 
-    def _get_orbit_id(self, state_index: int) -> int:
-        """Get compact orbit ID (0..255) for a state."""
-        rep = self._get_orbit_rep(state_index)
-        return self.rep_to_orbit_id.get(rep, -1)
-
     def _get_orbit_size(self, state_index: int) -> int:
         """Get size of an orbit."""
         if 0 <= state_index < len(self.orbit_sizes):
             return int(self.orbit_sizes[state_index])
         return 1
 
-    def _get_stage(self, state_index: int) -> str:
-        """Determine CGM stage from theta value."""
-        theta = self._get_theta(state_index)
+    def apply_gyration_and_transform(self, state_int: int, intron: int) -> int:
+        """Apply intron to state with CS asymmetric emission."""
+        intron &= 0xFF
         
-        if theta < THETA_CS:
-            return "CS"      # Common Source
-        elif theta < THETA_UNA:
-            return "UNA"     # Unity Non-Absolute
-        elif theta < THETA_ONA:
-            return "ONA"     # Opposition Non-Absolute  
-        elif theta < THETA_BU_EG:
-            return "BU_EG"   # Balance Universal - Egress
-        elif theta < THETA_BU_IN:
-            return "BU_IN"   # Balance Universal - Ingress
-        else:
-            return "CLOSURE"
-
-    def _is_at_boundary(self, theta: float) -> bool:
-        """Check if we're at a boundary state (equilibrium)."""
-        return theta < THETA_CS or theta >= THETA_BU_IN
-
-    def _strengthen_connection(self, token1: int, token2: int, strength: float = 0.1) -> None:
-        """Hebbian learning: strengthen connections between sequential tokens."""
-        key = (min(token1, token2), max(token1, token2))
-        current = self.connections.get(key, 0.0)
-        self.connections[key] = min(1.0, current + strength)
+        # CS asymmetric emission
+        if state_int == CS_STATE_INT:
+            # Standing intron - CS remains invariant
+            if (intron & (EXON_FG_MASK | EXON_BG_MASK)) == 0:
+                return CS_STATE_INT
+            # Driving intron - emit to new state
+            else:
+                emitted_int = int(INTRON_BROADCAST_MASKS[intron])
+                return emitted_int if emitted_int != 0 else CS_STATE_INT
+        
+        # Normal transition via epistemology
+        state_index = self._get_state_index(state_int)
+        next_index = self.epistemology[state_index, intron]
+        return self._get_state_int(next_index)
 
     def process_token(self, token_id: int) -> None:
-        """Learn a token using physics-based memory and Monodromic Fold.
-        
-        This implements the BU_EG (Intelligence Egress) stage of CGM,
-        where external information is integrated into internal structure
-        via the path-dependent Monodromic Fold.
-        """
+        """Learn a token using physics-based memory and Monodromic Fold."""
         if token_id not in self.valid_tokens:
             return
 
-        # Track the PRE-state (where we are learning FROM)
+        introns = token_to_introns(token_id)
+        if not introns:
+            return
+
+        # Track PRE-state for learning
         pre_state_index = self.current_state_index
-        pre_state_int = self._get_state_int(pre_state_index)
         pre_orbit_rep = self._get_orbit_rep(pre_state_index)
-        pre_exon = compute_exon_product(pre_state_int)
+        pre_state_int = self._get_state_int(pre_state_index)
+        baseline_exon = compute_exon_product(pre_state_int)
 
-        # Record trajectory through state space
-        introns = token_to_introns(token_id)
-        
+        # Evolve through all introns
         for intron in introns:
-            next_index = self.epistemology[self.current_state_index, intron & 0xFF]
-            self.current_state_index = int(next_index)
-
-        # Get physics properties of final state
-        final_state_int = self._get_state_int(self.current_state_index)
-        final_trajectory = compute_fold_trajectory(final_state_int)
-
-        # Compute token mask - fold WITHOUT seed to avoid 0x00
-        token_mask = fold_sequence(introns, start_state=0)
-        
-        # Update path memory using Monodromic Fold
-        self.path_memory = fold(self.path_memory, token_mask)
-
-        # Store pattern at PRE-ORBIT level (where we learned it)
-        if pre_orbit_rep >= 0:  # Valid orbit
-            if pre_orbit_rep not in self.orbit_patterns:
-                self.orbit_patterns[pre_orbit_rep] = []
+            next_state_int = self.apply_gyration_and_transform(
+                self._get_state_int(self.current_state_index), intron)
+            self.current_state_index = self._get_state_index(next_state_int)
             
-            # Check if token already learned at this orbit
-            found = False
-            for i, (existing_token, existing_mask, existing_traj) in enumerate(
-                    self.orbit_patterns[pre_orbit_rep]):
-                if existing_token == token_id:
-                    # Update mask using fold (path-dependent learning)
-                    new_mask = fold(existing_mask, token_mask)
-                    self.orbit_patterns[pre_orbit_rep][i] = (
-                        token_id, new_mask, final_trajectory)
-                    found = True
-                    break
+            # Update context window
+            self.context_window.append(intron)
+            if len(self.context_window) > self.window_size:
+                self.context_window.pop(0)
+
+        # Compute token mask using fold with context
+        context_fold = fold_sequence(self.context_window, start_state=0)
+        token_mask = fold_sequence(introns, start_state=context_fold)
+
+        # HOLOGRAPHIC COMPRESSION: Store only delta from baseline
+        delta = token_mask ^ baseline_exon
+        if delta != 0:  # Only store if different from baseline
+            if pre_orbit_rep not in self.orbit_deltas:
+                self.orbit_deltas[pre_orbit_rep] = {}
             
-            if not found:
-                # Initialize with pre-exon folded with token mask
-                initial_mask = fold(pre_exon, token_mask)
-                self.orbit_patterns[pre_orbit_rep].append(
-                    (token_id, initial_mask, final_trajectory))
+            # Update or store delta
+            existing_delta = self.orbit_deltas[pre_orbit_rep].get(token_id, 0)
+            new_delta = fold(existing_delta, delta)
+            self.orbit_deltas[pre_orbit_rep][token_id] = new_delta
 
-        # Hebbian connections with recent tokens (for flow)
-        if len(self.learned_sequence) > 0:
-            recent_token = self.learned_sequence[-1]
-            self._strengthen_connection(token_id, recent_token)
+        # Update per-orbit path memory
+        if pre_orbit_rep not in self.orbit_memories:
+            self.orbit_memories[pre_orbit_rep] = GENE_Mic_S
+        self.orbit_memories[pre_orbit_rep] = fold(
+            self.orbit_memories[pre_orbit_rep], token_mask
+        )
 
-        # Record for reproduction
-        self.learned_sequence.append(token_id)
-
-    def _evolve_state(self, token_id: int) -> None:
-        """Evolve state without learning."""
-        introns = token_to_introns(token_id)
-        for intron in introns:
-            next_index = self.epistemology[self.current_state_index, intron & 0xFF]
-            self.current_state_index = int(next_index)
-
-    def generate_token_reproduction(self) -> Optional[int]:
-        """REPRODUCTION MODE: Exact replay of learned sequence.
-        
-        This simply replays the tokens in the order they were learned,
-        without any modification or generation.
-        """
-        if self._reproduction_index >= len(self.learned_sequence):
-            return None
-        token_id = self.learned_sequence[self._reproduction_index]
-        self._reproduction_index += 1
-        return token_id
-
-    def generate_token_recollection(self) -> int:
-        """RECOLLECTION MODE: Generation via harmonic oscillator dynamics.
-        
-        This implements the BU_IN (Intelligence Ingress) stage of CGM,
-        where internal structure is expressed as external action using
-        harmonic resonance and Hebbian flow.
-        
-        The system uses:
-        1. Path-dependent Monodromic Fold for resonance checking
-        2. Hebbian connections for flow between tokens
-        3. Boundary detection for phase transitions
-        4. Trajectory overlap for physical alignment
-        """
-        # Get current physics state
-        current_theta = self._get_theta(self.current_state_index)
+    def generate_token(self) -> int:
+        """Generate token via pure fold-based resonance."""
         current_orbit_rep = self._get_orbit_rep(self.current_state_index)
-        current_stage = self._get_stage(self.current_state_index)
         current_state_int = self._get_state_int(self.current_state_index)
-        current_trajectory = compute_fold_trajectory(current_state_int)
-
-        # STAGE 1: At boundaries, use direct memory recall
-        if self._is_at_boundary(current_theta):
-            # At CS, emit CLS to start
-            if current_stage == "CS" and CLS_TOKEN not in self.recent_tokens:
-                if self._debug:
-                    print(f"   • At CS boundary → [CLS]")
-                return CLS_TOKEN
-            
-            # At CLOSURE, check if we have momentum to continue
-            if current_stage == "CLOSURE":
-                # Look for patterns learned at this orbit to continue
-                if current_orbit_rep in self.orbit_patterns:
-                    for token_id, mask, trajectory in self.orbit_patterns[current_orbit_rep]:
-                        if token_id not in self.recent_tokens and token_id != SEP_TOKEN:
-                            # Found a non-SEP pattern at boundary - continue oscillation
-                            if self._debug:
-                                print(f"   • At CLOSURE → continue via {self.tokens_to_text([token_id])}")
-                            self.recent_tokens.append(token_id)
-                            if len(self.recent_tokens) > self.inhibition_window:
-                                self.recent_tokens.pop(0)
-                            return token_id
-                
-                # No continuation found - emit SEP
-                if self._debug:
-                    print(f"   • At CLOSURE → [SEP]")
-                return SEP_TOKEN
-
-        # STAGE 2: Mid-flow - use Hebbian connections for sequential flow
-        last_token = self.recent_tokens[-1] if self.recent_tokens else None
+        baseline_exon = compute_exon_product(current_state_int)
         
-        if last_token is not None and last_token not in [CLS_TOKEN, SEP_TOKEN]:
-            # Find tokens connected to the last one
-            best_connected = None
-            best_strength = 0.0
-            
-            for (t1, t2), strength in self.connections.items():
-                candidate = None
-                if t1 == last_token and t2 not in self.recent_tokens:
-                    candidate = t2
-                elif t2 == last_token and t1 not in self.recent_tokens:
-                    candidate = t1
-                
-                if candidate is not None and strength > best_strength:
-                    # Also check if it's physically resonant
-                    resonant = False
-                    if current_orbit_rep in self.orbit_patterns:
-                        for tid, mask, traj in self.orbit_patterns[current_orbit_rep]:
-                            if tid == candidate:
-                                # Check trajectory resonance
-                                overlap = sum(bin(t1 & t2).count('1') 
-                                            for t1, t2 in zip(current_trajectory, traj))
-                                if overlap > 0:
-                                    resonant = True
-                                    break
-                    
-                    if resonant:
-                        best_strength = strength
-                        best_connected = candidate
-            
-            if best_connected is not None:
-                if self._debug:
-                    last_text = self.tokens_to_text([last_token])
-                    next_text = self.tokens_to_text([best_connected])
-                    print(f"   • Hebbian flow: {last_text} → {next_text}")
-                self.recent_tokens.append(best_connected)
-                if len(self.recent_tokens) > self.inhibition_window:
-                    self.recent_tokens.pop(0)
-                return best_connected
-
-        # STAGE 3: No Hebbian connection - find resonant pattern
-        candidate_found = None
+        # Get orbit memory or use global seed
+        orbit_memory = self.orbit_memories.get(current_orbit_rep, GENE_Mic_S)
         
-        # Check current orbit
-        if current_orbit_rep in self.orbit_patterns:
-            for token_id, mask, trajectory in self.orbit_patterns[current_orbit_rep]:
-                if token_id in self.recent_tokens:
-                    continue
+        # Compute context defect
+        context_fold = fold_sequence(self.context_window, start_state=0)
+        path_defect = fold(orbit_memory, context_fold)
+        
+        # Find token with minimum fold defect
+        best_token = None
+        min_defect = 256  # Max possible defect
+        
+        # Check patterns in current orbit
+        if current_orbit_rep in self.orbit_deltas:
+            for token_id, delta in self.orbit_deltas[current_orbit_rep].items():
+                # Reconstruct actual mask from delta
+                mask = delta ^ baseline_exon
                 
-                # Trajectory resonance
-                overlap = sum(bin(t1 & t2).count('1') 
-                            for t1, t2 in zip(current_trajectory, trajectory))
+                # Compute defect as hamming weight of fold result
+                defect_value = fold(path_defect, mask)
+                defect = bin(defect_value).count('1')
                 
-                # Path resonance
-                path_resonance = fold(self.path_memory, mask) != 0
-                
-                if overlap > 0 or path_resonance:
-                    candidate_found = token_id
-                    if self._debug:
-                        print(f"   • Resonance in current orbit → {self.tokens_to_text([token_id])}")
-                    break
-
-        # Check nearby orbits if nothing in current
-        if candidate_found is None:
-            for orbit_rep, patterns in self.orbit_patterns.items():
+                if defect < min_defect:
+                    min_defect = defect
+                    best_token = token_id
+        
+        # If no patterns in current orbit, check nearby orbits by defect
+        if best_token is None:
+            orbit_size = self._get_orbit_size(self.current_state_index)
+            
+            # Use orbit size to determine search range
+            search_range = max(1, 256 // max(1, orbit_size))
+            
+            for orbit_rep in list(self.orbit_deltas.keys())[:search_range]:
                 if orbit_rep == current_orbit_rep:
                     continue
-                
-                # Get theta for this orbit
-                sample_states = np.where(self.phenomenology == orbit_rep)[0]
-                if len(sample_states) == 0:
-                    continue
                     
-                orbit_theta = self._get_theta(sample_states[0])
-                theta_distance = abs(orbit_theta - current_theta)
-                
-                if theta_distance < 0.2:  # Natural theta window
-                    for token_id, mask, trajectory in patterns:
-                        if token_id in self.recent_tokens:
-                            continue
-                        
-                        overlap = sum(bin(t1 & t2).count('1') 
-                                    for t1, t2 in zip(current_trajectory, trajectory))
-                        path_resonance = fold(self.path_memory, mask) != 0
-                        
-                        if overlap > 0 or path_resonance:
-                            candidate_found = token_id
-                            if self._debug:
-                                print(f"   • Resonance in nearby orbit → {self.tokens_to_text([token_id])}")
-                            break
+                for token_id, delta in self.orbit_deltas[orbit_rep].items():
+                    # Reconstruct mask using current baseline
+                    mask = delta ^ baseline_exon
                     
-                    if candidate_found is not None:
+                    defect_value = fold(path_defect, mask)
+                    defect = bin(defect_value).count('1')
+                    
+                    if defect < min_defect:
+                        min_defect = defect
+                        best_token = token_id
+        
+        # If still no token, try special tokens based on theta
+        if best_token is None:
+            current_theta = self._get_theta(self.current_state_index)
+            
+            # Near CS, try CLS
+            if current_theta > 1.5 and CLS_TOKEN in self.valid_tokens:
+                best_token = CLS_TOKEN
+            # Near closure, try SEP
+            elif current_theta < 0.2 and SEP_TOKEN in self.valid_tokens:
+                best_token = SEP_TOKEN
+            # Otherwise, any valid token
+            else:
+                for token_id in self.valid_tokens:
+                    if token_id not in [CLS_TOKEN, SEP_TOKEN, PAD_TOKEN]:
+                        best_token = token_id
                         break
+        
+        return best_token if best_token is not None else PAD_TOKEN
 
-        if candidate_found is not None:
-            self.recent_tokens.append(candidate_found)
-            if len(self.recent_tokens) > self.inhibition_window:
-                self.recent_tokens.pop(0)
-            return candidate_found
-
-        # No resonance - return boundary token
-        if current_stage in ["CS", "UNA"]:
-            return CLS_TOKEN
-        else:
-            return SEP_TOKEN
+    def _evolve_state(self, token_id: int) -> None:
+        """Evolve state without learning (for generation)."""
+        introns = token_to_introns(token_id)
+        for intron in introns:
+            next_state_int = self.apply_gyration_and_transform(
+                self._get_state_int(self.current_state_index), intron)
+            self.current_state_index = self._get_state_index(next_state_int)
+            
+            # Update context window
+            self.context_window.append(intron)
+            if len(self.context_window) > self.window_size:
+                self.context_window.pop(0)
 
     def reset(self) -> None:
         """Reset to CS state."""
-        cs_index = int(np.argmin(self.theta))
-        self.current_state_index = cs_index
-        self._reproduction_index = 0
-        self.recent_tokens = []
-
-    def get_state_info(self) -> Dict:
-        """Get current state information."""
-        current_state_int = self._get_state_int(self.current_state_index)
-        trajectory = compute_fold_trajectory(current_state_int)
-        theta = self._get_theta(self.current_state_index)
-        orbit_rep = self._get_orbit_rep(self.current_state_index)
-        orbit_size = self._get_orbit_size(self.current_state_index)
-        stage = self._get_stage(self.current_state_index)
-        exon = compute_exon_product(current_state_int)
-        
-        return {
-            'state_index': self.current_state_index,
-            'orbit_rep': orbit_rep,
-            'orbit_size': orbit_size,
-            'theta': theta,
-            'stage': stage,
-            'exon': exon,
-            'path_memory': self.path_memory,
-            'learned_orbits': len(self.orbit_patterns),
-            'total_patterns': sum(len(p) for p in self.orbit_patterns.values()),
-            'connections': len(self.connections)
-        }
+        self.current_state_index = self.cs_index
+        self.context_window = []
 
     def text_to_tokens(self, text: str) -> List[int]:
         """Convert text to token IDs."""
-        if self.tokenizer is None:
-            return []
         encoding = self.tokenizer.encode(text)
         return [t for t in encoding.ids if t in self.valid_tokens]
 
     def tokens_to_text(self, token_ids: List[int]) -> str:
         """Convert token IDs to text."""
-        if self.tokenizer is None:
-            return " ".join(f"[{tid}]" for tid in token_ids)
-        
         filtered = [t for t in token_ids if t not in [CLS_TOKEN, SEP_TOKEN, PAD_TOKEN]]
         if not filtered:
             return ""
-        
         try:
             return self.tokenizer.decode(filtered)
         except:
             return " ".join(f"[{t}]" for t in filtered)
 
-    def learn_text(self, text: str) -> None:
-        """Learn text using path-dependent Monodromic Fold learning."""
-        tokens = self.text_to_tokens(text)
-        if self.verbose:
-            print(f"Learning {len(tokens)} tokens...")
-        
-        initial_orbits = len(self.orbit_patterns)
-        initial_connections = len(self.connections)
-        
-        for token_id in tokens:
-            self.process_token(token_id)
-        
-        final_orbits = len(self.orbit_patterns)
-        total_patterns = sum(len(p) for p in self.orbit_patterns.values())
-        final_connections = len(self.connections)
-        
-        if self.verbose:
-            print(f"Learned {len(tokens)} tokens:")
-            print(f"Orbits: {final_orbits} | Patterns: {total_patterns} | Connections: {final_connections}")
+    def generate_text(self, max_tokens: int = 50, debug: bool = False, prompt: Optional[str] = None) -> str:
+        """Generate text using pure physics-based resonance."""
+        # Process prompt to evolve state and learn
+        if prompt:
+            prompt_tokens = self.text_to_tokens(prompt)
+            if prompt_tokens:
+                for token_id in prompt_tokens:
+                    self.process_token(token_id)
+                
+                if debug:
+                    print(f"Processed prompt: {len(prompt_tokens)} tokens")
+                    print(f"After prompt: θ={self._get_theta(self.current_state_index):.3f}")
+                    print(f"Learned orbits: {len(self.orbit_deltas)}")
+                    total_deltas = sum(len(d) for d in self.orbit_deltas.values())
+                    print(f"Total deltas stored: {total_deltas}")
 
-    def learn_from_file(self, filepath: str) -> None:
-        """Learn from a text file."""
-        file_path = Path(filepath)
-        if not file_path.exists():
-            print(f"File not found: {filepath}")
-            return
-        
-        with open(file_path, 'r', encoding='utf-8') as f:
-            text = f.read()
-        
-        if self.verbose:
-            # Statistics
-            words = text.split()
-            sentences = [s.strip() for s in text.split('.') if s.strip()]
-            print(f"File: {filepath}")
-            print(f"Stats: {len(text):,} chars | {len(words):,} words | {len(sentences):,} sentences")
-        
-        self.learn_text(text)
-        
-        # Show orbit distribution
-        if len(self.orbit_patterns) > 0 and self.verbose:
-            orbit_sizes = [(rep, len(patterns)) for rep, patterns in self.orbit_patterns.items()]
-            orbit_sizes.sort(key=lambda x: x[1], reverse=True)
-            print(f"Top orbits: ", end="")
-            for rep, count in orbit_sizes[:3]:
-                percentage = (count / sum(len(p) for p in self.orbit_patterns.values())) * 100
-                print(f"Orbit {self.rep_to_orbit_id.get(rep, -1)}: {count} ({percentage:.1f}%)  ", end="")
-            print()
-
-    def generate_text(self, max_tokens: int = 50, mode: str = "recollection", debug: bool = False) -> str:
-        """Generate text in specified mode.
-        
-        Args:
-            max_tokens: Maximum number of tokens to generate
-            mode: "reproduction" for exact replay, "recollection" for harmonic oscillator
-            debug: Whether to print debug information
-            
-        Returns:
-            Generated text
-        """
-        use_reproduction = (mode.lower() == "reproduction")
         tokens = []
-        self._debug = debug
-
+        
         if debug:
-            info = self.get_state_info()
-            print(f"\n{'=' * 40}")
-            print(f"MODE: {mode.upper()}")
-            print(f"{'=' * 40}")
-            print(f"Initial: θ={info['theta']:.3f}, stage={info['stage']}")
+            print(f"\n{'=' * 50}")
+            print(f"GENERATION")
+            print(f"Initial: θ={self._get_theta(self.current_state_index):.3f}")
+            print(f"{'=' * 50}")
             
         for i in range(max_tokens):
-            if use_reproduction:
-                token_id = self.generate_token_reproduction()
-                if token_id is None:
-                    if debug:
-                        print(f"[End of sequence]")
-                    break
-            else:
-                token_id = self.generate_token_recollection()
+            token_id = self.generate_token()
+            
+            # Stop at PAD token
+            if token_id == PAD_TOKEN:
+                if debug:
+                    print(f"[No resonance found]")
+                break
 
             tokens.append(token_id)
             
-            # Get token text
-            token_text = self.tokens_to_text([token_id])
-            if not token_text:  # Special tokens
-                if token_id == CLS_TOKEN:
-                    token_text = "[CLS]"
-                elif token_id == SEP_TOKEN:
-                    token_text = "[SEP]"
-                else:
-                    token_text = f"[{token_id}]"
-
+            # Get token text for debug
             if debug:
-                if not use_reproduction:
-                    self._evolve_state(token_id)
-                    # Update path memory during generation
-                    token_mask = fold_sequence(token_to_introns(token_id), start_state=0)
-                    self.path_memory = fold(self.path_memory, token_mask)
-                    
-                    info = self.get_state_info()
-                    print(f"Token {i+1}: '{token_text}' → θ={info['theta']:.3f}, stage={info['stage']}")
-                else:
-                    print(f"Token {i+1}: '{token_text}'")
-            else:
-                if not use_reproduction:
-                    self._evolve_state(token_id)
-                    # Update path memory during generation
-                    token_mask = fold_sequence(token_to_introns(token_id), start_state=0)
-                    self.path_memory = fold(self.path_memory, token_mask)
-
-            # Don't stop at first SEP - check if we have momentum to continue
-            if token_id == SEP_TOKEN:
-                # Check if we have strong connections to continue
-                has_continuation = False
-                if self.recent_tokens:
-                    last = self.recent_tokens[-1] if self.recent_tokens else None
-                    for (t1, t2), strength in self.connections.items():
-                        if (t1 == last or t2 == last) and strength > 0.3:
-                            has_continuation = True
-                            break
+                token_text = self.tokens_to_text([token_id])
+                if not token_text:
+                    if token_id == CLS_TOKEN:
+                        token_text = "[CLS]"
+                    elif token_id == SEP_TOKEN:
+                        token_text = "[SEP]"
+                    else:
+                        token_text = f"[{token_id}]"
                 
-                if not has_continuation and i > 5:  # Allow at least some generation
-                    if debug:
-                        print(f"[Natural ending]")
-                    break
+                # Update state for next generation
+                old_theta = self._get_theta(self.current_state_index)
+                self._evolve_state(token_id)
+                new_theta = self._get_theta(self.current_state_index)
+                
+                theta_change = "↑" if new_theta > old_theta else "↓" if new_theta < old_theta else "→"
+                print(f"  {i+1:2d}: '{token_text}' → θ={new_theta:.3f} {theta_change}")
+            else:
+                self._evolve_state(token_id)
 
-        self._debug = False
-        
-        # Generate final text
+            # Natural stopping at SEP
+            if token_id == SEP_TOKEN and i > 3:
+                if debug:
+                    print(f"[Natural ending at SEP]")
+                break
+
         result = self.tokens_to_text(tokens)
         
         if debug:
             print(f"\nGenerated: {result}")
-            print(f"{'=' * 40}\n")
+            print(f"{'=' * 50}\n")
         
         return result
 
 
 def demo_kernel():
-    """GyroSI Kernel Demonstration"""
-    print("\nGyroSI Kernel Demonstration\n" + "=" * 30)
+    """GyroSI Kernel v0.9.7.2 Demonstration"""
+    print("\nGyroSI Kernel v0.9.7.2 - Simplified Pure Physics")
+    print("=" * 60)
 
-    # ======================================================
-    # REPRODUCTION MODE - Simple Text Learning and Replay
-    # ======================================================
-    print("\n" + "=" * 40)
-    print("REPRODUCTION MODE DEMONSTRATION")
-    print("=" * 40)
+    # Create kernel
+    kernel = GyroKernel(verbose=True)
     
-    simple_text = "The algorithm processes data efficiently."
-    print(f"Input text: '{simple_text}'")
+    # Load wiki text as prompt
+    wiki_file = "toys/training/wiki_test.txt"
+    try:
+        with open(wiki_file, 'r', encoding='utf-8') as f:
+            wiki_text = f.read()
+        sample_text = wiki_text[:100] + "..." if len(wiki_text) > 100 else wiki_text
+        print(f"\nWiki text prompt (sample): '{sample_text}'")
+    except FileNotFoundError:
+        wiki_text = "In mathematics and computer science, an algorithm is a sequence of instructions."
+        print(f"\nUsing fallback prompt: '{wiki_text}'")
     
-    # Create kernel for reproduction mode
-    kernel_repro = GyroKernel(verbose=True)
-    kernel_repro.learn_text(simple_text)
+    # Generate response
+    print("\nGENERATION TEST:")
+    kernel.reset()
+    generated = kernel.generate_text(max_tokens=30, debug=True, prompt=wiki_text)
     
-    # Test reproduction
-    print("\nREPRODUCTION TEST:")
-    kernel_repro.reset()
-    reproduced = kernel_repro.generate_text(max_tokens=20, mode="reproduction", debug=True)
-    print(f"Reproduced: '{reproduced}'")
-
-    # ======================================================
-    # RECOLLECTION MODE - Corpus Learning and Generation
-    # ======================================================
-    print("\n" + "=" * 40)
-    print("RECOLLECTION MODE DEMONSTRATION")
-    print("=" * 40)
-    
-    # Create a separate kernel for recollection mode
-    kernel_recoll = GyroKernel(verbose=True)
-    print("\nLearning from corpus:")
-    kernel_recoll.learn_from_file("toys/training/wiki_test.txt")
-    
-    # Test recollection
-    print("\nRECOLLECTION TEST:")
-    kernel_recoll.reset()
-    generated = kernel_recoll.generate_text(max_tokens=30, mode="recollection", debug=True)
-    print(f"\nGenerated: '{generated}'")
-    
-    print("\n" + "=" * 40)
-    print("DEMONSTRATION COMPLETE")
-    print("=" * 40 + "\n")
+    print("\nDEMONSTRATION COMPLETE")
+    print("=" * 60 + "\n")
 
 
 if __name__ == "__main__":

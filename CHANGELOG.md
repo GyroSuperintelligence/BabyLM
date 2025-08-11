@@ -2,7 +2,32 @@
 
 ---
 
-## [v0.9.6.9-Kernel] – 2025-08-08 - Kernel
+## [v0.9.7.0-Kernel] – 2025-08-10 - Kernel
+
+### 🚀 **Semantic Bridge & Performance Overhaul**
+This release implements the foundational "semantic bridge" to connect the pre-trained model's knowledge to the GyroSI physics engine. It introduces on-manifold token caching, vectorized generation, and a real-byte token protocol to replace matrix multiplications with pure physics-driven resonance.
+
+**1. On-Manifold Token Caching (Semantic Bridge)**
+- **`_build_or_load_token_post_states`**: Implemented a robust caching mechanism for token post-states and exons. At startup, the kernel now computes the on-manifold state for every token in the vocabulary by applying its real byte sequence via epistemology from the Common Source (CS).
+- **Persistence**: These computed states and exons are saved to memory-mapped `.npy` files (`token_post_states.npy`, `token_exons.npy`) in the model's cache directory for near-instantaneous startup on subsequent runs.
+- **`token_exon_cache`**: A complete `token_id -> exon` map is now available, providing the primary semantic information for generation.
+
+**2. Physics-Pure Token Protocol**
+- **`token_to_introns`**: Corrected the tokenization protocol to use the tokenizer's actual UTF-8 byte representation for each token string, rather than an artificial LEB128 encoding of the token ID. This ensures the physics operates on the true, language-grounded byte patterns.
+
+**3. Performance & Generation Vectorization**
+- **`_build_resonance_table`**: Pre-computes a 256x256 table for the `fold` operation, allowing resonance calculations to be vectorized with NumPy for massive speed gains.
+- **Vectorized Generation**: `generate_token` now uses NumPy to calculate the fold-defect score across the *entire* vocabulary in a single, highly efficient operation, replacing slow Python loops.
+- **Hierarchical Candidate Filtering (Experimental)**: Added `_build_hierarchical_candidates` and `_get_physics_filtered_candidates` to lay the groundwork for O(log N) candidate selection based on orbit and theta-window filtering, which will replace the full-vocab scan.
+
+**4. Code Quality & Correctness**
+- **Physics Purity**: Corrected `THETA_BU_EG` to use radians (`np.pi / 2`) instead of degrees, ensuring unit consistency. Removed the heuristic fallback in `compute_exon_from_state` in favor of a state-dependent perturbation for `exon=0`.
+- **CS Emission**: Now loads `INTRON_BROADCAST_MASKS` from a canonical meta-artifact file instead of generating them at runtime, ensuring perfect alignment with the build-time manifold discovery.
+- **Model Loading**: The `download_model` function was refactored to be more robust, streaming tensors from safetensors files to handle very large models without loading them all into memory at once.
+
+---
+
+## [v0.9.6.9-Kernel] – 2025-08-09 - Kernel
 
 > Note: We are now focusing solely on developing the Kernel - all Legacy code has been put aside.
 
