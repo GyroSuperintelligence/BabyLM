@@ -38,7 +38,7 @@ def exon_product_from_state(state_index: int, theta: float, orbit_size: int) -> 
         8-bit exon product encoding the state's family composition
     """
     # Extract family components deterministically from the state index
-    li_component = (state_index >> 6) & 0x03   # 2 bits
+    li_component = (state_index >> 6) & 0x03  # 2 bits
     fg_component = (state_index >> 12) & 0x07  # 3 bits
     bg_component = (state_index >> 21) & 0x07  # 3 bits
 

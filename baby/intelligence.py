@@ -183,17 +183,17 @@ class IntelligenceEngine:
         """
         Pure-physics utility for choosing the next token.
         No temperature, no stochasticity.
-        
+
         Args:
             state_idx: Current state index
             intron: Intron byte that would be applied
             mask: Learned mask for the candidate token
-            
+
         Returns:
             Action value (higher is better)
         """
         next_state = int(self.epistemology[state_idx, intron])
-        
+
         # 1) cooling term (Δθ = θ - θ')
         θ_now = self.s2._theta_table[state_idx]
         θ_next = self.s2._theta_table[next_state]
@@ -834,7 +834,7 @@ class IntelligenceEngine:
         A_physics = theta_alignment + fold_entropy
 
         # Physically exclude standing emissions (no successor movement) if any
-        same_state = (succ_indices == int(state_index))
+        same_state = succ_indices == int(state_index)
         if np.any(~same_state):
             A_physics = np.where(same_state, -1e9, A_physics)
 

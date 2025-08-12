@@ -92,7 +92,6 @@ except:
 agent_pool.ensure_triad()
 
 
-
 atexit.register(agent_pool.close_all)
 
 # ---------------------------------------------------------------------
@@ -117,6 +116,7 @@ async def warm():
 
         # Prime the tokenizer cache
         from baby.information import _load_tokenizer
+
         _ = _load_tokenizer(PREFERENCES["tokenizer"]["name"], base_path=BASE_PATH)
     except Exception:
         pass

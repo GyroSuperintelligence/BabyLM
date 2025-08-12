@@ -2,6 +2,77 @@
 
 ---
 
+## [v0.9.7.1-Experimental] – 2025-08-10 - Kernel
+
+This changelog documents the experimental phase focused on refining `baby/kernel_latest.py` into a pure-physics language model. The goal was to eliminate all remaining heuristics and scoring mechanisms in favor of a 100% CGM-aligned architecture. While this phase successfully implemented several key theoretical components, it also introduced critical architectural flaws that resulted in a non-functional state, necessitating the subsequent corrective work.
+
+### 🎯 Architectural & Physics Refinements (Goals)
+
+*   **Pure Resonance Generation:** Attempted to replace all forms of scoring (e.g., multi-part defect tuples) in the `generate_token` function with a single, pure resonance metric derived from the Monodromic Fold.
+*   **Strict Cycle Gating:** Introduced a strict gating mechanism based on a theoretical gyrotriangle defect formula (`δ = π - (α + β + γ)`) to enforce the forward-only progression of the CGM cycle (CS → UNA → ONA → BU).
+*   **Model Knowledge Integration:** Aimed to bridge the knowledge from the pre-trained model's weights by integrating the compressed `virtual_tokens` directly into the candidate selection and resonance process.
+*   **Tokenizer Primacy:** Corrected special token handling to use the specific IDs from the SmolLM tokenizer (`<|im_start|>`, `<|im_end|>`) to ensure proper sequence boundary semantics.
+*   **Pure Prompt Seeding:** Separated the process of setting the initial state from a prompt (`_seed_from_prompt`) from the learning process (`learn_text`) to perform a pure physics walk without side-effects.
+
+###  implemented Changes
+
+*   **Cycle Gating Mechanism:**
+    *   Implemented a new `_calculate_defect` function based on CGM stage angles.
+    *   Added logic in `_apply_intron` to block transitions where the calculated `delta` was positive, intended to prevent the accumulation of physical defect.
+*   **Special Token Correction:**
+    *   Modified `_set_special_tokens` to use `<|im_start|>` (ID 1) and `<|im_end|>` (ID 2) as `CLS_TOKEN` and `SEP_TOKEN`, providing distinct sequence boundaries.
+*   **Pure Resonance Function:**
+    *   Refactored `generate_token` to select candidates based on the single lowest defect value calculated by `_resonance_defect`, which uses the Monodromic Fold. A tie-breaking rule using `orbit_sizes` was added for diversity.
+*   **Prompt Handling:**
+    *   Introduced a `_seed_from_prompt` function to perform a pure physics walk for setting the initial state. `generate_text` was updated to use this function.
+*   **Virtual Token Integration:**
+    *   Modified `_integrate_virtual_tokens` to populate the `_orbit_candidates` and `token_exon_cache` with knowledge compressed from the model's weights, placing them in orbits derived from their initial transition from CS.
+*   **Code Simplification:**
+    *   Removed several complex and unused data structures (`_theta_buckets`, `_orbit_coupling`, etc.) and non-physical heuristics (e.g., stagnation counters) to simplify the kernel.
+
+###  pathologies & Deadlocks (Critical Findings)
+
+*   **Fatal Gating Deadlock:** The implemented defect calculation (`if delta > TOL: block`) was based on a fundamental misinterpretation of CGM theory. It incorrectly treated all natural forward progression (which generates a positive defect) as an error to be blocked. **This resulted in a complete system deadlock where the kernel could not evolve its state past the initial prompt seeding**, leading to `Tokens learned: 0` and empty generation output.
+*   **Knowledge Isolation:** Despite successfully loading and compressing model weights into `virtual_tokens`, the generation loop was unreachable due to the gating deadlock. The vast knowledge from the pre-trained model remained architecturally integrated but practically isolated and could not influence the output.
+*   **State Evolution Failure:** Due to the gating deadlock, both `_seed_from_prompt` and `learn_text` failed to evolve the system's state beyond a few initial steps. The system was effectively frozen after processing the prompt, which is why every generation attempt started from the same state and produced the same failure.
+
+*   **Fixes & Refinements:**
+    *   Implemented cycle gating logic to prevent stage regression by blocking transitions where `next_stage_idx < current_stage_idx`.
+    *   Corrected `_get_stage` to derive stage from `state_index`'s `theta`.
+    *   Standardized special token IDs (`CLS_TOKEN`, `SEP_TOKEN`, `IM_START`, `IM_END`) by dynamically retrieving them from the HuggingFace tokenizer.
+    *   Adjusted `_seed_from_prompt` to utilize the `_apply_chat_template` for prompt processing.
+*   **Virtual Token and Exon Handling:**
+    *   Modified virtual token ID generation in `_integrate_virtual_tokens` to ensure positive and within-bounds IDs using `hash((key, pos)) & 0x7FFFFFFF`, addressing `IndexError`.
+    *   Introduced `_recompute_exons_from_embeddings` to explicitly recompute and cache token exons from embedding-projected token states after projection, ensuring more meaningful exon values.
+    *   Refined `_build_or_load_token_post_states` to include bounds checks when saving `token_exons.npy`.
+    *   Added explicit handling for virtual tokens in `token_to_introns`, returning an empty list.
+*   **Resonance and Candidate Selection:**
+    *   Reinstated accidental removal of fallback candidate search (though this was later removed again in favor of strict error surfacing).
+    *   Modified `generate_token` to update `path_memory` using `fold_sequence` of the full intron sequence at a token level.
+    *   Removed explicit special token penalties and `theta_factor` from `_resonance_defect` and `generate_token`, reverting `_resonance_defect` to pure Hamming weight.
+    *   Removed fallbacks in `_get_candidates_for_state` and `generate_token`, replacing them with `RuntimeError` exceptions if no valid candidates or UNA pool entries are found.
+    *   Refined candidate filtering in `_get_candidates_for_state` to exclude special tokens.
+*   **Chat Templating and Prompt Processing:**
+    *   Introduced `_apply_chat_template` helper function to encapsulate `tokenizer.apply_chat_template` logic, including a fallback for tokenizers without a defined chat template.
+    *   Ensured `tokenizer.decode` uses `skip_special_tokens=True` in `generate_text`.
+    *   Updated `_seed_from_prompt` to apply `_update_stage` after processing prompt tokens.
+*   **Code Quality & Debugging:**
+    *   Re-added missing `introns = self.token_to_introns(token)` line in `generate_token` to resolve "introns is not defined" error.
+    *   Removed extensive debug prints to reduce output verbosity.
+
+**Tools and Utilities:**
+
+*   **`tools/rebuild_safetensors_from_chunks.py`:**
+    *   Created this script to reconstruct a single `model.safetensors` file from the fragmented `weights_chunk_*.npz` files (which contain the *original float tensors* saved in a NumPy-compressed format), allowing the HuggingFace `transformers` library to load the full model from local disk. This clarified that the `transformers` model was loading the original weights, not our custom "virtual token" compression.
+*   **`tools/test_tokenizer_only.py`:**
+    *   Developed to verify standalone functionality of `transformers.AutoTokenizer`, including `apply_chat_template`.
+*   **`tools/test_transformers_cpu.py`:**
+    *   Created to test loading and running the full `transformers` model on CPU, handling local model directories, setting `pad_token`, and passing `attention_mask`.
+*   **`tools/chat_transformers_cpu.py`:**
+    *   Implemented an interactive chat interface for the `transformers` model running on CPU, utilizing chat templates for prompt formatting.
+
+---
+
 ## [v0.9.7.0-Kernel] – 2025-08-10 - Kernel
 
 ### 🚀 **Semantic Bridge & Performance Overhaul**

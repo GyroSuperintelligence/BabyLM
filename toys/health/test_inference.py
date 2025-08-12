@@ -50,7 +50,9 @@ class TestInferenceEngineInitialization:
         assert s3_engine.endogenous_modulus == len(s2_engine._keys)
         assert s3_engine._v_max is not None and s3_engine._v_max > 0
 
-    def test_initialization_validates_orbit_cardinality(self, test_env: Dict[str, Any], temp_store: PhenotypeStore) -> None:
+    def test_initialization_validates_orbit_cardinality(
+        self, test_env: Dict[str, Any], temp_store: PhenotypeStore
+    ) -> None:
         """Test initialization fails with zero orbit cardinality."""
         keys = test_env["main_meta_files"]["ontology"]
         ep = test_env["main_meta_files"]["epistemology"]

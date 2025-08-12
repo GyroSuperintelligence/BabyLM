@@ -447,8 +447,6 @@ class InformationEngine:
         else:
             self._theta_table = None
 
-
-
         self._v_max = 1 if self.orbit_cardinality is None else int(np.max(self.orbit_cardinality))
 
         # Early fail if theta.npy is missing or corrupt

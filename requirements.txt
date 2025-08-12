@@ -17,6 +17,7 @@ httpx>=0.24.0
 # Language processing
 tokenizers>=0.15.0
 transformers>=4.30.0
+torch>=2.2.2
 
 # Storage & JIT
 # msgpack removed - replaced with fixed-length binary struct
@@ -32,6 +33,7 @@ psutil>=5.9.0
 pytest>=7.4.0
 questionary>=2.0.1
 tqdm>=4.66.0
+autopep8>=1.7.0
 
 # Type stubs
 types-tqdm>=4.66.0

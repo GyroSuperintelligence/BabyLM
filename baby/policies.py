@@ -163,7 +163,11 @@ class OrbitStore:
         # Wire from preferences with sane defaults
         self.write_threshold = int(prefs.get("write_batch_size", write_threshold))
         storage_backend = str(prefs.get("storage_backend", "binary_struct"))
-        self.use_mmap = bool(prefs.get("use_mmap", (storage_backend == "binary_struct"))) if preferences is not None else bool(use_mmap)
+        self.use_mmap = (
+            bool(prefs.get("use_mmap", (storage_backend == "binary_struct")))
+            if preferences is not None
+            else bool(use_mmap)
+        )
         self.max_size_mb = int(prefs.get("max_file_size_mb", 512))
         self._max_size_bytes = int(self.max_size_mb) * 1024 * 1024
         self.lock = RLock()
@@ -509,7 +513,7 @@ class OrbitStore:
             for s, t in self.pending_writes.keys():
                 if s == state_idx:
                     yield (s, t)
-            for tok_id in self.index_by_state.get(state_idx, ()): 
+            for tok_id in self.index_by_state.get(state_idx, ()):
                 yield (state_idx, tok_id)
 
 
@@ -783,9 +787,7 @@ class MultiKnowledgeView:
                 try:
                     store = OrbitStore(resolved_path, use_mmap=True)
                     self.stores.append(store)
-                    logger.info(
-                        "Loaded knowledge file: %s (%d entries)", os.path.basename(file_path), len(store.data)
-                    )
+                    logger.info("Loaded knowledge file: %s (%d entries)", os.path.basename(file_path), len(store.data))
                 except Exception as e:
                     logger.warning("Failed to load %s: %s", file_path, e)
             else:
