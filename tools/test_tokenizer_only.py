@@ -70,8 +70,7 @@ def apply_chat_template(tokenizer: Any, user_prompt: str) -> List[int]:
 
     # Minimal fallback if template not available
     templated = (
-        "You are a helpful AI assistant.\n<|im_start|>user\n" + user_prompt +
-        "<|im_end|>\n<|im_start|>assistant\n"
+        "You are a helpful AI assistant.\n<|im_start|>user\n" + user_prompt + "<|im_end|>\n<|im_start|>assistant\n"
     )
     return tokenizer.encode(templated)
 
@@ -125,5 +124,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

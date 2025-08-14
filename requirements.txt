@@ -18,6 +18,8 @@ httpx>=0.24.0
 tokenizers>=0.15.0
 transformers>=4.30.0
 torch>=2.2.2
+huggingface_hub>=0.19.0
+openai-harmony>=0.1.0
 
 # Storage & JIT
 # msgpack removed - replaced with fixed-length binary struct

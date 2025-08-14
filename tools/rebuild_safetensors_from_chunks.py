@@ -24,6 +24,7 @@ from typing import Dict
 
 def load_chunks(model_dir: str) -> Dict[str, "np.ndarray"]:
     import numpy as np
+
     pattern = os.path.join(model_dir, "weights_chunk_*.npz")
     files = sorted(glob.glob(pattern))
     if not files:
@@ -38,6 +39,7 @@ def load_chunks(model_dir: str) -> Dict[str, "np.ndarray"]:
 
 def save_safetensors(model_dir: str, tensors: Dict[str, "np.ndarray"]) -> str:
     from safetensors.numpy import save_file
+
     out_path = os.path.join(model_dir, "model.safetensors")
     save_file(tensors, out_path)
     return out_path
@@ -47,6 +49,7 @@ def verify_load(model_dir: str) -> None:
     try:
         import torch  # noqa: F401
         from transformers import AutoModelForCausalLM
+
         m = AutoModelForCausalLM.from_pretrained(
             model_dir,
             local_files_only=True,
@@ -106,5 +109,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

@@ -110,12 +110,16 @@ def main() -> int:
     tokenizer = AutoTokenizer.from_pretrained(model_ref, local_files_only=is_local_dir)
 
     print(f"[info] loading model from: {model_ref} (CPU)")
-    model = AutoModelForCausalLM.from_pretrained(
-        model_ref,
-        local_files_only=is_local_dir,
-        torch_dtype=torch.float32,
-        device_map=None,
-    ).to("cpu").eval()
+    model = (
+        AutoModelForCausalLM.from_pretrained(
+            model_ref,
+            local_files_only=is_local_dir,
+            torch_dtype=torch.float32,
+            device_map=None,
+        )
+        .to("cpu")
+        .eval()
+    )
 
     ensure_pad(tokenizer, model)
 
@@ -153,15 +157,19 @@ def main() -> int:
             "pad_token_id": tokenizer.pad_token_id,
         }
         if args.temperature and args.temperature > 0:
-            gen_kwargs.update({
-                "do_sample": True,
-                "temperature": args.temperature,
-                "top_p": args.top_p,
-            })
+            gen_kwargs.update(
+                {
+                    "do_sample": True,
+                    "temperature": args.temperature,
+                    "top_p": args.top_p,
+                }
+            )
         else:
-            gen_kwargs.update({
-                "do_sample": False,
-            })
+            gen_kwargs.update(
+                {
+                    "do_sample": False,
+                }
+            )
 
         with torch.no_grad():
             gen_ids = model.generate(
@@ -171,7 +179,7 @@ def main() -> int:
             )
 
         # Decode only the newly generated part
-        new_tokens = gen_ids[0][input_ids.shape[-1]:]
+        new_tokens = gen_ids[0][input_ids.shape[-1] :]
         assistant_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
         print(f"assistant> {assistant_text}")
 
@@ -183,5 +191,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

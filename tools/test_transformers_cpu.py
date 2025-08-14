@@ -58,12 +58,16 @@ def main() -> int:
 
     print(f"[info] loading model from: {model_ref} (CPU)")
     t0 = time.time()
-    model = AutoModelForCausalLM.from_pretrained(
-        model_ref,
-        local_files_only=is_local_dir,
-        torch_dtype=torch.float32,
-        device_map=None,
-    ).to("cpu").eval()
+    model = (
+        AutoModelForCausalLM.from_pretrained(
+            model_ref,
+            local_files_only=is_local_dir,
+            torch_dtype=torch.float32,
+            device_map=None,
+        )
+        .to("cpu")
+        .eval()
+    )
     t1 = time.time()
     print(f"[info] model loaded in {t1 - t0:.2f}s")
     # Align model pad token id if missing
@@ -110,5 +114,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
