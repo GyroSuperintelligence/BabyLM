@@ -1,4 +1,56 @@
-## 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
+```plaintext
+💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
+```
+
+## \[v0.9.7.2-GPT-OSS-Kernel\] – 2025-08-14 - Experimental
+
+### **Performance Optimizations and MoE Weight Loading**
+
+This release focuses on significant performance improvements and proper handling of Mixture of Experts (MoE) weights in MXFP4 format.
+
+**Layer Normalization Fix (**`**kernel/gyro_head.py**`**):**
+
+*   Added final layer normalization in `generate_next_token` before logits computation to mirror `forward_pass` behavior.
+*   Ensures consistent model output between generation and forward pass modes.
+
+**Byte-Plane Caching Optimization (**`**kernel/gyro_head.py**`**):**
+
+*   Implemented `_byte_plane_cache` dictionary in `GyroHead.__init__` to cache tensor byte-planes.
+*   Modified `_fgemm_fold` method to reuse cached byte-plane views instead of re-forming them.
+*   Applied psi isomorphism (XOR 0xAA) to cached `Wb` planes while maintaining fresh application to `xb`.
+*   **Performance Impact:** Eliminates redundant tensor view operations in physics-based GEMM computations.
+
+**Popcount LUT Optimization (**`**kernel/gyro_head.py**`**):**
+
+*   Replaced nibble popcount trick with precomputed 256-entry lookup table (`_popcount_lut`).
+*   Updated `_res_score_per_head` method to use LUT-based popcount calculation.
+*   **Performance Impact:** Significantly faster than bitwise operations for attention scoring.
+
+**MoE Weight Loading Infrastructure (**`**kernel/gyro_head.py**`**):**
+
+*   **Metadata Storage:** Added `model_weight_meta` dictionary to store JSON metadata during weight loading for proper tensor slicing.
+*   **MXFP4 Dequantization:** Implemented `_mxfp4_dequantize` method with 16-entry lookup table for efficient MXFP4 to dense tensor conversion.
+*   **Expert Weight Orientation:** Added `_orient_gate_up` and `_orient_down` helpers to handle fused projection weights and ensure proper tensor shapes.
+*   **Lazy Expert Materialization:** Implemented `_moe_get_expert` method with LRU cache for on-demand expert weight loading.
+*   **Router Weight Fix:** Corrected router weight orientation from `[E,H]` to `[H,E]` and fixed weight key from `mlp.gate.weight` to `mlp.router.weight`.
+
+**MoE Forward Pass Updates (**`**kernel/gyro_head.py**`**):**
+
+*   Modified `_mlp_step_moe` to use lazy expert materialization instead of direct `_layer_weight` calls.
+*   Integrated router weight orientation fixes for compatibility with `_fgemm_fold`.
+*   **Memory Impact:** Prevents loading all expert weights simultaneously, reducing memory usage from gigabytes to manageable levels.
+
+**Verification and Testing:**
+
+*   All optimizations compile successfully and maintain compatibility with existing physics-based operations.
+*   Proper handling of converted weights in `model.gyro.safetensors` ensures full utilization of MXFP4 expert weights.
+
+**Technical Details:**
+
+*   Expert weights are now lazily dequantized from MXFP4 format only when needed
+*   LRU cache prevents memory bloat while maintaining performance for frequently used experts
+*   Byte-plane caching reduces CPU overhead in fold-based GEMM operations
+*   All changes maintain the gyroscopic intelligence and physics-based architecture
 
 ## \[v0.9.7.1-Experimental\] – 2025-08-13 - Kernel
 
@@ -1275,7 +1327,7 @@ This release implements a fundamental architectural shift from byte-fragment-lev
 #### 🗄️ Storage Layer Improvements
 
 *   **Updated: Binary Format for Minimal Phenotypes**
-    *   **New Format:** `_STRUCT_FMT = "<iibhx"` -="" 12-byte="" fixed="" structure="" \*="" **fields:\*\*=""** `**state_idx**`**\="" (uint32),=""** `**token_id**`**\=""** `**mask**`**\="" (uint8),=""** `**conf**`**\="" (float16)="" \*\*impact:\*\*="" optimized="" storage="" for="" minimal="" phenotype="" \*\*fixed:="" store="" operations**\="" updated="" `put()`,="" `merge_phenotype_maps()`,="" `apply_global_confidence_decay()`\="" new="" removed="" `max_age_days`\="" logic="" (no="" longer="" relevant)="" operations="" now="" work="" correctly="" with="" phenotypes="" ####="" 🧪="" test="" suite="" overhaul="" **comprehensive="" updates**\="" all="" tests="" to="" use="" `(state_index,="" token_id)`\="" keying="" replaced="" `learn_by_key()`\="" calls="" two-step="" `get_phenotype()`\="" +="" `learn()`\="" process="" field="" references:="" `"confidence"`\="" →="" `"conf"`,="" `"exon_mask"`\="" `"mask"`\="" added="" "key"="" entries="" where="" required="" assertions\*\*="" pruning="" append-only="" stores="" confidence="" decay="" assertions="" match="" actual="" return="" keys="" validation="" reflect="" **removed:="" obsolete="" tests**\="" deleted="" `testbuingress`\="" class="" and="" related="" `test_batch_learning_stores_different_phenotypes`\="" (replaced="" token-aware="" version)="" accurately="" reflects="" current="" architecture="" 🔧="" governance="" updates="" signature\*\*="" eliminated="" `compute_governance_signature()`\="" function="" `governancesignature`\="" typeddict="" simplified="" layer,="" unused="" complexity="" **updated:="" exon="" product="" function**\="" `exon_product_from_metadata()`\="" accepts="" `confidence`\="" parameters="" aligned="" 🎯="" theoretical="" impact="" this="" refactoring="" represents="" a="" fundamental="" shift="" in="" how="" the="" system="" understands="" processes="" knowledge:="" \*_token-aware="" learning:\*\*="" knowledge="" is="" organized="" by="" meaningful="" linguistic="" units="" rather="" than="" arbitrary="" byte="" fragments="" \*\*minimal="" phenotypes:\*\*="" reduced="" allows="" more="" efficient="" processing="" \*\*active="" tokenizer="" integration:\*\*="" serves="" as="" an="" internal="" decoder,="" not="" just="" i="" o="" adapter="" \*\*improved="" coherence:\*\*="" generation="" learning="" are="" token="" boundaries,="" reducing="" inference="" overlaps="" operates="" on="" linguistically="" level="" while="" maintaining="" core="" gyrosi="" physics="" monodromic="" fold="" operations.="" ---="" ##="" \[0.9.6.6\]="" –="" 2025-07-28="" ###="" wikipedia="" training="" pipeline="" \*\*robust="" article="" splitting:\*\*="" splits="" articles="" only="" at="" three="" or="" consecutive="" blank="" lines,="" matching="" dump="" format="" preventing="" topic="" bleed-through.="" \*\*token-based="" filtering:\*\*="" least=""_ `_min_token_count_`\_="" tokens="" included,="" skipping="" empty="" trivial="" stubs.="" \*\*efficient="" single-pass="" tokenization:\*\*="" each="" tokenized="" once,="" no="" double-tokenization="" unnecessary="" allocations.="" \*\*sequential="" byte-level="" processed="" egress="" ingress="" cycles="" true="" path-dependent="" training,="" batch="" summarization.="" \\\_\*frequent="" safe="" checkpointing:\*\*="" checkpoints="" saved="" every="" 1m="" tokens,="" 120="" seconds,="" n="" files,="" async="" thread="" pool="" rare="" backlog="" flush="" safeguard.="" \*\*process-specific="" memory="" guard:\*\*="" uses="" rss="" (not="" system-wide="" percent)="" trigger="" gc="" checkpointing.="" \*\*automatic="" maintenance:\*\*="" runs="" when="" needed="" (store="">2GB and at least 1hr since last decay), and compaction is deferred until after agent close for safety.
+    *   **New Format:** `_STRUCT_FMT = "<iibhx"` -="" 12-byte="" fixed="" structure="" \*="" **fields:\*\*="" \***_\*\*="" \*\*_\="" `_****state_idx****_`\_**\*\*="" (uint32),=""** `**_****token_id****_**`**\_**\*\*="" `_****mask****_`\_**\*\*="" (uint8),=""** `**_****conf****_**`**\_**\*\*="" (float16)="" \\**\_**\*impact:\*\*="" optimized="" storage="" for="" minimal="" phenotype="" \*\*fixed:="" store="" operations**\="" updated=""** `**put()**`**,=""** `**merge_phenotype_maps()**`**,=""** `**apply_global_confidence_decay()**`**\="" new="" removed=""** `**max_age_days**`**\="" logic="" (no="" longer="" relevant)="" operations="" now="" work="" correctly="" with="" phenotypes="" ####="" 🧪="" test="" suite="" overhaul="" \*\*comprehensive="" updates**\="" all="" tests="" to="" use="" `(state_index,="" token_id)`\="" keying="" replaced="" `learn_by_key()`\="" calls="" two-step="" `get_phenotype()`\="" +="" `learn()`\="" process="" field="" references:="" `"confidence"`\="" →="" `"conf"`,="" `"exon_mask"`\="" `"mask"`\="" added="" "key"="" entries="" where="" required="" assertions\*\*="" pruning="" append-only="" stores="" confidence="" decay="" assertions="" match="" actual="" return="" keys="" validation="" reflect="" **removed:="" obsolete="" tests**\="" deleted="" `testbuingress`\="" class="" and="" related="" `test_batch_learning_stores_different_phenotypes`\="" (replaced="" token-aware="" version)="" accurately="" reflects="" current="" architecture="" 🔧="" governance="" updates="" signature\*\*="" eliminated="" `compute_governance_signature()`\="" function="" `governancesignature`\="" typeddict="" simplified="" layer,="" unused="" complexity="" **updated:="" exon="" product="" function**\="" `exon_product_from_metadata()`\="" accepts="" `confidence`\="" parameters="" aligned="" 🎯="" theoretical="" impact="" this="" refactoring="" represents="" a="" fundamental="" shift="" in="" how="" the="" system="" understands="" processes="" knowledge:="" \*\_token-aware="" learning:\*\*="" knowledge="" is="" organized="" by="" meaningful="" linguistic="" units="" rather="" than="" arbitrary="" byte="" fragments="" \*\*minimal="" phenotypes:\*\*="" reduced="" allows="" more="" efficient="" processing="" \*\*active="" tokenizer="" integration:\*\*="" serves="" as="" an="" internal="" decoder,="" not="" just="" i="" o="" adapter="" \*\*improved="" coherence:\*\*="" generation="" learning="" are="" token="" boundaries,="" reducing="" inference="" overlaps="" operates="" on="" linguistically="" level="" while="" maintaining="" core="" gyrosi="" physics="" monodromic="" fold="" operations.="" ---="" ##="" \[0.9.6.6\]="" –="" 2025-07-28="" ###="" wikipedia="" training="" pipeline="" \*\*robust="" article="" splitting:\*\*="" splits="" articles="" only="" at="" three="" or="" consecutive="" blank="" lines,="" matching="" dump="" format="" preventing="" topic="" bleed-through.="" \*\*token-based="" filtering:\*\*="" least="" \_="" \_="" `__min_token_count__`\_\\\_="" tokens="" included,="" skipping="" empty="" trivial="" stubs.="" \*\*efficient="" single-pass="" tokenization:\*\*="" each="" tokenized="" once,="" no="" double-tokenization="" unnecessary="" allocations.="" \*\*sequential="" byte-level="" processed="" egress="" ingress="" cycles="" true="" path-dependent="" training,="" batch="" summarization.="" \\\_\*frequent="" safe="" checkpointing:\*\*="" checkpoints="" saved="" every="" 1m="" tokens,="" 120="" seconds,="" n="" files,="" async="" thread="" pool="" rare="" backlog="" flush="" safeguard.="" \*\*process-specific="" memory="" guard:\*\*="" uses="" rss="" (not="" system-wide="" percent)="" trigger="" gc="" checkpointing.="" \*\*automatic="" maintenance:\*\*="" runs="" when="" needed="" (store="">2GB and at least 1hr since last decay), and compaction is deferred until after agent close for safety.
 *   **Safe post-close compaction:** Knowledge store is compacted only after the agent and mmap are closed, preventing file corruption.
 *   **Progress bar improvements:** Now shows process memory usage (RSS) for accurate resource tracking.
 *   **Test mode:** Added `--test-aa` flag to restrict training to the AA shard for quick validation before full runs.
@@ -2157,7 +2209,7 @@ Fixed TypedDict access warnings for optional keys.
 🗂️ **Initial project structure established**
 
 *   📁 Created base directories: src/, tests/, docs/, examples/
-*   📄 Added s1\_governance files: README.md, LICENSE, pyproject.toml, requirements.txt, Makefile, CHANGELOG.md\</iibhx"\`>
+*   📄 Added s1\_governance files: README.md, LICENSE, pyproject.toml, requirements.txt, Makefile, CHANGELOG.md\\
 
 ```plaintext
 "pruning": {
@@ -2168,6 +2220,4 @@ Fixed TypedDict access warnings for optional keys.
 }
 ```
 
-```plaintext
-[uLEB128 state_index][uLEB128 n_pairs][(uLEB128 token_id + mask_byte) * n_pairs]
-```
+`plaintext [uLEB128 state_index][uLEB128 n_pairs][(uLEB128 token_id + mask_byte) * n_pairs]` \</uuid>\</iibhx"\`>
