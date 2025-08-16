@@ -3,6 +3,13 @@
 
 ---
 
+## [v0.9.7.3-Reset] – 2025-08-15 - Experimental
+
+### Back to Theory
+Making corrections and redefining our directions, directives and implementation.
+
+---
+
 ## [v0.9.7.2-GPT-OSS-Kernel] – 2025-08-15 - Experimental
 
 ### Fixed
