@@ -245,24 +245,43 @@ def decode_gyro_tensor(name: str, blob: torch.Tensor, meta: bytes | None, device
     comp_bytes = bytes(memoryview(blob.detach().cpu().numpy()))
 
     # Decompress based on codec
-    if codec == "gyro-llp-v1":
-        # Use the specified compressor
-        if compressor == "zstd" and zstd:
-            dctx = zstd.ZstdDecompressor()
-            raw_with_pad = dctx.decompress(comp_bytes)
+    try:
+        if codec == "gyro-llp-v1":
+            # Use the specified compressor
+            if compressor == "zstd" and zstd:
+                try:
+                    dctx = zstd.ZstdDecompressor()
+                    raw_with_pad = dctx.decompress(comp_bytes)
+                except Exception as e:
+                    raise RuntimeError(f"ZSTD decompression failed for {name}: {e}")
+            else:
+                try:
+                    raw_with_pad = zlib.decompress(comp_bytes)
+                except zlib.error as e:
+                    raise RuntimeError(f"Zlib decompression failed for {name}: {e}. Data may be corrupted.")
+
+            # Remove padding
+            n_raw = meta_dict["n_raw"]
+            if n_raw > len(raw_with_pad):
+                raise RuntimeError(f"Invalid n_raw ({n_raw}) > decompressed size ({len(raw_with_pad)}) for {name}")
+            raw = raw_with_pad[:n_raw]
+
+            # Reverse ψ isomorphism if applied
+            if meta_dict.get("psi", 0) == 1:
+                raw = bytes(b ^ 0xAA for b in raw)
         else:
-            raw_with_pad = zlib.decompress(comp_bytes)
-
-        # Remove padding
-        n_raw = meta_dict["n_raw"]
-        raw = raw_with_pad[:n_raw]
-
-        # Reverse ψ isomorphism if applied
-        if meta_dict.get("psi", 0) == 1:
-            raw = bytes(b ^ 0xAA for b in raw)
-    else:
-        # Legacy format
-        raw = zlib.decompress(comp_bytes) if codec == "zlib" else comp_bytes
+            # Legacy format
+            if codec == "zlib":
+                try:
+                    raw = zlib.decompress(comp_bytes)
+                except zlib.error as e:
+                    raise RuntimeError(f"Legacy zlib decompression failed for {name}: {e}. Data may be corrupted.")
+            else:
+                raw = comp_bytes
+    except RuntimeError:
+        raise  # Re-raise our custom errors
+    except Exception as e:
+        raise RuntimeError(f"Unexpected decompression error for {name}: {e}")
 
     # Convert to numpy array with correct dtype
     np_dtype = {

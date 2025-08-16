@@ -18,7 +18,7 @@ import argparse
 import numpy as np
 import sys
 from pathlib import Path
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Optional, TYPE_CHECKING, Union
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -27,10 +27,21 @@ if str(project_root) not in sys.path:
 
 # For typing only; do not rely on these at runtime
 try:
-    from openai_harmony import Message as _HarmonyMessage, Role as _HarmonyRole
+    from openai_harmony import Message as _HarmonyMessage
+    from openai_harmony import Role as _HarmonyRole
 except Exception:
     _HarmonyMessage = None  # type: ignore[assignment]
     _HarmonyRole = None  # type: ignore[assignment]
+
+# Create stub classes for runtime usage
+class _Role:
+    ASSISTANT = "assistant"
+    USER = "user"
+    SYSTEM = "system"
+
+if TYPE_CHECKING:
+    from kernel.gyro_head import GyroHead
+    from openai_harmony import Message as HarmonyMessage, StreamableParser, Role
 
 
 def setup_harmony_format() -> tuple[Any, Any]:
@@ -64,7 +75,7 @@ def setup_harmony_format() -> tuple[Any, Any]:
             .with_required_channels(["analysis", "commentary", "final"])  # All channels as per guide
         )
 
-        system_message = Message.from_role_and_content(Role.SYSTEM, system_message_content)
+        system_message = Message.from_role_and_content("system", system_message_content)
 
         return encoding, system_message
 
@@ -74,7 +85,7 @@ def setup_harmony_format() -> tuple[Any, Any]:
         return None, None
 
 
-def load_gyro_model(model_path: Path) -> Optional[Any]:
+def load_gyro_model(model_path: Path) -> Optional[GyroHead]:
     """Load the GyroHead model for physics-based inference."""
     try:
         from kernel.gyro_head import GyroHead
@@ -96,20 +107,27 @@ def load_gyro_model(model_path: Path) -> Optional[Any]:
 
 def generate_response(
     encoding: Any,
-    gyro_model: Any,
-    conversation: list[Any],
+    gyro_model: 'GyroHead',
+    conversation: List[Any],
     max_new_tokens: int = 256,
 ) -> Optional[str]:
     """Generate a response using GyroHead physics-based generation."""
     try:
         # Convert conversation to tokens using harmony encoding
-        from openai_harmony import Conversation, Role as HarmonyRole
-
+        try:
+            from openai_harmony import Conversation
+        except ImportError as e:
+            print(f"[error] Missing openai-harmony dependency in generate_response: {e}")
+            print("[error] Install with: pip install openai-harmony")
+            return None
+        
         conv = Conversation.from_messages(conversation)
-        token_ids = encoding.render_conversation_for_completion(conv, HarmonyRole.ASSISTANT)
+        # Import Role from harmony library for proper enum usage
+        from openai_harmony import Role
+        token_ids = encoding.render_conversation_for_completion(conv, Role.ASSISTANT)
 
         # Use proper state seeding method instead of manual token loop
-        def seed_from_tokens(gyro_model, token_ids):
+        def seed_from_tokens(gyro_model: 'GyroHead', token_ids: List[int]) -> None:
             gyro_model.current_state_index = gyro_model.CS_STATE_INDEX
             # Reset path_memory to seed (not "itself")
             from kernel.gyro_head import GENE_Mic_S
@@ -141,10 +159,10 @@ def generate_response(
             return None
         
         # Generate tokens using proper GyroHead physics
-        generated_tokens = []
+        generated_tokens: List[int] = []
         
         # Start with proper Harmony message structure: <|channel|>final<|message|>
-        harmony_prefix = [channel_token_id, final_token_id, message_token_id]
+        harmony_prefix: List[int] = [channel_token_id, final_token_id, message_token_id]
         for i, tok in enumerate(harmony_prefix):
             gyro_model.ingest_token(tok, pos=i)
             generated_tokens.append(tok)
@@ -154,6 +172,8 @@ def generate_response(
         # Generate content using GyroHead physics engine
         content_tokens_generated = 0
         max_content_tokens = min(50, max_new_tokens - len(harmony_prefix) - 1)  # Reserve space for stop token
+        consecutive_special_tokens = 0  # Track consecutive special tokens to prevent infinite loops
+        max_consecutive_special = 10  # Maximum consecutive special tokens before breaking
         
         for step in range(max_content_tokens):
             # step with real tensors + physics sieve
@@ -161,33 +181,62 @@ def generate_response(
                 prev = generated_tokens[-1] if generated_tokens else 0  # or your last assistant token
                 best_token = gyro_model.generate_next_token(prev_token_id=prev, pos=step)
                 
+                # Validate token is within valid range
+                if best_token is None or best_token < 0:
+                    print(f"[warning] Invalid token generated: {best_token}")
+                    break
+                
                 # Check if we should stop generation
                 if best_token == stop_token_id or best_token >= gyro_model.vocab_size:
                     break
                     
-                # Filter out special tokens
+                # Filter out special tokens but track consecutive occurrences
                 if (best_token == channel_token_id or best_token == message_token_id):
+                    consecutive_special_tokens += 1
+                    if consecutive_special_tokens >= max_consecutive_special:
+                        print(f"[warning] Too many consecutive special tokens, stopping generation")
+                        break
                     continue
+                else:
+                    consecutive_special_tokens = 0  # Reset counter on valid token
                 
                 # Generate the selected token
                 generated_tokens.append(best_token)
                 content_tokens_generated += 1
                     # Path memory is now updated inside generate_next_token
                 
-
+                # Safety check: if no content tokens generated after many attempts, break
+                if step > 20 and content_tokens_generated == 0:
+                    print(f"[warning] No content tokens generated after {step} attempts")
+                    break
                 
             except Exception as e:
+                print(f"[warning] Token generation error at step {step}: {e}")
                 break
         
         # End with stop token
         generated_tokens.append(stop_token_id)
         
         # Parse tokens back to messages (exclude stop token from parser input)
-        if generated_tokens:
+        if generated_tokens and len(generated_tokens) > 0:
             try:
                 # Remove stop token before parsing as recommended
-                tokens_for_parsing = generated_tokens[:-1] if generated_tokens[-1] == stop_token_id else generated_tokens
-                messages = encoding.parse_messages_from_completion_tokens(tokens_for_parsing, HarmonyRole.ASSISTANT)
+                tokens_for_parsing: List[int] = generated_tokens[:-1] if generated_tokens[-1] == stop_token_id else generated_tokens
+                
+                # Validate tokens before parsing
+                if not tokens_for_parsing:
+                    return "No valid tokens to parse"
+                
+                # Check for minimum viable token sequence
+                if len(tokens_for_parsing) < 3:  # At least channel + content + message tokens
+                    return "Insufficient tokens for valid message"
+                
+                # Import Role from harmony library for proper enum usage
+                from openai_harmony import Role
+                messages: List[Any] = encoding.parse_messages_from_completion_tokens(tokens_for_parsing, Role.ASSISTANT)
+                
+                if not messages:
+                    return "No messages parsed from tokens"
                 
                 # Return only 'final' channel messages, ignore analysis/commentary
                 for i, m in enumerate(messages):
@@ -197,20 +246,35 @@ def generate_response(
                         # Extract text content from final channel message
                         if hasattr(m, 'content'):
                             if hasattr(m.content, 'text'):
-                                return m.content.text
+                                content_text = m.content.text
+                                if content_text and content_text.strip():
+                                    return content_text.strip()
                             elif isinstance(m.content, list) and len(m.content) > 0:
                                 # Handle list of TextContent objects
                                 if hasattr(m.content[0], 'text'):
-                                    return m.content[0].text
+                                    content_text = m.content[0].text
+                                    if content_text and content_text.strip():
+                                        return content_text.strip()
                                 else:
-                                    return str(m.content[0])
+                                    content_str = str(m.content[0])
+                                    if content_str and content_str.strip():
+                                        return content_str.strip()
                             else:
-                                return str(m.content)
+                                content_str = str(m.content)
+                                if content_str and content_str.strip():
+                                    return content_str.strip()
+                
+                # If no final channel message found, try to extract any content
+                for i, m in enumerate(messages):
+                    if hasattr(m, 'content'):
+                        if hasattr(m.content, 'text') and m.content.text:
+                            return f"[{getattr(m, 'channel', 'unknown')}] {m.content.text.strip()}"
                 
                 # If no final channel message found, return diagnostic
                 return "No final channel message found in response"
                 
             except Exception as e:
+                print(f"[error] Token parsing failed: {e}")
                 return f"Parsing error: {e}"
         else:
             return "No tokens generated"
@@ -275,9 +339,9 @@ def main() -> int:
 
         # Add user message to conversation
         try:
-            from openai_harmony import Message as HarmonyMessage, Role as HarmonyRole
-
-            user_message = HarmonyMessage.from_role_and_content(HarmonyRole.USER, user_input)
+            from openai_harmony import Message as HarmonyMessage, Role
+            
+            user_message = HarmonyMessage.from_role_and_content(Role.USER, user_input)
         except Exception as e:
             print(f"[error] Harmony library unavailable: {e}")
             return 1
@@ -296,9 +360,9 @@ def main() -> int:
             # Add assistant response to conversation
             # The response is already a parsed message content, so we need to create a proper Message
             try:
-                from openai_harmony import Message as HarmonyMessage, Role as HarmonyRole
-
-                assistant_message = HarmonyMessage.from_role_and_content(HarmonyRole.ASSISTANT, response)
+                from openai_harmony import Message as HarmonyMessage, Role
+                
+                assistant_message = HarmonyMessage.from_role_and_content(Role.ASSISTANT, response)
                 conversation.append(assistant_message)
             except Exception as e:
                 print(f"[warning] Could not add response to conversation: {e}")

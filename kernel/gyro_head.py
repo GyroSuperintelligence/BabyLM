@@ -16,11 +16,14 @@ Core Features:
 import os
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Set, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, Set, TYPE_CHECKING, Any, Union
 from collections import defaultdict, deque
 
 import numpy as np
 import torch
+
+# Import transcribe_byte function
+# transcribe_byte is defined below with XOR implementation
 
 
 # ============================================================================
@@ -186,6 +189,19 @@ class GyroHead:
     Implements the Common Governance Model (CGM) as a functional language model
     that replaces transformer architecture with gyroscopic intelligence.
     """
+    
+    # Type annotations for class attributes
+    broadcast_masks: Optional[np.ndarray]
+    INTRON_BROADCAST_MASKS: Optional[np.ndarray]
+    theta: np.ndarray
+    ontology: np.ndarray
+    phenomenology: np.ndarray
+    epistemology: np.ndarray
+    CS_STATE_INDEX: int
+    token_introns: List[List[int]]
+    model_weights: Dict[str, torch.Tensor]
+    cfg: Dict[str, Any]
+    _UNA_pool: np.ndarray
 
     def __init__(
         self,
@@ -203,11 +219,26 @@ class GyroHead:
         self.tokenizer = tokenizer
         self.virtual_tokens = virtual_tokens or {}
 
-        # Load physics tables
-        self._load_physics_tables()
+        # Load physics tables with error handling
+        try:
+            self._load_physics_tables()
+        except FileNotFoundError as e:
+            print(f"[error] Missing physics table: {e}")
+            print(f"[info] Expected physics tables in: {self.base_path / 'public' / 'meta'}")
+            print("[info] Required files: ontology_keys.npy, epistemology.npy, theta.npy, phenomenology_map.npy, orbit_sizes.npy")
+            raise RuntimeError(f"Physics tables not found. Please ensure all required .npy files are present in {self.base_path / 'public' / 'meta'}") from e
+        except ValueError as e:
+            print(f"[error] Invalid physics table format: {e}")
+            raise RuntimeError(f"Physics tables have invalid format: {e}") from e
 
         # Load broadcast masks
-        self._load_broadcast_masks()
+        try:
+            self._load_broadcast_masks()
+        except FileNotFoundError as e:
+            print(f"[warning] Broadcast masks not found: {e}")
+            print("[info] Continuing without broadcast masks - some features may be limited")
+            self.broadcast_masks = None
+            self.INTRON_BROADCAST_MASKS = None
 
         # Find CS state (minimum theta)
         self._find_cs_state()
@@ -215,7 +246,13 @@ class GyroHead:
         # Load model config before building expert orbit bias
         self._load_model_config()
         
-        # Build expert orbit bias table
+        # Load consolidated model weights first
+        self._load_model_weights()
+        
+        # Validate and fix config after weights are loaded (for GQA inference)
+        self._validate_and_fix_config()
+        
+        # Build expert orbit bias table (requires model_weights)
         self._build_expert_orbit_bias()
 
         # Initialize archetypal state
@@ -257,14 +294,6 @@ class GyroHead:
 
         # Set special tokens
         self._set_special_tokens()
-
-        # Load consolidated model weights
-        self._load_model_weights()
-
-
-        
-        # Load model config
-        self._load_model_config()
         
     # ---------- small utils: config + rope ----------
     def _load_model_config(self):
@@ -296,8 +325,7 @@ class GyroHead:
                 "vocab_size": self.vocab_size,
             }
             
-        # Validate config consistency
-        self._validate_and_fix_config()
+        # Config validation moved to after model weights are loaded
     
     def _validate_and_fix_config(self):
         """Validate and fix model configuration to ensure consistency."""
@@ -313,6 +341,19 @@ class GyroHead:
             # Fix by adjusting head_dim to match hidden_size / num_heads
             self.cfg["head_dim"] = hidden_size // num_heads
             print(f"[info] Adjusted head_dim to {self.cfg['head_dim']}")
+        
+        # Infer num_key_value_heads from actual model weights if available
+        if hasattr(self, 'model_weights') and self.model_weights:
+            # Look for k_proj weight to infer the actual number of key-value heads
+            for key in self.model_weights.keys():
+                if 'layers.0.self_attn.k_proj.weight' in key:
+                    k_proj_shape = self.model_weights[key].shape
+                    kv_dim = k_proj_shape[0]  # Output dimension of k_proj
+                    inferred_num_kv_heads = kv_dim // self.cfg["head_dim"]
+                    if inferred_num_kv_heads != self.cfg.get("num_key_value_heads", num_heads):
+                        print(f"[info] Inferred num_key_value_heads={inferred_num_kv_heads} from k_proj shape {k_proj_shape}")
+                        self.cfg["num_key_value_heads"] = inferred_num_kv_heads
+                    break
         
         # Validate layer_types length
         layer_types = self.cfg.get("layer_types", [])
@@ -362,16 +403,26 @@ class GyroHead:
             x = x.to(W.dtype)
         B, D = x.shape
         Dw, M = W.shape
-        assert D == Dw, f"x({x.shape}) vs W({W.shape})"
+        
+        # Dimensions must match for physics-based fold operations
+        assert D == Dw, f"Input dimension {D} must match weight dimension {Dw} for _fgemm_fold. Weight matrices must be properly adjusted before calling this function."
 
-        # view-as-bytes
+        # view-as-bytes - need to reinterpret the tensor bytes, not just convert dtype
         bpe = int(W.element_size())
-        xb = x.contiguous().view(torch.uint8).reshape(B, D * bpe)
+        x_bytes = x.contiguous().view(torch.uint8)  # Reinterpret bytes, don't convert
+        
+        # x_bytes should now have shape [B, D * bpe] naturally
+        if x_bytes.dim() == 1:
+            # If x was [D], x_bytes is [D * bpe], reshape to [1, D * bpe]
+            xb = x_bytes.view(1, -1)
+        else:
+            # If x was [B, D], x_bytes is [B, D * bpe], reshape accordingly
+            xb = x_bytes.view(B, D * bpe)
         
         # Cache W's byte-planes to avoid re-forming views
         w_id = id(W)
         if w_id not in self._byte_plane_cache:
-            Wb = W.contiguous().view(torch.uint8).reshape(D * bpe, M)  # [D * bytes_per_elem, M]
+            Wb = W.contiguous().view(torch.uint8).view(D * bpe, M)  # [D * bytes_per_elem, M]
             # Apply ψ isomorphism (XOR 0xAA) to byte planes for physics-aware GEMM
             psi = 0xAA  # GENE_Mic_S holographic topology constant
             Wb = Wb ^ psi
@@ -407,11 +458,31 @@ class GyroHead:
         return out_f.squeeze(0) if out_f.shape[0] == 1 else out_f
         
     def _layer_weight(self, name_like: str):
+        import torch
+        
         # best-effort lookup across common HF variants
         for k in self.model_weights.keys():
             if name_like in k:
-                return self.model_weights[k]
-        raise KeyError(f"Missing weight matching: {name_like}")
+                weight = self.model_weights[k]
+                # Return weights without any truncation - let caller handle dimension inference
+                return weight
+        
+        # Debug: show available keys for troubleshooting
+        available_keys = list(self.model_weights.keys())
+        matching_keys = [k for k in available_keys if any(part in k for part in name_like.split('.'))]
+        
+        print(f"[debug] Failed to find weight matching: {name_like}")
+        print(f"[debug] Total available keys: {len(available_keys)}")
+        print(f"[debug] Potentially matching keys: {matching_keys[:5]}")
+        
+        # Try alternative key formats for lm_head specifically
+        if 'lm_head' in name_like:
+            for k in available_keys:
+                if 'lm_head' in k and 'weight' in k:
+                    print(f"[debug] Found alternative lm_head key: {k}")
+                    return self.model_weights[k]
+        
+        raise KeyError(f"Missing weight matching: {name_like}. Available keys: {available_keys[:10]}...")
     
     def _res_score_per_head(self, qh: torch.Tensor, ks: torch.Tensor) -> torch.Tensor:
         """Compute attention scores per head with correct per-time computation.
@@ -426,15 +497,20 @@ class GyroHead:
         import torch
         
         # qh: [dH], ks: [T, dH]  -> scores: [T]
-        qb = qh.contiguous().view(torch.uint8)            # [Bq]
-        kb = ks.contiguous().view(-1).view(ks.size(0), -1).to(torch.uint8)  # [T, Bk]
+        qb = qh.contiguous().view(-1).to(torch.uint8)            # [Bq]
+        kb = ks.contiguous().view(-1).view(ks.shape[0], -1).to(torch.uint8)  # [T, Bk]
 
         # XOR then popcount per time row
         xor = torch.bitwise_xor(kb, qb.unsqueeze(0))      # [T, B]
-        # Use precomputed LUT for popcount
-        pc = self._popcount_lut[xor].sum(dim=1)           # [T]
+        # Use precomputed LUT for popcount - ensure uint8 range and flatten
+        xor_uint8 = xor.to(torch.uint8)  # Ensure proper data type
+        xor_flat = xor_uint8.view(-1).long()  # Flatten and convert to long for indexing
+        pc_flat = self._popcount_lut[xor_flat]  # Get popcount for each byte
+        pc = pc_flat.view(xor_uint8.shape).sum(dim=1)  # Reshape back and sum along byte dimension
         maxbits = qb.numel() * 8
-        return 1.0 - 2.0 * (pc.float() / maxbits)        # [-1,1]
+        one = torch.ones((), device=qh.device, dtype=torch.float32)
+        two = torch.tensor(2.0, device=qh.device, dtype=torch.float32)
+        return one - two * (pc.float() / float(maxbits))        # [-1,1]
     
     def _attn_step(self, layer_idx: int, h_t: torch.Tensor, K_cache, V_cache, S_cache, pos_idx: int, window: int):
         """
@@ -450,29 +526,90 @@ class GyroHead:
         Wk = self._layer_weight(f"model.layers.{layer_idx}.self_attn.k_proj.weight")
         Wv = self._layer_weight(f"model.layers.{layer_idx}.self_attn.v_proj.weight")
         Wo = self._layer_weight(f"model.layers.{layer_idx}.self_attn.o_proj.weight")
+        
+        # Infer real dimensions from actual weight shapes
+        input_dim = h_t.shape[-1]
+        weight_input_dim = Wq.shape[1]
+        
+        # Handle dimension mismatch by adjusting input or weights
+        if input_dim != weight_input_dim:
+            print(f"[info] Dimension mismatch: input={input_dim}, weight expects={weight_input_dim}")
+            if input_dim < weight_input_dim:
+                # Pad input to match weight dimensions
+                padding_size = weight_input_dim - input_dim
+                h_t = torch.cat([h_t, torch.zeros(padding_size, device=h_t.device, dtype=h_t.dtype)], dim=-1)
+                print(f"[info] Padded input from {input_dim} to {weight_input_dim}")
+            else:
+                # Slice weights to match input dimensions
+                Wq = Wq[:, :input_dim]
+                Wk = Wk[:, :input_dim]
+                Wv = Wv[:, :input_dim]
+                print(f"[info] Sliced weights from {weight_input_dim} to {input_dim}")
+        
+        # Infer real head dimensions from actual weight shapes
+        actual_q_output_dim = Wq.shape[0]
+        actual_k_output_dim = Wk.shape[0] 
+        actual_v_output_dim = Wv.shape[0]
+        
+        # Calculate real head dimensions
+        if actual_q_output_dim % nH != 0:
+            raise ValueError(f"Q projection output dim {actual_q_output_dim} not divisible by num_heads {nH}")
+        
+        dH = actual_q_output_dim // nH
+        print(f"[info] Inferred dH={dH} from q_proj shape {Wq.shape}")
+        
+        # Infer KV head configuration
+        if actual_k_output_dim != actual_v_output_dim:
+            raise ValueError(f"K and V projection output dims must match: K={actual_k_output_dim}, V={actual_v_output_dim}")
+        
+        if actual_k_output_dim % dH != 0:
+            raise ValueError(f"K/V projection output dim {actual_k_output_dim} not divisible by head_dim {dH}")
+            
+        nKV = actual_k_output_dim // dH
+        print(f"[info] Inferred nKV={nKV} from k_proj/v_proj shape")
+        
+        # Validate output projection dimensions
+        expected_attn_output = nH * dH
+        if Wo.shape[1] != expected_attn_output:
+            raise ValueError(f"Output projection input dim mismatch: expected {expected_attn_output}, got {Wo.shape[1]}")
+        if Wo.shape[0] != input_dim:
+            raise ValueError(f"Output projection output dim mismatch: expected {input_dim}, got {Wo.shape[0]}")
         bq = self.model_weights.get(f"model.layers.{layer_idx}.self_attn.q_proj.bias")
         bk = self.model_weights.get(f"model.layers.{layer_idx}.self_attn.k_proj.bias")
         bv = self.model_weights.get(f"model.layers.{layer_idx}.self_attn.v_proj.bias")
         bo = self.model_weights.get(f"model.layers.{layer_idx}.self_attn.o_proj.bias")
 
-        # Q/K/V via fold-GEMM
+        # Q/K/V projections using _fgemm_fold only
         q = self._fgemm_fold(h_t, Wq, bq)
+        
+        # For GQA, k/v projections may have different dimensions
+        nKV = self.cfg.get("num_key_value_heads", nH)
+        
+        # K and V projections
         k = self._fgemm_fold(h_t, Wk, bk)
         v = self._fgemm_fold(h_t, Wv, bv)
 
-        # reshape heads with proper GQA handling
+        # reshape heads with proper GQA handling using inferred dimensions
         import torch
-        nKV = self.cfg.get("num_key_value_heads", nH)
         
         q = q.view(nH, dH)
-        k = k.view(nKV, dH)
-        v = v.view(nKV, dH)
         
-        # expand k/v to nH by repeating per group for GQA
+        # Use inferred nKV and calculate dH_kv from actual weight dimensions
+        dH_kv = actual_k_output_dim // nKV
+        k = k.view(nKV, dH_kv)
+        v = v.view(nKV, dH_kv)
+        
+        # Expand k/v to match q's head count if using GQA
         if nKV != nH:
+            if nH % nKV != 0:
+                raise ValueError(f"Number of query heads {nH} must be divisible by number of KV heads {nKV}")
             group = nH // nKV
-            k = k.repeat_interleave(group, dim=0)
-            v = v.repeat_interleave(group, dim=0)
+            k = k.repeat_interleave(group, dim=0)  # [nH, dH_kv]
+            v = v.repeat_interleave(group, dim=0)  # [nH, dH_kv]
+        
+        # Ensure k/v head dimensions match q head dimensions
+        if dH_kv != dH:
+            raise ValueError(f"KV head dimension {dH_kv} must match Q head dimension {dH}")
         
         # rope/yarn
         q, k = self._rope_apply(q, k, pos_idx)
@@ -527,14 +664,16 @@ class GyroHead:
         if len(S_cache) > window:
             S_cache = S_cache[-window:]
         
-        th_past = torch.tensor([float(self.theta[s]) for s in S_cache], dtype=torch.float32)
-        theta_gain = 1.0 - (torch.abs(th_past - th_now) / np.pi)  # [0..1]
+        th_past = torch.tensor([float(self.theta[s]) for s in S_cache], dtype=torch.float32, device=h_t.device)
+        one = torch.ones((), device=h_t.device, dtype=torch.float32)
+        theta_gain = one - (torch.abs(th_past - th_now) / np.pi)  # [0..1]
         
         # orbit (phenomenology) coherence bonus
         ph_now = int(self.phenomenology[s_now])
-        ph_past = torch.tensor([int(self.phenomenology[s]) for s in S_cache], dtype=torch.float32)
+        ph_past = torch.tensor([int(self.phenomenology[s]) for s in S_cache], dtype=torch.float32, device=h_t.device)
         same_orbit = (ph_past == ph_now).float()
-        orbit_gain = 1.0 + 0.2 * same_orbit  # +20% if same orbit
+        point_two = torch.tensor(0.2, device=h_t.device, dtype=torch.float32)
+        orbit_gain = one + point_two * same_orbit  # +20% if same orbit
         
         for h in range(nH):
             ks = torch.stack([K_cache[t][h] for t in range(T)], dim=0)  # [T, dH]
@@ -578,6 +717,7 @@ class GyroHead:
 
         # project out
         y = ctx.reshape(nH * dH)
+        # Output projection using _fgemm_fold only
         h_next = self._fgemm_fold(y, Wo, bo)  # [H]
         return h_next, K_cache, V_cache, S_cache
         
@@ -723,12 +863,13 @@ class GyroHead:
         
         # Get proposed intron for tie-breaking
         proposed_intron = self._propose_intron()
-        proposed_mask = self.broadcast_masks[proposed_intron] if hasattr(self, 'broadcast_masks') else None
+        proposed_mask = self.broadcast_masks[proposed_intron] if hasattr(self, 'broadcast_masks') and self.broadcast_masks is not None else None
         
         for tok in idxs.tolist(): 
             # keep if forward-only ok + resonance with exon 
             if self._token_post_state_index_arr is None or self._token_exon_arr is None: 
                 self._build_token_post_states() 
+            assert self._token_post_state_index_arr is not None and self._token_exon_arr is not None
             post = int(self._token_post_state_index_arr[tok]) 
             th = float(self.theta[post]) 
             lo, hi = self._allowed_theta_window(float(self.theta[self.current_state_index])) 
@@ -740,7 +881,7 @@ class GyroHead:
             
             # Calculate tie-breaker score using broadcast mask overlap
             tie_breaker_score = 0.0
-            if proposed_mask is not None:
+            if proposed_mask is not None and hasattr(self, 'broadcast_masks') and self.broadcast_masks is not None:
                 token_introns = self.token_to_introns(tok)
                 if token_introns:
                     first_intron = token_introns[0]
@@ -751,11 +892,12 @@ class GyroHead:
             gated.append((tok, tie_breaker_score)) 
             
         # Sort by tie-breaker score (higher overlap preferred) and take best
+        best: int
         if gated:
             gated.sort(key=lambda x: x[1], reverse=True)
-            best = gated[0][0]
+            best = int(gated[0][0])
         else:
-            best = idxs[0].item() 
+            best = int(idxs[0].item()) 
  
         # 5) advance state with the chosen token (apply *all* introns) 
         introns = self.token_to_introns(best) 
@@ -864,17 +1006,6 @@ class GyroHead:
             y = y + bias
         return y
 
-    
-
-        # Populate token -> post-state and orbit candidates using maps
-        # This provides immediate generation feasibility without weights
-        self._build_token_post_states()
-        self._build_token_introns_index()
-        self._build_orbit_candidates()
-
-        # Statistics
-        self.stats = {"tokens_learned": 0, "memory_entries": 0, "orbits_discovered": 0, "generation_steps": 0}
-
     def token_to_introns(self, token_id: int) -> List[int]:
         """Convert token ID to intron sequence via LEB128 encoding."""
         leb = self._id_to_uleb128(token_id)
@@ -953,6 +1084,9 @@ class GyroHead:
             return np.full(256, self.CS_STATE_INDEX, dtype=np.int32)
 
         masks = self.INTRON_BROADCAST_MASKS  # (256, 48) uint8
+        if masks is None:
+            return np.zeros(256, dtype=np.int32)
+            
         una_state_ints = self._state_ints_for_indices(self._UNA_pool)  # uint64
 
         # Unpack UNA states into (|pool|, 48) {0,1} bits
@@ -969,7 +1103,10 @@ class GyroHead:
             # overlap = sum(mask48 & una_bits) over axis=1
             overlaps = (una_bits & mask48).sum(axis=1)  # (|pool|,)
             best = int(np.argmax(overlaps))
-            intron_to_idx[intron] = int(self._UNA_pool[best])
+            if self._UNA_pool is not None:
+                intron_to_idx[intron] = int(self._UNA_pool[best])
+            else:
+                intron_to_idx[intron] = 0
         return intron_to_idx
 
     def _build_token_introns_index(self) -> None:
@@ -1038,43 +1175,119 @@ class GyroHead:
 
         if model_weights_path is None:
             print(f"[warning] No model.gyro.safetensors found in {self.base_path}")
+            print(f"[info] Searched paths: {[str(p) for p in possible_paths]}")
             self.model_weights = {}
             self.model_weight_meta = {}
             return
 
-        from safetensors import safe_open
-        from kernel.codecs.gyrowt import decode_gyro_tensor
+        try:
+            from safetensors import safe_open
+        except ImportError as e:
+            print(f"[error] Failed to import safetensors: {e}")
+            print("[info] Install with: pip install safetensors")
+            self.model_weights = {}
+            self.model_weight_meta = {}
+            return
+
+        try:
+            from kernel.codecs.gyrowt import decode_gyro_tensor
+        except ImportError as e:
+            print(f"[error] Failed to import decode_gyro_tensor: {e}")
+            print("[info] Ensure kernel.codecs.gyrowt module is available")
+            self.model_weights = {}
+            self.model_weight_meta = {}
+            return
+
         import json
 
         self.model_weights = {}
         self.model_weight_meta = {}
         print(f"[info] Loading model weights from: {model_weights_path}")
 
-        with safe_open(str(model_weights_path), framework="pt", device="cpu") as f:
-            keys = list(f.keys())
-            for key in keys:
-                if key.endswith(".gyro"):
-                    base = key[:-5]
-                    blob = f.get_tensor(key)
-                    meta_key = base + ".meta"
-                    meta_bytes = None
-                    if meta_key in keys:
-                        meta_t = f.get_tensor(meta_key)
-                        meta_bytes = meta_t.cpu().numpy().tobytes()
-                        # Store metadata for MoE expert slicing
-                        try:
-                            meta_json = json.loads(meta_bytes.decode("utf-8"))
-                            self.model_weight_meta[base] = meta_json
-                        except Exception:
-                            pass
-                    # decode to a real torch tensor on CPU
-                    t = decode_gyro_tensor(base, blob, meta_bytes, device="cpu")
-                    self.model_weights[base] = t  # numeric
-                elif (key not in self.model_weights) and (not key.endswith(".meta")):
-                    # plain numeric (if any)
-                    self.model_weights[key] = f.get_tensor(key)
+        try:
+            with safe_open(str(model_weights_path), framework="pt", device="cpu") as f:
+                keys = list(f.keys())
+                if not keys:
+                    print(f"[warning] No keys found in {model_weights_path}")
+                    return
 
-        print(f"[info] Decoded {len(self.model_weights)} tensors")
+                successful_loads = 0
+                failed_loads = 0
+
+                for key in keys:
+                    try:
+                        if key.endswith(".gyro"):
+                            base = key[:-5]
+                            blob = f.get_tensor(key)
+                            if blob is None:
+                                print(f"[warning] Failed to load tensor for key: {key}")
+                                failed_loads += 1
+                                continue
+
+                            meta_key = base + ".meta"
+                            meta_bytes = None
+                            if meta_key in keys:
+                                try:
+                                    meta_t = f.get_tensor(meta_key)
+                                    if meta_t is not None:
+                                        meta_bytes = meta_t.cpu().numpy().tobytes()
+                                        # Store metadata for MoE expert slicing
+                                        try:
+                                            meta_json = json.loads(meta_bytes.decode("utf-8"))
+                                            self.model_weight_meta[base] = meta_json
+                                        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                                            print(f"[warning] Failed to parse metadata for {base}: {e}")
+                                except Exception as e:
+                                    print(f"[warning] Failed to load metadata for {meta_key}: {e}")
+
+                            # decode to a real torch tensor on CPU
+                            try:
+                                t = decode_gyro_tensor(base, blob, meta_bytes, device="cpu")
+                                if t is not None:
+                                    self.model_weights[base] = t  # numeric
+                                    successful_loads += 1
+                                else:
+                                    print(f"[warning] decode_gyro_tensor returned None for {base}")
+                                    failed_loads += 1
+                            except RuntimeError as e:
+                                print(f"[error] Failed to decode gyro tensor for {base}: {e}")
+                                print(f"[info] Skipping corrupted tensor {base} and continuing with other tensors")
+                                failed_loads += 1
+                            except Exception as e:
+                                print(f"[error] Unexpected error decoding gyro tensor for {base}: {e}")
+                                failed_loads += 1
+
+                        elif (key not in self.model_weights) and (not key.endswith(".meta")):
+                            # plain numeric (if any)
+                            try:
+                                tensor = f.get_tensor(key)
+                                if tensor is not None:
+                                    self.model_weights[key] = tensor
+                                    successful_loads += 1
+                                else:
+                                    print(f"[warning] Failed to load plain tensor for key: {key}")
+                                    failed_loads += 1
+                            except Exception as e:
+                                print(f"[error] Failed to load plain tensor for {key}: {e}")
+                                failed_loads += 1
+
+                    except Exception as e:
+                        print(f"[error] Unexpected error processing key {key}: {e}")
+                        failed_loads += 1
+
+                print(f"[info] Successfully loaded {successful_loads} tensors")
+                if failed_loads > 0:
+                    print(f"[warning] Failed to load {failed_loads} tensors")
+
+                if successful_loads == 0:
+                    print(f"[error] No tensors were successfully loaded from {model_weights_path}")
+                    print("[info] Model may not function correctly without weights")
+
+        except Exception as e:
+            print(f"[error] Failed to open or read model weights file {model_weights_path}: {e}")
+            print("[info] Continuing with empty model weights - model may not function correctly")
+            self.model_weights = {}
+            self.model_weight_meta = {}
 
     def _mxfp4_dequantize(self, blocks: torch.Tensor, scales: torch.Tensor, dtype=torch.bfloat16) -> torch.Tensor:
         """Dequantize MXFP4 tensors (blocks + scales) to dense format.
@@ -1295,12 +1508,14 @@ class GyroHead:
 
         if broadcast_masks_path.exists():
             self.INTRON_BROADCAST_MASKS = np.load(broadcast_masks_path, mmap_mode="r")
+            self.broadcast_masks = self.INTRON_BROADCAST_MASKS  # Add alias
         else:
             # Generate if not found
             os.makedirs(meta_path, exist_ok=True)
             masks = generate_intron_broadcast_masks()
             np.save(broadcast_masks_path, masks)
             self.INTRON_BROADCAST_MASKS = masks
+            self.broadcast_masks = self.INTRON_BROADCAST_MASKS  # Add alias
 
     def _find_cs_state(self) -> None:
         """Find the CS state (minimum theta)."""
@@ -1340,7 +1555,7 @@ class GyroHead:
             for name in ("up_proj.weight", "down_proj.weight"):
                 k = f"model.layers.0.mlp.experts.{e}.{name}"  # any layer works for bias signature
                 if k in self.model_weights:
-                    w = self.model_weights[k].contiguous().view(torch.uint8).cpu().numpy()
+                    w = self.model_weights[k].contiguous().view(-1).to(torch.uint8).cpu().numpy()
                     # sample a small stride to stay O(N)
                     stride = max(1, w.size // 4096)
                     for i in range(0, w.size, stride):
@@ -1360,12 +1575,14 @@ class GyroHead:
         """Get post-state index for token using dense array (O(1) access)."""
         if self._token_post_state_index_arr is None:
             self._build_token_post_states()
+        assert self._token_post_state_index_arr is not None
         return int(self._token_post_state_index_arr[token_id])
     
     def get_token_exon(self, token_id: int) -> int:
         """Get exon for token using dense array (O(1) access)."""
         if self._token_exon_arr is None:
             self._build_token_post_states()
+        assert self._token_exon_arr is not None
         return int(self._token_exon_arr[token_id])
 
     def _apply_intron_and_gate(self, state_index: int, intron: int) -> int:

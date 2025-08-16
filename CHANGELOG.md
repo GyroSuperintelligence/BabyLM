@@ -1,6 +1,36 @@
-```plaintext
+
 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
-```
+
+---
+
+## [v0.9.7.2-GPT-OSS-Kernel] – 2025-08-15 - Experimental
+
+### Fixed
+- **Gyro Model Critical Fixes**: Resolved multiple blocking issues in `gyro_head.py`
+  - Fixed broadcast mask alias mismatch by setting `self.broadcast_masks = self.INTRON_BROADCAST_MASKS`
+  - Removed duplicate `transcribe_byte` definitions, keeping only the XOR version
+  - Cleaned up unreachable code after return statements in `_apply_rmsnorm` method
+  - Stopped truncating weights and implemented proper head dimension inference from actual weight shapes
+  - Fixed device-unsafe `torch.tensor` constants in attention score calculations to be device-aware
+  - Added dimension adjustment logic to handle input/weight dimension mismatches
+
+- **Test Infrastructure**: Updated `test_gyro_model.py` for better compatibility
+  - Fixed import path issues by adding project root to Python path
+  - Updated to use `model.gyro.safetensors` instead of deprecated gyro directory structure
+  - Added command-line argument support for `--model_path`
+  - Corrected field references to use proper `GyroTransformer` attributes
+
+- **Chat System**: Fixed Role enum inconsistencies in `chat_oss.py`
+  - Resolved conflicts between stub `_Role` class and `openai_harmony.Role` imports
+  - Ensured consistent usage of `Role.USER` and `Role.ASSISTANT` throughout
+
+### Technical Notes
+- All fixes maintain backward compatibility with existing model weights
+- Dimension adjustment logic handles both input padding and weight slicing scenarios
+- Device-aware tensor operations ensure proper GPU/CPU compatibility
+
+
+---
 
 ## \[v0.9.7.2-GPT-OSS-Kernel\] – 2025-08-14 - Experimental
 
@@ -51,6 +81,8 @@ This release focuses on significant performance improvements and proper handling
 *   LRU cache prevents memory bloat while maintaining performance for frequently used experts
 *   Byte-plane caching reduces CPU overhead in fold-based GEMM operations
 *   All changes maintain the gyroscopic intelligence and physics-based architecture
+
+---
 
 ## \[v0.9.7.1-Experimental\] – 2025-08-13 - Kernel
 

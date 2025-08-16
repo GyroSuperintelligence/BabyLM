@@ -1,30 +1,36 @@
-# Python 3.12 required (see Numba/llvmlite compatibility)
+# Python 3.12 optimized ML stack (Windows)
 
 # Core dependencies
-numpy>=1.26.0,<2.0.0
-ujson>=5.7.0
+numpy>=2.0.0,<2.3.0
+ujson>=5.10.0
 
 # Extra features
-emoji>=2.8.0
-nltk>=3.8.1
+emoji>=2.14.0
+nltk>=3.9.0
 
 # Protocols / API
-fastapi>=0.100.0
-pydantic>=1.10.0
-uvicorn>=0.23.0
-httpx>=0.24.0
+fastapi>=0.116.0
+pydantic>=2.11.0
+uvicorn>=0.35.0
+httpx>=0.28.0
 
 # Language processing
-tokenizers>=0.15.0
-transformers>=4.30.0
-torch>=2.2.2
-huggingface_hub>=0.19.0
-openai-harmony>=0.1.0
+# Keep transformers moderate to ensure Py3.12 wheels availability
+transformers>=4.43.2,<4.56.0
+# Use CPU or DirectML builds explicitly per environment
+# For CPU-only (default):
+# For DirectML/CPU on Windows (pins compatible with torch-directml)
+torch==2.4.1
+torchvision==0.19.1
+torch-directml
+# torchaudio has fewer prebuilt wheels on Windows; pin compatible if needed
+# torchaudio==2.5.1
+huggingface_hub>=0.23.0,<0.36.0
+openai-harmony>=0.0.4
 
 # Storage & JIT
-# msgpack removed - replaced with fixed-length binary struct
-numba>=0.59.1,<0.61.0
-llvmlite>=0.43.0,<0.45.0
+numba>=0.60.0,<0.61.0
+llvmlite>=0.43.0,<0.44.0
 
 # Development
 black>=23.7.0
@@ -45,3 +51,5 @@ types-psutil
 
 gradio>=3.50.0
 rich
+
+zstandard>=0.22.0
