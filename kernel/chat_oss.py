@@ -126,24 +126,41 @@ def generate_response(
         from openai_harmony import Role
         token_ids = encoding.render_conversation_for_completion(conv, Role.ASSISTANT)
 
-        # Use proper state seeding method instead of manual token loop
+        # Use proper state seeding method - ingest_token without memory folding
         def seed_from_tokens(gyro_model: 'GyroHead', token_ids: List[int]) -> None:
             gyro_model.current_state_index = gyro_model.CS_STATE_INDEX
             # Reset path_memory to seed (not "itself")
             from kernel.gyro_head import GENE_Mic_S
             gyro_model.path_memory = GENE_Mic_S
-            # Process tokens sequentially to advance the model state
+            # Process tokens sequentially using ingest_token (no manual loops)
             for i, token_id in enumerate(token_ids):
                 if token_id < gyro_model.vocab_size:
-                    # Use ingest_token to update state with the actual input token
+                    # ingest_token advances state without learning/memory folding
                     gyro_model.ingest_token(token_id, pos=i)
         
         seed_from_tokens(gyro_model, token_ids)
         
-        # Get all special tokens from encoding (no hard-coding)
-        channel_token_id = encoding.encode("<|channel|>", allowed_special={"<|channel|>"})[0]
-        message_token_id = encoding.encode("<|message|>", allowed_special={"<|message|>"})[0]
-        stop_token_id = encoding.encode("<|return|>", allowed_special={"<|return|>"})[0]
+        # Validate and derive special tokens from encoding
+        def get_special_token(token_str: str) -> Optional[int]:
+            """Get special token ID, deriving via encoding if not in vocab."""
+            try:
+                tokens = encoding.encode(token_str, allowed_special={token_str})
+                return tokens[0] if tokens else None
+            except Exception:
+                # If special token not in vocab, derive via encoding
+                try:
+                    tokens = encoding.encode(token_str)
+                    return tokens[0] if tokens else None
+                except Exception:
+                    return None
+        
+        channel_token_id = get_special_token("<|channel|>")
+        message_token_id = get_special_token("<|message|>")
+        stop_token_id = get_special_token("<|return|>")
+        
+        if channel_token_id is None or message_token_id is None or stop_token_id is None:
+            print(f"[error] Could not derive required special tokens")
+            return None
         
         # Derive channel name tokens from encoding by rendering them
         # Render "<|channel|>final<|message|>" to get the token between channel and message

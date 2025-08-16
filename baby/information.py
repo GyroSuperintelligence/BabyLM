@@ -672,18 +672,17 @@ def open_memmap_int32(
 # ==============================================================================
 def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.uint64]]:
     """
-    Discovers the complete 789,170 state manifold via BFS.
+    Discovers the complete 788,986 state manifold via BFS.
 
     The epistemology map E : ℳ × ℐ → ℳ embeds the formal grammar where:
     - ℳ is the ontology manifold (the set of state indices)
     - ℐ is the intron space (256 discrete elements)
-    - CS ∈ ℳ is the origin, not the "first" state
+    - CS is treated as extra-phenomenal, handled at the boundary layer
 
-    The Common Source acts as an asymmetric fixed point:
-    - Invariant under standing introns (internal reflexivity)
-    - Radiatively projective under driving introns (seeding UNA)
+    The Common Source (CS) is a pre-observable axiom, not an operational node
+    within the manifold. All transitions use generic physics.
     """
-    EXPECTED_SIZE = 789_170  # after CS-kick expansion
+    EXPECTED_SIZE = 788_986  # original manifold size
     progress = ProgressReporter("Discovering ontology")
 
     origin_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)

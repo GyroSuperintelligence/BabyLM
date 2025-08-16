@@ -266,20 +266,10 @@ class GyroKernel:
         return 1
 
     def apply_gyration_and_transform(self, state_int: int, intron: int) -> int:
-        """Apply intron to state with CS asymmetric emission."""
+        """Apply intron to state using generic physics."""
         intron &= 0xFF
 
-        # CS asymmetric emission
-        if state_int == CS_STATE_INT:
-            # Standing intron - CS remains invariant
-            if (intron & (EXON_FG_MASK | EXON_BG_MASK)) == 0:
-                return CS_STATE_INT
-            # Driving intron - emit to new state
-            else:
-                emitted_int = int(INTRON_BROADCAST_MASKS[intron])
-                return emitted_int if emitted_int != 0 else CS_STATE_INT
-
-        # Normal transition via epistemology
+        # Generic transition via epistemology for all states
         state_index = self._get_state_index(state_int)
         next_index = self.epistemology[state_index, intron]
         return self._get_state_int(next_index)

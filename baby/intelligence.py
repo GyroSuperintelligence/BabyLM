@@ -778,27 +778,6 @@ class IntelligenceEngine:
         filtered = [t for t in candidate_tokens if not _is_unused(t)]
         candidates = filtered if filtered else list(candidate_tokens)
 
-        # Special-case at CS: drop candidate tokens whose intron sequence is entirely standing
-        # (no FG/BG drive bits). This enforces PCE: emergence to UNA under driving introns.
-        try:
-            state_int = int(self.s2.get_state_from_index(state_index))
-        except Exception:
-            state_int = -1
-        if state_int == 0:  # governance.CS_INT, using integer value 0
-            driven: list[int] = []
-            for tok in candidates:
-                bs = self._get_token_bytes(int(tok))
-                has_drive = False
-                for b in bs:
-                    intr = governance.transcribe_byte(int(b)) & 0xFF
-                    if (intr & (governance.EXON_FG_MASK | governance.EXON_BG_MASK)) != 0:
-                        has_drive = True
-                        break
-                if has_drive:
-                    driven.append(int(tok))
-            if driven:
-                candidates = driven
-
         # Pre-gather data for physics computation using full token sequences
         full_masks = np.array([self._get_full_mask(t) for t in candidates], dtype=np.uint8)
 

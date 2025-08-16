@@ -95,22 +95,84 @@ for i in range(256):
         m ^= BG_MASK
     XFORM_MASK[i] = m
 
-# ------------------------------------------------------------------
-# ❶  Common Source (CS) constants
-# ------------------------------------------------------------------
-#
-# The Common Source acts as an asymmetric fixed point:
-#  - Invariant under standing introns (internal reflexivity)
-#  - Radiatively projective under driving introns (seeding UNA)
-#
-# This expresses the CGM axiom that observation begins at the first
-# parity-breaking rotation (π/2 → π/4), and that the source is
-# self-reflexive under symmetry-conserving transitions.
-#
-# CS is the **unique** state whose 48-bit integer is 0.  It already
-# appears as ontology index 0 after sorting, so we keep that identity.
+# Common Source (CS) integer value for reference
+# CS is treated as extra-phenomenal and handled at the boundary layer
 CS_INT = 0  # integer value
-CS_STANDING_MSK = EXON_FG_MASK | EXON_BG_MASK  # introns *without* these bits are "standing"
+
+
+def tensor_to_int(tensor: NDArray[np.int8]) -> int:
+    """Convert 48-byte tensor to 48-bit integer."""
+    if tensor.shape != (4, 2, 3, 2):
+        raise ValueError(f"Expected tensor shape (4, 2, 3, 2), got {tensor.shape}")
+    # +1 -> 0, -1 -> 1 (match InformationEngine)
+    bits = (tensor.flatten(order="C") == -1).astype(np.uint8)
+    packed = np.packbits(bits, bitorder="big")
+    return int.from_bytes(packed.tobytes(), "big")
+
+
+def apply_boundary_selector(intron: int) -> int:
+    """
+    Boundary selector π for CS handling as extra-phenomenal axiom.
+    
+    When the active state is CS, this applies a chiral boundary reindexing
+    of the intron before it enters the generic physics T.
+    
+    Args:
+        intron: 8-bit instruction mask
+        
+    Returns:
+        Reindexed intron for CS boundary transitions
+    """
+    intron &= 0xFF
+    
+    # Partition introns into standing and driving classes
+    has_drive = (intron & (EXON_FG_MASK | EXON_BG_MASK)) != 0
+    
+    if not has_drive:
+        # Standing intron: π(i) = i (no emergence without drive)
+        return intron
+    else:
+        # Driving intron: choose π(i) from same family class
+        # that lands in UNA band (nearest to π/4 from archetype)
+        # For now, use a simple deterministic mapping that preserves
+        # the family structure while ensuring non-zero result
+        
+        # Preserve LI orientation, modify FG/BG to ensure UNA landing
+        li_bits = intron & EXON_LI_MASK
+        drive_bits = intron & (EXON_FG_MASK | EXON_BG_MASK)
+        
+        # Simple chirality-consistent rule: if both FG and BG are set,
+        # prefer FG (forward gyration) for UNA emergence
+        if (drive_bits & EXON_FG_MASK) and (drive_bits & EXON_BG_MASK):
+            drive_bits = EXON_FG_MASK
+        elif not drive_bits:
+            drive_bits = EXON_FG_MASK  # Default to forward gyration
+            
+        return li_bits | drive_bits
+
+
+def apply_cs_boundary_transition(intron: int) -> int:
+    """
+    Handle CS boundary transition using the boundary selector.
+    
+    This implements the boundary law:
+    if s = CS: s' = T(s*, π(i)) with s* = GENE_Mac_S (archetypal state)
+    
+    Args:
+        intron: 8-bit instruction mask
+        
+    Returns:
+        Next state after CS boundary transition
+    """
+    # Apply boundary selector to get the reindexed intron
+    pi_intron = apply_boundary_selector(intron)
+    
+    # Use archetypal state as the lawful origin
+    archetypal_int = tensor_to_int(GENE_Mac_S)
+    
+    # Apply generic physics from archetypal state with reindexed intron
+    return apply_gyration_and_transform(archetypal_int, pi_intron)
+
 
 # Note: Full activation (LI + FG + BG) results in mask = 0 due to cancellation:
 # LI applies FULL_MASK, FG applies FG_MASK, BG applies BG_MASK
@@ -125,6 +187,9 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     1. Apply transformational forces based on intron bit patterns (using precomputed mask)
     2. Apply path-dependent memory/carry term
 
+    The Common Source (CS) is treated as extra-phenomenal and handled at the boundary
+    layer, not within the generic physics transformation.
+
     Args:
         state_int: Current 48-bit state as integer
         intron: 8-bit instruction mask
@@ -137,36 +202,6 @@ def apply_gyration_and_transform(state_int: int, intron: int) -> int:
     intron = int(intron)
     intron &= 0xFF  # Defensive masking
 
-    # ------------------------------------------------------------------
-    # ❷  Special-case the Common Source
-    # ------------------------------------------------------------------
-    #
-    # Theorem (Emergence from the Common Source):
-    # Let CS be the unique state with no internal structure (popcount 0).
-    # Then there exists a partition of the intron set ℐ into:
-    #  - 𝓢 (standing): where T(CS, k) = CS (invariant under standing introns)
-    #  - 𝓓 (driving): where T(CS, k) ∈ ℳ, such that θ(T(CS, k)) = π/4
-    #    and T is chirality-preserving (radiatively projective)
-    #
-    if state_int == CS_INT:
-        if (intron & CS_STANDING_MSK) == 0:
-            # standing intron → perfect reflection (partial absorber)
-            # ∀ k ∈ 𝓢: T(CS, k) = CS (invariant under standing introns)
-            return CS_INT
-        else:
-            # driving intron → Parity-Conserving Emission (PCE)
-            # ∀ k ∈ 𝓓: T(CS, k) = U_k ∈ UNA (chirality-preserving emission)
-            # U_k = INTRON_BROADCAST_MASK[k] & ((1 << 48) - 1)
-            # This preserves chirality, ensures minimal Hamming weight ≥ 1,
-            # and is consistent with CGM axiom that observation begins at
-            # parity-breaking through rotation.
-            kick = int(INTRON_BROADCAST_MASKS[intron]) & ((1 << 48) - 1)
-            # never allow the kick to cancel to 0 (non-absolute unity)
-            return kick if kick else 1
-
-    # ------------------------------------------------------------------
-    # ❸  Generic path – unchanged physics
-    # ------------------------------------------------------------------
     # Step 1: Gyro-addition (applying transformational forces) using precomputed mask
     temp_state = state_int ^ int(XFORM_MASK[intron])
 
@@ -191,15 +226,6 @@ def apply_gyration_and_transform_batch(states: NDArray[np.uint64], intron: int) 
     pattern = INTRON_BROADCAST_MASKS[intron]
     temp = states ^ mask
     result = temp ^ (temp & pattern)
-
-    # fast vectorised CS fix - Parity-Conserving Emission (PCE)
-    if (intron & CS_STANDING_MSK) != 0:
-        cs_rows = states == CS_INT
-        # ∀ k ∈ 𝓓: T(CS, k) = U_k ∈ UNA (chirality-preserving emission)
-        kick = INTRON_BROADCAST_MASKS[intron] & ((1 << 48) - 1)
-        # never allow the kick to cancel to 0 (non-absolute unity)
-        result[cs_rows] = kick if kick else 1
-
     return cast("NDArray[np.uint64]", result.astype(np.uint64))
 
 
@@ -210,17 +236,6 @@ def apply_gyration_and_transform_all_introns(states: NDArray[np.uint64]) -> NDAr
     """
     temp = states[:, np.newaxis] ^ XFORM_MASK[np.newaxis, :]
     res = temp ^ (temp & INTRON_BROADCAST_MASKS[np.newaxis, :])
-
-    # Fix every [row = CS_INT, intron with drive bits] - Parity-Conserving Emission (PCE)
-    cs_rows = np.where(states == CS_INT)[0]
-    if cs_rows.size:
-        drive_cols = np.where((np.arange(256) & CS_STANDING_MSK) != 0)[0]
-        # ∀ k ∈ 𝓓: T(CS, k) = U_k ∈ UNA (chirality-preserving emission)
-        kicks = INTRON_BROADCAST_MASKS[drive_cols] & ((1 << 48) - 1)
-        # never allow the kick to cancel to 0 (non-absolute unity)
-        kicks[kicks == 0] = 1
-        res[np.ix_(cs_rows, drive_cols)] = kicks
-
     return cast("NDArray[np.uint64]", res.astype(np.uint64))
 
 

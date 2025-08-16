@@ -283,8 +283,8 @@ def decode_gyro_tensor(name: str, blob: torch.Tensor, meta: bytes | None, device
     except Exception as e:
         raise RuntimeError(f"Unexpected decompression error for {name}: {e}")
 
-    # Convert to numpy array with correct dtype
-    np_dtype = {
+    # Convert to numpy array with correct dtype using typed maps
+    np_dtype_map = {
         torch.bfloat16: np.uint16,  # bfloat16 raw storage
         torch.float16: np.float16,
         torch.float32: np.float32,
@@ -295,10 +295,16 @@ def decode_gyro_tensor(name: str, blob: torch.Tensor, meta: bytes | None, device
         torch.int32: np.int32,
         torch.int64: np.int64,
         torch.bool: np.bool_,
-    }[target_dtype]
+    }
+    
+    np_dtype = np_dtype_map.get(target_dtype)
+    if np_dtype is None:
+        raise RuntimeError(f"Unsupported target dtype for numpy conversion: {target_dtype}")
 
     np_arr = np.frombuffer(raw, dtype=np_dtype).reshape(shape).copy()
     if target_dtype is torch.bfloat16:
+        # Preserve endianness in bfloat16 conversion: view as int16 then bfloat16
+        # Raw bytes are already in correct endianness from storage
         signed_arr = np_arr.view(np.int16)
         t = torch.from_numpy(signed_arr)
         t = t.view(torch.bfloat16)
@@ -595,14 +601,44 @@ def pack_gyro_safetensors(input_dir: str, output_file: str) -> None:
     import safetensors.torch
     from glob import glob
     import os
+    import json
+    
     tensor_dict = {}
     safetensors_files = sorted(glob(os.path.join(input_dir, "*.safetensors")))
+    
+    # Collect metadata for integrity check
+    pack_info = {
+        "gyro_pack": "1",
+        "input_dir": str(input_dir),
+        "num_files": len(safetensors_files),
+        "files": [],
+        "version": "1"
+    }
+    
     for fname in safetensors_files:
         try:
+            # Calculate SHA256 for each input file
+            file_hash = _compute_sha256_file(fname)
+            pack_info["files"].append({
+                "name": os.path.basename(fname),
+                "sha256": file_hash
+            })
+            
             tensors = safetensors.torch.load_file(fname)
             for k, v in tensors.items():
                 tensor_dict[os.path.basename(fname) + ":" + k] = v
         except Exception as e:
             print(f"Error loading {fname}: {e}")
-    safetensors.torch.save_file(tensor_dict, output_file)
-    print(f"Packed {len(safetensors_files)} files into {output_file}")
+    
+    # Calculate SHA256 of the consolidated pack header for integrity
+    pack_header_json = json.dumps(pack_info, sort_keys=True)
+    pack_header_hash = hashlib.sha256(pack_header_json.encode('utf-8')).hexdigest()
+    
+    # Add the header hash to metadata
+    metadata = {
+        "pack_header_sha256": pack_header_hash,
+        "pack_info": pack_header_json
+    }
+    
+    safetensors.torch.save_file(tensor_dict, output_file, metadata=metadata)
+    print(f"Packed {len(safetensors_files)} files into {output_file} with SHA256 integrity check: {pack_header_hash[:16]}...")

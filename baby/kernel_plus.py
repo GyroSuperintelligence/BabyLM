@@ -575,12 +575,18 @@ class GyroKernel:
         """Precompute UNA states for CS emission."""
         # Find states with theta close to π/4
         target_theta = np.pi / 4
-        tolerance = 0.1
+        tight_tolerance = 0.05  # Tighter tolerance for sharper CS emission
+        fallback_tolerance = 0.1
 
-        self._UNA_pool = np.argwhere(np.abs(self.theta - target_theta) < tolerance).astype(np.int32).ravel()
+        # Try tight tolerance first
+        self._UNA_pool = np.argwhere(np.abs(self.theta - target_theta) < tight_tolerance).astype(np.int32).ravel()
 
+        # If too small, fallback to looser tolerance
+        if len(self._UNA_pool) < 10:  # Minimum viable pool size
+            self._UNA_pool = np.argwhere(np.abs(self.theta - target_theta) < fallback_tolerance).astype(np.int32).ravel()
+
+        # Final fallback: use states with theta in UNA range
         if len(self._UNA_pool) == 0:
-            # Fallback: use states with theta in UNA range
             self._UNA_pool = np.argwhere((self.theta > THETA_CS) & (self.theta < THETA_ONA)).astype(np.int32).ravel()
 
         if self.debug:
@@ -870,43 +876,8 @@ class GyroKernel:
         self.stage_index = STAGE_ORDER.index(stage)
 
     def _apply_intron_and_gate(self, state_index: int, intron: int) -> int:
-        """Apply intron with CS emission and cycle gating."""
-        # CS asymmetric emission
-        if state_index == self.CS_STATE_INDEX:
-            if (intron & (EXON_FG_MASK | EXON_BG_MASK)) == 0:
-                # Standing intron: CS remains invariant
-                return self.CS_STATE_INDEX
-            else:
-                # Driving intron: emit UNA state
-                broadcast_mask = self.INTRON_BROADCAST_MASKS[intron]
-
-                # Convert mask to state integer
-                emitted_int = 0
-                for i, bit in enumerate(broadcast_mask):
-                    if bit:
-                        emitted_int |= 1 << i
-
-                # Find best matching UNA state
-                if len(self._UNA_pool) > 0:
-                    best = int(self._UNA_pool[0])
-                    best_overlap = -1
-
-                    for cand in self._UNA_pool[:100]:  # Limit search
-                        cand_int = int(self.ontology[cand])
-                        overlap = 48 - bin(emitted_int ^ cand_int).count("1")
-                        if overlap > best_overlap:
-                            best_overlap = overlap
-                            best = int(cand)
-
-                    # Update path memory with CS emission
-                    self.path_memory = fold(self.path_memory, GENE_Mic_S)
-
-                    return best
-                else:
-                    # Fallback: use epistemology
-                    return int(self.epistemology[self.CS_STATE_INDEX, intron & 0xFF])
-
-        # Normal Transition & Gating
+        """Apply intron using generic physics with cycle gating."""
+        # Generic transition for all states
         if 0 <= state_index < len(self.epistemology):
             next_index = int(self.epistemology[state_index, intron & 0xFF])
             current_stage_idx = STAGE_ORDER.index(self._get_stage(state_index))

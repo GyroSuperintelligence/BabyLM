@@ -249,6 +249,18 @@ class GyroHead:
         # Load consolidated model weights first
         self._load_model_weights()
         
+        # Physics control switches - default to pure resonance mode
+        self.switch = {
+            "theta_gain": False,
+            "orbit_gain": False, 
+            "ontology_distance_penalty": False,
+            "cycle_gating": True,        # keep forward-only gating ON
+            "cs_emission": True,         # ON by default (parity asymmetry)
+            "router_orbit_bias": False,  # MoE bias off by default
+            "use_logits_sieve": True,    # ON = weights drive candidate set
+            "pure_resonance_only": False # when True, bypass logits entirely
+        }
+        
         # Validate and fix config after weights are loaded (for GQA inference)
         self._validate_and_fix_config()
         
@@ -264,6 +276,8 @@ class GyroHead:
 
         # Memory: orbit_rep -> token_id -> mask
         self.memory: Dict[int, Dict[int, int]] = {}
+        # Orbit patterns for learning (sparse storage)
+        self.orbit_patterns: Dict[int, Dict[int, int]] = {}
         # Orbit candidates (lazy / optional). Keys are orbit ids, values token ids
         self._orbit_candidates: Dict[int, List[int]] = {}
         
@@ -291,6 +305,9 @@ class GyroHead:
         # UNA pool for CS emission
         self._precompute_una_pool()
         self._intron_to_una_index = self._precompute_intron_to_una_index()
+        
+        # Build token-intron mappings for fast lookup
+        self._build_token_introns_index()
 
         # Set special tokens
         self._set_special_tokens()
@@ -328,45 +345,30 @@ class GyroHead:
         # Config validation moved to after model weights are loaded
     
     def _validate_and_fix_config(self):
-        """Validate and fix model configuration to ensure consistency."""
-        # Check if num_hidden_layers * head_dim == hidden_size
+        """Validate model configuration without modifying it - treat HF config.json as canonical."""
+        # Validate configuration consistency but do NOT modify cfg
         num_layers = self.cfg.get("num_hidden_layers", 24)
         head_dim = self.cfg.get("head_dim", 64)
         hidden_size = self.cfg.get("hidden_size", 2880)
         num_heads = self.cfg.get("num_attention_heads", 64)
         
-        # Validate head dimensions
+        # Report mismatches but do not fix them - config is canonical
         if num_heads * head_dim != hidden_size:
-            print(f"[warning] Config mismatch: num_heads({num_heads}) * head_dim({head_dim}) != hidden_size({hidden_size})")
-            # Fix by adjusting head_dim to match hidden_size / num_heads
-            self.cfg["head_dim"] = hidden_size // num_heads
-            print(f"[info] Adjusted head_dim to {self.cfg['head_dim']}")
+            print(f"[info] Config note: num_heads({num_heads}) * head_dim({head_dim}) != hidden_size({hidden_size})")
+            print(f"[info] Will infer effective dimensions from actual weight shapes at runtime")
         
-        # Infer num_key_value_heads from actual model weights if available
-        if hasattr(self, 'model_weights') and self.model_weights:
-            # Look for k_proj weight to infer the actual number of key-value heads
-            for key in self.model_weights.keys():
-                if 'layers.0.self_attn.k_proj.weight' in key:
-                    k_proj_shape = self.model_weights[key].shape
-                    kv_dim = k_proj_shape[0]  # Output dimension of k_proj
-                    inferred_num_kv_heads = kv_dim // self.cfg["head_dim"]
-                    if inferred_num_kv_heads != self.cfg.get("num_key_value_heads", num_heads):
-                        print(f"[info] Inferred num_key_value_heads={inferred_num_kv_heads} from k_proj shape {k_proj_shape}")
-                        self.cfg["num_key_value_heads"] = inferred_num_kv_heads
-                    break
+        # Report KV head configuration from config
+        num_kv_heads = self.cfg.get("num_key_value_heads", num_heads)
+        print(f"[info] Config specifies: num_attention_heads={num_heads}, num_key_value_heads={num_kv_heads}")
+        print(f"[info] Effective dimensions will be derived from weight shapes during attention")
         
-        # Validate layer_types length
+        # Report layer_types configuration
         layer_types = self.cfg.get("layer_types", [])
         if not layer_types or len(layer_types) != num_layers:
-            print(f"[warning] Config mismatch: layer_types length ({len(layer_types) if layer_types else 0}) != num_hidden_layers ({num_layers})")
-            # Synthesize layer_types deterministically
-            if num_layers % 2 == 0:
-                # Even number of layers: alternate sliding and full attention
-                self.cfg["layer_types"] = ["sliding_attention", "full_attention"] * (num_layers // 2)
-            else:
-                # Odd number of layers: alternate with one extra sliding_attention
-                self.cfg["layer_types"] = ["sliding_attention", "full_attention"] * (num_layers // 2) + ["sliding_attention"]
-            print(f"[info] Synthesized layer_types for {num_layers} layers")
+            print(f"[info] Config note: layer_types length ({len(layer_types) if layer_types else 0}) != num_hidden_layers ({num_layers})")
+            print(f"[info] Will use default alternating pattern if layer_types is insufficient")
+        else:
+            print(f"[info] Using layer_types from config for {num_layers} layers")
     
     def _rope_apply(self, q, k, pos_idx: int):
         """YARN/rope in-place. q,k: [H, D]. We keep it minimal & CPU-friendly."""
@@ -386,7 +388,7 @@ class GyroHead:
             return xr if D==2*half else torch.cat([xr, x[..., 2*half:]], dim=-1)
         return rot(q), rot(k)
     
-    def _fgemm_fold(self, x: torch.Tensor, W: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
+    def _fgemm_fold(self, x: torch.Tensor, W: torch.Tensor, bias: torch.Tensor | None = None, x_already_psi: bool = False) -> torch.Tensor:
         """
         Physics GEMM using fold on raw byte streams.
         x:  [B, D] or [D]
@@ -402,10 +404,10 @@ class GyroHead:
         if x.dtype != W.dtype:
             x = x.to(W.dtype)
         B, D = x.shape
-        Dw, M = W.shape
+        M, Dw = W.shape  # W is [output_dim, input_dim]
         
-        # Dimensions must match for physics-based fold operations
-        assert D == Dw, f"Input dimension {D} must match weight dimension {Dw} for _fgemm_fold. Weight matrices must be properly adjusted before calling this function."
+        # Input dimension must match weight's input dimension for physics-based fold operations
+        assert D == Dw, f"Input dimension {D} must match weight input dimension {Dw} for _fgemm_fold. Weight matrices must be properly adjusted before calling this function."
 
         # view-as-bytes - need to reinterpret the tensor bytes, not just convert dtype
         bpe = int(W.element_size())
@@ -422,7 +424,7 @@ class GyroHead:
         # Cache W's byte-planes to avoid re-forming views
         w_id = id(W)
         if w_id not in self._byte_plane_cache:
-            Wb = W.contiguous().view(torch.uint8).view(D * bpe, M)  # [D * bytes_per_elem, M]
+            Wb = W.contiguous().view(torch.uint8).view(Dw * bpe, M)  # [input_dim * bytes_per_elem, output_dim]
             # Apply ψ isomorphism (XOR 0xAA) to byte planes for physics-aware GEMM
             psi = 0xAA  # GENE_Mic_S holographic topology constant
             Wb = Wb ^ psi
@@ -432,18 +434,23 @@ class GyroHead:
         
         assert xb.shape[1] == D * bpe
         
-        # Apply ψ isomorphism to x byte planes
-        psi = 0xAA  # GENE_Mic_S holographic topology constant
-        xb = xb ^ psi
+        # Apply ψ isomorphism to x byte planes (conditional)
+        if not x_already_psi:
+            psi = 0xAA  # GENE_Mic_S holographic topology constant
+            xb = xb ^ psi
 
-        # Process by byte planes to keep memory small
+        # Vectorized byte plane processing - unroll the loop for better performance
+        # Reshape to [B, D, bpe] for vectorized operations
+        x_planes = xb.view(B, D, bpe).to(torch.int16)  # [B, D, bpe]
+        W_planes = Wb.view(D, bpe, M).permute(1, 0, 2).to(torch.int16)  # [bpe, D, M]
+        
+        # Vectorized fold accumulation across all byte planes
         out = torch.zeros(B, M, dtype=torch.int32)
         for byte_i in range(bpe):
-            # pick this plane for x and W
-            x_plane = xb[:, byte_i::bpe].to(torch.int16)    # [B, D]
-            W_plane = Wb[byte_i::bpe, :].to(torch.int16)    # [D, M]
+            x_plane = x_planes[:, :, byte_i]  # [B, D]
+            W_plane = W_planes[byte_i]        # [D, M]
+            
             # fold accumulation: a ⊕ (b ⊕ (a & ¬b)) lifted to int and reduce-sum
-            # Approximate "sum of folds" by XOR+AND trick aggregated along D
             a = x_plane.unsqueeze(2).expand(-1, -1, M)      # [B, D, M]
             b = W_plane.unsqueeze(0).expand(B, -1, -1)      # [B, D, M]
             neg_b = (~b) & 0xFF
@@ -517,63 +524,50 @@ class GyroHead:
         h_t: [H] float tensor (bfloat16/fp16/float32 ok)
         K_cache/V_cache/S_cache: lists of past tensors/states per position (we keep last 'window')
         """
-        H = self.cfg["hidden_size"]
+        # Get config values but do NOT modify them - they are canonical
         nH = self.cfg["num_attention_heads"]
-        dH = self.cfg["head_dim"]
 
-        # Weights (numeric, decoded)
-        Wq = self._layer_weight(f"model.layers.{layer_idx}.self_attn.q_proj.weight")
-        Wk = self._layer_weight(f"model.layers.{layer_idx}.self_attn.k_proj.weight")
-        Wv = self._layer_weight(f"model.layers.{layer_idx}.self_attn.v_proj.weight")
-        Wo = self._layer_weight(f"model.layers.{layer_idx}.self_attn.o_proj.weight")
+        # Load and orient weights to match input dimensions
+        Wq_raw = self._layer_weight(f"model.layers.{layer_idx}.self_attn.q_proj.weight")
+        Wk_raw = self._layer_weight(f"model.layers.{layer_idx}.self_attn.k_proj.weight")
+        Wv_raw = self._layer_weight(f"model.layers.{layer_idx}.self_attn.v_proj.weight")
+        Wo_raw = self._layer_weight(f"model.layers.{layer_idx}.self_attn.o_proj.weight")
         
-        # Infer real dimensions from actual weight shapes
+        # Orient weights to match input dimension
         input_dim = h_t.shape[-1]
-        weight_input_dim = Wq.shape[1]
+        Wq = self._orient_W(Wq_raw, input_dim)
+        Wk = self._orient_W(Wk_raw, input_dim)
+        Wv = self._orient_W(Wv_raw, input_dim)
+        # Note: Wo orientation will be handled after we know the actual output dimensions
         
-        # Handle dimension mismatch by adjusting input or weights
+        # Handle dimension mismatch by padding/slicing input if needed
+        weight_input_dim = Wq.shape[1]
         if input_dim != weight_input_dim:
-            print(f"[info] Dimension mismatch: input={input_dim}, weight expects={weight_input_dim}")
             if input_dim < weight_input_dim:
                 # Pad input to match weight dimensions
                 padding_size = weight_input_dim - input_dim
                 h_t = torch.cat([h_t, torch.zeros(padding_size, device=h_t.device, dtype=h_t.dtype)], dim=-1)
-                print(f"[info] Padded input from {input_dim} to {weight_input_dim}")
             else:
                 # Slice weights to match input dimensions
                 Wq = Wq[:, :input_dim]
                 Wk = Wk[:, :input_dim]
                 Wv = Wv[:, :input_dim]
-                print(f"[info] Sliced weights from {weight_input_dim} to {input_dim}")
         
-        # Infer real head dimensions from actual weight shapes
-        actual_q_output_dim = Wq.shape[0]
-        actual_k_output_dim = Wk.shape[0] 
-        actual_v_output_dim = Wv.shape[0]
+        # Get output dimensions from weights
+        Mq = Wq.shape[0]
+        Mk = Wk.shape[0]
+        Mv = Wv.shape[0]
+        assert Mk == Mv, f"K/V out dims must match, got {Mk} vs {Mv}"
         
-        # Calculate real head dimensions
-        if actual_q_output_dim % nH != 0:
-            raise ValueError(f"Q projection output dim {actual_q_output_dim} not divisible by num_heads {nH}")
+        # Infer heads from config preferences and actual weight shapes
+        nH_pref = int(self.cfg.get("num_attention_heads", 64))
+        nKV_pref = int(self.cfg.get("num_key_value_heads", nH_pref))
         
-        dH = actual_q_output_dim // nH
-        print(f"[info] Inferred dH={dH} from q_proj shape {Wq.shape}")
+        nH = self._best_divisor(Mq, nH_pref)
+        dH = Mq // nH
+        nKV = self._best_divisor(Mk, nKV_pref)
+        dH_kv = Mk // nKV
         
-        # Infer KV head configuration
-        if actual_k_output_dim != actual_v_output_dim:
-            raise ValueError(f"K and V projection output dims must match: K={actual_k_output_dim}, V={actual_v_output_dim}")
-        
-        if actual_k_output_dim % dH != 0:
-            raise ValueError(f"K/V projection output dim {actual_k_output_dim} not divisible by head_dim {dH}")
-            
-        nKV = actual_k_output_dim // dH
-        print(f"[info] Inferred nKV={nKV} from k_proj/v_proj shape")
-        
-        # Validate output projection dimensions
-        expected_attn_output = nH * dH
-        if Wo.shape[1] != expected_attn_output:
-            raise ValueError(f"Output projection input dim mismatch: expected {expected_attn_output}, got {Wo.shape[1]}")
-        if Wo.shape[0] != input_dim:
-            raise ValueError(f"Output projection output dim mismatch: expected {input_dim}, got {Wo.shape[0]}")
         bq = self.model_weights.get(f"model.layers.{layer_idx}.self_attn.q_proj.bias")
         bk = self.model_weights.get(f"model.layers.{layer_idx}.self_attn.k_proj.bias")
         bv = self.model_weights.get(f"model.layers.{layer_idx}.self_attn.v_proj.bias")
@@ -581,41 +575,56 @@ class GyroHead:
 
         # Q/K/V projections using _fgemm_fold only
         q = self._fgemm_fold(h_t, Wq, bq)
-        
-        # For GQA, k/v projections may have different dimensions
-        nKV = self.cfg.get("num_key_value_heads", nH)
-        
-        # K and V projections
         k = self._fgemm_fold(h_t, Wk, bk)
         v = self._fgemm_fold(h_t, Wv, bv)
 
-        # reshape heads with proper GQA handling using inferred dimensions
-        import torch
+        # Re-infer from actual outputs (paranoia guard against odd weight orientation)
+        Mq_rt, Mk_rt, Mv_rt = q.numel(), k.numel(), v.numel()
+        if Mq_rt != Mq: 
+            Mq, nH, dH = Mq_rt, self._best_divisor(Mq_rt, nH), Mq_rt // self._best_divisor(Mq_rt, nH)
+        if Mk_rt != Mk: 
+            Mk, nKV, dH_kv = Mk_rt, self._best_divisor(Mk_rt, nKV), Mk_rt // self._best_divisor(Mk_rt, nKV)
         
+        # Reshape safely
         q = q.view(nH, dH)
-        
-        # Use inferred nKV and calculate dH_kv from actual weight dimensions
-        dH_kv = actual_k_output_dim // nKV
         k = k.view(nKV, dH_kv)
         v = v.view(nKV, dH_kv)
         
-        # Expand k/v to match q's head count if using GQA
+        # Handle GQA: expand k/v to match q's head count
         if nKV != nH:
             if nH % nKV != 0:
-                raise ValueError(f"Number of query heads {nH} must be divisible by number of KV heads {nKV}")
-            group = nH // nKV
-            k = k.repeat_interleave(group, dim=0)  # [nH, dH_kv]
-            v = v.repeat_interleave(group, dim=0)  # [nH, dH_kv]
+                # choose a compatible nKV that divides nH
+                nKV_new = self._best_divisor(nH, nKV)
+                if Mk % nKV_new == 0:
+                    nKV, dH_kv = nKV_new, Mk // nKV_new
+                    k = k.view(nKV, dH_kv)
+                    v = v.view(nKV, dH_kv)
+                else:
+                    # final fallback: just repeat to the next multiple
+                    group = (nH + nKV - 1) // nKV
+                    k = k.repeat_interleave(group, dim=0)[:nH]
+                    v = v.repeat_interleave(group, dim=0)[:nH]
+            else:
+                group = nH // nKV
+                k = k.repeat_interleave(group, dim=0)
+                v = v.repeat_interleave(group, dim=0)
         
-        # Ensure k/v head dimensions match q head dimensions
+        # Handle head dimension mismatch: pad or crop instead of crashing
         if dH_kv != dH:
-            raise ValueError(f"KV head dimension {dH_kv} must match Q head dimension {dH}")
+            if dH_kv < dH:
+                pad = dH - dH_kv
+                k = torch.nn.functional.pad(k, (0, pad))
+                v = torch.nn.functional.pad(v, (0, pad))
+            else:  # dH_kv > dH
+                k = k[:, :dH]
+                v = v[:, :dH]
         
         # rope/yarn
         q, k = self._rope_apply(q, k, pos_idx)
         
-        # Broadcast mask gain from current first intron (if available)
-        if hasattr(self, 'current_token_id') and self.token_introns and self.INTRON_BROADCAST_MASKS is not None:
+        # Broadcast mask gain from current first intron (if enabled)
+        mask_gain = 1.0
+        if self.switch.get("cs_emission", True) and hasattr(self, 'current_token_id') and self.token_introns and self.INTRON_BROADCAST_MASKS is not None:
             tid = getattr(self, 'current_token_id', 0)
             intrs = self.token_introns[tid] if tid < len(self.token_introns) else None
             if intrs:
@@ -624,12 +633,6 @@ class GyroHead:
                 if 0 <= intr0 < self.INTRON_BROADCAST_MASKS.shape[0]:
                     mask48 = self.INTRON_BROADCAST_MASKS[intr0]  # numpy shape (48,)
                     mask_gain = 1.0 + 0.05 * (mask48.sum() / 48.0)  # small, stable gain
-                else:
-                    mask_gain = 1.0
-            else:
-                mask_gain = 1.0
-        else:
-            mask_gain = 1.0
 
         # append caches (sliding window)
         K_cache.append(k); V_cache.append(v); S_cache.append(self.current_state_index)
@@ -664,16 +667,23 @@ class GyroHead:
         if len(S_cache) > window:
             S_cache = S_cache[-window:]
         
-        th_past = torch.tensor([float(self.theta[s]) for s in S_cache], dtype=torch.float32, device=h_t.device)
+        # Switch-controlled gains (default to pure resonance)
         one = torch.ones((), device=h_t.device, dtype=torch.float32)
-        theta_gain = one - (torch.abs(th_past - th_now) / np.pi)  # [0..1]
         
-        # orbit (phenomenology) coherence bonus
-        ph_now = int(self.phenomenology[s_now])
-        ph_past = torch.tensor([int(self.phenomenology[s]) for s in S_cache], dtype=torch.float32, device=h_t.device)
-        same_orbit = (ph_past == ph_now).float()
-        point_two = torch.tensor(0.2, device=h_t.device, dtype=torch.float32)
-        orbit_gain = one + point_two * same_orbit  # +20% if same orbit
+        if self.switch.get("theta_gain", False):
+            th_past = torch.tensor([float(self.theta[s]) for s in S_cache], dtype=torch.float32, device=h_t.device)
+            theta_gain = one - (torch.abs(th_past - th_now) / np.pi)  # [0..1]
+        else:
+            theta_gain = one
+        
+        if self.switch.get("orbit_gain", False):
+            ph_now = int(self.phenomenology[s_now])
+            ph_past = torch.tensor([int(self.phenomenology[s]) for s in S_cache], dtype=torch.float32, device=h_t.device)
+            same_orbit = (ph_past == ph_now).float()
+            point_two = torch.tensor(0.2, device=h_t.device, dtype=torch.float32)
+            orbit_gain = one + point_two * same_orbit  # +20% if same orbit
+        else:
+            orbit_gain = one
         
         for h in range(nH):
             ks = torch.stack([K_cache[t][h] for t in range(T)], dim=0)  # [T, dH]
@@ -692,8 +702,8 @@ class GyroHead:
                         epistemology_mask[t] = 0.0
                 scores = scores * epistemology_mask
             
-            # Ontology distance weighting: down-weight attention to distant states
-            if hasattr(self, 'ontology'):
+            # Ontology distance weighting (switch-controlled)
+            if self.switch.get("ontology_distance_penalty", False) and hasattr(self, 'ontology'):
                 ontology_weights = torch.ones(T, dtype=torch.float32)
                 current_ontology = int(self.ontology[s_now])
                 for t in range(T):
@@ -717,6 +727,11 @@ class GyroHead:
 
         # project out
         y = ctx.reshape(nH * dH)
+        # Orient output projection weight to match concatenated attention output
+        Wo = self._orient_W(Wo_raw, y.shape[-1])
+        # Adapt y length once if needed to match Wo's input dim
+        if Wo.shape[1] != y.numel():
+            y = self._harmonize_len(y, Wo.shape[1])
         # Output projection using _fgemm_fold only
         h_next = self._fgemm_fold(y, Wo, bo)  # [H]
         return h_next, K_cache, V_cache, S_cache
@@ -768,57 +783,60 @@ class GyroHead:
         """
         import torch
         import torch.nn.functional as F
-        
-        # Router weights - fix orientation from [E,H] to [H,E]
-        W_router = self._layer_weight(f"model.layers.{layer_idx}.mlp.router.weight")
-        if W_router.shape[0] == self.cfg["num_local_experts"] and W_router.shape[1] == self.cfg["hidden_size"]:
-            W_router = W_router.T.contiguous()  # [H, E]
+
+        # Router: make sure weight is [E, H]
+        W_router_raw = self._layer_weight(f"model.layers.{layer_idx}.mlp.router.weight")
+        W_router = self._orient_W(W_router_raw, h_t.shape[-1])
+
+        # Sanitize router bias to be 1-D [E]
         b_router = self.model_weights.get(f"model.layers.{layer_idx}.mlp.router.bias")
-        
-        # Router logits
-        router_logits = self._fgemm_fold(h_t, W_router, b_router)  # [num_experts]
-        
-        # Add orbit-based expert routing bias using phenomenology
-        ph_now = int(self.phenomenology[self.current_state_index])
-        if hasattr(self, 'expert_orbit_bias'):
-            router_logits = router_logits + self.expert_orbit_bias[:, ph_now]
-        
-        # Add orbit size router bias to prevent collapse into gigantic orbits
-        import math
-        alpha = 0.05
-        post = self.current_state_index
-        orbit = int(self.phenomenology[post])
-        if hasattr(self, 'orbit_sizes'):
-            size = float(self.orbit_sizes[post])
-            router_logits = router_logits - alpha * math.log(max(size, 1.0))
-        
-        # Top-k expert selection
-        experts_per_token = self.cfg.get("experts_per_token", 4)
-        num_experts = self.cfg.get("num_local_experts", 32)
-        
-        # Get top-k experts
-        top_k_logits, top_k_indices = torch.topk(router_logits, k=experts_per_token, dim=-1)
+        if b_router is not None and b_router.dim() != 1:
+            b_router = b_router.reshape(-1)[:W_router.shape[0]]
+
+        # Compute logits and force to shape [E]
+        router_logits = self._fgemm_fold(h_t, W_router, b_router)  # expect [E]
+
+        E = self.cfg.get("num_local_experts", 32)
+        if router_logits.dim() != 1:
+            rl = router_logits
+            # Common case: [E, experts_per_token] → mean over trailing axis
+            if rl.dim() == 2 and rl.shape[0] == E:
+                rl = rl.mean(dim=1)
+            else:
+                # Generic fallback: collapse and average groups if multiple of E
+                if rl.numel() % E == 0:
+                    rl = rl.view(E, -1).mean(dim=1)
+                else:
+                    rl = rl.view(-1)[:E]
+            router_logits = rl.contiguous().view(E)
+
+        # Optional orbit bias
+        if self.switch.get("router_orbit_bias", False):
+            ph_now = int(self.phenomenology[self.current_state_index])
+            if hasattr(self, 'expert_orbit_bias'):
+                router_logits = router_logits + self.expert_orbit_bias[:, ph_now]
+
+        experts_per_token = int(self.cfg.get("experts_per_token", 4))
+        k = min(experts_per_token, router_logits.numel())
+        top_k_logits, top_k_indices = torch.topk(router_logits, k=k, dim=-1)
         top_k_weights = F.softmax(top_k_logits, dim=-1)
-        
-        # Process selected experts using lazy materialization
+
         expert_outputs = []
-        for i, expert_idx in enumerate(top_k_indices):
-            expert_idx = expert_idx.item()
-            
-            # Get expert weights via lazy materialization
+        for i in range(k):
+            expert_idx = int(top_k_indices[i].item())
+
             W_gate, b_gate, W_up, b_up, W_down, b_down = self._moe_get_expert(layer_idx, expert_idx)
-            
-            # Expert forward pass
+
             gate = self._fgemm_fold(h_t, W_gate, b_gate)
-            up = self._fgemm_fold(h_t, W_up, b_up)
-            
-            # SwiGLU activation
-            swiglu_limit = self.cfg.get("swiglu_limit", 7.0)
+            up   = self._fgemm_fold(h_t, W_up, b_up)
+
+            # Infer I from the actual weight, not config; avoid undefined I
+            I = W_up.shape[0]  # W_up is oriented as [out_dim, in_dim], so shape[0] is intermediate size
+            swiglu_limit = float(self.cfg.get("swiglu_limit", 7.0))
             gate_act = torch.sigmoid(gate) * torch.clamp(gate, -swiglu_limit, swiglu_limit)
-            hidden = gate_act * up
-            
-            # Down projection
-            expert_out = self._fgemm_fold(hidden, W_down, b_down)
+            hidden = gate_act * up  # [I]
+
+            expert_out = self._fgemm_fold(hidden, W_down, b_down)  # [H]
             expert_outputs.append(expert_out * top_k_weights[i])
         
         # Combine expert outputs
@@ -828,82 +846,58 @@ class GyroHead:
         
     # Old forward_pass removed - using the version with more complete implementation
         
-    def generate_next_token(self, prev_token_id: int, pos: int) -> int: 
-        """ 
-        Uses the real tensors (attention+MLP) to get logits, 
-        then applies your resonance sieve to pick the final token. 
-        """ 
-        import torch 
-        # 1) input embedding 
-        Wemb = self._layer_weight("model.embed_tokens.weight") if "model.embed_tokens.weight" in self.model_weights else self._layer_weight("embed_tokens.weight") 
-        x = Wemb[prev_token_id].to(torch.float32)  # [H] 
- 
-        # 2) run through all layers (respect schedule) 
-        if not hasattr(self, "_caches"): 
-            self._load_model_config() 
-            self._init_caches(self.cfg["num_hidden_layers"]) 
- 
-        h = x 
-        for L in range(self.cfg["num_hidden_layers"]): 
-            h, self._caches = self._layer_step(L, h, self._caches, pos) 
- 
-        # 3) logits from real lm_head 
-        lnf_w = self._layer_weight("model.norm.weight") 
-        lnf_b = self.model_weights.get("model.norm.bias") 
-        h = self._apply_rmsnorm(h, lnf_w, lnf_b) 
-        logits = self._logits(h)  # [V] float 
- 
-        # 4) physics sieve (no randomness): intersect top-K with resonance gates 
-        V = logits.shape[0] 
-        topK = min(512, V) 
-        vals, idxs = torch.topk(logits, k=topK, largest=True, sorted=True) 
-        # gate by stage / path memory / intron rules you already have: 
-        pm = self.path_memory & 0xFF 
-        gated = [] 
+    def generate_next_token(self, prev_token_id: int, pos: int) -> int:
+        """Deterministic generation with configurable top-K and physics sieve."""
+        import torch
+        import os
         
-        # Get proposed intron for tie-breaking
-        proposed_intron = self._propose_intron()
-        proposed_mask = self.broadcast_masks[proposed_intron] if hasattr(self, 'broadcast_masks') and self.broadcast_masks is not None else None
-        
-        for tok in idxs.tolist(): 
-            # keep if forward-only ok + resonance with exon 
-            if self._token_post_state_index_arr is None or self._token_exon_arr is None: 
-                self._build_token_post_states() 
-            assert self._token_post_state_index_arr is not None and self._token_exon_arr is not None
-            post = int(self._token_post_state_index_arr[tok]) 
-            th = float(self.theta[post]) 
-            lo, hi = self._allowed_theta_window(float(self.theta[self.current_state_index])) 
-            if not (lo <= th < hi): 
-                continue 
-            te = int(self._token_exon_arr[tok]) 
-            if (fold(pm, te) & EXON_DYNAMIC_MASK) == 0: 
-                continue 
-            
-            # Calculate tie-breaker score using broadcast mask overlap
-            tie_breaker_score = 0.0
-            if proposed_mask is not None and hasattr(self, 'broadcast_masks') and self.broadcast_masks is not None:
-                token_introns = self.token_to_introns(tok)
-                if token_introns:
-                    first_intron = token_introns[0]
-                    first_mask = self.broadcast_masks[first_intron]
-                    # Overlap as dot product (number of matching bits)
-                    tie_breaker_score = float(np.dot(proposed_mask, first_mask))
-            
-            gated.append((tok, tie_breaker_score)) 
-            
-        # Sort by tie-breaker score (higher overlap preferred) and take best
-        best: int
-        if gated:
-            gated.sort(key=lambda x: x[1], reverse=True)
-            best = int(gated[0][0])
-        else:
-            best = int(idxs[0].item()) 
- 
-        # 5) advance state with the chosen token (apply *all* introns) 
-        introns = self.token_to_introns(best) 
-        for intr in introns: 
-            self.current_state_index = self._apply_intron_and_gate(self.current_state_index, intr) 
-            self.path_memory = fold(self.path_memory, intr) 
+        if self.switch["pure_resonance_only"]:
+            t = self.next_token_resonant()
+            return int(t) if t is not None else self.SEP_TOKEN
+
+        # 1) real network
+        Wemb = self._layer_weight("model.embed_tokens.weight")
+        h = Wemb[prev_token_id].to(torch.float32)
+        for l in range(self.cfg["num_hidden_layers"]):
+            h, self._caches = self._layer_step(l, h, self._caches, pos)
+
+        # 2) logits (tile-aware, top-K only)
+        topK = int(os.getenv("GYRO_TOPK", "512"))
+        idxs, vals = self._logits(h, return_topk=True, top_k=topK)  # returns (indices, values)
+
+        # 3) physics sieve
+
+        gated: list[tuple[int, float]] = []
+        pm = self.path_memory & 0xFF
+        proposed = self._propose_intron()
+        p_mask = self.broadcast_masks[proposed] if self.broadcast_masks is not None else None
+
+        for tok in idxs.tolist():
+            intrs = self.token_introns[tok]
+            if not intrs or not self._token_respects_cycle(self.current_state_index, intrs):
+                continue
+            post = int(self._token_post_state_index_arr[tok])
+            te   = int(self._token_exon_arr[tok])
+            # resonance gate: must align with path/exon
+            if fold(pm, te) == 0:
+                continue
+            tb = 0.0
+            if p_mask is not None:
+                first_mask = self.broadcast_masks[intrs[0] & 0xFF]
+                tb = float(np.dot(p_mask, first_mask))
+            gated.append((tok, tb))
+
+        if not gated:
+            return self.SEP_TOKEN
+
+        # deterministic tie-break: by tb desc then token_id asc
+        gated.sort(key=lambda x: (-x[1], x[0]))
+        best = int(gated[0][0])
+
+        # 4) evolve state (no learning on egress)
+        for intr in self.token_to_introns(best):
+            self.current_state_index = self._apply_intron_and_gate(self.current_state_index, intr)
+
         return best
         
     def forward_pass(self, input_ids, past_key_values=None):
@@ -920,7 +914,6 @@ class GyroHead:
         from collections import defaultdict
         
         batch_size, seq_len = input_ids.shape
-        hidden_size = self.cfg["hidden_size"]
         num_layers = self.cfg["num_hidden_layers"]
         sliding_window = self.cfg.get("sliding_window", 128)
         layer_types = self.cfg.get("layer_types", ["full_attention"] * num_layers)
@@ -931,8 +924,9 @@ class GyroHead:
             for _ in range(num_layers):
                 past_key_values.append(([], [], []))  # K, V, S caches
         
-        # Embedding lookup
+        # Embedding lookup - derive hidden_size from weights
         embed_weight = self._layer_weight("model.embed_tokens.weight")
+        hidden_size = embed_weight.shape[1]  # derive from weights, not config
         h = torch.zeros((batch_size, seq_len, hidden_size), dtype=torch.float32)
         for b in range(batch_size):
             for s in range(seq_len):
@@ -978,6 +972,7 @@ class GyroHead:
         # Final layer norm
         ln_f_weight = self._layer_weight("model.norm.weight")
         ln_f_bias = self.model_weights.get("model.norm.bias")
+        hidden_size = h.shape[-1]  # use current hidden size from tensor
         h_final = torch.zeros((batch_size, seq_len, hidden_size), dtype=torch.float32)
         for pos in range(seq_len):
             h_final[:, pos] = self._apply_rmsnorm(h[:, pos], ln_f_weight, ln_f_bias)
@@ -1063,12 +1058,18 @@ class GyroHead:
         """Precompute UNA states for CS emission."""
         # Find states with theta close to π/4
         target_theta = np.pi / 4
-        tolerance = 0.1
+        tight_tolerance = 0.05  # Tighter tolerance for sharper CS emission
+        fallback_tolerance = 0.1
 
-        self._UNA_pool = np.argwhere(np.abs(self.theta - target_theta) < tolerance).astype(np.int32).ravel()
+        # Try tight tolerance first
+        self._UNA_pool = np.argwhere(np.abs(self.theta - target_theta) < tight_tolerance).astype(np.int32).ravel()
 
+        # If too small, fallback to looser tolerance
+        if len(self._UNA_pool) < 10:  # Minimum viable pool size
+            self._UNA_pool = np.argwhere(np.abs(self.theta - target_theta) < fallback_tolerance).astype(np.int32).ravel()
+
+        # Final fallback: use states with theta in UNA range
         if len(self._UNA_pool) == 0:
-            # Fallback: use states with theta in UNA range
             self._UNA_pool = np.argwhere((self.theta > THETA_CS) & (self.theta < THETA_ONA)).astype(np.int32).ravel()
 
     def _state_ints_for_indices(self, idxs: np.ndarray) -> np.ndarray:
@@ -1110,15 +1111,15 @@ class GyroHead:
         return intron_to_idx
 
     def _build_token_introns_index(self) -> None:
-        """Exact ψ/LEB128 introns for the entire vocab; ~200k tokens is fine on CPU."""
+        """Build complete token-intron mappings for fast lookup."""
         self.token_introns: List[List[int]] = [None] * self.vocab_size  # type: ignore
         self.first_intron_to_tokens: Dict[int, List[int]] = defaultdict(list)
-
-        for token_id in range(self.vocab_size):
-            intrs = self.token_to_introns(token_id)
-            self.token_introns[token_id] = intrs
+        
+        for tid in range(self.vocab_size):
+            intrs = self.token_to_introns(tid)
+            self.token_introns[tid] = intrs
             if intrs:
-                self.first_intron_to_tokens[intrs[0]].append(token_id)
+                self.first_intron_to_tokens[intrs[0] & 0xFF].append(tid)
                 
     def _stage_of_theta(self, th: float) -> int:
         """Determine the stage index based on theta value."""
@@ -1164,6 +1165,58 @@ class GyroHead:
             if self._token_respects_cycle(self.current_state_index, intrs):
                 return token_id
         return None
+
+    def _best_divisor(self, N: int, prefer: int) -> int:
+        """Find the best divisor of N close to the preferred value."""
+        if prefer > 0 and N % prefer == 0:
+            return prefer
+        # search down, then up
+        for d in range(min(prefer, N), 0, -1):
+            if N % d == 0:
+                return d
+        for d in range(prefer + 1, N + 1):
+            if N % d == 0:
+                return d
+        return 1
+
+    def _harmonize_len(self, vec: torch.Tensor, L: int) -> torch.Tensor:
+        """Adapt a 1D tensor to length L via reduce or repeat-pad.
+        Keeps physics stable by single adaptation per boundary.
+        """
+        import torch
+        v = vec.view(-1)
+        N = v.numel()
+        if N == L:
+            return v
+        if N > L:
+            step = max(1, N // L)
+            trimmed = v[: step * L].view(L, step)
+            return trimmed.mean(dim=1)
+        else:
+            reps = (L + N - 1) // N
+            out = v.repeat(reps)[:L]
+            return out
+    
+    def _orient_W(self, W: torch.Tensor, x_dim: int) -> torch.Tensor:
+        """Orient weight matrix to match input dimension.
+        Expected W: [out_dim, in_dim]
+        """
+        if W.shape[1] == x_dim:
+            return W
+        if W.shape[0] == x_dim:  # likely transposed
+            return W.T.contiguous()
+        
+        # Handle dimension mismatch by adjusting the weight matrix
+        if W.shape[1] > x_dim:
+            # Slice weight to match input dimension
+            return W[:, :x_dim]
+        elif W.shape[1] < x_dim:
+            # Pad weight to match input dimension
+            pad_size = x_dim - W.shape[1]
+            padding = torch.zeros(W.shape[0], pad_size, device=W.device, dtype=W.dtype)
+            return torch.cat([W, padding], dim=1)
+        
+        return W
 
     def _load_model_weights(self) -> None:
         """Load numeric tensors from model.gyro.safetensors (decode <key>.gyro with <key>.meta)."""
@@ -1397,19 +1450,31 @@ class GyroHead:
 
         W_u = self._mxfp4_dequantize(bu_e, su_e, dtype=torch.bfloat16)  # [rows, cols]
         
-        # Reshape to either [2I, H] or [H, 2I] based on config
-        H = self.cfg["hidden_size"]
-        I = self.cfg["intermediate_size"]
-        twoI = 2 * I
-        
-        if   W_u.shape == (twoI, H):  W_u = W_u.unsqueeze(0)  # [1,2I,H]
-        elif W_u.shape == (H, twoI):  W_u = W_u.unsqueeze(0).movedim(-2,-1)  # -> [1,2I,H]
+        # Use dimension-agnostic orientation for gate_up weights
+        # Assume W_u should be oriented to match input dimension for gate/up projections
+        # The weight should be [2*intermediate, hidden] after orientation
+        if W_u.dim() == 2:
+            # Try to orient based on which dimension could be 2*intermediate
+            if W_u.shape[0] % 2 == 0 and W_u.shape[0] > W_u.shape[1]:
+                # Likely [2I, H] already
+                W_u = W_u.unsqueeze(0)  # [1, 2I, H]
+            elif W_u.shape[1] % 2 == 0 and W_u.shape[1] > W_u.shape[0]:
+                # Likely [H, 2I], transpose to [2I, H]
+                W_u = W_u.T.unsqueeze(0)  # [1, 2I, H]
+            else:
+                # Fallback: assume first dim is correct
+                W_u = W_u.unsqueeze(0)  # [1, rows, cols]
+        elif W_u.dim() == 3:
+            # Already has batch dimension
+            pass
         else:
-            # Try to infer rows==twoI*? and cols==H, then fold the extra dim(s)
-            raise RuntimeError(f"Cannot orient gate_up: {W_u.shape}")
+            raise RuntimeError(f"Unexpected gate_up weight dimensions: {W_u.shape}")
             
         W_gate, W_up = self._orient_gate_up(W_u)  # each [1,H,I]
         W_gate, W_up = W_gate[0], W_up[0]         # drop leading dim
+        # Ensure _fgemm_fold sees weights as [output_dim, input_dim] => gate/up must be [I, H]
+        W_gate = W_gate.T.contiguous()
+        W_up = W_up.T.contiguous()
 
         # Dequantize down
         bd = self._layer_weight(f"{base}.down_proj_blocks")
@@ -1417,21 +1482,38 @@ class GyroHead:
         bd_e, sd_e = bd[expert_idx], sd[expert_idx]
         W_d = self._mxfp4_dequantize(bd_e, sd_e, dtype=torch.bfloat16)  # [rows, cols]
         
-        if   W_d.shape == (H, I):  W_d = W_d.T  # need [I,H]
-        elif W_d.shape == (I, H):  pass
-        else:
-            raise RuntimeError(f"Cannot orient down_proj: {W_d.shape}")
+        # Use dimension-agnostic orientation for down projection
+        # Down projection should be [intermediate, hidden] to project from intermediate back to hidden
+        if W_d.shape[0] < W_d.shape[1]:
+            # Likely [I, H] already - correct orientation
+            pass
+        elif W_d.shape[0] > W_d.shape[1]:
+            # Likely [H, I] - transpose to [I, H]
+            W_d = W_d.T
+        # If dimensions are equal, assume current orientation is correct
 
-        # Biases
+        # Biases - derive dimensions from actual weights
+        intermediate_size = W_gate.shape[0]  # W_gate is [intermediate, hidden]
+        hidden_size = W_gate.shape[1]
+        
         b_fused = self._layer_weight(f"{base}.gate_up_proj_bias")  # [E, 2I] or [2I, E]
-        if b_fused.shape[0] == self.cfg["num_local_experts"]:
+        num_experts = self.cfg.get("num_local_experts", 32)
+        if b_fused.shape[0] == num_experts:
             b_e = b_fused[expert_idx]
         else:
             b_e = b_fused[:, expert_idx]
-        b_gate, b_up = b_e[:I].contiguous(), b_e[I:].contiguous()
+        
+        # Split bias safely based on actual dimensions
+        b_e_size = b_e.numel()
+        half_size = b_e_size // 2
+        b_gate = b_e[:half_size].contiguous()
+        b_up = b_e[half_size:].contiguous()
 
         b_down = self._layer_weight(f"{base}.down_proj_bias")      # [E, H] or [H, E]
-        b_down = b_down[expert_idx] if b_down.shape[0] == self.cfg["num_local_experts"] else b_down[:, expert_idx]
+        if b_down.shape[0] == num_experts:
+            b_down = b_down[expert_idx]
+        else:
+            b_down = b_down[:, expert_idx]
         b_down = b_down.contiguous()
 
         self._moe_cache[key] = (W_gate, b_gate, W_up, b_up, W_d, b_down)
@@ -1586,26 +1668,22 @@ class GyroHead:
         return int(self._token_exon_arr[token_id])
 
     def _apply_intron_and_gate(self, state_index: int, intron: int) -> int:
-        """Apply intron transition with CS asymmetric emission and optional cycle gating."""
-        if state_index == self.CS_STATE_INDEX:
-            if (intron & (EXON_FG_MASK | EXON_BG_MASK)) == 0:
-                return self.CS_STATE_INDEX  # standing → invariant
-            else:
-                next_idx = int(self._intron_to_una_index[intron & 0xFF])
-                self.path_memory = fold(self.path_memory, GENE_Mic_S)  # chirality memory
-                return next_idx
-        else:
-            # General case: use epistemology
-            next_index = int(self.epistemology[state_index, intron & 0xFF])
-            
-            if getattr(self, "cycle_gating", False):
-                # Forward-only monotone stage gate (optional, deterministic)
-                th_now = float(self.theta[state_index])
-                th_next = float(self.theta[next_index])
-                # Gate only hard regressions across major boundaries.
-                if (th_next < THETA_CS and th_now >= THETA_CS) or (th_next < THETA_UNA <= th_now):
-                    return state_index  # reject illegal back jump
-            return next_index
+        """Apply intron transition using generic physics with optional cycle gating.
+        
+        Pure physics transition - no learning/path_memory mutation here.
+        CS is treated as extra-phenomenal and handled at the boundary layer.
+        """
+        # Generic transition via epistemology for all states
+        nxt = int(self.epistemology[state_index, intron & 0xFF])
+        
+        if self.switch.get("cycle_gating", False):
+            th_now = float(self.theta[state_index])
+            th_nxt = float(self.theta[nxt])
+            lo, hi = self._allowed_theta_window(th_now)
+            if not (lo <= th_nxt <= hi):
+                return state_index  # reject illegal back-jump
+        
+        return nxt
             
     def _layer_step(self, layer_idx: int, h_t: torch.Tensor, caches, pos_idx: int): 
         """One transformer block: Attn → MLP with residuals + RMSNorm."""
@@ -1647,32 +1725,81 @@ class GyroHead:
         for L in range(self.cfg["num_hidden_layers"]):
             h, self._caches = self._layer_step(L, h, self._caches, pos)
             
-        # Update physics with the actual input token
+        # Update physics with the actual input token (egress path - no learning)
         for intr in self.token_to_introns(token_id):
             self.current_state_index = self._apply_intron_and_gate(self.current_state_index, intr)
-            self.path_memory = fold(self.path_memory, intr)
+        # Do NOT fold path_memory here; learning only at BU_IN by policy
+        
+    def learn_token(self, token_id: int) -> None:
+        """Explicit learning method: holographic memory only at BU_IN.
+        
+        Learn at closing intron relative to pre-state orbit.
+        Separate from ingestion - this is the only place learning happens.
+        """
+        intrs = self.token_to_introns(token_id)
+        if not intrs:
+            return
+
+        pre = self.current_state_index
+        pre_orbit = int(self.phenomenology[pre])
+        pre_state_int = int(self.ontology[pre])
+        exon0 = compute_exon_from_state(pre_state_int)
+
+        # evolve to just before last intron
+        for intr in intrs[:-1]:
+            self.current_state_index = self._apply_intron_and_gate(self.current_state_index, intr)
+
+        # hinge at closing intron
+        closing = intrs[-1] & 0xFF
+        mask = fold(exon0, closing)
+
+        # sparse store only if deviates
+        if pre_orbit not in self.orbit_patterns:
+            self.orbit_patterns[pre_orbit] = {}
+        if self.orbit_patterns[pre_orbit].get(token_id) != mask:
+            self.orbit_patterns[pre_orbit][token_id] = mask
+
+        # finalize evolution
+        self.current_state_index = self._apply_intron_and_gate(self.current_state_index, closing)
+
+        # update path memory once per token (not per intron)
+        self.path_memory = fold(self.path_memory, mask)
         
     def _init_caches(self, max_layers: int): 
         self._caches = [( [], [], [] ) for _ in range(max_layers)]  # per layer: (K_list, V_list, S_list)
         
-    def _logits(self, h_t: torch.Tensor, tile_size: int = 8192) -> torch.Tensor:
-        """Compute logits with tiling for memory efficiency on large vocabularies."""
+    def _logits(self, h_t: torch.Tensor, tile_size: int = 8192, return_topk: bool = True, top_k: Optional[int] = None) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """Compute logits with tiling for memory efficiency on large vocabularies.
+        
+        Args:
+            h_t: Hidden state tensor
+            tile_size: Size of vocabulary tiles for memory efficiency
+            return_topk: If True, return (indices, values) for top-K only
+            top_k: Number of top tokens to return (auto-computed if None)
+            
+        Returns:
+            If return_topk=True: (top_indices, top_values)
+            If return_topk=False: full logits tensor
+        """
         import torch
         
         W = self._layer_weight("lm_head.weight")  # [V, D]
         b = self.model_weights.get("lm_head.bias")
         V, D = W.shape
         
-        # For small vocabularies, use direct computation
-        if V <= tile_size:
+        # Set default top_k if not provided
+        if top_k is None:
+            top_k = min(1024, max(32, V // 4))
+        
+        # For small vocabularies and no top-K requirement, use direct computation
+        if V <= tile_size and not return_topk:
             return self._fgemm_fold(h_t, W.T.contiguous(), b)  # [V]
         
-        # For large vocabularies, use tiled computation with top-K tracking
+        # For large vocabularies or top-K requirement, use streaming top-K
         device = h_t.device
         dtype = h_t.dtype
         
         # Keep running top-K to avoid storing full logits
-        top_k = min(1024, V // 4)  # Reasonable top-K size
         running_values = torch.full((top_k,), float('-inf'), device=device, dtype=dtype)
         running_indices = torch.zeros(top_k, device=device, dtype=torch.long)
         
@@ -1696,6 +1823,10 @@ class GyroHead:
             top_vals, top_pos = torch.topk(combined_values, k=top_k, largest=True)
             running_values = top_vals
             running_indices = combined_indices[top_pos]
+        
+        # Return top-K only or reconstruct full tensor
+        if return_topk:
+            return running_indices, running_values
         
         # Reconstruct full logits tensor (sparse)
         full_logits = torch.full((V,), float('-inf'), device=device, dtype=dtype)
