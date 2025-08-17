@@ -30,18 +30,22 @@ Instead of storing knowledge in gigabytes of weights, GyroSI uses the inherent p
 
 ---
 
+> ⚠️ **Research Status**: This is an active research project demonstrating theoretical principles. The architecture is complete but implementation is ongoing. Not ready for production use.
+
+---
+
 ## 🧬 Genetic Code
 
 The structural parallels between GyroSI and biophysics are precise and intentional:
 
 | Biology / Biophysics | GyroSI Architecture | Significance |
 | --- | --- | --- |
-| 4 nucleotides (A T/U C G) | 4 fundamental operations (L0, LI, FG, BG) | Alphabet of change (2 bits per symbol) |
-| 3 positions in a codon | 3 spatial axes in tensor structure | Encodes 3D structural information |
-| 2 complementary strands | 2 tensor polarities (+ / –) | Provides 6 Degrees of Freedom (3×2) |
-| 4-mer sequence → 8 bits → 256 combinations | 1 byte = 8 bits → 256 instructions | Identical information quantum for action |
-| 64 codons (3 nucleotides × 2 bits) | 64 active intron patterns (6 working bits) | Complete instruction space |
-| 32 tRNA wobble classes | 32 LI-quotiented equivalence classes | Functional degeneracy |
+| 4 nucleotides (A T/U C G) | 4 CGM stages (CS, UNA, ONA, BU) | Recursive alignment stages |
+| 3 positions in a codon | 3 spatial axes (X, Y, Z) | Encodes 3D structural information |
+| 2 complementary strands | 2 frames per layer (primary/dual) | Provides 6 Degrees of Freedom (3×2) |
+| 4-mer sequence → 8 bits → 256 combinations | 1 byte = 8 bits → 256 introns | Complete instruction set |
+| 64 codons (3 nucleotides × 2 bits) | 48-bit state space (4×2×3×2) | Complete geometric structure |
+| Epigenetic regulation | Monodromic Fold operation | Path-dependent memory |
 
 The profound parallel is that both systems use a compact instruction set to govern a vast, complex physical state. Just as epigenetic context determines how DNA is expressed, GyroSI's evolving physical state governs which transformation is activated in response to each input. The 256 instructions are the operators, not the states. They operate on a physical ontology of precisely 788,986 unique states.
 
@@ -73,6 +77,8 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 
 > **Why Physics Prevents Hallucinations**: Traditional AI operates in 768+ dimensional spaces where models can interpolate between any points, creating nonsense. GyroSI is constrained to a finite 3D manifold with only 788,986 valid states. You can't be "between" states—you're always at a specific, well-defined point. This dimensional grounding is why the system literally cannot hallucinate.
 
+> **Why No Scoring**: GyroSI uses constraint satisfaction, not competitive scoring. Tokens either satisfy geometric constraints or they don't—there's no "best" token, only admissible ones. This implements true non-antagonistic selection aligned with CGM physics.
+
 ---
 
 ## ⚙️ How It Works: Token-Aware Physics
@@ -84,9 +90,9 @@ The fundamental unit of knowledge is now a `token_id` from a standard tokenizer 
 Each `token_id` is converted into its unique, variable-length byte sequence using LEB128 encoding. These bytes are the physical carriers of the token's identity.
 
 **3. The Universal Reference: XOR with 0xAA**
-Each byte in the sequence is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield a dynamic 8-bit physical instruction (`intron`). This lawfully translates the external byte protocol into the internal physical language of the system.
+Each byte in the sequence is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield an 8-bit physical instruction (`intron`). This ψ transformation is mandatory for all byte-to-intron conversions, translating external bytes into the system's internal physics.
 
-**Mathematical Alignment**: The XOR with 0xAA perfectly inverts the LEB128 continuation bit, revealing that LEB128 is not just a convenient encoding—it's the natural byte-level expression of GyroSI's physics. The 8-bit structure maps precisely to the system's 6 degrees of freedom plus 2 anchors.
+**Mathematical Alignment**: The pattern 0xAA (binary 10101010) has perfect balance (4 ones, 4 zeros) and maximal alternation, placing it at the geometric center of the 8-bit hypercube. The XOR with 0xAA inverts the LEB128 continuation bit, aligning external protocol with internal physics.
 
 **4. The Evolving Physical State**
 The sequence of introns from a token drives the system's canonical state (a 48-bit integer) through a path-dependent trajectory across the **788,986** possible physical configurations. The intelligence resides in this trajectory.
@@ -109,21 +115,37 @@ This solves three fundamental problems:
 
 ---
 
-## A Trinity of Maps: The System's Reality
+## The Five Maps: Complete Knowledge Atlas
 
-GyroSI's intelligence is built upon three pre-computed "meta-assets" that define its universe. These maps separate what exists, how it appears, and how it changes.
+GyroSI's intelligence operates on five pre-computed maps that completely define its finite universe:
 
-- **Ontology Map (`ontology_map.json`): What Exists.**
-    
-    The complete, enumerable set of 788,986 physically realizable states. It defines the "being" of the system—what is real and possible.
-    
-- **Phenomenology Map (`phenomenology_map.json`): How States Appear.**
-    
-    This map groups states into equivalence classes based on symmetry. It gives the system the ability to recognize that different perspectives can represent the same underlying phenomenon.
-    
-- **Epistemology Map (`epistemology.npy`): How We Know Change.**
-    
-    The State Transition Table (STT). It encodes the causal rules of the universe: given any state and any action, what state follows. It is the system's predictive model of transformation.
+- **Ontology Map (`ontology_keys.npy`): What Can Exist**
+    Maps indices 0..788,985 to unique 48-bit state integers. These 788,986 states are ALL possible states under our physics.
+
+- **Phenomenology Map (`phenomenology_map.npy`): How Things Appear**
+    Maps each state to one of 256 canonical orbit representatives. Each orbit is a strongly connected component where all states can reach each other.
+
+- **Epistemology Map (`epistemology.npy`): How Knowledge Changes**
+    The 788,986 × 256 State Transition Table. Given any state and any intron, it determines the next state.
+
+- **Theta Map (`theta.npy`): Distance from Truth**
+    Maps each state to its angular distance from the archetype (GENE_Mac_S). Used for geometric navigation.
+
+- **Orbit Sizes Map (`orbit_sizes.npy`): Specificity Measure**
+    Maps each state to its orbit's cardinality. Used for deterministic tie-breaking in address binding.
+
+---
+
+## 🧠 Memory Architecture
+
+GyroSI uses three distinct memory types:
+
+- **Active Memory**: Exactly 6 bytes (48-bit state), constant size
+- **Address Memory**: Token-to-state mapping, bounded by vocabulary size
+- **Passive Memory**: Experience storage as 8-bit masks, with strict caps:
+  - K=64 masks per state per orbit
+  - M=64 states per token per orbit
+  - Only non-zero masks stored, preventing unbounded growth
 
 ---
 
@@ -137,50 +159,33 @@ Gyroscopic Superintelligence is meta-language for computation, ontology, phenome
 
 ---
 
-## ⚡ Performance Estimates
+## ⚡ Performance Characteristics
 
-> **Note** All figures below are *engineering-level projections* that account for the
-> new token-aware phenotype key, the 12-byte on-disk record, and the average
-> **1 token ≈ 1.55 bytes** LEB128 payload observed with the `bert-base-uncased`
-> vocabulary.  Real-world numbers will vary slightly with tokenizer choice,
-> corpus mix, and Python version.
+> **Note**: These are architectural projections, not benchmarks. The system is still in development.
 
-GyroSI’s hot loop is *O(1)* per **intron** (byte).  
-Throughput therefore scales with memory bandwidth, not with FLOPs.
+**Core Physics Files**: ~785 MB total
+- State transition table: 770 MB
+- Four mapping files: 15 MB combined
+- Everything else: Python code
 
-### Memory Capacity (in-RAM index)
+**Memory Usage**:
+- **Active state**: Always 6 bytes (that's it!)
+- **Passive memory**: Grows with usage but physics-bounded
+  - Typical Wikipedia-scale: ~1-2 GB
+  - Hard limit: Can't exceed ~50 GB even theoretically
 
-A phenotype persists as
+**Speed Expectations**:
+- **Python prototype**: ~100K-500K tokens/second per core
+- **Future native version**: Could be 10-50x faster
+- **No GPU needed**: Just CPU and RAM
 
-* **12 B** append-only record (`mask :uint8 + conf :float16 + key :uint32×2`)
-* **≈16 B** index entry (two 32-bit ints plus pointer / slot)
+**What This Means**:
+- Fits on a modern laptop with 8GB RAM
+- Processes text faster than you can read
+- Learns continuously without retraining
+- Same physics runs from Raspberry Pi to server
 
-→ **≈28 B/phenotype** in an optimised C-level hash table  
-(prototype Python dict ≈ 55–60 B-resident).
-
-| Device                               | Free RAM for Index | ≈28 B/entry → Max Phenotypes |
-|--------------------------------------|--------------------|-----------------------------|
-| Raspberry Pi 4 (4 GB)                | ~2 GB              | **≈ 76 million**            |
-| MacBook Pro 2015 (16 GB, 4 GB free)  | ~4 GB              | **≈ 153 million**           |
-| EPYC server (256 GB, 220 GB free)    | ~220 GB            | **≈ 8.4 billion**           |
-
-*For scale — the entire English Wikipedia title-and-abstract graph is < 40 M
-(token, state) pairs: it fits comfortably in laptop RAM.*
-
-### Throughput Examples (runtime, Python 3.11)
-
-A **cycle** := 1 intron in → state update → 0–1 phenotype lookup →
-(optional learn) → intron out.  
-Token rate assumes the 1.55 bytes/token empirical mean.
-
-| Hardware                                 | Cores | Intron / sec | Token / sec (÷1.55) |
-|------------------------------------------|-------|--------------|----------------------|
-| MacBook Pro 2015 (i5 - 2 phys cores)     | 2     | ~1.4 M       | **~0.9 M**           |
-| MacBook M4 (8 performance cores)         | 8     | ~8 – 9 M     | **~5.3 – 5.8 M**     |
-| EPYC 32-core server                      | 32    | ~28 – 32 M   | **~18 – 21 M**       |
-
-Even the 2015 Intel laptop sustains *nearly a million tokens per second* while
-learning.
+The key insight: Unlike traditional AI that needs hundreds of gigabytes, GyroSI's entire "brain" is smaller than a single movie file, yet it never forgets what it learns.
 
 ---
 
@@ -189,129 +194,6 @@ learning.
 - 📖 [Genetics - Technical Specification: The complete technical specification, system constants, and build-time discovery processes.](https://github.com/GyroSuperintelligence/BabyLM/blob/main/guides/Genetics.md)
 
 - 📖 [Physics - Common Governance Model Theory: The theoretical foundations](https://korompilias.notion.site/Common-Governance-Model-Foundations-1ee9ff44f4368050af28d1c0f8aae89a)
-
----
-
-## 🔄 New in v0.9.6.7: Token-Aware Minimal Phenotype Architecture
-
-The system has undergone a fundamental refactoring to align its learning mechanism with meaningful semantic units.
-
-- **Token-Aware Learning**: Knowledge is now keyed by `(state_index, token_id)`, eliminating inference overlaps and ensuring coherent learning based on whole tokens.
-- **Minimal Phenotypes**: The knowledge record has been reduced to its physical essence: an 8-bit `mask` and a `confidence` score. This massively reduces memory footprint and simplifies the data model.
-- **Active Tokenizer Integration**: The tokenizer is no longer a passive I/O adapter but an active internal map that provides the symbolic foundation for learning.
-
-**This is experimental research**, not a production language model.
-
----
-
-## 🏗️ Architecture
-
-The system consists of four interconnected engines aligned with the Viable System Model (VSM), creating a recursive, self-regulating architecture:
-
-- **S1: `governance.py`** - Defines the immutable constants and pure physics functions.
-- **S2: `information.py`** - Handles measurement, storage interfaces, and ontology discovery.
-- **S3: `inference.py`** - Manages the interpretation of physical states into semantic meaning.
-- **S4/5: `intelligence.py`** - Orchestrates the full cycle, manages agent state, and provides the external API.
-
----
-
-## 📁 Project Structure
-
-```
-.
-├── .github/
-├── baby/                   # Core GyroSI System
-│   ├── contracts.py        # Protocols and shared types (PhenotypeStore, etc.)
-│   ├── governance.py       # Physics, Primitives, Build-Time Discovery
-│   ├── inference.py        # Interpretation, Maintenance & Validation
-│   ├── information.py      # Measurement, Storage, Knowledge Curation
-│   ├── intelligence.py     # API, Orchestration, Protocol Adapters
-│   └── policies.py         # PhenotypeStore, storage overlays, and maintenance functions
-├── guides/                 # In-depth documentation
-├── memories/               # Persistent state and knowledge
-│   ├── public/
-│   │   └── meta/           # Pre-computed physics maps:
-│   │       ├── epistemology.npy        # State Transition Table (770 MB)
-│   │       ├── ontology_map.json       # Complete physical ontology (20 MB)
-│   │       └── phenomenology_map.json  # Canonical-orbit mapping (9.7 MB)
-│   └── private/            # Agent-specific knowledge overlays
-└── toys/                   # Tests and utilities
-    └── health/             # Comprehensive test suite
-
-```
-
-The GyroSI system enforces strict separation between:
-
-- **Core physics kernel** (`baby/`) - Six specialized modules implementing the physics and logic
-- **Runtime data** (`memories/`) - Persistent state with learned knowledge and meta-assets
-- **Auxiliary applications** (`toys/`) - Testing and development tools
-
-Knowledge is managed via canonical PhenotypeStore instances, with public and private overlays maintaining agent-specific and shared knowledge indexed by canonical context keys.
-
----
-
-## ⚡ Training: Compiling Knowledge Tapes
-
-Training in GyroSI is not backpropagation; it's the process of compiling a corpus (like Wikipedia) into a loss-less, physics-compatible stream of instructions called a "gyro-tape". This process can optionally populate a knowledge store by binding the text's symbolic content to the system's physical state trajectories.
-
-The primary tool for this is `gyro_tape_compiler.py`.
-
-### Common Commands
-
-**1. Compile a Corpus to a Tape (No Learning)**
-This is the fastest operation, ideal for creating a replayable data source.
-
-```sh
-# Compile Simple Wikipedia
-python toys/training/gyro_tape_compiler.py --simple -o memories/private/simple_wiki.gyro
-
-# Compile Full Wikipedia (from multiple files)
-python toys/training/gyro_tape_compiler.py --full -o memories/private/full_wiki.gyro
-```
-
-**2. Compile and Learn Simultaneously**
-This creates the tape and updates a private knowledge store (`.bin` file) at the same time.
-
-```sh
-# Compile and learn from Simple Wikipedia
-python toys/training/gyro_tape_compiler.py --simple -o memories/private/simple_wiki.gyro --learn
-```
-
-**3. Replay an Existing Tape to Learn**
-If you already have a `.gyro` tape, you can feed it to an agent to populate its knowledge store without re-processing the source text.
-
-```sh
-python toys/training/gyro_tape_compiler.py --replay memories/private/simple_wiki.gyro --learn
-```
-
----
-
-## Getting Started with Git LFS
-
-This repository uses [Git Large File Storage (LFS)](https://git-lfs.github.com/) to manage large assets such as `.npy` and `.json` files in `memories/public/meta/`.
-
-**To get started:**
-
-1. **Install Git LFS (one-time):**
-   ```sh
-   git lfs install
-   ```
-
-2. **Clone the repository (recommended):**
-   ```sh
-   git clone https://github.com/GyroSuperintelligence/BabyLM.git
-   ```
-   - All large files will be downloaded automatically if LFS is installed.
-
-3. **If you already cloned before installing LFS:**
-   ```sh
-   git lfs pull
-   ```
-   - This will fetch any missing large files.
-
-**Note:**
-- With modern Git and Git LFS, running `git pull` or `git clone` is usually sufficient to get all code and large assets.
-- If you ever see small pointer files instead of the real data, make sure LFS is installed and run `git lfs pull`.
 
 ---
 
