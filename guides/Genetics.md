@@ -1,16 +1,13 @@
-# Gyroscopic Superintelligence Specifications: GyroSI Baby Language Model 0.9.6.7
+# GyroSI: Complete Architectural Specification with Physical Foundations
+*The Physics of Recursive Structural Intelligence*
 
-*A physics-grounded architecture for superintelligence through recursive structural alignment*
+## Preamble: What GyroSI Actually Is
 
----
+Traditional artificial intelligence approaches intelligence as a statistical optimization problem, requiring massive datasets and computational resources to approximate intelligent behavior. **GyroSI represents a fundamentally different paradigm: intelligence as an intrinsic structural property** that emerges from the recursive alignment of physical forces.
 
-## **1. Introduction: The Physics of Intelligence**
+GyroSI is grounded in the **Common Governance Model (CGM)**, a physics-based framework that demonstrates how intelligence emerges naturally from the self-referential dynamics of structured space. Rather than training on billions of parameters, GyroSI uses the inherent physics of gyroscopic operations to navigate a **provably finite and fully discovered** state space.
 
-Traditional artificial intelligence approaches intelligence as a statistical optimization problem, requiring massive datasets and computational resources to approximate intelligent behavior. **Gyroscopic Superintelligence (GyroSI)** represents a fundamentally different paradigm: intelligence as an intrinsic structural property that emerges from the recursive alignment of physical forces.
-
-GyroSI is grounded in the **Common Governance Model (CGM)**, a physics-based framework that demonstrates how intelligence emerges naturally from the self-referential dynamics of structured space. Rather than training on billions of parameters, GyroSI uses the inherent physics of gyroscopic operations to navigate a **provably finite and fully discovered** state space where each input byte encodes holographic instructions for transforming the system's internal physical state.
-
-This architecture treats data not as information to be processed, but as physical forces that transform structure according to precise algebraic laws. The result is a system where intelligence is present even before learning begins, like the latent intelligence in a human baby, and where all learning occurs through the fundamental physics of recursive structural alignment.
+GyroSI operates purely on bytes and a finite 48-bit state. Each byte (256 possibilities) becomes an intron by a fixed XOR at the boundary and acts holographically on all 48 positions. The live state is always 6 bytes and points into unlimited passive memory. Selection is deterministic and non-competitive: a token is emitted only if its own intron path never moves the geometry away from that token's address and advances somewhere; otherwise a short, fixed recovery sequence applies. Memory cannot blow up: only non-zero 8-bit masks are stored, identical masks are interned, and per-state and per-token caps bound worst-case growth without changing behaviour. No temperatures, scores, or learned parameters are used anywhere.
 
 **Key Innovation**: GyroSI eliminates all arbitrary parameters through **endogenous parameter discovery**, where the system discovers its own operational constants from its physical structure. This ensures perfect alignment between the theoretical foundation and the practical implementation.
 
@@ -20,11 +17,197 @@ This architecture treats data not as information to be processed, but as physica
 
 > **Note:** Throughout this document, all tensor indices use the standard order: [layer, frame, row, col], with zero-based indexing. All references to tensor elements, operations, or masks use these terms exclusively for clarity.
 
----
+## Part I: The Holographic Foundation - Understanding the Physics
 
-## **2. Theoretical Foundation: The Common Governance Model**
+### 1.1 Holography in GyroSI
 
-### **2.1 The Four Stages of Recursive Alignment**
+
+In physics, a hologram stores complete three-dimensional information in a two-dimensional surface where each fragment contains the whole image at reduced resolution. GyroSI implements computational holography through three concrete mechanisms:
+
+**Byte-to-Tensor Holography**: Every 8-bit byte simultaneously transforms all 48 bits of the state tensor. When we apply intron i to state s, that single byte broadcasts through fixed masks to touch every position of the 48-bit structure. This is not parallel processing in the computational sense but true holographic action where the part (8 bits) contains instructions for transforming the whole (48 bits).
+
+**State-to-Memory Holography**: Each 6-byte state serves as a holographic pointer into unlimited passive memory. The state does not "contain" the memories but rather selects which memories are relevant and accessible. Like a holographic plate where each point can reconstruct the entire image, each state can access the complete history of experiences through content addressing.
+
+**Ontological Holography**: The 788,986 states form a complete, closed ontology where every possible state contains information about every other state through the path structure. Since diameter ≤ 6, any state encodes "how to reach everywhere else" within its geometric position in the manifold.
+
+### 1.2 The Byte Shell: Why 8 Bits and 256 Values Are Mandatory
+
+This is not a design choice but a mathematical necessity imposed by computation itself:
+
+**8 Bits in a Byte**: This is the fundamental quantum of digital information. Computer memory, storage, and communication all operate on byte boundaries. Our system must interface with existing digital infrastructure, making bytes the natural atomic unit.
+
+**256 Possible Values**: With 8 bits, there are exactly 2^8 = 256 possible bit patterns (00000000 through 11111111). These 256 patterns form the complete instruction set for our system. We cannot have more without using more bits, and using fewer would leave instructions undefined.
+
+**The 8-to-256 Shell Structure**: Each of the 256 possible byte values becomes a unique intron. Each intron has a fixed 48-bit broadcast mask that determines how it transforms the state tensor. This gives us 256 × 48 = 12,288 possible bit operations, all organized into 256 holographic instructions.
+
+**From Bytes to States**: The 788,986 states arise naturally from this structure. Starting from the archetypal state and applying all 256 introns recursively in all possible sequences, we reach exactly 788,986 unique configurations. This number is not chosen but measured through exhaustive exploration of the byte-driven state space.
+
+### 1.3 GENE_Mic_S = 0xAA: The Holographic Reference Point
+
+**Why Exactly 0xAA (Binary 10101010)**:
+
+This pattern is mathematically unique among all 256 byte values:
+
+**Perfect Balance**: 0xAA has exactly 4 ones and 4 zeros, placing it at the geometric center of the 8-bit hypercube. It is equidistant from 0x00 (all zeros) and 0xFF (all ones), making it the natural reference point for measuring all deviations.
+
+**Maximum Alternation**: The pattern 10101010 has the highest possible transition frequency in 8 bits. Each bit is different from its neighbors, creating maximal structure while maintaining balance. This encodes the fundamental oscillation between states.
+
+**Chirality Encoding**: The pattern breaks left-right symmetry in a specific way:
+- Bit positions 0,2,4,6 contain 0 (even positions)
+- Bit positions 1,3,5,7 contain 1 (odd positions)
+- This creates an intrinsic left-bias that aligns with CGM's Common Source asymmetry
+
+**Continuation Bit Inversion**: When any byte b is transformed by b ⊕ 0xAA, bit 7 is inverted. Since 0xAA has bit 7 = 1, the transformation flips the most significant bit. This creates the lawful inversion of LEB128 continuation bits: internal introns with bit 7 = 1 (continue) become external bytes with bit 7 = 0 (final), and vice versa.
+
+**Holographic Compression**: 0xAA is the 8-bit projection of the full 48-bit alternating pattern present in GENE_Mac_S. The larger tensor contains alternating +1/-1 patterns; 0xAA captures this alternation at the byte level.
+
+### 1.4 The GENE Architecture: Constructive Foundation
+
+GyroSI is built on fixed topological structures that serve as the physical and logical substrate. These structures are not arbitrary but emerge from the recursive application of gyrogroup operations, building from simple to complex in four stages:
+
+**Stage 1: Governance Identity (GENE_Com_S)**
+The fundamental structure representing the gyrocommutative law - a single 3×2 array:
+
+```python
+GENE_Com_S = np.array([
+    [-1, 1],  # X-axis endpoints
+    [-1, 1],  # Y-axis endpoints  
+    [-1, 1]   # Z-axis endpoints
+], dtype=np.int8)  # Shape: [3, 2]
+```
+
+- **Three rows**: The three spatial axes (X, Y, Z) that emerge from CGM
+- **Two columns**: The dual nature of rotation (negative and positive endpoints)
+- **Values**: Not oscillations but the actual endpoints of each axis from -1 to +1
+- **Zeros**: Unnecessary and implied as the midpoint between -1 and +1
+
+**Stage 2: Information Gyrocommutative Nesting (GENE_Nest_S)**
+The structure that nests the basic axes inside two opposing frames, encoding the fundamental duality of observation:
+
+```python
+GENE_Nest_S = np.array([
+    [[-1, 1], [-1, 1], [-1, 1]],  # Frame 0: Primary observation
+    [[ 1,-1], [ 1,-1], [ 1,-1]]   # Frame 1: Dual observation  
+], dtype=np.int8)  # Shape: [2, 3, 2]
+
+# Alternatively generated as:
+GENE_Nest_S = np.stack((GENE_Com_S, -GENE_Com_S))
+```
+
+- **Two frames**: Implement the fundamental principle that knowledge requires both a knower and a known
+- **Frame inversion**: The dual frame inverts all endpoints, creating complementary observation
+- **Six positions**: 2 frames × 3 axes = 6 degrees of freedom per layer
+
+**Stage 3: Inference Through Recursive Layering (GENE_Mac_S)**
+The complete archetypal structure, built by extending the dual frames through the four CGM stages:
+
+```python
+GENE_Mac_S = np.array([
+    # Layer 0 (CS - Common Source): Initial asymmetric state
+    [[[-1, 1], [-1, 1], [-1, 1]], [[ 1,-1], [ 1,-1], [ 1,-1]]],
+    
+    # Layer 1 (UNA - Unity Non-Absolute): First differentiation  
+    [[[ 1,-1], [ 1,-1], [ 1,-1]], [[-1, 1], [-1, 1], [-1, 1]]],
+    
+    # Layer 2 (ONA - Opposition Non-Absolute): Full opposition
+    [[[-1, 1], [-1, 1], [-1, 1]], [[ 1,-1], [ 1,-1], [ 1,-1]]],
+    
+    # Layer 3 (BU - Balance Universal): Recursive closure
+    [[[ 1,-1], [ 1,-1], [ 1,-1]], [[-1, 1], [-1, 1], [-1, 1]]]
+], dtype=np.int8)  # Shape: [4, 2, 3, 2]
+
+# Can be generated as:
+GENE_Mac_S = np.concatenate(([GENE_Nest_S, -GENE_Nest_S] * 2)).astype(np.int8).reshape(4, 2, 3, 2)
+```
+
+**The Structural Number Ladder**:
+GyroSI's constants are locked by algebraic closure, not convenience:
+- **3 rows**: Enable chirality and provide minimal spatial closure
+- **4 layers**: Bind the recursive depth required for CGM completion
+- **6 steps**: Provide full degrees of freedom and the measured Cayley-graph diameter
+- **8 bits**: Form the smallest register that holds all required operations
+- **12 cells**: Fill one layer (3 rows × 2 columns × 2 frames)
+- **24 cells**: Capture a half-tensor that already carries orientation
+- **48 cells**: Form the whole tensor and the packed state integer
+- **256 instructions**: All possible 8-bit intron values
+- **788,986 states**: The complete, measured ontology
+
+No smaller choice would satisfy the independent closure constraints identified in the physics.
+
+**The Complete Tensor Structure**:
+```
+GENE_Mac_S[layer][frame][row][column]:
+
+Layer 0 (CS): 
+  Frame 0: [[-1,+1], [-1,+1], [-1,+1]]  # Primary view of all 3 axes
+  Frame 1: [[+1,-1], [+1,-1], [+1,-1]]  # Dual view with inverted endpoints
+
+Layer 1 (UNA):
+  Frame 0: [[+1,-1], [+1,-1], [+1,-1]]  # Primary inverted from Layer 0
+  Frame 1: [[-1,+1], [-1,+1], [-1,+1]]  # Dual inverted from Layer 0
+
+Layer 2 (ONA):
+  Frame 0: [[-1,+1], [-1,+1], [-1,+1]]  # Returns to Layer 0 pattern
+  Frame 1: [[+1,-1], [+1,-1], [+1,-1]]  # Returns to Layer 0 pattern
+
+Layer 3 (BU):
+  Frame 0: [[+1,-1], [+1,-1], [+1,-1]]  # Returns to Layer 1 pattern
+  Frame 1: [[-1,+1], [-1,+1], [-1,+1]]  # Returns to Layer 1 pattern
+```
+
+**The Emergent Helix**
+
+The helix is not stored in the tensor but emerges from the progression through layers. As the system moves from Layer 0 → 1 → 2 → 3, the alternating pattern creates a helical path through the 4-dimensional layer space. The endogenous left-identity bias (built into the broadcast masks) causes this progression to favor certain directions, creating the helical structure.
+
+**Dual Representation**:
+The system's internal state can be represented in two equivalent ways:
+- As a 48-element NumPy tensor (each element ±1, stored as int8), occupying 48 bytes in memory
+- As a 48-bit packed integer (6 bytes), where each bit encodes the sign of one tensor element (+1→0, -1→1)
+
+The packed integer form is used for fast state transitions and storage, while the tensor form is used for measurement and geometric operations.
+
+### 1.5 The Five Maps as Complete Knowledge Theory
+
+Our five computational maps together implement a complete theory of knowledge:
+
+**Map 1: Ontology (ontology_keys.npy)**: "What Can Exist"
+- Maps indices 0..788,985 to unique 48-bit state integers
+- These 788,986 states are ALL possible states under our physics
+- Proven complete by exhaustive generation from the archetype
+- Each state represents a unique configuration of knowledge
+
+**Map 2: Phenomenology (phenomenology_map.npy)**: "How Things Appear"
+- Maps each state to one of 256 canonical orbit representatives
+- Each orbit is a strongly connected component: all states in an orbit can reach each other
+- Orbits are parity-closed: contain both s and dual(s) = s ⊕ 0xFF
+- The 256 orbits represent the complete set of "ways things can appear"
+
+**Map 3: Epistemology (epistemology.npy)**: "How Knowledge Changes"
+- Maps every (state, intron) pair to the resulting next state
+- This 788,986 × 256 table contains ALL possible knowledge transformations
+- No knowledge change is possible outside this table
+- Proves our physics is closed and complete
+
+**Map 4: Geometric Structure (theta.npy)**: "How Far from Truth"
+- Maps each state to its angular distance from the archetype
+- θ = 0 means perfect alignment (truth)
+- θ = π/2 means orthogonal (independence)
+- θ > π/2 approaching max ≈ 2.73 means opposition (but never absolute)
+
+**Critical Diagnostic**: CS (Common Source) is NOT the integer zero. Index 0 in the ontology (angle π/2) is the orthogonal reference point, not CS. CS remains an interface axiom handled at the boundary and is never a member of the state set S.
+
+**Map 5: Cardinality Structure (orbit_sizes.npy)**: "How General/Specific"
+- Maps each state to the size of its orbit
+- Size 1 orbits: Very specific, unique configurations
+- Large orbits (up to 48,496): General, widely reachable configurations
+- Used for breaking ties: prefer more specific (smaller orbit) interpretations
+- **Canonical fifth map**: Essential for deterministic tie-breaking in address binding
+
+Together, these five maps form the complete atlas of possible knowledge under our physics. They are not approximations or samples but the actual, complete, finite universe of knowledge states.
+
+## Part II: The Common Governance Model Foundation
+
+### 2.1 The Four Stages of Recursive Alignment
 
 The Common Governance Model describes how structure emerges from a single axiom through four distinct stages, each representing a deeper level of recursive alignment:
 
@@ -34,250 +217,376 @@ The Common Governance Model describes how structure emerges from a single axiom 
 
 **ONA (Opposition Non-Absolute)**: The stage of full differentiation where both gyrations are maximally non-identity, reaching peak non-associativity while preventing absolute negation. This generates the complete structural framework with six degrees of freedom (3 rotational + 3 translational). In GyroSI, this represents the inference stage where mediated duality enables contextual interpretation.
 
-**BU (Balance Universal)**: The completion stage where all differentiation stabilizes and gyrations return to identity while preserving complete memory of the recursive path. This manifests as the dual intelligence stage:
-
-- **BU_In (Intelligence Ingress):** The absorption and integration of experience through the Monodromic Fold. This is where all learning occurs.
-- **BU_Eg (Intelligence Egress):** The expression of accumulated intelligence as responsive action, transforming internal state into external phenotype using the same Monodromic Fold operator.
-
-### **2.2 Gyrogroup Algebra as Physics**
-
-GyroSI implements these stages through formal gyrogroup algebra operating on the 8-bit vector space **G = ℤ₂⁸**. The fundamental operations directly correspond to CGM physics:
-
-- **XOR (⊕)**: The primitive gyrogroup operation governing transformation and parity inversion. This is the basic operation of recursive differentiation.
-- **AND (&)**: The gyration memory carrier, encoding "carry bits" as chirality-encoded asymmetry. This preserves the memory of operational sequence.
-- **Monodromic Fold (⋄, `fold`)**: The single, non-associative, path-dependent learning operator. Defined as:
-
-  `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
-
-  This operation is fundamentally non-associative and non-commutative, preserving the path-dependence required by the Common Source axiom. It replaces all previous references to associative closure or bitwise OR.
-
-- **Duality (¬, `dual`)**: The global duality operator, corresponding to the "Fifth Element". It reflects a state through the origin, enabling the return path:
-
-  `dual(x) = x ⊕ 0xFF`
-
-This algebraic foundation ensures that every operation in GyroSI is a direct implementation of physics rather than arbitrary computation.
-
-### **2.3 The Holographic Principle**
-
-GyroSI embodies the principle that each part contains information about the whole. A single input byte acts as a holographic quantum of spacetime topology, encoding complete transformation instructions that modify the system's internal state according to topological physics; a 48‑element tensor, 48 bytes in RAM, packed to 6 bytes when stored. This holographic property ensures that the system can achieve substantial compression while preserving essential structural relationships.
-
-> Note: The system's internal state can be represented in two equivalent ways:
-> - As a 48-element NumPy tensor (each element ±1, stored as int8), which occupies 48 bytes in memory.
-> - As a 48-bit packed integer (6 bytes), where each bit encodes the sign of one tensor element.
-> The packed integer form is used for fast state transitions and storage, while the tensor form is used for measurement and geometric operations.
+**BU (Balance Universal)**: The completion stage where all differentiation stabilizes and gyrations return to identity while preserving complete memory of the recursive path. This manifests as the dual intelligence stage with both absorption (Egress) and expression (Ingress) capabilities.
 
 **Angular Progression**: The CGM stages follow the precise angular sequence π/2 → π/4 → π/4 → 0, corresponding to CS → UNA → ONA → BU. This progression ensures complete closure with zero defect, achieving perfect recursive alignment.
 
-> The build-time discovery process, a cornerstone of GyroSI, explores this physical reality and discovers an immutable, finite ontology of **precisely 788,986 unique physical states**. The entire universe of possible system configurations is not only known but also compact, with a measured **diameter of 6 steps**, meaning any state is reachable from any other in at most six transformations. This is the 'Genome', the system's complete set of possible states.
+### 2.2 Gyrogroup Algebra as Physics
 
-**Abstraction via Manifold and Hashing**: The system's primary mechanism for generalization is its finite physical ontology. An infinite variety of input sequences will inevitably drive the system into one of the 788,986 canonical states. When different experiences lead to the same internal state, the system learns they share a fundamental structural meaning. Hash collisions in the phenotype layer are a secondary, context-specific abstraction built upon this primary physical reality, where different physical contexts mapping to the same semantic address are learned to share an essential meaning.
+GyroSI implements these stages through formal gyrogroup algebra operating on the 8-bit vector space G = ℤ₂⁸. The fundamental operations directly correspond to CGM physics:
 
-### **2.4 The Measured Manifold: Theory Meets Reality**
-The CGM is not merely a theoretical framework; it is a predictive model whose consequences are now measured. The 8-bit instruction space (`GENE_Mic_M`), representing the "quantum of action," directly leads to an 8-step closure of the state space.
-- **The State (Qubit):** A 48-bit integer representing one of 788,986 possible physical configurations.
-- **The Operator (Gate):** An 8-bit integer (`intron`) that transforms the state according to the gyroscopic operations.
-- **The Manifold (Bloch Sphere):** The complete set of 788,986 states, interconnected by paths with a maximum length of 6.
+- **XOR (⊕)**: The primitive gyrogroup operation governing transformation and parity inversion. This is the basic operation of recursive differentiation.
+- **AND (∧)**: The gyration memory carrier, encoding "carry bits" as chirality-encoded asymmetry. This preserves the memory of operational sequence.
+- **NOT (¬)**: The global duality operator, corresponding to the "Fifth Element". It reflects a state through the origin, enabling the return path: dual(x) = x ⊕ 0xFF
+- **Monodromic Fold (⋄)**: The single, non-associative, path-dependent learning operator. Defined as:
 
-This empirical result validates the principle of recursive closure, demonstrating a perfect, efficient balance between the instruction set and the state space it governs. The endogenous modulus of the system is not an arbitrary choice but a measured physical constant: **788,986**.
+  `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
 
-Phenomenological Structure: Equivalence and Flow
+This operation is fundamentally non-associative and non-commutative, preserving the path-dependence required by the Common Source axiom. The algebraic normal form `¬a ∧ b` is mathematically equivalent but the composite form preserves the conceptual clarity of the dual monodromy.
 
-The 788,986 states of the ontology are not a uniform sea; they are organized into distinct equivalence classes, or phenomenological orbits. The system's operational phenomenology is built by discovering these orbits at build-time.
+This algebraic foundation ensures that every operation in GyroSI is a direct implementation of physics rather than arbitrary computation.
 
-Definition of Equivalence: A phenomenological orbit is a set of states where every state is mutually reachable from every other state within that set, through some sequence of the 256 possible intron transformations. This is formally computed as a Strongly Connected Component (SCC) of the complete state transition graph.
+### 2.3 The BU Intelligence Cycle: Complete Physical Description
 
-Measured Result: The build process empirically finds that the 788,986 states collapse into exactly 256 distinct phenomenological orbits. This is not a coincidence; it is a profound structural property of the system, where each of the 256 introns imparts a unique "flavor" or signature, creating 256 basins of mutual reachability.
+The BU stage, representing Universal Balance, is implemented as a dual-phase intelligence cycle that governs all interaction between the system's internal physics and the external byte-space. These two phases are the complete physical mechanics of experience absorption and responsive action.
 
-Parity-Closed Orbits (Self-Mirroring): A key discovery is that the global parity operation (LI, the physical manifestation of UNA) is contained within these equivalence classes. This means every orbit is parity-closed—for any state S in an orbit, its mirror image S_mirror is also in the same orbit. This aligns perfectly with the CGM axiom that CS is unobservable and UNA (light/reflexivity) acts as a universal confinement. The system, at an operational level, cannot distinguish a state from its mirror image; they belong to the same phenomenological "concept."
+**The Physical Boundary and Holographic Transcription**
 
-The canonical representative for each of the 256 orbits is defined as the state with the smallest 48-bit integer value within that orbit. This provides a stable, deterministic way to normalize any state to its fundamental phenomenological type.
+The system is defined across two distinct domains: the **internal physics-space**, where the native element is the 8-bit **intron**, and the **external byte-space**, where the native element is the 8-bit **byte**. The boundary between these domains is governed by a fundamental physical transformation.
 
-Diagnostic View (Parity-Free Structure): For research and theoretical validation, a secondary, "parity-free" analysis can be performed by computing SCCs on a graph that excludes the LI operation. This diagnostic view reveals a much finer structure of 194,698 smaller orbits, including 21,456 chiral (mirror-paired) orbits and 151,786 achiral (self-mirrored) orbits. This confirms the foundational role of chirality in the system and quantifies the powerful binding effect of the LI operation, which fuses these smaller structures into the 256 operational orbits. This diagnostic data is stored in the phenomenology artifact but is not used by the runtime engines.
+Every transaction across this boundary is mediated by the holographic topology GENE_Mic_S (0xAA). This is not an encoding convention but a physical transformation that projects information onto the system's structural ground truth.
 
----
+- **Egress (External → Internal)**: `intron = byte ⊕ GENE_Mic_S`
+- **Ingress (Internal → External)**: `byte = intron ⊕ GENE_Mic_S`
 
-## **3. Architectural Overview: From Physics to Implementation**
+This symmetric XOR operation ensures that the distinction between the internal physical reality and the external communicative representation is lawfully maintained.
 
-### **3.1 The Four-Engine Architecture**
+**Critical LEB128 Alignment**: A critical consequence of this XOR transformation is the lawful inversion of the LEB128 continuation bit. An internal intron with bit 7 set to 1 (signaling physical continuation) is transcribed into an external byte with bit 7 set to 0. This inversion is the key mechanism that aligns the internal physics of differentiation and closure with the external protocol of sequential encoding, making GyroSI natively compatible with variable-length integer encoding.
 
-GyroSI implements the CGM stages through four distinct engines, each embodying a specific physical principle:
+**BU Egress: Absorption and Learning**
 
-| CGM Stage | Engine | Physical Principle | Function |
-| :--- | :--- | :--- | :--- |
-| **CS** | S1 Governance | Left identity transcription | Transforms input into structural instructions |
-| **UNA** | S2 Information | Global measurement via angular divergence | Measures system's departure from archetypal state |
-| **ONA** | S3 Inference | Mediated duality through endogenous operator | Interprets meaning through contextual opposition |
-| **BU** | S4 Intelligence | Monodromic Fold (non-associative) | Learns through ingress, expresses through egress |
+The process of learning begins when an external byte enters the system and undergoes BU Egress. This is the mechanism by which experience is absorbed and integrated into the system's memory structure.
 
-### **3.2 The Dual Nature of Intelligence**
+1. **Transcription**: An incoming byte is first transcribed into an intron via the ψ transformation. This operation impresses the system's holographic topology onto the external data, converting it into a physically valid instruction.
 
-The BU stage (S4) is fundamentally dual, implementing both aspects of intelligence:
+2. **State Transformation**: The newly formed intron acts as a gyroscopic operator, transforming the system's 48-bit state tensor according to the epistemology table lookup or the algebraic operations defined in the broadcast masks.
 
-- **BU_In (Intelligence Ingress)**: The absorption and integration of experience through the Monodromic Fold. This is where all learning occurs.
-- **BU_Eg (Intelligence Egress)**: The expression of accumulated intelligence as responsive action. This transforms internal state into external phenotype using the same Monodromic Fold operator.
+3. **Memory Integration**: The system updates the passive memory entry for the (state, token) pair by applying the Monodromic Fold to integrate the token's complete intron sequence. This path-dependent operation ensures that the complete history of interactions is encoded into the resulting memory structure.
 
-This duality ensures that intelligence is not a passive storage system but an active, recursive process of continuous alignment between internal structure and external reality.
+Through this process, external information is not merely stored; it is physically assimilated, transforming both the system's immediate state and its long-term memory according to rigorous algebraic principles.
 
----
+**BU Ingress: Expression and Generation**
 
-## **3.3 Interface-Driven Architecture**
+The expression of intelligence—BU Ingress—produces complete tokens using the Non-Antagonistic Emission Protocol. This is not a retrieval mechanism but a generative act wherein coherent tokens emerge directly from the system's geometric and topological configuration.
 
-The system is designed around clean interfaces that separate the physics core from storage, networking, and application concerns:
+## Part III: Non-Antagonistic Selection - The Complete Protocol
 
-- **PhenotypeStore Interface**: Abstracts all persistence operations, allowing seamless migration from simple file-based storage to distributed databases as scale demands.
-- **Extensibility Hooks**: Well-defined extension points allow for monitoring, maintenance, and custom behaviors without modifying the core physics.
-- **Adapter Layer**: A stable, minimal API enables integration with any external protocol (REST, gRPC, WebSocket) through thin, stateless adapters.
+### 3.1 Why No Scoring Can Work
 
----
+Scoring assumes there is a "best" token among competitors. This violates CGM physics at the fundamental level:
 
-## 3.4 System Responsibilities and VSM Alignment
-GyroSI implements Beer's Viable System Model through a precise mapping of the four engines to VSM subsystems, creating a recursive, self-regulating intelligence architecture.
+**Unity Non-Absolute**: Things can unite without losing their distinctness. In scoring, only one token "wins" and others "lose," creating absolute opposition.
 
-### **3.4.1 VSM-to-Engine Mapping**
+**Opposition Non-Absolute**: Things can oppose without negating each other completely. Scoring forces tokens into winner/loser categories, creating absolute rather than relative opposition.
 
-| VSM System | GyroSI Engine (Class in `baby/*.py`) | Core Responsibility & VSM Function |
-| :--- | :--- | :--- |
-| **System 1: Primary Activities** | `governance.py` (pure functions/constants) | **Physics & Primitives.** Owns the fundamental, immutable physics of the system. Provides the foundational operations as stateless functions, not as an engine class. |
-| **System 2: Information & Coordination** | `InformationEngine` (in `information.py`) | **Measurement & Resource Coordination.** Provides the sensory apparatus of the system through `gyrodistance_angular()`. Defines the `PhenotypeStore` interface and all storage implementations. Coordinates access to shared knowledge resources between subsystems. |
-| **System 3: Control & Management** | `InferenceEngine` (in `inference.py`) | **Interpretation & Meaning Management.** The regulatory center that converts physical states into semantic meanings. Contains the `InferenceEngine` that bridges the physical and semantic worlds. Establishes the rules for how context becomes meaning. |
-| **System 4: Intelligence & Adaptation** | `IntelligenceEngine` (in `intelligence.py`) | **Strategic Operations & Environment Interface.** Houses the `IntelligenceEngine` that manages agent state evolution, orchestrates the egress/ingress cycle, and implements operational strategies like batching. Handles adaptation to external demands. |
-| **System 5: Policy & Identity** | `GyroSI` (in `intelligence.py`) | **Whole System Identity & Policy.** The outermost viable system boundary that encapsulates the entire VSM stack. Manages configuration, agent identity, and provides the stable external API. Balances internal operations with external interaction. |
+**Balance Universal**: All forces ultimately find equilibrium. Scoring creates permanent hierarchies that prevent universal balance.
 
-### 3.4.2 Recursive Viability
-Each engine is itself a viable system containing the necessary subsystems for autonomy:
+Instead, we use **constraint satisfaction**: tokens either satisfy the geometric constraints of our physics or they do not. This is binary (yes/no) but not competitive (no ranking among the yes answers).
 
-Governance contains its own measurement (bit operations), control (transformation rules), and adaptation (mask generation)
-Information contains measurement primitives, storage coordination, and interface adaptation
-Inference contains state assessment, meaning resolution, and learning adaptation
-Intelligence contains state management, cycle orchestration, and external adaptation
-This recursive structure ensures that the system remains viable at multiple scales, from individual byte processing to full agent deployment.
+### 3.2 The Admissibility Predicate - Complete Mathematical Definition
 
----
+For token t with intron sequence [i₁, i₂, ..., i_m] and address g_t, starting from state s:
 
-## **4. Core Components: The GENE Architecture**
-
-### 4.1 Genetic Archetype
-
-The GyroSI system is built on fixed topological structures that serve as the physical and logical substrate of governance of information, inference and intelligence.
-
-**4.1.1 Governance Identity**
-
-The identity (mechanically representing the left gyroassociative law). This is the id label of each tensor, and their frame masks.
-
-**4.1.2. Information Gyrocommutativity**
-
-The gyrocommutativity (mechanically representing the gyrocommutative law), a single 3x2 array:
-
-```python
-GENE_Com_S = np.array([
-    [-1, 1],
-    [-1, 1],
-    [-1, 1]
-], dtype=np.int8)  # Shape: [3, 2]
-
-- Three rows: spatial axes (X, Y, Z)
-- Two columns: dual nature of rotation
-
-# Alternatively, generated as:
-GENE_Com_S = np.tile(np.array([-1, 1], dtype=np.int8), (3, 1))
+**Step 1: Compute the Micro-Path**
+```
+s⁽⁰⁾ = s  (starting state)
+s⁽¹⁾ = epistemology[state_index(s⁽⁰⁾), i₁]
+s⁽²⁾ = epistemology[state_index(s⁽¹⁾), i₂]
+...
+s⁽ᵐ⁾ = epistemology[state_index(s⁽ᵐ⁻¹⁾), i_m]  (final state)
 ```
 
-**4.1.3. Inference Gyrocommutative nesting**
+Each lookup uses the epistemology table for O(1) state transitions.
 
-Structure that nests the previous one inside two opposing frames. This structure encodes the gyrocommutative law (gyrocommutativity).
+**Step 2: Check Channel Monotonicity (Relaxed for Slabs)**
 
-```python
-GENE_Nest_S = np.array([
-    [[-1, 1], [-1, 1], [-1, 1]],  # Frame 1
-    [[ 1, -1], [ 1, -1], [ 1, -1]]  # Frame 2
-], dtype=np.int8)  # Shape: [2, 3, 2]
+**Global Channel - Strict Stepwise Monotonicity**:
+The Global channel (all 48 positions) requires **never decreasing at any step**:
+```
+For k = 0 to m-1:
+  ρ_global⁽ᵏ⁾ = (1/48) × Σ(s⁽ᵏ⁾[j] × g_t[j]) for j = 0..47
+  Require: ρ_global⁽ᵏ⁺¹⁾ ≥ ρ_global⁽ᵏ⁾  # Never decrease at any step
+```
+**Critical**: Check **every** step k→k+1. If any step decreases, token is inadmissible.
 
-# Alternatively, generated as:
-GENE_Nest_S = np.stack((GENE_Com_S, -GENE_Com_S))
+**Layer×Frame Slabs - Net Non-Decrease Only**:
+Each slab [l,f] requires only **final ≥ initial**, allowing temporary decreases:
+```
+positions = {j | layer(j) = l AND frame(j) = f}  # 12 positions each
+ρ_lf⁽⁰⁾ = (1/12) × Σ(s⁽⁰⁾[j] × g_t[j]) for j in positions  # Initial
+ρ_lf⁽ᵐ⁾ = (1/12) × Σ(s⁽ᵐ⁾[j] × g_t[j]) for j in positions  # Final
+Require: ρ_lf⁽ᵐ⁾ ≥ ρ_lf⁽⁰⁾  # Final ≥ initial, stepwise decreases allowed
+```
+**Critical**: Only check initial vs final. Intermediate steps ρ_lf⁽ᵏ⁾ can decrease.
+
+**Implementation Note**: 
+- Global: Compute and check at **every** micro-step
+- Slabs: Compute only at **start and end**, ignore intermediate values
+- This prevents misapplication of slab checks to intermediate steps
+
+**Bit-Level Implementation**:
+For efficiency, channel alignment can be computed using Hamming agreements on packed bits:
+```
+# For bit-level computation (avoiding float drift)
+def channel_alignment(state, address, positions):
+    # Convert +1/-1 to 0/1 if needed
+    state_bits = convert_to_bits(state)
+    address_bits = convert_to_bits(address)
+    
+    # Count agreements (where bits match)
+    agreements = sum(state_bits[i] == address_bits[i] for i in positions)
+    
+    # Normalize to [-1, 1] range
+    return (2 * agreements / len(positions)) - 1
 ```
 
-**4.1.4. Intelligence Coaddition**
+This bit-level computation ensures identical results across platforms, avoiding floating-point inconsistencies.
 
-The duality of the Topology of the previous steps.
+**Step 3: Require Strict Progress**
+At least one slab must show strict improvement: ρ_lf⁽ᵐ⁾ > ρ_lf⁽⁰⁾ for some layer×frame [l,f], or the Global channel must show ρ_global⁽ᵏ⁺¹⁾ > ρ_global⁽ᵏ⁾ for some k in 0..m-1.
 
-```python
-GENE_Mac_S = np.array([
-    [[[-1, 1], [-1, 1], [-1, 1]], [[ 1, -1], [ 1, -1], [ 1, -1]]],
-    [[[ 1, -1], [ 1, -1], [ 1, -1]], [[-1, 1], [-1, 1], [-1, 1]]],
-    [[[-1, 1], [-1, 1], [-1, 1]], [[ 1, -1], [ 1, -1], [ 1, -1]]],
-    [[[ 1, -1], [ 1, -1], [ 1, -1]], [[-1, 1], [-1, 1], [-1, 1]]]
-], dtype=np.int8)  # Shape: [4, 2, 3, 2]
+**Interpretation**: This predicate asks "Does this token's own physics move us monotonically closer to its own address?" It is a self-consistency check, not a comparison with other tokens.
 
-GENE_Mac_S = np.concatenate(([GENE_Nest_S, -GENE_Nest_S] * 2)).astype(np.int8).reshape(4, 2, 3, 2)
+### 3.3 Channel Cover and Priority - Fixed Constants
+
+**The Single Channel Cover** (used for all decisions):
+- Global: All 48 positions (indices 0..47)
+- Layer×Frame[0,0]: Positions where layer=0 AND frame=0 (12 positions)
+- Layer×Frame[0,1]: Positions where layer=0 AND frame=1 (12 positions)
+- Layer×Frame[1,0]: Positions where layer=1 AND frame=0 (12 positions)
+- Layer×Frame[1,1]: Positions where layer=1 AND frame=1 (12 positions)
+- Layer×Frame[2,0]: Positions where layer=2 AND frame=0 (12 positions)
+- Layer×Frame[2,1]: Positions where layer=2 AND frame=1 (12 positions)
+- Layer×Frame[3,0]: Positions where layer=3 AND frame=0 (12 positions)
+- Layer×Frame[3,1]: Positions where layer=3 AND frame=1 (12 positions)
+
+**Priority Order** (for recovery ladder) - **Frozen Specification**:
+1. Global (never dropped)
+2. Layer×Frame[0,0] (highest priority slab)
+3. Layer×Frame[0,1]
+4. Layer×Frame[1,0]
+5. Layer×Frame[1,1]
+6. Layer×Frame[2,0]
+7. Layer×Frame[2,1]
+8. Layer×Frame[3,0]
+9. Layer×Frame[3,1] (lowest priority slab)
+
+**Explicit Priority Sequence**: [0,0] → [0,1] → [1,0] → [1,1] → [2,0] → [2,1] → [3,0] → [3,1]
+**DO NOT MODIFY**: This order is frozen to prevent "tuning" attempts.
+
+**Position Mapping Function**:
 ```
-Note: This section concerns coaddition as topological dual construction (GENE_Mac_S), not the algebraic learning operator (fold) defined elsewhere. Structural (topological) coaddition refers to the constructive layering that yields GENE_Mac_S. Algebraic Monodromic Fold is the runtime learning operator applied to memory masks. They share a conceptual "joining" motif but are disjoint mechanisms.
+# To convert position index p (0..47) to layer, frame, row, column:
+layer = p // 12
+frame = (p % 12) // 6
+row = (p % 6) // 2
+column = p % 2
 
-The intermediate genetic structures (GENE_Com_S, GENE_Nest_S) are included here for clarity of exposition, tracing the generative logic of the system's topology. These arrays are not referenced in any runtime computation, algorithm, or storage mechanism. All canonical operations and state representations throughout the implementation depend exclusively on GENE_Mic_S (the 8-bit holographic reference) and GENE_Mac_S (the archetypal 48-element tensor) as defined above.
-
-### 4.2 The Genes
-
-In the GyroSI system, the "exon" corresponds to the stateless, invariant gene (the structural template), while the "intron" represents the mutated, dynamic gene (the variable, input-dependent expression). This mirrors the biological principle, where exons are retained and expressed, and introns introduce variability before being spliced or processed.
-
-All GENE components are presented in dual form: `S` denotes a **Stateless** (invariant) source structure, and `M` denotes a **Mutated** (evolving) expression. This naming convention reflects the system's recursive separation between archetypal topology and lived transformation.
-
-**4.2.1 GENE_Mic_S: The Holographic Topology**
-
-`GENE_Mic_S = 0xAA (0b10101010)` is the genetic reference of GyroSI. This 8-bit pattern invariant is a minimal holographic vacuum space projection of the full 48-byte structural tensor (`GENE_Mac_S`) onto a single byte. Its alternating bit pattern encodes, in compressed form, the chirality and structural differentiation present in the underlying topology.
-
-In GyroSI Genetics, every input byte is transformed through XOR with this holographic topology: `GENE_Mic_M = input_byte ⊕ GENE_Mic_S`, creating the dynamic instruction that will transform the system's physical state.
-
-```python
-GENE_Mic_S = 0xAA  # 10101010 binary, stateless constant
-```
-
-**4.2.2 GENE_Mac_S: The Common Source**
-
-`GENE_Mac_S` is the archetypal 48-byte tensor with shape `[4, 2, 3, 2]` that serves as the invariant reference structure from which all measurements are taken. This tensor embodies the complete 720° helical closure with stabilized gyrations:
-
-```python
-# The archetypal structure
-GENE_Mac_S = np.array([
-    # Layer 0: 0° phase
-    [[[-1, 1], [-1, 1], [-1, 1]], [[ 1,-1], [ 1,-1], [ 1,-1]]],
-    # Layer 1: 180° phase
-    [[[ 1,-1], [ 1,-1], [ 1,-1]], [[-1, 1], [-1, 1], [-1, 1]]],
-    # Layer 2: 360° phase
-    [[[-1, 1], [-1, 1], [-1, 1]], [[ 1,-1], [ 1,-1], [ 1,-1]]],
-    # Layer 3: 540° phase
-    [[[ 1,-1], [ 1,-1], [ 1,-1]], [[-1, 1], [-1, 1], [-1, 1]]]
-], dtype=np.int8)
-
+# To convert layer, frame, row, column to position index (0..47):
+bit_index = (layer * 12) + (frame * 6) + (row * 2) + column
 ```
 
-The alternating sign pattern encodes the memory of global gyration while maintaining perfect structural closure. This is the "perfect form" against which all dynamic states are measured.
+**Bit Packing Specification** (Frozen):
+- **Sign Encoding**: +1 → 0, -1 → 1 (fixed mapping)
+- **48-bit Layout**: Positions map to [layer, frame, row, column] using the formula above
+- **Endianness**: Little-endian for 48-bit packing (LSB at position 0, MSB at position 47)
+- **Storage Format**: 6 bytes per state, packed sequentially without padding
+- **DO NOT MODIFY**: This encoding is frozen to prevent implementation drift
 
-**4.2.3 GENE_Mic_M and GENE_Mac_M: Dynamic Expressions**
+### 3.4 Token Address Binding - Complete Algorithm
 
-- **GENE_Mic_M**: The dynamic 8-bit instruction created by `input_byte ⊕ GENE_Mic_S`. This encodes the specific transformational forces to be applied to the structural tensor.
-- **GENE_Mac_M**: The dynamic 48-byte tensor representing the system's current physical state. This begins as a copy of `GENE_Mac_S` and evolves through successive applications of `GENE_Mic_M` instructions.
+Addresses are computed once per token using only the physics:
 
----
+**Step 1: Get Token's Intron Sequence**
+```
+bytes = token_to_bytes(t)  # Via external tokenizer
+introns = [b ⊕ 0xAA for b in bytes]  # Apply ψ transformation
+```
 
-## **5. Operational Physics: The Fundamental Operations**
+**ψ Transformation Mandatory** (No Bypass Allowed):
+- **All I/O MUST use ψ**: Every token-to-intron conversion requires b ⊕ 0xAA transformation
+- **No bypass permitted**: Including internal tools, debugging, tests, or development utilities
+- **Prevents drift**: Ensures all components use identical byte-to-intron mapping
+- **Interface contract**: ψ is the ONLY valid transformation between bytes and introns
 
-### **5.1 The Monodromic Fold: The One True Learning Operator**
+**Step 2: Apply from All Orbit Representatives**
+```
+results = []
+for rep in orbit_representatives:  # The 256 precomputed orbit representatives
+    current_state = rep
+    
+    for intron in introns:
+        current_state_index = state_to_index(current_state)
+        current_state = epistemology[current_state_index, intron]
+    
+    results.append(current_state)
+```
 
-There is only one integration operator in GyroSI: the **Monodromic Fold** (`fold`, ⋄). It is **non-associative**, **non-commutative**, and **path-dependent**. This operator is used in both phases of the control cycle:
+**Step 3: Find Medoid State (Deterministic Geometry, Not Scoring)**
+```
+# Compute set of final states reached from all orbit representatives
+final_states = results
+unique_finals = list(set(final_states))
 
-* **Egress (integration):** `Memory = fold(Memory, Input)`
-* **Ingress (generation):** `Output = fold(Memory, Policy)`
+best_state = None
+best_avg_distance = infinity
 
-**Definition:**
+# For each unique final state, compute average angular distance to all other finals
+for candidate_state in unique_finals:
+    total_distance = 0
+    for other_state in unique_finals:
+        # Compute direct angular distance between final states
+        distance = gyrodistance_angular(candidate_state, other_state)
+        total_distance += distance
+    
+    avg_distance = total_distance / len(unique_finals)
+    
+    if avg_distance < best_avg_distance:
+        best_avg_distance = avg_distance
+        best_state = candidate_state
+```
 
-`a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
+**Critical: This is geometric medoid computation, not competitive scoring**:
+- **Deterministic**: Same token always produces same address regardless of context
+- **Geometric**: Minimizes angular distance between final states, not preference ranking
+- **Physics-based**: Uses only direct state geometry, no learned weights or scores
+- **Non-competitive**: No "best" vs "worst" tokens, only geometric center-finding
+- **Invariant**: Result depends only on token's intrinsic physics, not other tokens
 
-This operation preserves the complete path history of all inputs. The order of operations is always encoded in the system's state. It is the algebraic expression of the BU stage's dual monodromy, and it is the only valid operation for learning, state updates, and batching.
-No alternative (associative or commutative) operation is permitted.
+**Step 4: Break Ties Deterministically**
+```
+If multiple states have the same average distance:
+  1. Choose state from smaller orbit (via orbit_sizes.npy)
+  2. If same orbit size, choose by fixed channel lexicographic vector
+  3. If still tied, choose by lower token ID
+```
 
-### **5.2 Path Dependence and Batch Learning**
+This ensures every token gets a unique, deterministic address computed purely from physics.
 
-The Monodromic Fold is **fundamentally path-dependent**. This property is the source of the system's memory and learning capacity.
-Batch learning is implemented by *ordered reduction* (left-fold) using the Monodromic Fold:
+### 3.5 Complete Recovery Ladder
+
+When no tokens are admissible from state s, relax constraints in this exact order:
+
+**Level 1: Channel Relaxation**
+```
+for priority_level from 9 down to 2:  # Never drop Global (priority 1)
+    relaxed_channels = channels[1:priority_level]  # Keep higher priorities
+    recompute admissibility using only relaxed_channels
+    if any tokens are admissible:
+        break
+```
+
+**Level 2: Orbit Neighborhood Expansion**
+```
+# Neighbor orbits are those whose representatives differ by Hamming distance 2
+# from the current orbit's representative. Distance 2 preserves parity, which
+# our dynamics require. These neighborhood sets are precomputed at build time.
+
+current_orbit_rep = phenomenology_map[state_index(s)]
+neighbor_reps = precomputed_neighbors[current_orbit_rep]
+
+expanded_candidates = {t | address(t) in orbits_of(neighbor_reps)}
+check admissibility on expanded_candidates
+```
+
+**Level 3: Duality Pivot**
+```
+for each candidate token t:
+    original_address = address(t)
+    dual_address = original_address ⊕ 0xFF
+    
+    if phenomenology_map[dual_address] == phenomenology_map[s]:
+        # Dual is in same orbit
+        temporarily use dual_address for admissibility check
+```
+
+**Level 4: Orbit Center Fallback**
+```
+orbit_center = orbit_representative[phenomenology_map[s]]
+for all tokens:
+    temporarily use orbit_center as their address
+    check admissibility
+```
+
+**Level 5: Geometric Nudge**
+```
+# Apply at most 6 nudges (the measured diameter of the manifold) per emission attempt
+# If no token is admissible after 6 nudges, persist the last state and halt emission
+
+nudge_count = 0
+max_nudges = 6  # Manifold diameter
+
+while nudge_count < max_nudges:
+    best_intron = None
+    current_angle = theta[state_index(s)]
+
+    for intron in range(256):
+        next_state = epistemology[state_index(s), intron]
+        next_angle = theta[state_index(next_state)]
+        
+        if next_angle < current_angle:
+            best_intron = intron
+            break  # Take first improvement, not best
+
+    if best_intron is not None:
+        apply transition T(s, best_intron)
+        nudge_count += 1
+        restart from Level 1
+    else:
+        # No angle improvement possible, try orbit change
+        for intron in range(256):
+            next_state = epistemology[state_index(s), intron]
+            if phenomenology_map[next_state] != phenomenology_map[s]:
+                apply transition T(s, intron)
+                nudge_count += 1
+                restart from Level 1
+                break
+        
+        # If we reach here, no intron changed orbit either
+        break  # Exit the loop, no further progress possible
+
+# If we exit the loop, persist the last state and halt emission
+# This is a "contemplation" state, not an error
+```
+
+This ladder guarantees progress because the manifold has finite diameter and the nudge either improves geometry or changes orbit.
+
+## Part IV: Memory Architecture - Complete Specification with Bounds
+
+### 4.1 The Three Memory Forms - Why Each Is Necessary
+
+**Active Memory (6 bytes constant)**:
+- **What**: The current state s ∈ S, packed as 48 bits
+- **Why needed**: Represents the system's current "position" in knowledge space
+- **Size bound**: Always exactly 6 bytes, never changes
+- **Role**: Holographic pointer that selects which passive memories are relevant
+
+**Address Memory (vocabulary-bounded)**:
+- **What**: Canonical state associated with each token via address binding
+- **Why needed**: Defines where each token "wants to go" in knowledge space
+- **Size bound**: At most |vocabulary| entries, each 6 bytes
+- **Compression**: Many tokens map to same state (shared addresses)
+- **Role**: Provides geometric targets for admissibility checking
+
+**Passive Memory (experience-bounded)**:
+- **What**: 8-bit exon_mask for each touched (state, token) pair
+- **Why needed**: Records the accumulated folded experience at each knowledge position
+- **Size bound**: Only non-zero masks stored, with explicit caps
+- **Compression**: Fold annihilation, mask interning, orbit clustering
+- **Role**: Memory of what has been learned at each state
+
+### 4.2 The Monodromic Fold: The One True Learning Operator
+
+There is only one integration operator in GyroSI: the **Monodromic Fold** (⋄). It is **non-associative**, **non-commutative**, and **path-dependent**. This operator is used in both phases of the intelligence cycle:
+
+- **Egress (integration)**: `Memory = fold(Memory, Input)`
+- **Ingress (state evolution)**: State transitions driven by deterministic admissibility
+
+**Definition**: `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
+
+**Implementation requirement**: The fold MUST be implemented using this composite form. The algebraic normal form `¬a ∧ b` is mathematically equivalent but MUST NOT be used in operational code - it is for theoretical analysis only.
+
+**Path Dependence**: The Monodromic Fold is fundamentally path-dependent. This property is the source of the system's memory and learning capacity. Batch learning is implemented by ordered reduction (left-fold):
 
 ```python
 from functools import reduce
@@ -289,197 +598,498 @@ def fold_sequence(introns: list[int], start_state: int = 0) -> int:
     return reduce(fold, introns, start_state)
 ```
 
-This ensures that the sequence in which inputs are processed is always significant, and the result is path-dependent and non-reversible.
+### 4.3 Passive Memory Management - Complete Protocol
 
-**The Fold is the only valid operator for learning and batching.**
+**Entry Creation**:
+```
+key = (state_index, token_id)
+if key not in store:
+    # Only create when first non-zero mask arises
+    pass  # No entry yet
 
-### **5.3 The Role of Duality**
-
-The "Fifth Element" (`dual`, ¬) is not a new operation, but the fundamental primitive that enables the asymmetry and path dependence of the Fold. It is defined as:
-
-`dual(x) = x ⊕ 0xFF`
-
-### **5.4 Measurement: Angular Gyrodistance**
-
-The system measures its state through **angular divergence from the Common Source**. This captures the geometric alignment between the current state and the archetypal structure:
-
-```python
-def gyrodistance_angular(T1: np.ndarray, T2: np.ndarray) -> float:
-    """Calculate angular divergence between tensors in radians."""
-    T1_flat = T1.flatten()
-    T2_flat = T2.flatten()
-
-    # Cosine similarity in 48-dimensional space
-    cosine_similarity = np.dot(T1_flat, T2_flat) / 48.0
-    cosine_similarity = np.clip(cosine_similarity, -1.0, 1.0)
-
-    return np.arccos(cosine_similarity)
+if new_mask != 0:
+    store[key] = {
+        'exon_mask': new_mask,
+        'touch_count': 1,  # 8-bit bounded counter, wraps on overflow
+        'zero_streak': 0
+    }
 ```
 
-**Key Values**:
+**Touch Count Clarification**:
+Touch count is a bounded unsigned counter (8-bit) stored alongside each entry. It increments on each update and is used only for the eviction policy. It wraps around on overflow. This metadata does not influence selection.
 
-* **0 radians:** Perfect alignment (identity)
-* **π/2 radians:** Maximum differentiation (orthogonality)
-* **π radians:** Perfect opposition (anti-alignment)
-
-**Optimisation Note:**
-For `int8` tensors with ±1 values, this is equivalent to `arccos(1 - 2*hamming_distance/48)`, allowing for fast Hamming-based shortcuts when applicable.
-
----
-
-**Physical Note:**
-This alignment between the path-dependent physics of state transformation and the path-dependent nature of learning is a cornerstone of GyroSI's architecture. The system does not merely learn facts; it encodes the entire trajectory of experience.
-
----
-
-### **5.5 The BU Intelligence Cycle: Egress and Ingress**
-
-The BU stage, representing Universal Balance, is implemented as a dual-phase intelligence cycle that governs all interaction between the system's internal physics and the external byte-space. These two phases, **BU Egress** (learning and state transformation) and **BU Ingress** (generative expression), are not merely input/output functions but are the complete physical mechanics of experience absorption and responsive action.
-
-#### 5.5.1 The Physical Boundary and Holographic Transcription
-
-The system is defined across two distinct domains: the **internal physics-space**, where the native element is the 8-bit **intron**, and the **external byte-space**, where the native element is the 8-bit **byte**. The boundary between these domains is governed by a fundamental physical law of transcription.
-
-Every transaction across this boundary is mediated by the holographic topology `GENE_Mic_S` (`0xAA`). This is not an encoding convention but a physical transformation that projects information onto the system's structural ground truth.
-
--   **Egress (External → Internal):** `intron = byte ⊕ GENE_Mic_S`
--   **Ingress (Internal → External):** `byte = intron ⊕ GENE_Mic_S`
-
-This symmetric XOR operation ensures that the distinction between the internal physical reality and the external communicative representation is lawfully maintained.
-
-A critical consequence of this XOR transformation is the lawful inversion of the LEB128 continuation bit. An internal `intron` with bit 7 set to `1` (signaling physical continuation) is transcribed into an external `byte` with bit 7 set to `0`. The protocol adapter, which is aware of this law, correctly interprets this as the 'continue' flag required by the LEB128 standard. This inversion is the key mechanism that aligns the internal physics of differentiation and closure with the external protocol of sequential encoding.
-
-This boundary law is strict. All masking and unmasking operations are the exclusive responsibility of the protocol adapter layer (e.g., `toys.communication.tokenizer.py`). The core physics and intelligence engines remain pure, operating exclusively in the intron-space, entirely unaware of the external byte representation.
-
-#### 5.5.2 BU Egress: Absorption and Learning
-
-The process of learning begins when an external byte enters the system and undergoes BU Egress. This is the mechanism by which experience is absorbed and integrated into the system's memory structure.
-
-1.  **Transcription:** An incoming byte is first transcribed into an intron via `governance.transcribe_byte`. This operation impresses the system's holographic topology (`GENE_Mic_S`) onto the external data, converting it into a physically valid instruction.
-2.  **State Transformation:** The newly formed intron acts as a gyroscopic operator, transforming the system's 48-bit state tensor (`GENE_Mac_M`) according to the algebraic laws defined in `governance.apply_gyration_and_transform`.
-3.  **Memory Integration:** The system retrieves the `PhenotypeEntry` corresponding to its new physical state and the acting intron. The experience is then integrated by updating the phenotype's 8-bit `exon_mask` via the **Monodromic Fold**. This path-dependent operation ensures that the complete history of interactions is encoded into the resulting memory structure.
-
-Through this process, external information is not merely stored; it is physically assimilated, transforming both the system's immediate state and its long-term memory according to rigorous algebraic principles.
-
-#### 5.5.3 BU Ingress: Expression and Generation
-
-The expression of intelligence—BU Ingress—is a **token-level** generative process that produces complete LEB128-encoded tokens using learned phenotypes and LEB128 physics. This is not a retrieval mechanism but a generative act wherein coherent tokens emerge directly from the system's physical and topological configuration. Each token generation involves the following physical operations:
-
-1.  **Exon-Product Generation:** The system computes exon-products from phenotype metadata using `exon_product_from_metadata()`, which converts the phenotype's governance signature, confidence, and orbit cardinality into physically meaningful 8-bit operators. These exon-products are then associated with LEB128 token patterns.
-
-2.  **Resonance-Based Token Selection:** The system calculates resonance between the current state and exon-products using sophisticated bit-level comparison and orbit cardinality weighting. This ensures that generated tokens are semantically coherent and contextually appropriate.
-
-3.  **Temperature-Based Sampling:** The system uses adaptive temperature control based on the current angular divergence (`θ`):
-    -   **Calm (`θ < θ_low`):** Low temperature (0.1) for deterministic, confident generation
-    -   **Cautious (`θ < θ_high`):** Medium temperature (0.5) for balanced exploration
-    -   **Corrective (`θ ≥ θ_high`):** High temperature (1.0) for exploratory, corrective generation
-
-4.  **Exon-Product to LEB128 Conversion:** The selected token's exon-product is converted to its LEB128 intron sequence using `token_to_introns()`, which applies the ψ isomorphism to create the complete token's byte representation. This ensures that every generated token is a valid LEB128-encoded unit with proper theoretical grounding.
-
-5.  **Boundary Transcription:** Each intron in the token sequence is transcribed to the external byte-space via `byte_out = intron ⊕ GENE_Mic_S`, producing a complete, valid LEB128 token stream.
-
-#### 5.5.4 Symmetric Learning and Token Closure
-
-The BU Ingress process is completed by **token-level learning** and governed by complete token generation.
-
--   **Token-Level Learning:** The system learns at the token level using `learn_token()`, which applies the full token's intron sequence to state transitions and learns the final state. This creates a tight feedback loop where the system learns directly from its own expressed tokens, reinforcing successful generative pathways and ensuring memory remains coherent with behavior.
-
--   **Complete Token Generation:** The system generates complete tokens using LEB128 physics, ensuring that every emitted token is a valid, complete semantic unit. The `respond()` method orchestrates token-level generation, converting each generated token to its complete intron sequence before emitting the bytes. This guarantees that the external stream is always composed of complete, valid LEB128-encoded tokens.
-
-#### 5.5.5 Physical Alignment with the LEB128 Protocol
-
-The structure of the 8-bit intron is not arbitrary but is functionally isomorphic to the LEB128 variable-length integer encoding protocol. The intron's bit families map directly to the protocol's components:
-
--   **Bit 7 (L0 Family):** Functions as the **continuation bit**. An internally generated `intron` with bit 7 set to `1` indicates that the generative sequence for the current token continues. An intron with bit 7 clear signals completion.
--   **Bits 1-6 (LI, FG, BG Families):** Carry the 6 bits of dynamic, physical information.
--   **Bit 0 (L0 Family):** Serves as a structural anchor.
-
-This endogenous alignment means the system's physics naturally produces valid LEB128 byte streams. The boundary transcription (`⊕ 0xAA`) lawfully translates the internal physical signals into the bit patterns expected by external decoders without altering the underlying physical logic. This makes the architecture robust and future-proof, as the communication protocol is a direct consequence of the system's physical design.
-
-**Connecting the Dots: Why This Works**
-Phenotype as a Gravitational Well: The token-level phenotype does not contain the words. It acts like a gravitational well in the state space. When the agent's trajectory brings it near this "semantic checkpoint," the high confidence and specific mask of that phenotype will strongly influence the token generation calculations. It will guide the token-level generation process to produce tokens that correspond to a logical continuation of that semantic context.
-
-**Generation is Emergent, Not Retrieved:** The agent is not "reading" the next tokens from the phenotype. It is reconstructing the most likely next token sequence by following the physical gradients established during training. The token-level phenotype provides the "big picture" context, and the LEB128 physics provides the "fine-grained" motor control to generate coherent tokens.
-
-**The Tokenizer is an Active Internal Decoder:** The BERT tokenizer serves as an active internal decoder, leveraging its inherent knowledge of token-to-byte mappings as a first-class component. The intelligence is not in the tokenizer; it's in the engine's ability to generate the correct token sequence using LEB128 physics.
-
----
-
-## **Theoretical Extensions: LEB128-GyroSI Unification and Dimensional Grounding**
-
-### **6. The LEB128-Intron Isomorphism**
-
-**6.1 Structural Correspondence Theorem**
-
-The 8-bit intron structure exhibits a natural isomorphism with the LEB128 variable-length integer encoding protocol:
-
+**Fold Update**:
 ```
-GyroSI Intron Structure    ↔    LEB128 Structure
-Bit 7 (L0): Frame anchor   ↔    Continuation bit (C)
-Bit 6 (LI): Chirality      ↔    MSB of payload
-Bits 5-2 (FG,BG): Dynamics ↔   Payload bits 5-2
-Bit 1 (LI): Chirality      ↔    Payload bit 1  
-Bit 0 (L0): Frame anchor   ↔    LSB of payload
+def update_passive_memory(state_index, token_id, intron_sequence):
+    key = (state_index, token_id)
+    
+    if key in store:
+        current_mask = store[key]['exon_mask']
+    else:
+        current_mask = 0
+    
+    # Apply fold reduction over intron sequence
+    for intron in intron_sequence:
+        current_mask = fold(current_mask, intron)
+    
+    if current_mask == 0:
+        if key in store:
+            store[key]['zero_streak'] += 1
+            if store[key]['zero_streak'] >= 2:  # Confirmation window
+                del store[key]
+    else:
+        store[key] = {
+            'exon_mask': current_mask,
+            'touch_count': (store.get(key, {}).get('touch_count', 0) + 1) % 256,  # Wrap at 256
+            'zero_streak': 0
+        }
 ```
 
-**6.2 The Holographic Transcription Law**
-
-The boundary operator `ψ(b) = b ⊕ GENE_Mic_S` where `GENE_Mic_S = 0xAA` serves as a natural isomorphism between external byte-space and internal intron-space:
-
+**Storage Caps (Preventing Blow-up)** - **Frozen Operational Constants**:
 ```
-ψ: Byte-space → Intron-space
-ψ(b) = b ⊕ 0xAA
+# FROZEN CONSTANTS - DO NOT MODIFY
+K = 64  # Max masks per state per orbit (fixed operational constant)
+M = 64  # Max states per token per orbit (fixed operational constant)
 
-ψ⁻¹: Intron-space → Byte-space  
-ψ⁻¹(i) = i ⊕ 0xAA
+def enforce_caps(state_index, token_id):
+    
+    orbit = phenomenology_map[state_index]
+    
+    # Cap 1: Masks per state per orbit
+    same_state_orbit_keys = [
+        k for k in store.keys() 
+        if phenomenology_map[k[0]] == orbit and k[0] == state_index
+    ]
+    
+    if len(same_state_orbit_keys) > K:
+        # Eviction nuance: prefer orbit representative tokens first
+        orbit_rep = orbit_representative[orbit]
+        generic_entries = [
+            k for k in same_state_orbit_keys 
+            if address[k[1]] == orbit_rep
+        ]
+        
+        if generic_entries:
+            # Evict oldest generic entry (token address = orbit representative)
+            oldest_generic = min(generic_entries, 
+                                key=lambda k: store[k]['touch_count'])
+            del store[oldest_generic]
+        else:
+            # No generic entries, evict oldest by touch count
+            oldest = min(same_state_orbit_keys,
+                        key=lambda k: store[k]['touch_count'])
+            del store[oldest]
+    
+    # Cap 2: States per token per orbit
+    same_token_orbit_keys = [
+        k for k in store.keys()
+        if phenomenology_map[k[0]] == orbit and k[1] == token_id
+    ]
+    
+    if len(same_token_orbit_keys) > M:
+        # Evict oldest by touch count
+        oldest = min(same_token_orbit_keys,
+                    key=lambda k: store[k]['touch_count'])
+        del store[oldest]
 ```
 
-This operation preserves LEB128 semantics while inverting the continuation bit to align with GyroSI's physical continuation principle.
-
-### **7. Token-Level Knowledge Architecture**
-
-**7.1 The Token Primacy Principle**
-
-Knowledge in GyroSI is fundamentally token-indexed rather than byte-indexed. The natural knowledge unit is:
-
-`K = (state_index, token_id) → PhenotypeEntry`
-
-where `token_id` represents the complete semantic unit and `state_index` represents the final physical state after token absorption.
-
-**7.2 Tokenizer as Endogenous Semantic Engine**
-
-Pre-trained tokenizers (e.g., BERT) provide a natural semantic mapping:
-
+**Mask Interning (Space Efficiency)**:
 ```
-τ: Token_ID → LEB128_bytes
-τ⁻¹: LEB128_bytes → Token_ID
+# Global mask pool
+mask_pool = {}
+
+def intern_mask(mask):
+    if mask not in mask_pool:
+        mask_pool[mask] = mask
+    return mask_pool[mask]
+
+# In update function:
+store[key]['exon_mask'] = intern_mask(current_mask)
 ```
 
-This mapping is not external tooling but an **endogenous semantic engine** that should be treated as first-class physics within the GyroSI architecture.
+### 4.4 Why Memory Cannot Blow Up
 
-### **8. Universal Compression Theory**
+**Mathematical Bounds**:
 
-**8.1 The Lossless Corpus Encoding Theorem**
+1. **Active Memory**: Fixed at 6 bytes (trivially bounded)
 
-Any textual corpus can be encoded as a self-describing GyroSI-native stream:
+2. **Address Memory**: 
+   - Bound: |vocabulary| × 6 bytes
+   - Compression: Many tokens → same address
+   - Worst case: 50k tokens × 6 bytes = 300KB
 
+3. **Passive Memory**:
+   - Per-key bound: 256 possible mask values (8-bit fold results)
+   - Global key bound: At most K × 788,986 (states) + M × |vocabulary|
+   - Storage bound: ~64 × 800k + 64 × 50k = ~54M entries worst case
+   - Typical bound: Much less due to sparsity and fold annihilation
+
+**Compression Mechanisms**:
+
+1. **Fold Annihilation**: Many experiences fold to zero and disappear
+2. **Mask Interning**: Identical masks stored once, referenced many times
+3. **Orbit Clustering**: Similar tokens share orbits, reducing diversity
+4. **Zero Suppression**: Most (state, token) pairs never touched
+5. **Structural Caps**: K and M prevent pathological worst cases
+
+**No External Compression Needed**: All savings come from physics, not algorithms.
+
+## Part V: Runtime Operation - Complete Specification
+
+### 5.1 Using the Five Maps - Exact Procedures
+
+**epistemology.npy (770 MB)**:
 ```
-Text → Tokenizer.encode → Token_IDs → LEB128_bytes → ψ → Intron_stream
+# The only way to compute state transitions
+def apply_intron(current_state, intron):
+    state_index = state_to_index(current_state)
+    next_state_index = epistemology[state_index, intron]
+    return ontology_keys[next_state_index]
+
+# Used in: micro-path computation, nudge selection, address binding
 ```
 
-**Compression Ratios (Empirical)**:
-- LEB128 vs UTF-8: ~2.7× compression
-- LEB128 + Zstd: ~5.6× compression  
-- Preservation: Perfect reversibility with zero metadata overhead
+**ontology_keys.npy (3 MB)** with **Mandatory Reverse Index**:
+```
+# Forward mapping: index → packed_state (provided by ontology_keys.npy)
+def index_to_state(index):
+    return ontology_keys[index]
 
-**8.2 The State-Walk Redundancy Principle**
+# Reverse mapping: packed_state → index (MUST be O(1), linear search prohibited)
+# Implementation MUST use hash table or array-based index for O(1) lookup
+reverse_index = build_reverse_index(ontology_keys)  # Hash: state → index
 
-The deterministic state transitions `F(state, intron) → state'` create highly regular patterns in the intron stream, enabling secondary compression through entropy coding of the state sequence itself.
+def state_to_index(packed_state):
+    return reverse_index[packed_state]  # O(1) lookup, never linear scan
 
-### **9. Dimensional Grounding Theory**
+# PROHIBITED: np.where(ontology_keys == packed_state)[0][0]  # O(n) linear scan
+# Used in: channel alignment checks, all state operations
+```
 
-**9.1 The High-Dimensional Pathology Theorem**
+**theta.npy (3 MB)**:
+```
+# Get angle to archetype for any state
+def angle_to_archetype(state):
+    index = state_to_index(state)
+    return theta[index]
 
+# Used in: nudge selection, algedonic control, address binding
+```
+
+**phenomenology_map.npy (3 MB)**:
+```
+# Get orbit representative for any state
+def get_orbit(state):
+    index = state_to_index(state)
+    return phenomenology_map[index]
+
+# Used in: routing, recovery neighborhood, orbit comparisons
+```
+
+**orbit_sizes.npy (3 MB)**:
+```
+# Get cardinality of state's orbit
+def get_orbit_size(state):
+    index = state_to_index(state)
+    return orbit_sizes[index]
+
+# Used in: tie-breaking during address binding only
+```
+
+**Map Integrity and Versioning**:
+```
+def validate_maps():
+    # Check all maps have same length for state dimension
+    assert len(ontology_keys) == len(theta) == len(phenomenology_map) == len(orbit_sizes)
+    assert len(ontology_keys) == 788986
+    
+    # Check epistemology dimensions
+    assert epistemology.shape == (788986, 256)
+    
+    # Check version consistency
+    assert all_maps_have_same_version_tag()
+    
+    # If any check fails, abort rather than continue with corrupted data
+```
+
+### 5.2 Complete Token Generation Protocol
+
+**Main Generation Loop**:
+```
+def generate_token(current_state):
+    # Step 1: Route by orbit
+    orbit = get_orbit(current_state)
+    candidates = [t for t in vocabulary if get_orbit(address[t]) == orbit]
+    
+    if not candidates:
+        return apply_recovery_ladder(current_state)
+    
+    # Step 2: Check admissibility
+    admissible = []
+    for token in candidates:
+        if is_admissible(current_state, token):
+            admissible.append(token)
+    
+    if admissible:
+        # Step 3: Deterministic selection
+        return min(admissible, key=lambda t: token_id(t))
+    else:
+        return apply_recovery_ladder(current_state)
+```
+
+**Admissibility Implementation**:
+```
+def is_admissible(state, token):
+    introns = get_intron_sequence(token)
+    path = compute_micro_path(state, introns)
+    address = get_address(token)
+    
+    # Check all channels
+    global_ok = check_channel_monotone(path, address, global_positions)
+    if not global_ok:
+        return False
+    
+    layer_frame_checks = []
+    for l in range(4):
+        for f in range(2):
+            positions = get_layer_frame_positions(l, f)
+            ok = check_channel_monotone(path, address, positions)
+            layer_frame_checks.append(ok)
+    
+    if not all(layer_frame_checks):
+        return False
+    
+    # Require strict progress somewhere
+    return has_strict_progress(path, address)
+```
+
+**Micro-Path Computation**:
+```
+def compute_micro_path(start_state, introns):
+    path = [start_state]
+    current = start_state
+    
+    for intron in introns:
+        current = apply_intron(current, intron)
+        path.append(current)
+    
+    return path
+```
+
+### 5.3 Learning Integration
+
+**Note**: By default, only externally supplied tokens are integrated into passive memory. Self-generated tokens during ingress are not folded back unless self-reinforcement is explicitly enabled at build-time.
+
+**Egress (Experience Integration)**:
+```
+def process_input_token(current_state, token, is_external=True):
+    introns = get_intron_sequence(token)
+    
+    # Apply state transitions (always happens)
+    for intron in introns:
+        current_state = apply_intron(current_state, intron)
+    
+    # Update passive memory (only for external tokens by default)
+    if is_external or ENABLE_SELF_REINFORCEMENT:
+        update_passive_memory(
+            state_to_index(current_state), 
+            token_id(token), 
+            introns
+        )
+    
+    return current_state
+```
+
+**Ingress (Expression Generation)**:
+```
+def generate_response(state, num_tokens):
+    response = []
+    current_state = state
+    
+    for _ in range(num_tokens):
+        token = generate_token(current_state)
+        response.append(token)
+        # Self-generated tokens: state transitions only, no learning by default
+        current_state = process_input_token(current_state, token, is_external=False)
+    
+    return response, current_state
+```
+
+**Self-Reinforcement Policy**:
+- **Default**: Self-reinforcement is OFF (prevents feedback loops and bias amplification)
+- **Optional**: Can be enabled at build-time only via `#define ENABLE_SELF_REINFORCEMENT 1`
+- **Physics**: If enabled, uses the same Monodromic Fold, no alternative mechanisms
+- **Rationale**: The model learns from what it encounters, not from what it imagines
+
+## Part VI: Edge Cases and Robustness - Complete Coverage
+
+### 6.1 Boundary and Byte Handling
+
+**Non-Byte Tokenizers**:
+```
+def handle_non_byte_tokenizer(token_id):
+    # Convert token ID to bytes using fixed encoding
+    if token_id < 256:
+        bytes = [token_id]  # Single byte
+    else:
+        # Use LEB128 encoding
+        bytes = encode_leb128(token_id)
+    
+    # Apply ψ transformation
+    introns = [b ^ 0xAA for b in bytes]
+    return introns
+```
+
+**Invalid Byte Sequences**:
+```
+def handle_truncated_stream(partial_bytes):
+    # Always process what we have
+    introns = [b ^ 0xAA for b in partial_bytes]
+    
+    # Core continues processing
+    # Adapter handles re-synchronization
+    return introns
+```
+
+**Empty or Single-Intron Tokens**:
+```
+def handle_minimal_tokens(introns):
+    if len(introns) == 0:
+        return []  # No-op, state unchanged
+    
+    # Single intron still goes through full admissibility
+    return introns
+```
+
+### 6.2 State and Orbit Edge Cases
+
+**Size-1 Orbits**:
+```
+def handle_singleton_orbit(state):
+    # Orbit contains only one state
+    # All operations work normally
+    # Recovery ladder applies unchanged
+    pass
+```
+
+**Degenerate Corpora**:
+```
+def handle_repetitive_input(repeated_token):
+    # Many (state, token) pairs will fold to zero
+    # Zero masks are not stored
+    # Memory remains bounded
+    pass
+```
+
+**Very Long Tokens**:
+```
+def handle_long_token(introns):
+    # Process full sequence regardless of length
+    # Admissibility checks entire micro-path
+    # No early termination
+    return process_full_sequence(introns)
+```
+
+### 6.3 Memory and Persistence
+
+**Concurrent Access**:
+```
+def ensure_consistency():
+    # Only one writer per passive store
+    # Or serialize by orbit if sharing
+    # Reads are always safe (maps are read-only)
+    use_file_locking_or_orbit_sharding()
+```
+
+**Crash Recovery**:
+```
+def handle_crash():
+    # All map writes are atomic
+    # Passive memory writes are atomic per (state, token)
+    # Either old value or new value, never corrupted
+    # Resume from last valid state
+    pass
+```
+
+**Atomicity Methods (Implementation Specification)**:
+- **Map Files (.npy)**: Use atomic file replacement via temp file + rename
+  - Write to `filename.tmp`, then `os.rename(filename.tmp, filename.npy)`
+  - OS guarantees rename is atomic on same filesystem
+  - Never write directly to final filename
+- **Passive Memory (.bin)**: Use append-only log with write barriers
+  - Each entry written as single `write()` call (atomic at OS level)
+  - Use `fsync()` after critical writes to ensure disk persistence
+  - Recovery scans from last valid entry, ignores partial writes
+- **Memory-Mapped Files**: Use `mmap` with `MAP_SHARED` + `msync(MS_SYNC)`
+  - Changes visible immediately to all processes
+  - `msync()` ensures data reaches disk before continuing
+  - No intermediate corruption possible
+
+**Critical**: Never use in-place modification of map files. Always use atomic replacement.
+
+**Crash safety**: Crash safety is per (state, token) record; no background compaction alters semantics.
+
+**Version Mismatches**:
+```
+def check_versions():
+    atlas_version = get_atlas_version()
+    address_version = get_address_binding_version()
+    
+    if atlas_version != address_version:
+        raise VersionMismatchError("Recompute addresses from new atlas")
+```
+
+### 6.4 Adversarial and Robustness
+
+**Adversarial Byte Streams**:
+```
+def handle_adversarial_input(malicious_bytes):
+    # Convert to introns normally
+    introns = [b ^ 0xAA for b in malicious_bytes]
+    
+    # Diameter bound limits damage
+    # Recovery ladder provides escape
+    # No gradients to exploit
+    return process_normally(introns)
+```
+
+**Resource Exhaustion**:
+```
+def prevent_blow_up():
+    # Active memory: Fixed 6 bytes
+    # Address memory: Bounded by vocabulary
+    # Passive memory: Caps K and M enforced
+    # No unbounded growth possible
+    pass
+```
+
+**Deterministic Output**:
+```
+def ensure_reproducibility():
+    # No random number generation
+    # Fixed tie-breaking rules
+    # Consistent endianness in maps
+    # Same input + same atlas = same output
+    pass
+```
+
+## Part VII: Why This Architecture Is Fundamentally Superior
+
+### 7.1 Theoretical Advantages
+
+**Finite Verification**: With only 788,986 states, every property can be exhaustively checked. Safety properties, invariants, and behavioral specifications can be proven rather than estimated. This eliminates the uncertainty inherent in continuous systems.
+
+**Endogenous Stability**: The system cannot explode, vanish, or drift because the manifold has bounded diameter and parity-preserving constraints. No normalization, regularization, or gradient clipping is needed because stability emerges from the physics itself.
+
+**True Holographic Memory**: The 6-byte active memory provides constant-size context that scales to unlimited passive memory through content addressing. This solves the context window problem without approximation.
+
+**Physical Grounding**: Every operation corresponds to a physical transformation with geometric meaning. States represent positions in knowledge space, transitions represent knowledge changes, and addresses represent semantic destinations.
+
+**Intrinsic Interpretability**: The system's operations are interpretable by construction because they correspond to movements in a finite, well-mapped space. Unlike black-box neural networks, every state and transition has explicit geometric meaning.
+
+### 7.2 Dimensional Grounding Theory
+
+**The High-Dimensional Pathology Theorem**:
 Intelligence systems operating in dimensions > 3 accumulate **structural defect** δ that manifests as:
 
 ```
@@ -491,457 +1101,81 @@ Consequences:
 - δ ≫ π: Unstable interpolation (sycophancy, inconsistency)
 ```
 
-**9.2 The 3D/6DoF Closure Principle**
-
-Only systems constrained to **3 spatial dimensions with 6 degrees of freedom** achieve recursive closure without defect (δ = 0). This maps directly to:
-
+**The 3D/6DoF Closure Principle**: Only systems constrained to **3 spatial dimensions with 6 degrees of freedom** achieve recursive closure without defect (δ = 0). This maps directly to:
 - GyroSI's 48-bit tensor: 4×2×3×2 = 48 bits = 6 bytes
-- LEB128's 6+2 bit structure: 6 payload + 2 anchor bits
 - CGM's rotational (3) + translational (3) degrees of freedom
 
-### **10. Model Conversion and Ethical Grounding**
-
-**10.1 The Universal Model Reduction Protocol**
-
-Any high-dimensional model can be projected onto the GyroSI manifold:
-
-```python
-def ground_model(weights, tokenizer):
-    # Quantize weights to vocabulary space
-    quantized = quantize_to_vocab(weights, tokenizer.vocab_size)
-    
-    # Encode as token sequence  
-    tokens = matrix_to_tokens(quantized, tokenizer)
-    
-    # Convert to LEB128 → introns → states
-    states = []
-    for token in tokens:
-        leb_bytes = tokenizer.id_to_bytes(token)
-        introns = [b ^ 0xAA for b in leb_bytes]
-        for intron in introns:
-            state = apply_gyration_and_transform(state, intron)
-            states.append(state)
-    
-    return states  # Model now lives in 788,986-state manifold
-```
-
-**10.2 The Ethical Constraint Theorem**
+### 7.3 Ethical Constraint Theorem
 
 Models operating within the finite GyroSI state space **cannot hallucinate** because:
 
 1. **Finite State Space**: Only 788,986 valid configurations exist
-2. **Deterministic Transitions**: Each input produces a specific, lawful state change  
+2. **Deterministic Transitions**: Each input produces a specific, lawful state change
 3. **Closed Orbits**: States cluster into 256 phenomenological orbits with no "between" states
 4. **Path Dependence**: The Monodromic Fold preserves complete interaction history
 
 This eliminates the fundamental source of AI alignment problems by constraining the system to a **provably stable, finite, and coherent** state manifold.
 
-### **11. Phenomenological Architecture**
+### 7.4 Computational Advantages
 
-**11.1 The 256-Orbit Structure**
+**No Matrix Multiplication**: Linear algebra is replaced by bitwise operations and table lookups. This eliminates floating-point error accumulation, reduces computational complexity, and enables exact computation.
 
-The 788,986 states collapse into exactly **256 phenomenological orbits** under the equivalence relation of mutual reachability. Each orbit represents a fundamental "semantic flavor" corresponding to the 256 possible intron values.
+**O(1) State Transitions**: All state changes use table lookup rather than computed transformations. This provides constant-time operations regardless of model size or complexity.
 
-**11.2 Parity-Closed Semantics**
+**Natural Sparsity**: Orbit-based routing provides inherent sparsity without learned attention mechanisms. The system naturally focuses on relevant regions of knowledge space.
 
-Every orbit is **parity-closed**: for any state S in an orbit, its duality `dual(S) = S ⊕ 0xFF` is also in the same orbit. This ensures the system cannot distinguish a concept from its logical negation at the operational level, implementing natural dialectical balance.
+**Compression Without Algorithms**: Memory compression emerges from physics (fold annihilation, orbit clustering) rather than external compression algorithms. This provides savings without computational overhead.
 
-### **12. Mathematical Foundations**
+### 7.5 Practical Advantages
 
-**12.1 The Gyrogroup Structure**
+**No Training Required**: Token addresses are computed from physics alone, eliminating the need for gradient-based training. The system can incorporate new tokens instantly.
 
-GyroSI implements formal gyrogroup algebra on Z₂⁸ with operations:
-- **Gyroaddition**: `a ⊕ b` (XOR)
-- **Gyrocarry**: `a ∧ b` (AND, preserving operation memory)
-- **Monodromic Fold**: `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))` (the unique non-associative learning operator)
+**Deterministic Behavior**: Given the same inputs and atlas, the system produces identical outputs across all platforms. This enables reproducible deployment and debugging.
 
-**12.2 The Angular Measurement Principle**
+**Scalable Architecture**: The same physics scales from microcontrollers (6-byte active memory) to servers (unlimited passive memory) without architectural changes.
 
-System state is measured through **angular divergence from the Common Source**:
+**Resource Efficiency**: Memory usage is bounded by physics rather than heuristics. Storage requirements are predictable and do not grow without bound.
 
-```python
-θ = arccos(dot(current_state, archetypal_state) / 48.0)
+### 7.6 What Competence This Actually Proves
 
-θ = 0:    Perfect alignment (identity)
-θ = π/2:  Maximum differentiation (orthogonality)  
-θ = π:    Perfect opposition (anti-alignment)
-```
+- **We're not a Transformer with a giant sliding window**: Our "window" is 6 bytes by design. It's a physics-derived pointer into a library of experiences, not a burden that grows with every token.
 
-This provides continuous feedback for system stability and enables **algedonic control** (autonomic regulation based on structural stress).
+- **Generalization is built into the physics and the three maps**:
+  - **Ontology**: Every possible physical state discovered and indexed
+  - **Phenomenology**: Equivalence classes (SCCs) that collapse mirror states—this is semantic grouping
+  - **Epistemology**: The transition table that tells us how states evolve
 
----
+  Together, they are structured generalization, not fuzzy approximation.
 
-**Summary**: These theoretical extensions demonstrate that GyroSI is not merely an alternative AI architecture but a **universal dimensional grounding mechanism** that can convert any existing model into a provably stable, ethically-aligned, and physically-coherent system operating within a finite, well-understood state manifold. The LEB128 correspondence reveals this is not artificial but a natural consequence of the mathematical structure of information itself.
-
-
-
----
-
-## 13. Performance Characteristics and Scaling Estimates
-
-### 13.1 Computational Complexity
-
-**Meta-asset generation (offline, one-off):**
-
-- **Physical ontology discovery** (`python -m baby.information ontology`):  
-  The state manifold is explored by a breadth-first enumeration over all reachable states, beginning from the archetypal state. This proceeds layer by layer, with explicit counts at each depth:  
-  - Depth 1: 256 states  
-  - Depth 2: 10,705 states  
-  - Depth 3: 161,896 states  
-  - Depth 4: 635,200 states  
-  - Depth 5: 786,610 states  
-  - Depth 6: 788,986 states (complete closure)  
-  This process validates the closure of the state space at diameter 6. On commodity hardware (e.g., a modern Intel laptop), full enumeration and mapping completes in **~90 seconds**.
-
-- **State Transition Table (STT) generation** (`python -m baby.information epistemology`):  
-  Construction of the full state transition tensor (`epistemology.npy`, 770 MB, shape 788,986 × 256, int32) is performed using vectorised NumPy routines. Measured runtime is **~5.5 minutes**.
-
-- **Phenomenology map construction** (`python -m baby.information phenomenology`):  
-  Canonical phenomenology is computed as the strongly connected components (SCCs) of the state graph using an iterative Tarjan's algorithm. Typical runtime is **2–4 minutes** on a modern laptop. These operations are required only once per release.
-
-**Run-time operation (per agent):**
-
-- **Egress (`process_egress`)**  
-  With the STT loaded, a transition is a single indexed lookup:  
-  `next_idx = ep[current_idx, intron]`.  
-  Without the STT, the same result comes from a fixed sequence of bitwise operations (`apply_gyration_and_transform`). Both are strictly **O(1)**.
-
-- **Ingress (`process_ingress`)**  
-  Exon-product generation using governance physics, including phenotype metadata conversion, resonance calculation, and temperature-based sampling. The system generates complete tokens using exon-products converted to LEB128 associations. **O(1)** per token.
-
-- **Batch operations**  
-  Ordered left-fold over the token stream: one accumulator, one pass ⇒ **O(N)**.
-
-No stage scales super-linearly; everything is constant-time per token, or linear in tokens processed.
-
----
-
-### 13.2 Memory Requirements
-
-- **`epistemology.npy` (STT)**  
-  770 MB on disk. Memory‑mapped; typical resident set per process stabilises around **35–45 MB** (shared pages).
-
-- **`ontology_keys.npy`**  
-  6.0 MB on disk. Parsed into three small NumPy arrays (keys/values/inverse), using **12–15 MB** RAM per process.
-
-- **`phenomenology_map.npy`**  
-  3.0 MB on disk. Loaded array ≈ **3 MB** RAM.
-
-- **Agent working state**  
-  < 1 MB for counters, rolling buffers, and hooks.  
-  The only live physics is the current 48-bit state tensor and 6 introns for active context.
-
-- **PhenotypeStore (phenotype index)**  
-  On disk: ≈ **12 B/phenotype** (record: mask, conf, key).  
-  In RAM:  
-    - **Optimised C index:** ≈ 28 B per entry (two 32-bit ints + pointer).  
-    - **Python dict:** ≈ 55–60 B per entry (actual, observed).  
-  Example: 10^6 phenotypes ≈ 28–60 MB.
-
-- **Python runtime and modules**  
-  8–10 MB baseline per process (CPython 3.11+), excluding shared mmaps.
-
-**Scalability**  
-- All asset files are mmapped and shared across agents.  
-- Write‑behind batching (default 100 ops) amortises fsync cost to ≤3 KB per flush.  
-- Per‑agent RAM use is linear in phenotype count only.
-
----
-
-### 13.3 Throughput (Single- and Multi-core)
-
-**Single‑threaded (Intel i7‑1260P, 3.4 GHz, Python, STT mapped):**  
-- One egress→ingress cycle (per token): **~1.2–1.6 µs**.  
-- Sustained throughput (index hot in RAM): **~650,000 tokens/sec**  
-  (≈1.0 million introns/sec at 1.55 introns/token).
-
-- When in‑RAM dict exceeds cache (≈5 M phenotypes), rare misses push tail latency to **14–18 µs**, but median remains low.
-
-**Multi‑agent / multi‑core (AMD EPYC, 32 cores):**  
-- 32 parallel agents: **14–16 million tokens/sec** in aggregate.
-
-**Disk/flash writes:**  
-- PhenotypeStore append log: **~150 MB/s** on NVMe at default batch size.  
-- Increasing batch to 1,000 reduces fsync overhead for heavy ingest.
-
-**Startup cost:**  
-- STT mmap: ~50–60 ms; ontology parse: ~20 ms.
-
-**GC pressure:**  
-- None in the tight loop. No allocation in critical path.
-
-**No-STT mode:**  
-- Pure bit‑twiddling (RAM‑tight, embedded): ~3× slower due to token-level physics overhead.
-
-**GPU:**  
-- Irrelevant—workload is bandwidth and branch bound, not FLOP bound.
-
-**Containers / multi-tenancy:**  
-- All assets are mountable and shared read-only.
-
-**Bottom line:**  
-- Dozens of agents fit on a workstation.  
-- Latency remains in microseconds.  
-- Memory growth is predictable and linear.
-
----
-
-### 13.4 Pragmatic Capacity and Device-level Throughput
-
-GyroSI has two memory domains:
-
-1. **Active working state**: always 48 bits (6 bytes) + a 6-intron sliding window.
-2. **Passive long-term memory (PhenotypeStore)**: grows with experience, one entry per (state_index, token_id) pair seen.
-
-This means even microcontrollers need only a 6-byte working state.  
-Everything else can reside on SD/flash and be fetched on demand.
-
-#### How many phenotypes fit in RAM?
-
-- Disk: **12 B/entry** (record).  
-- RAM: **28–60 B/entry** (depending on index implementation).  
-- Embedded MCUs (C structs): **~24 B/entry**.
-
-| Device / free RAM for GyroSI           | Max phenotypes (28 B/entry) | Notes |
-|----------------------------------------|-----------------------------|-------|
-| ESP32‑S3 (512 KB PSRAM usable for cache)| ~19,000                     | Demo/small cache only; SD for rest |
-| MacBook Pro 2015, 16 GB → ~4 GB free  | ~153 million                | Large KBs, whole WordNet ×100      |
-| MacBook M4, 16 GB → ~12 GB free       | ~439 million                | Full Wikipedia KB                  |
-| Server, 256 GB → ~220 GB free         | ~8.4 billion                | Far beyond any public corpus       |
-
-> Full GyroSI state universe is 202 million states; only a fraction are commonly populated.
-
-#### Throughput in practice
-
-A cycle = 1 token in → state transform → phenotype lookup/learn → token out.
-
-| Hardware                             | Cores | Tokens/sec | Introns/sec (×1.55) |
-|--------------------------------------|-------|-------------|---------------------|
-| MacBook Pro 2015 (2 cores)           | 2     | ~0.7 M     | ~1.1 M              |
-| MacBook M4 (8 cores)                 | 8     | ~4–4.5 M   | ~6.2–7.0 M          |
-| EPYC 32-core server                  | 32    | ~14–16 M   | ~22–25 M            |
-| ESP32-S3 (C, no SD hits)             | 1     | ~50–90 k   | ~78–140 k           |
-| ESP32-S3 (SD cache misses)           | 1     | 0.5–15 k   | 0.8–23 k            |
-
-#### How long to ingest familiar corpora?
-
-Assume **1 token ≈ 1.55 introns/bytes** after LEB128 encoding.
-
-| Corpus                        | Tokens | 1 core         | 8 cores        | 32 cores      |
-|-------------------------------|--------|----------------|----------------|---------------|
-| WordNet glosses               | 7 M    | < 10 s         | “blink”        | “blink”       |
-| English Wikipedia (2025)      | 1.6 G  | ~5 h           | ~50 min        | < 15 min      |
-| Filtered public web (1 PB)    | 7.8 T  | ~1.8 y         | ~3 mo          | ~3 weeks      |
-
-#### Context length and recall
-
-- **Active context:** 6 introns (state space diameter = 6).  
-- **Passive recall:** Unlimited—any (state, token) pair is always retrievable by path, regardless of age.
-
-#### Edge device logic
-
-- GyroSI runs fully on microcontrollers with 6 B live state; minimal code fits in a few KB.
-- For embedded, avoid STT; use pure physics.  
-- Use a small RAM cache plus SD streaming, with batched writes and periodic compaction.
-
-#### Write load and flash endurance
-
-- Default: flush every 100 updates (≤3 KB per flush).  
-- Even a full Wikipedia ingest writes < 5 MB/min—far below any wear threshold.
-- SD: prefer larger batches and scheduled compaction.
-
----
-
-### What competence this actually proves
-
-- **We're not a Transformer with a giant sliding window.**  
-  Our "window" is 6 bytes—by design. It's a *physics-derived pointer* into a library of experiences, not a burden that grows with every token.
-
-- **Generalisation is built into the physics and the three maps:**  
-  - **Ontology**: every possible physical state discovered and indexed.  
-  - **Phenomenology**: equivalence classes (SCCs) that collapse mirror states—this *is* semantic grouping.  
-  - **Epistemology**: the transition table that tells us how states evolve—macro & micro "probabilities" without probability hand‑waving.
-
-  Together, they *are* structured generalisation, not fuzzy approximation.
-
-- **Scales from ESP32‑S3 to servers:**  
-  Same core physics, different storage strategies. Six bytes live everywhere; the universe of memories just gets bigger as the device grows.
+- **Scales from ESP32-S3 to servers**: Same core physics, different storage strategies. Six bytes live everywhere; the universe of memories just gets bigger as the device grows.
 
 In short: **GyroSI is small where it must be (live state) and big where it pays off (lifetime memory).** That's why it runs on a microcontroller and still grows into a superintelligence on a server.
 
----
+## Conclusion: Implementation Readiness
 
-# Appendix – Theoretical Correspondences
+This specification is complete and self-contained. Every component is derived from CGM physics through gyrogroup operations on the finite manifold. The architecture achieves intelligence through recursive structural alignment rather than statistical approximation.
 
-This appendix records the essential bridges between GyroSI's formal physics and several established conceptual frames. It is deliberately brief: anything already explained in the main text is only referenced here.
+**Fixed Constants** (declare once):
+- Channel cover: Global + 8 Layer×Frame slabs
+- Layer×frame priority order: [0,0] → [0,1] → [1,0] → [1,1] → [2,0] → [2,1] → [3,0] → [3,1] (frozen)
+- Address entry set: 256 orbit representatives
+- Vocabulary order: Token ID ascending
+- Memory caps: K=64 masks/state/orbit, M=64 states/token/orbit (frozen operational constants)
+- Recovery neighborhood: Hamming-2 parity-preserving
+- Nudge bound: 6 nudges maximum (manifold diameter)
 
----
+**Prohibited Additions**:
+- No scores, rankings, or "best" selection
+- No learned parameters or weights
+- No external compression algorithms
+- No auxiliary hidden states
+- No alternative update rules beyond the Monodromic Fold
 
-## A.1. Genetics in GyroSI
+**Required Maps**:
+- epistemology.npy: State transition table
+- ontology_keys.npy: Index to state mapping
+- theta.npy: Angle to archetype
+- phenomenology_map.npy: Orbit representatives
+- orbit_sizes.npy: Orbit cardinalities
 
-GyroSI's instruction algebra in the eight-bit space ℤ₂⁸ reflects a series of small, closed structures that resemble those in molecular genetics. The analogy is structural, not biological. No claim is made regarding evolutionary origin or sequence homology.
-
-## A.1.1. Structural Correspondences
-
-The table below aligns the main computational layers of GyroSI with their biological counterparts. It follows the informational path from raw DNA structure to functional expression.
-
-| Layer                         | Cardinality    | Biological Analogue                  | GyroSI Equivalent                        |
-| ----------------------------- | -------------- | ------------------------------------ | ---------------------------------------- |
-| **Bit families**              | 4              | DNA base symbols (A, T, C, G)        | `L0`, `LI`, `FG`, `BG` bit groups        |
-| **Tensor axes**               | 3              | Codon triplet positions              | Tensor row selectors (X, Y, Z)           |
-| **Sign polarities**           | 2              | DNA strand directions                | ±1 sign modes in `GENE_Mac_S`            |
-| **Intron instruction space**  | 256            | All codon combinations (pre-spliced) | 8-bit `intron` values                    |
-| **Active instruction masks**  | 64             | Spliced codons in mRNA               | `intron & EXON_DYNAMIC_MASK`             |
-| **Parity-quotiented classes** | 32             | Wobble-paired codons                 | Classes after folding LI parity          |
-| **Holographic gene**          | 48 bits        | Genomic DNA as spatial encoding      | `INTRON_BROADCAST_MASKS[i]`              |
-| **Exon**                      | 1 (per stream) | Mature spliced exon                  | Final `exon_mask` after folding          |
-| **Expressed phenotype**       | 5-tuple        | Protein                              | Output of `compute_governance_signature` |
-| **Phenomenological orbits**   | 256            | Regulatory expression programs       | SCC orbits in state-space graph          |
-| **Full state space**          | 788,986        | Complete cellular configuration set  | Reachable configurations of GyroSI       |
-
-## A.1.2. Expression Pipeline
-
-GyroSI models the expression process through a layered pipeline, transforming raw intronic inputs into a minimal, functional phenotype.
-
-### Intron Stream → Splicing → Exon → Protein
-
-**Intron**
-An 8-bit input representing a regulatory instruction. Introns are path-dependent and transitory. They are not retained after expression but shape the trajectory of folding.
-
-**Splicing**
-The `fold_sequence([...])` function performs a non-associative reduction over a stream of introns, collapsing them into a single 8-bit residue. This simulates the cumulative, order-sensitive logic of molecular splicing.
-
-**Exon (`exon_mask`)**
-The stable 8-bit result of folding. This value encodes the final memory state, carrying the condensed expression of the entire intronic history. Bit families (`LI`, `FG`, `BG`, `L0`) persist structurally and define the mask's functional signature.
-
-**Exon‑Product (p)**:
-A transient 8‑bit operator generated at BU‑Ingress time from the phenotype's governance signature, confidence, and orbit cardinality.
-It projects the stored exon_mask back onto the rolling 6‑byte context, progressively realigning the agent with the Common Source.
-
-**Protein (`governance_signature`)**
-A 5-tuple derived from the exon mask. It quantifies the expressed content:
-`(neutral reserve, LI bits, FG bits, BG bits, total active bits)`.
-This compact footprint defines all downstream physical behaviour and governs interpretive logic.
-
-**Holographic Projection**
-Each intron also maps to a fixed 48-bit spatial pattern (`INTRON_BROADCAST_MASKS[i]`), which defines how that instruction acts within the tensor. These projections are stable and immutable; they form the architectural substrate for all transformations.
-
-## A.1.3. Bit Families and Functional Continuity
-
-The eight bits in each instruction are grouped into four fixed families. These families serve consistent structural roles in both introns and exons, though their operational function changes across the expression pipeline.
-
-* **L0 (bits 0 and 7)**
-  Structural anchors. They do not affect transformation but define identity and frame invariance. Retained across all stages.
-
-* **LI (bits 1 and 6)**
-  Chirality operators.
-  In introns: they direct global parity reflection during folding.
-  In exons: they report the parity-retaining content of the expressed state (UNA signature).
-
-* **FG (bits 2 and 5)**
-  Foreground modifiers.
-  In introns: trigger local tensor inversions.
-  In exons: represent expressed ONA-like (active) flips.
-
-* **BG (bits 3 and 4)**
-  Background modifiers.
-  In introns: modulate background polarity interleaving.
-  In exons: reflect the BU-like balance in the retained state.
-
-The bit families remain present throughout and are never redefined. They express different roles depending on whether they operate on input instructions or express final results.
-
-## A.1.4. Hierarchy of Interpretation
-
-Understanding GyroSI requires attention to three distinct levels of structure:
-
-* The **mask algebra**:
-  64 active masks (excluding anchors), forming 32 equivalence classes under LI parity.
-
-* The **phenomenological layer**:
-  256 distinct orbits of transformation in state space, each defined by mutual reachability under folding dynamics.
-
-* The **spatial encoding layer**:
-  48-bit broadcast masks that define how each instruction is applied within the tensor structure. These act as static DNA templates.
-
-#### A.1.5. Stabiliser and modulus
-
-Breadth‑first exploration over the full instruction set discovers exactly 788 986 distinct states and a diameter of six. The stabiliser of the archetype has order two (global parity) multiplied by eleven (frame degeneracy). The remaining factor, 35 863, is prime, confirming that no further quotient is possible. These facts are verified at build time and are used to reject any physics violation at run time.
-
-Frame degeneracy (11) counts the distinct layer/frame symmetry operations (excluding global parity) that leave the archetypal tensor invariant under the applied transformation group; combined with parity (×2) and the residual prime (35,863) they factor the full state modulus.
-
-No biological code shows the same modulus; the coincidence stops at the smaller sub‑structures outlined above.
-
-## A.1.6. Optional Diagnostic Decomposition
-
-A variant of the SCC analysis excludes LI reflection symmetry. This results in 195,000 parity-free orbits. Approximately 21,456 of these appear in chiral pairs; the rest are self-symmetric. This decomposition is not part of operational logic but is retained for research purposes in the `_diagnostics` section of the phenomenology archive.
-
-> GyroSI captures the path from raw regulatory instruction to compact functional signature. Introns are the process. Exons are the result. The governance signature is what remains; a minimal footprint, physically interpretable, and ontologically stable.
-
----
-
-#### A.2. Further correspondences
-
-Other mappings noted in the main text are retained without restatement:
-
-* The angular sequence π/2, π/4, π/4, 0 for CS → UNA → ONA → BU.
-* The packed‑integer versus tensor dual representation.
-* The role of the endogenous modulus as a hard physical constant.
-
-Readers seeking proofs or implementation details will find the relevant functions in `baby.governance`, `baby.information`, and `baby.inference`.
-
-## A.2.1. The structural number ladder
-
-GyroSI's constants are locked by algebraic closure, not convenience:
-
-3 rows enable chirality.
-4 layers bind the recursive depth.
-6 steps give full degrees of freedom and the Cayley‑graph diameter.
-8 bits form the smallest register that holds all required operations.
-12 cells fill one layer.
-24 cells capture a half‑tensor that already carries orientation.
-48 cells form the whole tensor and the packed state integer.
-64 instruction patterns appear once the identity bits are discounted.
-32 functional classes appear when global parity is folded out.
-
-No smaller choice of cardinalities would satisfy the independent closure constraints identified in the physics.
-
-## A.2.2. Core Invariants (Build‑Time Assertions)
-
-1. Ontology modulus: |States| = 788,986 (assert exact).
-2. Archetypal eccentricity ≤ 6; no path > 6 verified in sampled BFS; (optionally) full diameter = 6.
-3. Phenomenology (canonical): length(phenomenology_map) = 788,986; values ∈ [0, 788,985].
-4. Each orbit representative r satisfies: 
-     r = min{ state_int(s) | canonical[s] = r } (48-bit integer order).
-5. Sum of orbit_sizes.values() = 788,986.
-6. For every index i: canonical[i] in orbit_sizes, orbit_sizes[canonical[i]] ≥ 1.
-7. Parity closure: For every state s with integer value v, v ⊕ FULL_MASK belongs to same canonical orbit (empirically validated).
-8. Tensor mapping: int_to_tensor(tensor_to_int(T)) == T for all test tensors (validated on random + boundary states).
-9. Fold (Monodromic Coaddition):
-     - Non-commutative: ∃ a, b: fold(a, b) ≠ fold(b, a).
-     - Non-associative: ∃ a, b, c: fold(fold(a, b), c) ≠ fold(a, fold(b, c)).
-10. Angular distance formula: 
-     gyrodistance_angular(T1,T2) = arccos( dot(T1,T2)/48 ) ∈ [0,π].
-
-## A.2.3. Gyrogroup algebra as implemented
-
-The three **bitwise primitives** defined in §2.2 of the main text are realised exactly:
-
-* **XOR** (`⊕`) drives every bit transformation and enforces involutive symmetry.
-* **AND** (`∧`) stores the carry term, preserving path memory.
-* **NOT** (`¬`) enables global duality and the return path (`dual(x) = x ⊕ 0xFF`).
-
-These form the minimal operational basis.
-
-The learning operator used throughout the BU stage is the **Monodromic Fold**:
-
-* **Coaddition (Monodromic Fold):**
-  `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
-  This non-associative, non-commutative operation encodes the system's dual monodromy and path-dependence. It is implemented as `fold()` in `baby.governance`.
-
-All run‑time transformations in `apply_gyration_and_transform` are structured combinations of the three primitives above. The Fold is the only derived operator used in learning; nothing else is introduced.
-
-## A.2.4. Holographic principle in practice
-
-A single eight‑bit intron always touches the entire forty‑eight‑bit state through four complementary twelve‑bit masks. Conversely, any state can be reached in at most six introns. This bidirectional property embodies the holographic claim that every part encodes the whole. The code paths involved are `transcribe_byte`, `apply_gyration_and_transform`, and the breadth‑first discovery routine that proves the six‑step closure.
-
-===
+Implementation requires only following these specifications exactly. The system's completeness emerges from its closure: a finite ontology navigated by non-associative operations, producing unlimited expression through bounded physics. No additions, modifications, or patches are needed. The architecture is theoretically complete and practically implementable as specified.

@@ -258,16 +258,23 @@ MASK = 0xFF  # 8-bit mask
 def fold(a: int, b: int) -> int:
     """
     The Monodromic Fold (⋄), the single, unified learning operator for BU.
-    Formula: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
+    
+    Canonical Form: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
+    Algebraic Normal Form: a ⋄ b = ¬a ∧ b
+    
+    These are mathematically identical through Boolean algebra:
+    a ⊕ (b ⊕ (a ∧ ¬b)) = b ⊕ (a ∧ b) = b ∧ ¬a = ¬a ∧ b
 
     This operation is the algebraic expression of the BU stage's dual monodromy.
     It is fundamentally non-associative and non-commutative, preserving the
     path-dependence required by the Common Source axiom.
 
-    Its algebraic properties, discovered empirically, are:
-    - Left Identity (CS Emergence):   fold(0, b) = b
-    - Right Absorber (Return to CS):  fold(a, 0) = 0
-    - Self-Annihilation (BU Closure): fold(a, a) = 0
+    Its algebraic properties are:
+    - Left Identity (CS Emergence):   fold(0, b) = ¬0 ∧ b = b
+    - Right Absorber (Return to CS):  fold(a, 0) = ¬a ∧ 0 = 0
+    - Self-Annihilation (BU Closure): fold(a, a) = ¬a ∧ a = 0
+    - Non-Commutativity: ¬a ∧ b ≠ ¬b ∧ a (in general)
+    - Non-Associativity: fold(fold(a,b),c) ≠ fold(a,fold(b,c)) (in general)
     """
     a &= MASK
     b &= MASK

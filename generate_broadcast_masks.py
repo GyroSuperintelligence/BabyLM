@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def generate_intron_broadcast_masks() -> np.ndarray:
-    """Generate canonical broadcast masks for CS emission."""
+    """Generate canonical broadcast masks for boundary layer operations with CS as extra-phenomenal axiom."""
     masks = np.zeros((256, 48), dtype=np.uint8)
 
     for intron in range(256):

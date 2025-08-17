@@ -66,13 +66,13 @@ class TestMonodromicFold:
     """Test the Monodromic Fold operation - core of learning."""
 
     def test_left_identity(self) -> None:
-        """Test fold(0, b) = b (CS Emergence)."""
+        """Test fold(0, b) = b (CS as extra-phenomenal identity axiom)."""
         for b in range(256):
             result = governance.fold(0, b)
             assert result == b, f"Left identity failed for b={b}"
 
     def test_right_absorber(self) -> None:
-        """Test fold(a, 0) = 0 (Return to CS)."""
+        """Test fold(a, 0) = 0 (Return to CS extra-phenomenal state)."""
         for a in range(256):
             result = governance.fold(a, 0)
             assert result == 0, f"Right absorber failed for a={a}"

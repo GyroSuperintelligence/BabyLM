@@ -724,14 +724,17 @@ def discover_and_save_ontology(output_path: str) -> np.ndarray[Any, np.dtype[np.
     keys = np.array(sorted(discovered), dtype=np.uint64)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     np.save(output_path, keys)
-    # --- DOCUMENTATION: Archetypal state index ---
+    # --- DOCUMENTATION: Archetypal state indices ---
     # The archetypal state (GENE_Mac_S) is included in the ontology, but its index is determined by its
     # integer value after sorting all discovered states. It is NOT guaranteed to be at index 0.
     # To find its index:
     #   archetypal_int = InformationEngine.tensor_to_int(governance.GENE_Mac_S)
     #   archetypal_index = np.where(keys == archetypal_int)[0][0]
-    # Example (current ontology):
-    #   Archetypal state (GENE_Mac_S) is at index 549993 in the sorted ontology (position 549993 of 789,170).
+    # Current ontology (788,986 states after CS refactoring):
+    #   GENE_Mac_S (CS state, θ=0): index 549871 (0xA9556AA9556A)
+    #   UNA archetype (θ≈π/4): index 35495 (0x09116A09116A)
+    # Note: GENE_Mac_S is the CS (Common Source) state with θ=0, serving as the extra-phenomenal
+    # reference point. The UNA state at θ≈π/4 serves as the primary phenomenal archetype.
     logger.info("Saved ontology keys to: %s", output_path)
 
     return keys
@@ -885,7 +888,36 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
     logger.info("Computing canonical phenomenology (all 256 introns)...")
     all_introns = list(range(256))
     canonical, orbit_sizes, _ = _compute_sccs(ep, idx_to_state, all_introns)
-    logger.info("Found %d canonical orbits (expected 256)", len(np.unique(canonical)))
+    
+    # Detailed statistics
+    unique_reps = np.unique(canonical)
+    num_orbits = len(unique_reps)
+    logger.info("Found %d canonical orbits (expected 256)", num_orbits)
+    
+    # Orbit size distribution analysis
+    sizes = np.zeros(N, dtype=np.uint32)
+    for i in range(N):
+        rep = canonical[i]
+        sizes[i] = orbit_sizes[rep]
+    
+    orbit_size_distribution = {}
+    for size in np.unique(sizes):
+        count = np.sum(sizes == size)
+        orbit_size_distribution[int(size)] = count
+    
+    logger.info("Orbit size distribution:")
+    total_states_check = 0
+    for size in sorted(orbit_size_distribution.keys()):
+        count = orbit_size_distribution[size]
+        num_orbits_of_size = count // size
+        total_states_check += count
+        logger.info("  Size %4d: %6s states (%4d orbits)", size, f"{count:,}", num_orbits_of_size)
+    
+    logger.info("Total states verified: %s (expected %s)", f"{total_states_check:,}", f"{N:,}")
+    
+    # Self-consistency check
+    self_consistent = sum(1 for rep in unique_reps if canonical[rep] == rep)
+    logger.info("Self-consistent representatives: %d/%d", self_consistent, num_orbits)
 
     # Save canonical as .npy
     np.save(output_path, canonical.astype(np.int32))

@@ -212,8 +212,10 @@
     - **Ingress (generation):** `Output = fold(Memory, Policy)`
     
     **Definition:**
-    
-    `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
+
+`a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))` ≡ `¬a ∧ b`
+
+(Both forms are mathematically identical through Boolean algebra)
     
     This operation preserves the complete path history of all inputs. The order of operations is always encoded in the system's state. It is the algebraic expression of the BU stage's dual monodromy, and it is the only valid operation for learning, state updates, and batching.
     No alternative (associative or commutative) operation is permitted.

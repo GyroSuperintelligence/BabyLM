@@ -90,8 +90,13 @@ for layer in range(4):
 
 
 def fold(a: int, b: int) -> int:
-    """The Monodromic Fold: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
-
+    """
+    The Monodromic Fold (⋄), the path-dependent learning operator.
+    
+    Canonical Form: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
+    Algebraic Normal Form: a ⋄ b = ¬a ∧ b
+    
+    These are mathematically identical through Boolean algebra.
     Non-associative, path-dependent learning operator.
     This is the ONLY learning/integration operator in the system.
     """
@@ -546,7 +551,7 @@ class GyroKernel:
         self.orbit_sizes = np.load(orbit_sizes_path, mmap_mode="r")
 
     def _load_broadcast_masks(self) -> None:
-        """Load broadcast masks for CS emission."""
+        """Load broadcast masks for boundary layer operations with CS as extra-phenomenal axiom."""
         meta_path = self.base_path / "public" / "meta"
         broadcast_masks_path = meta_path / "intron_broadcast_masks.npy"
 
@@ -561,7 +566,7 @@ class GyroKernel:
                 print(f"✅ Generated {self.INTRON_BROADCAST_MASKS.shape[0]} broadcast masks")
 
     def _find_cs_state(self) -> None:
-        """Find the CS state (minimum theta)."""
+        """Find the CS state (minimum theta) as extra-phenomenal reference point."""
         min_theta_idx = int(np.argmin(self.theta))
         min_theta = float(self.theta[min_theta_idx])
 
@@ -572,7 +577,7 @@ class GyroKernel:
             print(f"✅ Found CS state: index={min_theta_idx}, θ={min_theta:.4f}")
 
     def _precompute_una_pool(self) -> None:
-        """Precompute UNA states for CS emission."""
+        """Precompute UNA states for boundary layer operations with CS axiom."""
         # Find states with theta close to π/4
         target_theta = np.pi / 4
         tight_tolerance = 0.05  # Tighter tolerance for sharper CS emission
@@ -758,7 +763,7 @@ class GyroKernel:
                 self.token_exon_cache[tok] = compute_exon_from_state(int(self.ontology[s]))
 
     def _build_token_post_states(self) -> None:
-        """Build token post-states by walking from CS."""
+        """Build token post-states using CS as extra-phenomenal reference."""
         if self.debug:
             print(f"  → Building token post-states...")
 

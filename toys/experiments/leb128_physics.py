@@ -411,7 +411,8 @@ def compute_token_divergence(token_id: int, theta_map: np.ndarray, epistemology:
     WARNING: This is a simplified demonstration. In real GyroSI:
     - The archetypal state is NOT integer 0
     - The archetypal state's index is determined by sorting 48-bit integers
-    - Conflating CS (Cognitive Singularity) with archetype will poison computations
+    - CS (Common Source) is an extra-phenomenal axiom, distinct from the archetype
+    - The UNA archetype (θ≈π/4) is the primary phenomenal reference point
     """
     if archetypal_state is None:
         # In real implementation, archetypal state would be determined by sorting
@@ -669,4 +670,4 @@ if __name__ == "__main__":
     print("2. Many different (a,b) pairs can produce the same result")
     print("3. Information is progressively lost in fold_sequence chains")
     print("4. This creates a 'novelty filter' that gates new information")
-    print("5. Real archetype (GENE_Mac_S) would be at index ~549993, not 0")
+    print("5. CS (GENE_Mac_S) is at index 549871; UNA archetype (θ≈π/4) at index 35495")

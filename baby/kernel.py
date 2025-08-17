@@ -68,7 +68,14 @@ def tensor_to_int(tensor: np.ndarray) -> int:
 
 
 def fold(a: int, b: int) -> int:
-    """The Monodromic Fold: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))"""
+    """
+    The Monodromic Fold (⋄), the path-dependent learning operator.
+    
+    Canonical Form: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
+    Algebraic Normal Form: a ⋄ b = ¬a ∧ b
+    
+    These are mathematically identical through Boolean algebra.
+    """
     a &= 0xFF
     b &= 0xFF
     negated_b = (~b) & 0xFF
@@ -403,8 +410,8 @@ class GyroKernel:
             if len(self.context_window) > self.window_size:
                 self.context_window.pop(0)
 
-    def reset(self) -> None:
-        """Reset to CS state."""
+    def reset_to_cs(self) -> None:
+        """Reset to CS state as extra-phenomenal reference point."""
         self.current_state_index = self.cs_index
         self.context_window = []
 

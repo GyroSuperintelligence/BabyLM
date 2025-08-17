@@ -97,7 +97,7 @@ We discovered that **State 0 is a problematic "sink state"**:
 ### **Coaddition vs. Monodromic Fold**
 We clarified the distinction from `Genetics.md`:
 - **Coaddition**: Topological construction of `GENE_Mac_S` (the 48-byte archetypal tensor)
-- **Monodromic Fold**: Runtime learning operator (`a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`) used for both learning and generation
+- **Monodromic Fold**: Runtime learning operator (`a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))` ≡ `¬a ∧ b`) used for both learning and generation
 
 ### **The BU (Balance Universal) Stage**
 The system gets stuck in the **BU Eg** stage with maximum theta divergence, indicating it's in a differentiation phase but not progressing through the full cycle to achieve structural closure.

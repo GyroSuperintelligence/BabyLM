@@ -1839,7 +1839,9 @@ Provides a scaffolding for training custom WordPiece tokenizers on domain-specif
 **1\. Finalised the Monodromic Fold (**`**fold**`**)**
 
 Canonicalised the learning operation as:  
-`fold(a, b) = a ^ (b ^ (a &amp; ~b))`
+`fold(a, b) = a ^ (b ^ (a &amp; ~b))` ≡ `¬a ∧ b`
+
+(Both forms are mathematically identical through Boolean algebra)
 
 This form satisfies:
 
