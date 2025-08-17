@@ -267,7 +267,8 @@ Through this process, external information is not merely stored; it is physicall
 
 **BU Ingress: Expression and Generation**
 
-The expression of intelligence—BU Ingress—produces complete tokens using the Non-Antagonistic Emission Protocol. This is not a retrieval mechanism but a generative act wherein coherent tokens emerge directly from the system's geometric and topological configuration.
+The expression of intelligence through BU Ingress produces complete tokens using the Non-Antagonistic Emission Protocol. This is not a retrieval mechanism but a generative act wherein coherent tokens emerge directly from the system's geometric and topological configuration.
+
 
 ## Part III: Non-Antagonistic Selection - The Complete Protocol
 
@@ -1142,7 +1143,7 @@ This eliminates the fundamental source of AI alignment problems by constraining 
 
 - **Generalization is built into the physics and the three maps**:
   - **Ontology**: Every possible physical state discovered and indexed
-  - **Phenomenology**: Equivalence classes (SCCs) that collapse mirror states—this is semantic grouping
+  - **Phenomenology**: Equivalence classes (SCCs) that collapse mirror states. This is semantic grouping.
   - **Epistemology**: The transition table that tells us how states evolve
 
   Together, they are structured generalization, not fuzzy approximation.

@@ -75,9 +75,9 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 
 ---
 
-> **Why Physics Prevents Hallucinations**: Traditional AI operates in 768+ dimensional spaces where models can interpolate between any points, creating nonsense. GyroSI is constrained to a finite 3D manifold with only 788,986 valid states. You can't be "between" states—you're always at a specific, well-defined point. This dimensional grounding is why the system literally cannot hallucinate.
+> **Why Physics Prevents Hallucinations**: Traditional AI operates in 768+ dimensional spaces where models can interpolate between any points, creating nonsense. GyroSI is constrained to a finite 3D manifold with only 788,986 valid states. You can't be "between" states. You're always at a specific, well-defined point. This dimensional grounding is why the system literally cannot hallucinate.
 
-> **Why No Scoring**: GyroSI uses constraint satisfaction, not competitive scoring. Tokens either satisfy geometric constraints or they don't—there's no "best" token, only admissible ones. This implements true non-antagonistic selection aligned with CGM physics.
+> **Why No Scoring**: GyroSI uses constraint satisfaction, not competitive scoring. Tokens either satisfy geometric constraints or they don't. There's no "best" token, only admissible ones. This implements true non-antagonistic selection aligned with CGM physics.
 
 ---
 
@@ -98,7 +98,7 @@ Each byte in the sequence is XORed against the universal reference `GENE_Mic_S =
 The sequence of introns from a token drives the system's canonical state (a 48-bit integer) through a path-dependent trajectory across the **788,986** possible physical configurations. The intelligence resides in this trajectory.
 
 **5. From State to Meaning: Token-Level Learning**
-After processing a full token's byte sequence, the system's final state and the original `token_id` form the unique context key: `(state_index, token_id)`. This key is used to look up a minimal "phenotype"—a learned physical residue and a confidence score—from the system's memory.
+After processing a full token's byte sequence, the system's final state and the original `token_id` form the unique context key: `(state_index, token_id)`. This key is used to look up a minimal "phenotype"; a learned physical residue and a confidence score from the system's memory.
 
 **6. Learning as Physical Integration**
 Learning occurs once per token. The final intron of the token's byte sequence is integrated into the phenotype's memory (`mask`) via the **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that knowledge is both semantically coherent (keyed by token) and physically grounded (updated via path-dependent physics).
