@@ -3,13 +3,19 @@
 
 ---
 
+## [v0.9.7.3-BabyLM-OSS] – 2025-08-18 - Experimental
+
+### Forking GPT-OSS Infrastructure
+
+---
+
 ## [v0.9.7.3-BabyLM-OSS] – 2025-08-17 - Experimental
 
 ### Forking GPT-OSS Infrastructure
 
 ---
 
-## [v0.9.7.3-Reset] – 2025-08-15 - Experimental
+## [v0.9.7.3-Reset] – 2025-08-16 - Experimental
 
 ### Back to Theory
 Making corrections and redefining our directions, directives and implementation.

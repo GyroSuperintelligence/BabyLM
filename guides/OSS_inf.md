@@ -418,3 +418,10 @@ These browser tools are independent of the inference backend and should work wit
 │   │       ├── tokenizer.json
 │   │       ├── tokenizer_config.json
 │   │       └── USAGE_POLICY
+
+.venv\Lib\site-packages\openai_harmony
+.venv\Lib\site-packages\openai_harmony-0.0.4.dist-info
+
+.venv\Lib\site-packages\tiktoken
+.venv\Lib\site-packages\tiktoken_ext
+.venv\Lib\site-packages\tiktoken-0.11.0.dist-info
