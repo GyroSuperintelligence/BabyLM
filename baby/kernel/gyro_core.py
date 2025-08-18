@@ -288,12 +288,30 @@ class GyroEngine:
              
      # --- Byte/intron boundary ---
     @staticmethod
-    def psi(byte_val: int) -> int:
+    def byte_to_intron(b: int) -> int:
         """Transform byte to intron via XOR with 0xAA.
         
-        FROZEN - Immutable transformation rule: byte ↔ intron mapping.
+        FROZEN - Immutable transformation rule: byte → intron mapping.
+        ψ(b) = b ⊕ 0xAA
         """
-        return (byte_val & 0xFF) ^ 0xAA
+        return (b & 0xFF) ^ 0xAA
+        
+    @staticmethod
+    def intron_to_byte(i: int) -> int:
+        """Transform intron to byte via XOR with 0xAA.
+        
+        FROZEN - Immutable transformation rule: intron → byte mapping.
+        ψ⁻¹(i) = i ⊕ 0xAA (ψ is its own inverse)
+        """
+        return (i & 0xFF) ^ 0xAA
+        
+    @staticmethod
+    def psi(byte_val: int) -> int:
+        """Legacy alias for byte_to_intron. Use byte_to_intron instead.
+        
+        DEPRECATED - Use byte_to_intron for clarity.
+        """
+        return GyroEngine.byte_to_intron(byte_val)
         
     @staticmethod
     def encode_token_to_bytes(token_id: int) -> bytes:
@@ -315,8 +333,8 @@ class GyroEngine:
             return bytes(result)
             
     def token_to_introns(self, token_id: int) -> List[int]:
-        """Convert token to list of introns via psi transformation."""
-        return [self.psi(b) for b in self.encode_token_to_bytes(token_id)]
+        """Convert token to list of introns via boundary transformation."""
+        return [self.byte_to_intron(b) for b in self.encode_token_to_bytes(token_id)]
         
     def _encode_leb128(self, value: int) -> List[int]:
         """
@@ -392,6 +410,7 @@ class GyroEngine:
         # Compute medoid: maximize average agreements (angular distance surrogate)
         best_candidate = None
         best_agreements = -1
+        best_token_id = token_id  # Track token_id for final tie-break
         
         for candidate in unique_finals:
             total_agreements = 0
@@ -408,6 +427,7 @@ class GyroEngine:
             if total_agreements > best_agreements:
                 best_agreements = total_agreements
                 best_candidate = candidate
+                best_token_id = token_id
             elif total_agreements == best_agreements and best_candidate is not None:
                 # Tie-break by orbit size
                 candidate_idx = self.state_to_index[candidate]
@@ -418,15 +438,19 @@ class GyroEngine:
                 
                 if candidate_orbit_size < best_orbit_size:
                     best_candidate = candidate
+                    best_token_id = token_id
                 elif candidate_orbit_size == best_orbit_size:
                     # Tie-break by channel lexicographic (proper bit ordering)
                     candidate_key = self.channel_lex_key(candidate)
                     best_key = self.channel_lex_key(best_candidate)
                     if candidate_key < best_key:
                         best_candidate = candidate
-                    elif candidate == best_candidate:
-                        # Final tie-break by token id (already handled by choosing first)
-                        pass
+                        best_token_id = token_id
+                    elif candidate_key == best_key:
+                        # Final tie-break by token id (deterministic)
+                        if token_id < best_token_id:
+                            best_candidate = candidate
+                            best_token_id = token_id
                         
         # Use safe fallback if computation fails
         if best_candidate is None:
@@ -1346,8 +1370,8 @@ class GyroEngine:
                 x[1]['timestamp'],    # Oldest timestamp
                 x[0]                  # Deterministic tie-breaker by key
             ))
-            # Evict oldest entries to make room (keep 64, evict rest)
-            for key, _ in k_entries[:len(k_entries) - 64]:
+            # Evict oldest entries to make room for new entry (keep 63, evict rest)
+            for key, _ in k_entries[:len(k_entries) - 63]:
                 del self.passive_memory_index[key]
         
         # Collect entries for M constraint (same token, same orbit)
@@ -1369,8 +1393,8 @@ class GyroEngine:
                 x[1]['timestamp'],    # Oldest timestamp
                 x[0]                  # Deterministic tie-breaker by key
             ))
-            # Evict oldest entries to make room (keep 64, evict rest)
-            for key, _ in m_entries[:len(m_entries) - 64]:
+            # Evict oldest entries to make room for new entry (keep 63, evict rest)
+            for key, _ in m_entries[:len(m_entries) - 63]:
                 del self.passive_memory_index[key]
             
     def _is_generic_entry(self, entry: dict) -> bool:
@@ -1378,7 +1402,8 @@ class GyroEngine:
         token_id = entry['token_id']
         token_address = self.address_of_token(token_id)
         token_orbit = self.phenomenology_map[self.state_to_index[token_address]]
-        representative_address = self.orbit_representatives[token_orbit]
+        rep_idx = self.orbit_representatives[token_orbit]
+        representative_address = self.ontology_keys[rep_idx]
         
         return token_address == representative_address
         
@@ -1477,21 +1502,42 @@ class GyroEngine:
         # - Minimal theta value (most stable)
         # - Central orbit position
         # - High symmetry
+        # - Must be in an orbit that has tokens in the vocabulary range
         
-        # Method 1: Find state with minimum theta (most stable)
-        # Use deterministic tie-breaking: first occurrence (lowest index)
-        min_theta_value = np.min(self.theta)
-        min_theta_indices = np.where(self.theta == min_theta_value)[0]
-        min_theta_idx = int(min_theta_indices[0])  # Deterministic: choose first (lowest index)
-        archetypal_state = self.ontology_keys[min_theta_idx]
+        # Method 1: Find state with minimum theta among orbits that have tokens
+        # First, identify orbits that have tokens by checking a sample of the vocabulary
+        populated_orbits = set()
+        vocab_sample_size = min(1000, getattr(self, 'vocab_size', 50000))
         
-        # Validate this is a reasonable start state
-        if archetypal_state in self.state_to_index:
-            return archetypal_state
+        for token_id in range(vocab_sample_size):
+            try:
+                token_address = self.address_of_token(token_id)
+                if token_address in self.state_to_index:
+                    token_orbit = self.phenomenology_map[self.state_to_index[token_address]]
+                    populated_orbits.add(token_orbit)
+                    if len(populated_orbits) >= 50:  # Stop after finding enough populated orbits
+                        break
+            except Exception:
+                continue
+        
+        # Find the state with minimum theta among populated orbits
+        best_state = None
+        best_theta = float('inf')
+        
+        for orbit_code in populated_orbits:
+            if orbit_code in self.orbit_representatives:
+                rep_state_idx = self.orbit_representatives[orbit_code]
+                rep_theta = self.theta[rep_state_idx]
+                if rep_theta < best_theta:
+                    best_theta = rep_theta
+                    best_state = self.ontology_keys[rep_state_idx]
+        
+        if best_state is not None and best_state in self.state_to_index:
+            return best_state
             
         # Fallback: Use orbit representative of orbit 0 (most central)
         if 0 in self.orbit_representatives:
-            return self.orbit_representatives[0]
+            return self.ontology_keys[self.orbit_representatives[0]]
             
         # Final fallback: Use orthogonal reference (index 0)
         return self.ontology_keys[0]
@@ -1588,3 +1634,101 @@ class GyroEngine:
             return min(recovery_candidates)
             
         return None  # Halt condition
+    
+    # --- Helper functions for testing ---
+    def encode_token_to_introns(self, token_id: int) -> List[int]:
+        """Encode token to introns via LEB128 → bytes → ψ transformation."""
+        return self.token_to_introns(token_id)
+    
+    def introns_to_token_bytes(self, introns: List[int]) -> bytes:
+        """Convert introns back to token bytes via ψ⁻¹ transformation."""
+        return bytes([self.intron_to_byte(intron) for intron in introns])
+    
+    def compute_micro_path(self, start_state: int, introns: List[int]) -> List[int]:
+        """Compute micro-path for testing - alias for micro_path."""
+        return self.micro_path(start_state, introns)
+    
+    def channel_alignment(self, state: int, address: int, positions: List[int] = None) -> int:
+        """Compute channel alignment between state and address for testing."""
+        state_bits = self._packed_state_to_bitset(state)
+        address_bits = self._packed_state_to_bitset(address)
+        
+        if positions is None:
+            # Count all bit agreements
+            return bin(~(state_bits ^ address_bits) & self.MASK48).count('1')
+        else:
+            # Count agreements at specific positions
+            agreements = 0
+            for pos in positions:
+                if pos < 48:  # Validate position
+                    state_bit = (state_bits >> pos) & 1
+                    address_bit = (address_bits >> pos) & 1
+                    if state_bit == address_bit:
+                        agreements += 1
+            return agreements
+    
+    def get_layer_frame_positions(self, layer: int, frame: int) -> List[int]:
+        """Get bit positions for a specific layer and frame from frozen mapping."""
+        if layer < 0 or layer >= FROZEN_CHANNELS.NUM_LAYERS:
+            raise ValueError(f"Invalid layer {layer}, must be 0-{FROZEN_CHANNELS.NUM_LAYERS-1}")
+        if frame < 0 or frame >= FROZEN_CHANNELS.NUM_FRAMES:
+            raise ValueError(f"Invalid frame {frame}, must be 0-{FROZEN_CHANNELS.NUM_FRAMES-1}")
+        
+        # Calculate slab index from layer and frame
+        slab_idx = layer * FROZEN_CHANNELS.NUM_FRAMES + frame
+        return self._get_slab_bit_indices(slab_idx)
+    
+    def validate_maps(self) -> bool:
+        """Validate atlas maps integrity and version compatibility."""
+        try:
+            # Check version compatibility
+            if hasattr(self, 'version_info') and self.version_info:
+                expected_atlas = self.version_info.get('atlas_version', 'v1.0.0')
+                expected_address = self.version_info.get('address_version', 'v1.0.0')
+                
+                # Check if address memory exists and has metadata
+                if hasattr(self, 'address_meta_path') and self.address_meta_path.exists():
+                    try:
+                        with open(self.address_meta_path, 'r') as f:
+                            metadata = json.load(f)
+                        stored_atlas = metadata.get('atlas_version', 'unknown')
+                        stored_address = metadata.get('address_version', 'unknown')
+                        
+                        if (stored_atlas != expected_atlas or stored_address != expected_address):
+                            raise RuntimeError(f"Version mismatch: stored atlas_v{stored_atlas}/address_v{stored_address}, "
+                                             f"expected atlas_v{expected_atlas}/address_v{expected_address}")
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to validate versions: {e}")
+            
+            # Validate map shapes and consistency
+            expected_len = 788_986
+            
+            if len(self.ontology_keys) != expected_len:
+                raise ValueError(f"ontology_keys length mismatch: expected {expected_len}, got {len(self.ontology_keys)}")
+            
+            if self.epistemology.shape != (expected_len, 256):
+                raise ValueError(f"epistemology shape mismatch: expected ({expected_len}, 256), got {self.epistemology.shape}")
+            
+            if len(self.theta) != expected_len:
+                raise ValueError(f"theta length mismatch: expected {expected_len}, got {len(self.theta)}")
+            
+            # Validate reverse index consistency
+            if len(self.state_to_index) != expected_len:
+                raise ValueError(f"state_to_index length mismatch: expected {expected_len}, got {len(self.state_to_index)}")
+            
+            return True
+            
+        except Exception as e:
+            raise RuntimeError(f"Map validation failed: {e}")
+    
+    def validate_versions(self) -> bool:
+        """Validate version information and enforce version policy."""
+        if not hasattr(self, 'version_info') or not self.version_info:
+            raise RuntimeError("No version information available")
+        
+        required_versions = ['atlas_version', 'address_version', 'config_version']
+        for version_key in required_versions:
+            if version_key not in self.version_info:
+                raise RuntimeError(f"Missing required version: {version_key}")
+        
+        return self.validate_maps()

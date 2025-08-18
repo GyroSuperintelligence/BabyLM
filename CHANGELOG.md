@@ -3,7 +3,7 @@
 
 ---
 
-## [v0.9.7.3-BabyLM] – 2025-08-18 - Experimental
+## [v0.9.7.4-BabyLM] – 2025-08-18 - Experimental
 
 ### GyroEngine Core Implementation
 
