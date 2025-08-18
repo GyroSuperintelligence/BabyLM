@@ -2,6 +2,23 @@
 
 This document analyzes the OpenAI gpt-oss infrastructure components that can be leveraged for GyroSI development, focusing on reusable infrastructure rather than the models themselves.
 
+For all components we do not modify their code, we call them directly from their respective Python modules. The parts we do modify are forked under 'baby\' so we can modify them as needed.
+
+---
+
+Reference to original modules:
+.venv\Lib\site-packages\gpt_oss-0.0.3.dist-info
+.venv\Lib\site-packages\gpt_oss
+
+.venv\Lib\site-packages\openai_harmony
+.venv\Lib\site-packages\openai_harmony-0.0.4.dist-info
+
+.venv\Lib\site-packages\tiktoken
+.venv\Lib\site-packages\tiktoken_ext
+.venv\Lib\site-packages\tiktoken-0.11.0.dist-info
+
+---
+
 ## Overview
 
 The gpt-oss ecosystem provides a robust infrastructure foundation that can serve as a scaffold for GyroSI. Key components include:
@@ -242,7 +259,6 @@ conversation = Conversation.from_messages([system_message, user_message])
 
 **Integration Examples**:
 - `kernel/chat_oss.py`: Chat interface implementation
-- `toys/communication/external_adapter.py`: API adapters
 
 ## Conclusion
 
@@ -267,7 +283,43 @@ This document provides an analysis of the remaining files in the baby-oss projec
 ### __init__.py [Original]
 **Purpose**: Package initialization file. Can remain unchanged.
 
-## Evaluation Framework (evals/)
+## Inference Backends (responses_api/inference/)
+
+### responses_api/inference/stub.py [Original]
+**Purpose**: Mock inference backend that returns pre-defined fake tokens with a delay. Useful for testing and development without requiring actual model weights.
+
+### responses_api/inference/transformers.py [To Mod]
+**Purpose**: Implements inference using Hugging Face's AutoModelForCausalLM. Provides get_infer_next_token function that generates one token at a time. Can serve as a reference for implementing GyroSI backend.
+
+### responses_api/inference/__init__.py [Original]
+**Purpose**: Package initialization for inference backends.
+
+---
+
+## Tools Framework (called from module .venv\Lib\site-packages\gpt_oss
+)
+
+### tools/tool.py [Original]
+**Purpose**: Abstract base class defining the Tool interface. Tools expose APIs that models can call, allowing functionality like code execution and web browsing. The interface should remain unchanged.
+
+### tools/apply_patch.py [Original]
+**Purpose**: Self-contained utility for applying human-readable "pseudo-diff" patch files to text files. Handles ADD, DELETE, and UPDATE operations with fuzzy matching. This tool is independent of the inference backend.
+
+### tools/simple_browser/ [Original]
+**Purpose**: Web browsing tool implementation:
+- **simple_browser_tool.py**: Main browser tool that handles web navigation, search, and content extraction
+- **backend.py**: Backend abstraction for different search providers (includes ExaBackend for Exa Search API)
+- **page_contents.py**: HTML processing utilities for converting web pages to clean text with link preservation
+- **__init__.py**: Package initialization
+
+These browser tools are independent of the inference backend and should work with any model.
+
+### tools/__init__.py [Original]
+**Purpose**: Package initialization for the tools module.
+
+---
+
+## Evaluation Framework (evals/) (Moved to "toys/evals/")
 
 ### evals/__main__.py [Original]
 **Purpose**: Main entry point for running evaluations. Allows selection of models, reasoning effort, sampler backend (responses or chat completions), base URL, evaluation types (GPQA, HealthBench, AIME25), temperature, and number of threads. Handles result reporting and saving.
@@ -322,39 +374,7 @@ This document provides an analysis of the remaining files in the baby-oss projec
 ### responses_api/__init__.py [Original]
 **Purpose**: Package initialization for the responses_api module.
 
-## Inference Backends (responses_api/inference/)
-
-### responses_api/inference/stub.py [Original]
-**Purpose**: Mock inference backend that returns pre-defined fake tokens with a delay. Useful for testing and development without requiring actual model weights.
-
-### responses_api/inference/transformers.py [To Mod]
-**Purpose**: Implements inference using Hugging Face's AutoModelForCausalLM. Provides get_infer_next_token function that generates one token at a time. Can serve as a reference for implementing GyroSI backend.
-
-### responses_api/inference/ollama.py [To Mod]
-**Purpose**: Provides Ollama backend for inference using a separate thread to stream tokens from a local Ollama server. Handles buffering, timeouts, and EOS tokens. May be useful as reference for external model integration.
-
-### responses_api/inference/__init__.py [Original]
-**Purpose**: Package initialization for inference backends.
-
-## Tools Framework (tools/)
-
-### tools/tool.py [Original]
-**Purpose**: Abstract base class defining the Tool interface. Tools expose APIs that models can call, allowing functionality like code execution and web browsing. The interface should remain unchanged.
-
-### tools/apply_patch.py [Original]
-**Purpose**: Self-contained utility for applying human-readable "pseudo-diff" patch files to text files. Handles ADD, DELETE, and UPDATE operations with fuzzy matching. This tool is independent of the inference backend.
-
-### tools/simple_browser/ [Original]
-**Purpose**: Web browsing tool implementation:
-- **simple_browser_tool.py**: Main browser tool that handles web navigation, search, and content extraction
-- **backend.py**: Backend abstraction for different search providers (includes ExaBackend for Exa Search API)
-- **page_contents.py**: HTML processing utilities for converting web pages to clean text with link preservation
-- **__init__.py**: Package initialization
-
-These browser tools are independent of the inference backend and should work with any model.
-
-### tools/__init__.py [Original]
-**Purpose**: Package initialization for the tools module.
+---
 
 ## Summary
 
@@ -364,26 +384,13 @@ These browser tools are independent of the inference backend and should work wit
 
 ---
 
-├── baby-oss
+├── baby
 │   ├── chat.py
-│   ├── evals
-│   │   ├── abcd_grader.py
-│   │   ├── aime_eval.py
-│   │   ├── basic_eval.py
-│   │   ├── chat_completions_sampler.py
-│   │   ├── gpqa_eval.py
-│   │   ├── healthbench_eval.py
-│   │   ├── report.py
-│   │   ├── responses_sampler.py
-│   │   ├── types.py
-│   │   ├── __init__.py
-│   │   ├── __main__.py
 │   ├── generate.py
 │   ├── responses_api
 │   │   ├── api_server.py
 │   │   ├── events.py
 │   │   ├── inference
-│   │   │   ├── ollama.py
 │   │   │   ├── stub.py
 │   │   │   ├── transformers.py
 │   │   │   ├── __init__.py
@@ -392,36 +399,7 @@ These browser tools are independent of the inference backend and should work wit
 │   │   ├── utils.py
 │   │   ├── __init__.py
 │   ├── tokenizer.py
-│   ├── tools
-│   │   ├── apply_patch.py
-│   │   ├── python_docker
-│   │   │   ├── docker_tool.py
-│   │   ├── simple_browser
-│   │   │   ├── backend.py
-│   │   │   ├── page_contents.py
-│   │   │   ├── simple_browser_tool.py
-│   │   │   ├── __init__.py
-│   │   ├── tool.py
-│   │   ├── __init__.py
 │   └── __init__.py
+│   └── config.json [For GyroSI Config]
 
-├── memories
-│   ├── memory_preferences.json
-│   ├── models
-│   │   └── gpt-oss-20b
-│   │       ├── chat_template.jinja
-│   │       ├── config.json
-│   │       ├── generation_config.json
-│   │       ├── LICENSE
-│   │       ├── README.md
-│   │       ├── special_tokens_map.json
-│   │       ├── tokenizer.json
-│   │       ├── tokenizer_config.json
-│   │       └── USAGE_POLICY
 
-.venv\Lib\site-packages\openai_harmony
-.venv\Lib\site-packages\openai_harmony-0.0.4.dist-info
-
-.venv\Lib\site-packages\tiktoken
-.venv\Lib\site-packages\tiktoken_ext
-.venv\Lib\site-packages\tiktoken-0.11.0.dist-info

@@ -3,9 +3,56 @@
 
 ---
 
-## [v0.9.7.3-BabyLM-OSS] – 2025-08-18 - Experimental
+## [v0.9.7.3-BabyLM] – 2025-08-18 - Experimental
 
-### Forking GPT-OSS Infrastructure
+### GyroEngine Core Implementation
+
+#### Core Infrastructure
+- **Atlas Loading**: Fixed map loading using config atlas_paths with numpy mmap and enforced exact shapes (788,986 entries, epistemology 256 cols)
+- **Reverse Index**: Built reverse index for 48-bit packed states → row index enabling O(1) transitions
+- **Orbit System**: Constructed orbit representatives and Hamming-2 neighbor cache from phenomenology_map
+
+#### Token Processing
+- **Address Binding**: Replaced placeholder with complete medoid computation using ψ transform, micro-path simulation, and medoid computation with tie-breaking
+- **LEB128 Encoding**: Completed encoder for token-id to bytes conversion (≥256 uses LEB128, <256 single byte)
+- **Vocabulary Routing**: Built orbit→tokens index for O(1) candidate gathering instead of full vocab scan
+
+#### State Management
+- **State Transitions**: Fixed apply_intron to use reverse index for O(1) lookup, removed unknown state branches
+- **Admissibility**: Implemented exact predicate with global stepwise monotonicity, slab end-to-start, and strict progress requirement
+- **Start State**: Fixed to use correct archetypal packed state from atlas (minimum theta value with fallbacks)
+
+#### Advanced Features
+- **Recovery Ladder**: Implemented all 5 levels - channel relaxation, neighbor orbits, duality pivot, orbit center, and geometric nudge
+- **Passive Memory**: Complete fold_egress with Monodromic Fold composite form, append-only binary log, caps K=64/M=64, and mask interning
+- **Control Tokens**: Excluded Harmony control tokens from candidate vocab, allowing only END/RETURN from state machine
+
+#### Files Modified
+- `baby/kernel/gyro_core.py` - Complete GyroEngine implementation with all core systems
+- `baby/responses_api/inference/gyro.py` - Updated inference pipeline with control token filtering and efficient candidate gathering
+
+#### High Priority Fixes
+- **Physics Corrections**: Fixed orbit_sizes→phenomenology_map mapping, exact 6-bit slab indices, composite fold without shortcuts
+- **Address Medoid**: Replaced address binding with medoid over final states (not representatives), proper tie-breaking chain
+- **Admissibility Exact**: Global stepwise + slab end-vs-start only (no slab stepwise), exact bit mapping formula
+- **Recovery Exact**: Exact recovery ladder with frozen channel priorities, Level 5 geometric nudge with theta reduction
+- **Memory Management**: Hard caps K=64/M=64 per orbit, composite Monodromic Fold, mask interning, atomic log I/O
+- **Address Persistence**: Memory-mapped .npy files, atomic writes, version checking
+
+#### Medium Priority Fixes
+- **Boundary Enforcement**: ψ boundary (byte ⊕ 0xAA) enforced everywhere, no bypasses
+- **Candidate Routing**: Exclude Harmony control tokens, bounded lazy address materialization
+- **Version Validation**: Atlas/address version tags in config.json, enforce version matching on engine init
+
+#### Low Priority Fixes
+- **Determinism**: Removed RNG dependencies, vocabulary tie-breaking by ascending token ID
+
+#### Files Modified
+- `baby/kernel/gyro_core.py` - Core engine with physics, memory, and determinism fixes
+- `baby/responses_api/inference/gyro.py` - Inference interface with candidate routing and version validation
+- `baby/config.json` - Added version information for validation
+
+### Setting up BabyLM-OSS Infrastructure
 
 ---
 
