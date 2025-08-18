@@ -57,8 +57,9 @@ class GyroEngine:
         # Build orbit system: representatives and Hamming-2 neighbors
         self._build_orbit_system()
         
-        # Cache for address memory
+        # Cache for address memory with persistent storage
         self._address_cache = {}
+        self._load_address_cache()
         
         # Build orbit to tokens routing index
         self._build_orbit_to_tokens_index()
@@ -334,7 +335,7 @@ class GyroEngine:
             
     def token_to_introns(self, token_id: int) -> List[int]:
         """Convert token to list of introns via boundary transformation."""
-        return [self.byte_to_intron(b) for b in self.encode_token_to_bytes(token_id)]
+        return [self.byte_to_intron(b) for b in GyroEngine.encode_token_to_bytes(token_id)]
         
     def _encode_leb128(self, value: int) -> List[int]:
         """
@@ -463,6 +464,10 @@ class GyroEngine:
                 
         # Cache the result
         self._address_cache[token_id] = best_candidate
+        
+        # Periodically save cache to disk
+        if len(self._address_cache) % 100 == 0:
+            self._save_address_cache()
         
         # Update orbit→tokens routing index
         candidate_idx = self.state_to_index[best_candidate]
@@ -1240,9 +1245,11 @@ class GyroEngine:
         # Compute Monodromic Fold mask (8-bit composite)
         fold_mask = self._compute_monodromic_fold(state_index, token_id)
         
-        # Initialize passive memory index if needed
+        # Initialize passive memory index and timestamp counter if needed
         if not hasattr(self, 'passive_memory_index'):
             self.passive_memory_index = {}
+        if not hasattr(self, '_timestamp_counter'):
+            self._timestamp_counter = 0
         
         memory_key = (state_index, token_id)
         
@@ -1252,7 +1259,8 @@ class GyroEngine:
                 existing = self.passive_memory_index[memory_key]
                 existing['zero_streak'] += 1
                 existing['touch_count'] = min(255, existing['touch_count'] + 1)
-                existing['timestamp'] = len(getattr(self, 'passive_log', []))
+                self._timestamp_counter += 1
+                existing['timestamp'] = self._timestamp_counter
                 
                 # Delete entry if zero_streak >= 2
                 if existing['zero_streak'] >= 2:
@@ -1277,7 +1285,8 @@ class GyroEngine:
             existing['touch_count'] = min(255, existing['touch_count'] + 1)
             existing['zero_streak'] = 0  # Reset zero streak
             existing['mask_id'] = interned_mask_id
-            existing['timestamp'] = len(getattr(self, 'passive_log', []))
+            self._timestamp_counter += 1
+            existing['timestamp'] = self._timestamp_counter
             self._append_to_passive_log(existing)
         else:
             # Create new entry
@@ -1287,8 +1296,9 @@ class GyroEngine:
                 'mask_id': interned_mask_id,
                 'touch_count': 1,
                 'zero_streak': 0,
-                'timestamp': len(getattr(self, 'passive_log', []))
+                'timestamp': self._timestamp_counter + 1
             }
+            self._timestamp_counter += 1
             
             # Check and enforce caps before adding
             self._enforce_passive_memory_caps(state_orbit, token_orbit, memory_entry)
@@ -1431,8 +1441,9 @@ class GyroEngine:
                 self.passive_log_fh.write(packed_entry)
                 self.passive_log_fh.flush()
                 
-                # Force sync for first N writes and periodically
-                if self.passive_log_len < 100 or self.passive_log_len % 1000 == 0:
+                # Force sync much less frequently to improve performance
+                # Only sync every 10000 writes instead of every 1000
+                if self.passive_log_len % 10000 == 0:
                     os.fsync(self.passive_log_fh.fileno())
                     
                 self.passive_log_len += 1
@@ -1732,3 +1743,30 @@ class GyroEngine:
                 raise RuntimeError(f"Missing required version: {version_key}")
         
         return self.validate_maps()
+    
+    def _load_address_cache(self):
+        """Load address cache from disk if available."""
+        import os
+        import pickle
+        
+        cache_file = os.path.join(self.address_memory_path.parent, 'address_cache.pkl')
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'rb') as f:
+                    self._address_cache = pickle.load(f)
+                print(f"Loaded {len(self._address_cache)} cached addresses")
+            except Exception as e:
+                print(f"Failed to load address cache: {e}")
+                self._address_cache = {}
+    
+    def _save_address_cache(self):
+        """Save address cache to disk."""
+        import os
+        import pickle
+        
+        cache_file = os.path.join(self.address_memory_path.parent, 'address_cache.pkl')
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(self._address_cache, f)
+        except Exception as e:
+            print(f"Failed to save address cache: {e}")

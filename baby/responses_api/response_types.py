@@ -3,9 +3,9 @@ from typing import Any, Dict, Literal, Optional, Union
 from openai_harmony import ReasoningEffort
 from pydantic import BaseModel
 
-MODEL_IDENTIFIER = "gpt-oss-120b"
+MODEL_IDENTIFIER = "gyrosi-babylm"
 DEFAULT_TEMPERATURE = 0.0
-REASONING_EFFORT = ReasoningEffort.LOW
+REASONING_EFFORT = "low"
 DEFAULT_MAX_OUTPUT_TOKENS = 10_000
 
 class UrlCitation(BaseModel):

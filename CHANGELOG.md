@@ -3,56 +3,55 @@
 
 ---
 
-## [v0.9.7.4-BabyLM] – 2025-08-18 - Experimental
+## [v0.9.7.4-BabyLM] – 2025-08-18 - Alpha
 
-### GyroEngine Core Implementation
+### Overview
 
-#### Core Infrastructure
-- **Atlas Loading**: Fixed map loading using config atlas_paths with numpy mmap and enforced exact shapes (788,986 entries, epistemology 256 cols)
-- **Reverse Index**: Built reverse index for 48-bit packed states → row index enabling O(1) transitions
-- **Orbit System**: Constructed orbit representatives and Hamming-2 neighbor cache from phenomenology_map
+This release implements the BabyLM architecture over the forked GPT-OSS infrastructure. We now have a physics-constrained inference core wired into the OpenAI Harmony response format, with persistence, admissibility checks, and recovery fully in place. The system is ready for first knowledge-ingestion tests.
 
-#### Token Processing
-- **Address Binding**: Replaced placeholder with complete medoid computation using ψ transform, micro-path simulation, and medoid computation with tie-breaking
-- **LEB128 Encoding**: Completed encoder for token-id to bytes conversion (≥256 uses LEB128, <256 single byte)
-- **Vocabulary Routing**: Built orbit→tokens index for O(1) candidate gathering instead of full vocab scan
+### Changes
 
-#### State Management
-- **State Transitions**: Fixed apply_intron to use reverse index for O(1) lookup, removed unknown state branches
-- **Admissibility**: Implemented exact predicate with global stepwise monotonicity, slab end-to-start, and strict progress requirement
-- **Start State**: Fixed to use correct archetypal packed state from atlas (minimum theta value with fallbacks)
+**Core Engine**
 
-#### Advanced Features
-- **Recovery Ladder**: Implemented all 5 levels - channel relaxation, neighbor orbits, duality pivot, orbit center, and geometric nudge
-- **Passive Memory**: Complete fold_egress with Monodromic Fold composite form, append-only binary log, caps K=64/M=64, and mask interning
-- **Control Tokens**: Excluded Harmony control tokens from candidate vocab, allowing only END/RETURN from state machine
+* Implemented `GyroEngine` end-to-end with:
 
-#### Files Modified
-- `baby/kernel/gyro_core.py` - Complete GyroEngine implementation with all core systems
-- `baby/responses_api/inference/gyro.py` - Updated inference pipeline with control token filtering and efficient candidate gathering
+  * Correct ψ/LEB128 intron transform at byte boundaries (`byte_to_intron` / `intron_to_byte`).
+  * Deterministic 48-bit address computation, medoid binding, and slab/channel agreement functions.
+  * Enforced global channel monotonicity (strict at every micro-step) and slab admissibility (start–end only).
+  * Recovery ladder (Levels 1–5) with deterministic nudge selection and ≤6 transitions.
+  * O(1) reverse index, no linear search.
+  * Self-reinforcement disabled by default (Ingress vs. Egress separation).
 
-#### High Priority Fixes
-- **Physics Corrections**: Fixed orbit_sizes→phenomenology_map mapping, exact 6-bit slab indices, composite fold without shortcuts
-- **Address Medoid**: Replaced address binding with medoid over final states (not representatives), proper tie-breaking chain
-- **Admissibility Exact**: Global stepwise + slab end-vs-start only (no slab stepwise), exact bit mapping formula
-- **Recovery Exact**: Exact recovery ladder with frozen channel priorities, Level 5 geometric nudge with theta reduction
-- **Memory Management**: Hard caps K=64/M=64 per orbit, composite Monodromic Fold, mask interning, atomic log I/O
-- **Address Persistence**: Memory-mapped .npy files, atomic writes, version checking
+**Persistence & Memory**
 
-#### Medium Priority Fixes
-- **Boundary Enforcement**: ψ boundary (byte ⊕ 0xAA) enforced everywhere, no bypasses
-- **Candidate Routing**: Exclude Harmony control tokens, bounded lazy address materialization
-- **Version Validation**: Atlas/address version tags in config.json, enforce version matching on engine init
+* Added passive memory store with fold accumulation, annihilation (zero streaks), touch counter wrap-around, and mask interning.
+* Enforced capacity caps: `K` = 64 per state, `M` = 64 per orbit.
+* Passive log append/debug helpers and binary log reload verified.
+* Versioning metadata (`atlas_version`, `address_version`, `config_version`) validated on load.
 
-#### Low Priority Fixes
-- **Determinism**: Removed RNG dependencies, vocabulary tie-breaking by ascending token ID
+**OSS Integration**
 
-#### Files Modified
-- `baby/kernel/gyro_core.py` - Core engine with physics, memory, and determinism fixes
-- `baby/responses_api/inference/gyro.py` - Inference interface with candidate routing and version validation
-- `baby/config.json` - Added version information for validation
+* Forked GPT-OSS `chat.py`, `generate.py`, `responses_api/api_server.py`, `serve.py`, and `transformers.py` into **baby-oss** and rewired inference backend to `gyro`.
+* Retained OpenAI Harmony libraries (`openai_harmony`, `tiktoken`) as unmodified dependencies.
+* Verified token flow via Harmony encoding `o200k_harmony`, role/channel markers, and control token exclusions.
+* Ensured compatibility with OSS tool framework (browser, patch, Python execution).
 
-### Setting up BabyLM-OSS Infrastructure
+**Testing**
+
+* Built comprehensive standalone test suite (`toys/health/test_gyro_core.py`) covering:
+
+  * Engine initialisation with real atlas files.
+  * ψ/LEB128 encoding/decoding round-trip correctness.
+  * Vocab bounds, orbit-to-tokens initialisation, and address determinism.
+  * Recovery ladder progression and control-token exclusion.
+  * Slab integrity, state transitions, admissibility strictness, and tie-breaking determinism.
+  * Passive store persistence and caps enforcement.
+  * End-sequence state machine handling.
+* All tests pass successfully on current build.
+
+### Status
+
+With this release, BabyLM moves from **infrastructure scaffolding** to a **ready-to-learn engine**. Next step: run live ingestion and query experiments using the Harmony API server and evaluate early knowledge retention.
 
 ---
 

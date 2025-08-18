@@ -1037,6 +1037,47 @@ def test_deterministic_final_tiebreak():
     print("[OK] Deterministic final tie-break verified")
 
 
+def test_m_cap_enforcement():
+    """Test M-cap eviction priority - verify 64 states per token per orbit limit."""
+    print("Testing M-cap enforcement...")
+    
+    engine = create_real_engine()
+    
+    # Use a single test token
+    test_token = 42
+    token_address = engine.address_of_token(test_token)
+    token_state_index = engine.state_to_index[token_address]
+    token_orbit = engine.phenomenology_map[token_state_index]
+    
+    # Create >64 entries for the same (token, orbit) to trigger M-cap
+    # We'll use different states but in the same orbit
+    
+    # First, find states in the same orbit
+    same_orbit_states = []
+    for state_idx, orbit in enumerate(engine.phenomenology_map[:1000]):
+        if orbit == token_orbit and len(same_orbit_states) < 100:
+            same_orbit_states.append(engine.ontology_keys[state_idx])
+    
+    # Add entries to passive memory using fold_egress
+    for state in same_orbit_states:
+        engine.fold_egress(state, test_token)
+    
+    # Verify that entries exist and M-cap was enforced
+    m_entries = []
+    for key, entry in engine.passive_memory_index.items():
+        _, entry_token_id = key
+        if entry_token_id == test_token:
+            entry_token_address = engine.address_of_token(entry_token_id)
+            entry_token_orbit = engine.phenomenology_map[engine.state_to_index[entry_token_address]]
+            if entry_token_orbit == token_orbit:
+                m_entries.append((key, entry))
+    
+    # Should have at most 64 entries due to M-cap
+    assert len(m_entries) <= 64, f"M-cap not enforced: {len(m_entries)} entries"
+    
+    print(f"[OK] M-cap enforcement verified - {len(m_entries)} entries after M-cap")
+
+
 def run_all_tests():
     """Run all tests."""
     print("Running GyroEngine standalone tests...")
@@ -1084,6 +1125,7 @@ def run_all_tests():
         test_eviction_semantics()
         test_zero_streak_deletion()
         test_deterministic_final_tiebreak()
+        test_m_cap_enforcement()
         
         print("=" * 50)
         print("[OK] All tests passed successfully!")

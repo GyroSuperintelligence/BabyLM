@@ -107,9 +107,17 @@ def create_api_server(
                     )
                     entries = []
             else:
-                entries = encoding.parse_messages_from_completion_tokens(
-                    output_tokens, Role.ASSISTANT
-                )
+                try:
+                    entries = encoding.parse_messages_from_completion_tokens(
+                        output_tokens, Role.ASSISTANT
+                    )
+                except Exception as e:
+                    print(f"Error parsing tokens: {e}")
+                    error = Error(
+                        code="invalid_function_call",
+                        message=f"{e}",
+                    )
+                    entries = []
 
             fc_index = 0
             browser_tool_index = 0
@@ -720,7 +728,8 @@ def create_api_server(
                         else:
                             break
                     else:
-                        raise ValueError("No messages to process")
+                        # No messages parsed yet, just break gracefully
+                        break
                 if len(self.output_tokens) >= self.request_body.max_output_tokens:
                     break
 
@@ -796,7 +805,7 @@ def create_api_server(
         if body.reasoning is not None:
             try:
 
-                reasoning_effort = get_reasoning_effort(body.reasoning.effect)
+                reasoning_effort = get_reasoning_effort(body.reasoning.effort)
             except ValueError as e:
                 from fastapi import HTTPException
                 raise HTTPException(status_code=422, detail=str(e))
