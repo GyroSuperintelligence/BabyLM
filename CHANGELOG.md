@@ -3,6 +3,34 @@
 
 ---
 
+## [v0.9.7.4-BabyLM] – 2025-08-19 - Alpha
+
+### Overview
+
+This release focuses on stability improvements and performance optimizations for the BabyLM architecture. We've addressed critical threading issues, enhanced metrics collection, and implemented comprehensive testing capabilities to ensure reliable operation.
+
+### Changes
+
+**Core Engine**
+
+* Fixed concurrency issues in the GyroEngine initialization process
+* Optimized memory usage and cache performance
+* Added comprehensive runtime metrics and observability
+
+**Testing & Validation**
+
+* Implemented comprehensive test suite with performance benchmarking
+* Enhanced surface form validation for improved text quality
+* Added metrics visualization tools for system monitoring
+
+**General Improvements**
+
+* Standardized configuration paths across the codebase
+* Improved error handling and recovery mechanisms
+* Enhanced documentation for core components
+
+---
+
 ## [v0.9.7.4-BabyLM] – 2025-08-18 - Alpha
 
 ### Overview

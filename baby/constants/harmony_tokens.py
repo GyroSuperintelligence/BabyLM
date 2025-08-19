@@ -16,31 +16,30 @@ CONSTRAIN = 200003  # <|constrain|>
 RESERVED_200000 = 200000  # <|reserved_200000|>
 RESERVED_200001 = 200001  # <|reserved_200001|>
 
+# Dynamic helpers for runtime token ID resolution
+def token_id(encoding, text: str) -> int:
+    """Get token ID for text from encoding, return first token or -1 if none."""
+    ids = encoding.encode(text)
+    return ids[0] if ids else -1
+
+def assistant_role_id(encoding) -> int:
+    """Get token ID for 'assistant' role."""
+    return token_id(encoding, "assistant")
+
+def final_channel_id(encoding) -> int:
+    """Get token ID for 'final' channel."""
+    return token_id(encoding, "final")
+
 # Token sets for different use cases
 
-# Tokens excluded during normal generation (engine should never emit these)
+# Control sets - single source of truth
 GENERATION_EXCLUDED = {
-    START,      # <|start|> - only for message headers
-    CHANNEL,    # <|channel|> - only for message headers  
-    MESSAGE,    # <|message|> - only for message headers
-    CALL        # <|call|> - only state machine can emit
+    START, CHANNEL, MESSAGE, END, RETURN, CALL  # content must never emit these
 }
 
-# Tokens that only the state machine in inference can emit
 STATE_MACHINE_ONLY = {
-    END,        # <|end|> - marks message completion
-    RETURN      # <|return|> - marks inference completion
+    END, RETURN  # only the backend framing should emit these
 }
 
 # All control tokens (for exclusion from orbit sweeps)
-ALL_CONTROL_TOKENS = {
-    RESERVED_200000,
-    RESERVED_200001, 
-    RETURN,
-    CONSTRAIN,
-    CHANNEL,
-    START,
-    END,
-    MESSAGE,
-    CALL
-}
+ALL_CONTROL_TOKENS = GENERATION_EXCLUDED  # single source of truth

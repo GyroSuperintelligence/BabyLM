@@ -356,14 +356,14 @@ At least one slab must show strict improvement: ρ_lf⁽ᵐ⁾ > ρ_lf⁽⁰⁾ 
 
 **The Single Channel Cover** (used for all decisions):
 - Global: All 48 positions (indices 0..47)
-- Layer×Frame[0,0]: Positions where layer=0 AND frame=0 (12 positions)
-- Layer×Frame[0,1]: Positions where layer=0 AND frame=1 (12 positions)
-- Layer×Frame[1,0]: Positions where layer=1 AND frame=0 (12 positions)
-- Layer×Frame[1,1]: Positions where layer=1 AND frame=1 (12 positions)
-- Layer×Frame[2,0]: Positions where layer=2 AND frame=0 (12 positions)
-- Layer×Frame[2,1]: Positions where layer=2 AND frame=1 (12 positions)
-- Layer×Frame[3,0]: Positions where layer=3 AND frame=0 (12 positions)
-- Layer×Frame[3,1]: Positions where layer=3 AND frame=1 (12 positions)
+- Layer×Frame[0,0]: Positions where layer=0 AND frame=0 (6 positions: 3×2)
+- Layer×Frame[0,1]: Positions where layer=0 AND frame=1 (6 positions: 3×2)
+- Layer×Frame[1,0]: Positions where layer=1 AND frame=0 (6 positions: 3×2)
+- Layer×Frame[1,1]: Positions where layer=1 AND frame=1 (6 positions: 3×2)
+- Layer×Frame[2,0]: Positions where layer=2 AND frame=0 (6 positions: 3×2)
+- Layer×Frame[2,1]: Positions where layer=2 AND frame=1 (6 positions: 3×2)
+- Layer×Frame[3,0]: Positions where layer=3 AND frame=0 (6 positions: 3×2)
+- Layer×Frame[3,1]: Positions where layer=3 AND frame=1 (6 positions: 3×2)
 
 **Priority Order** (for recovery ladder) - **Frozen Specification**:
 1. Global (never dropped)
@@ -1209,7 +1209,7 @@ The following behaviors are intentional design features, not bugs:
 
 ### Recovery System Behavior
 - **Design**: Recovery candidates depend on orbit population in vocabulary range
-- **Heuristic**: `start_state()` selects minimum θ among populated orbits found by sampling
+- **Start State**: `start_state()` is frozen to "min θ" state (archetypal initial state)
 - **Observed**: In test run, selected orbit 4 with 32 tokens yielded 16 recovery candidates
 - **Expected**: Empty orbits naturally yield zero candidates
 

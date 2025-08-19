@@ -1,6 +1,6 @@
 from typing import Any, Dict, Literal, Optional, Union
 
-from openai_harmony import ReasoningEffort
+# ReasoningEffort import removed as it was unused
 from pydantic import BaseModel
 
 MODEL_IDENTIFIER = "gyrosi-babylm"
@@ -98,7 +98,7 @@ class Usage(BaseModel):
 class FunctionToolDefinition(BaseModel):
     type: Literal["function"]
     name: str
-    parameters: dict  # this should be typed stricter if you add strict mode
+    parameters: Dict[str, Any]  # this should be typed stricter if you add strict mode
     strict: bool = False  # change this if you support strict mode
     description: Optional[str] = ""
 

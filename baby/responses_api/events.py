@@ -1,5 +1,5 @@
 # torchrun --nproc-per-node=4 responses_api.py
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel
 
@@ -35,7 +35,7 @@ class ResponseOutputTextDelta(ResponseEvent):
     output_index: int = 0
     content_index: int = 0
     delta: str = ""
-    logprobs: list = []
+    logprobs: list[Any] = []
 
 
 class ResponseReasoningSummaryTextDelta(ResponseEvent):
@@ -95,7 +95,7 @@ class ResponseOutputTextDone(ResponseEvent):
     output_index: int = 0
     content_index: int = 0
     text: str = ""
-    logprobs: list = []
+    logprobs: list[Any] = []
 
 
 class ResponseContentPartDone(ResponseEvent):

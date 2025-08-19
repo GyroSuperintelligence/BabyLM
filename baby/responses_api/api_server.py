@@ -1,8 +1,6 @@
-import asyncio
 import datetime
 import uuid
-from typing import Callable, Literal, Optional
-import json
+from typing import AsyncGenerator, Callable, Literal, Optional, Union
 
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
@@ -63,11 +61,11 @@ DEFAULT_TEMPERATURE = 0.0
 
 def get_reasoning_effort(effort: Literal["low", "medium", "high"]) -> ReasoningEffort:
     if effort == "low":
-        return ReasoningEffort.LOW
+        return ReasoningEffort.LOW  # type: ignore
     if effort == "medium":
-        return ReasoningEffort.MEDIUM
+        return ReasoningEffort.MEDIUM  # type: ignore
     if effort == "high":
-        return ReasoningEffort.HIGH
+        return ReasoningEffort.HIGH  # type: ignore
     raise ValueError(f"Invalid reasoning effort: {effort}")
 
 
@@ -253,15 +251,15 @@ def create_api_server(
         )
 
         try:
-            debug_str = encoding.decode_utf8(input_tokens + output_tokens)
+            debug_str = encoding.decode(input_tokens + output_tokens)
         except Exception:
             debug_str = input_tokens + output_tokens
         try:
-            debug_input_str = encoding.decode_utf8(input_tokens)
+            debug_input_str = encoding.decode(input_tokens)
         except Exception:
             debug_input_str = input_tokens
         try:
-            debug_output_str = encoding.decode_utf8(output_tokens)
+            debug_output_str = encoding.decode(output_tokens)
         except Exception:
             debug_output_str = output_tokens
 
@@ -294,7 +292,7 @@ def create_api_server(
         output_tokens: list[int]
         output_text: str
         request_body: ResponsesRequest
-        request: Request
+        request: Optional[Request]
         sequence_number: int
     
 
@@ -317,7 +315,7 @@ def create_api_server(
             self.request_body = request_body
             self.parser = StreamableParser(encoding, role=Role.ASSISTANT)
             self.as_sse = as_sse
-            self.debug_mode = request_body.metadata.get(
+            self.debug_mode = (request_body.metadata or {}).get(
                 "__debug", False
             )  # we use this for demo purposes
             # Set temperature for this stream, fallback to DEFAULT_TEMPERATURE if not set
@@ -340,11 +338,11 @@ def create_api_server(
             event.sequence_number = self.sequence_number
             self.sequence_number += 1
             if self.as_sse:
-                return f"event: {event.type}\ndata: {event.model_dump_json(indent=None)}\n\n"
+                return f"event: {getattr(event, 'type', 'unknown')}\ndata: {event.model_dump_json(indent=None)}\n\n"
             else:
                 return event
 
-        async def run(self):
+        async def run(self) -> AsyncGenerator[Union[str, ResponseEvent], None]:
             browser_tool = self.browser_tool
             self.new_request = True
             initial_response = generate_response(
@@ -383,28 +381,20 @@ def create_api_server(
 
             while True:
                 # Check for client disconnect
-                if self.request is not None and await self.request.is_disconnected():
-                    print("Client disconnected, stopping token generation.")
-                    break
+                if self.request is not None:
+                    if await self.request.is_disconnected():
+                        print("Client disconnected, stopping token generation.")
+                        break
                 # Handle different backend signatures
-                try:
-                    # Try with new_request parameter (for existing backends)
-                    next_tok = infer_next_token(
-                        self.tokens,
-                        temperature=self.temperature,
-                        new_request=self.new_request,
-                    )
-                except TypeError:
-                    # Fallback for backends that don't support new_request (like GyroSI)
-                    next_tok = infer_next_token(
-                        self.tokens,
-                        temperature=self.temperature,
-                    )
+                next_tok = infer_next_token(
+                    self.tokens,
+                    self.temperature,
+                )
                 self.new_request = False
                 self.tokens.append(next_tok)
                 try:
                     self.parser.process(next_tok)
-                except Exception as e:
+                except Exception:
                     pass
 
                 if self.parser.state == StreamState.EXPECT_START:
@@ -437,7 +427,7 @@ def create_api_server(
                                                 )
                                                 else previous_item.recipient
                                             ),
-                                            arguments=previous_item.content[0].text,
+                                            arguments=previous_item.content[0].text,  # type: ignore
                                             id=fc_id,
                                             call_id=call_id,
                                         ),
@@ -449,7 +439,7 @@ def create_api_server(
                                     type="response.reasoning_text.done",
                                     output_index=current_output_index,
                                     content_index=current_content_index,
-                                    text=previous_item.content[0].text,
+                                    text=previous_item.content[0].text,  # type: ignore
                                 )
                             )
                             yield self._send_event(
@@ -459,7 +449,7 @@ def create_api_server(
                                     content_index=current_content_index,
                                     part=ReasoningTextContentItem(
                                         type="reasoning_text",
-                                        text=previous_item.content[0].text,
+                                        text=previous_item.content[0].text,  # type: ignore
                                     ),
                                 )
                             )
@@ -473,7 +463,7 @@ def create_api_server(
                                         content=[
                                             ReasoningTextContentItem(
                                                 type="reasoning_text",
-                                                text=previous_item.content[0].text,
+                                                text=previous_item.content[0].text,  # type: ignore
                                             )
                                         ],
                                     ),
@@ -482,9 +472,9 @@ def create_api_server(
                         if previous_item.channel == "final":
                             annotations = [UrlCitation(**a) for a in current_annotations]
                             if browser_tool:
-                                normalized_text, _annotations, _has_partial_citations = browser_tool.normalize_citations(previous_item.content[0].text)
+                                normalized_text, _annotations, _has_partial_citations = browser_tool.normalize_citations(previous_item.content[0].text)  # type: ignore
                             else:
-                                normalized_text = previous_item.content[0].text
+                                normalized_text = previous_item.content[0].text  # type: ignore
                                 annotations = []
                             text_content = TextContentItem(
                                 type="output_text",
@@ -620,9 +610,13 @@ def create_api_server(
 
                 try:
                     # purely for debugging purposes
-                    output_token_text = encoding.decode_utf8([next_tok])
+                    output_token_text = encoding.decode([next_tok])
                     self.output_text += output_token_text
-                    print(output_token_text, end="", flush=True)
+                    try:
+                        print(output_token_text, end="", flush=True)
+                    except (UnicodeEncodeError, UnicodeError):
+                        # Skip printing characters that can't be encoded in console
+                        pass
 
                 except RuntimeError:
                     pass
@@ -632,6 +626,7 @@ def create_api_server(
                         last_message = self.parser.messages[-1]
                         if (
                             self.use_browser_tool
+                            and browser_tool is not None
                             and last_message.recipient is not None
                             and last_message.recipient.startswith("browser.")
                         ):
@@ -671,66 +666,69 @@ def create_api_server(
                                     ResponseWebSearchCallInProgress(
                                         type="response.web_search_call.in_progress",
                                         output_index=current_output_index,
-                                        id=web_search_call_id
+                                        item_id=web_search_call_id
                                     )
                                 )
 
-                            async def run_tool():
-                                results = []
-                                async for msg in browser_tool.process(last_message):
-                                    results.append(msg)
-                                return results
+                                async def run_tool():
+                                    results = []
+                                    async for msg in browser_tool.process(last_message):
+                                        results.append(msg)
+                                    return results
 
-                            yield self._send_event(
-                                ResponseWebSearchCallSearching(
-                                    type="response.web_search_call.searching",
-                                    output_index=current_output_index,
-                                    id=web_search_call_id,
+                                yield self._send_event(
+                                    ResponseWebSearchCallSearching(
+                                        type="response.web_search_call.searching",
+                                        output_index=current_output_index,
+                                        item_id=web_search_call_id,
+                                    )
                                 )
-                            )
-                            result = await run_tool()
+                                result = await run_tool()
 
-                            new_tokens = encoding.render_conversation_for_completion(
-                                Conversation.from_messages(result), Role.ASSISTANT
-                            )
-                            
-                            print(encoding.decode_utf8(new_tokens))
-                            self.output_tokens.append(next_tok)
-                            self.tokens.append(encoding.encode('<|end|>', allowed_special="all")[0])
-
-                            for token in new_tokens:
-                                self.parser.process(token)
-                                self.output_tokens.append(token)
-                                self.tokens.append(token)
-
-                            yield self._send_event(
-                                ResponseWebSearchCallCompleted(
-                                    type="response.web_search_call.completed",
-                                    output_index=current_output_index,
-                                    id=web_search_call_id,
+                                new_tokens = encoding.render_conversation_for_completion(
+                                    Conversation.from_messages(result), Role.ASSISTANT
                                 )
-                            )
-                            yield self._send_event(ResponseOutputItemDone(
-                                type="response.output_item.done",
-                                output_index=current_output_index,
-                                item=WebSearchCallItem(
-                                    type="web_search_call",
-                                    id=web_search_call_id,
-                                    action=action,
-                                ),
-                            ))
+                                
+                                print(encoding.decode(new_tokens))
+                                self.output_tokens.append(next_tok)
+                                # Use proper stop_tokens method from HarmonyEncoding
+                                stop_tokens = encoding.stop_tokens()
+                                if stop_tokens:
+                                    self.tokens.append(stop_tokens[0])
 
-                            current_output_index += 1
-                            self.new_request = True
-                            
-                            continue
+                                for token in new_tokens:
+                                    self.parser.process(token)
+                                    self.output_tokens.append(token)
+                                    self.tokens.append(token)
+
+                                yield self._send_event(
+                                    ResponseWebSearchCallCompleted(
+                                        type="response.web_search_call.completed",
+                                        output_index=current_output_index,
+                                        item_id=web_search_call_id,
+                                    )
+                                )
+                                yield self._send_event(ResponseOutputItemDone(
+                                    type="response.output_item.done",
+                                    output_index=current_output_index,
+                                    item=WebSearchCallItem(
+                                        type="web_search_call",
+                                        id=web_search_call_id,
+                                        action=action,
+                                    ),
+                                ))
+
+                                current_output_index += 1
+                                self.new_request = True
+                                
+                                continue
 
                         else:
                             break
                     else:
                         # No messages parsed yet, just break gracefully
                         break
-                if len(self.output_tokens) >= self.request_body.max_output_tokens:
+                if self.request_body.max_output_tokens is not None and len(self.output_tokens) >= self.request_body.max_output_tokens:
                     break
 
                 # Adding in the end if we know we are not done
@@ -748,7 +746,7 @@ def create_api_server(
                     browser_tool=self.browser_tool,
                     browser_call_ids=self.browser_call_ids,
                 )
-                if self.store_callback and self.request_body.store:
+                if self.store_callback and self.request_body.store and self.response_id is not None:
                     self.store_callback(self.response_id, self.request_body, response)
                 yield self._send_event(
                     ResponseCompletedEvent(
@@ -758,7 +756,7 @@ def create_api_server(
                 )
 
     @app.post("/v1/responses", response_model=ResponseObject)
-    async def generate(body: ResponsesRequest, request: Request):
+    async def generate_response_endpoint(body: ResponsesRequest, request: Request):  # pyright: ignore[reportUnusedFunction]
         print("request received")
 
         use_browser_tool = any(
@@ -800,7 +798,7 @@ def create_api_server(
 
         system_message_content = SystemContent.new().with_conversation_start_date(
             datetime.datetime.now().strftime("%Y-%m-%d")
-        )
+        ).with_model_identity("You are a helpful AI assistant.")
         
         if body.reasoning is not None:
             try:
@@ -811,7 +809,7 @@ def create_api_server(
                 raise HTTPException(status_code=422, detail=str(e))
             system_message_content = system_message_content.with_reasoning_effort(reasoning_effort)
 
-        if use_browser_tool:
+        if use_browser_tool and browser_tool is not None:
             system_message_content = system_message_content.with_tools(browser_tool.tool_config)
 
         system_message = Message.from_role_and_content(
@@ -820,18 +818,15 @@ def create_api_server(
         messages = [system_message]
 
         if body.instructions or body.tools:
-            developer_message_content = DeveloperContent.new().with_instructions(
-                body.instructions
-            )
+            developer_message_content = DeveloperContent.new(body.instructions or "")  # type: ignore
 
             tools = []
-            for tool in body.tools:
+            for tool in (body.tools or []):
                 if tool.type == "function":
                     tools.append(
                         ToolDescription.new(
-                            tool.name,
-                            tool.description,
-                            tool.parameters,
+                            tool.name or "",
+                            tool.description or "",
                         )
                     )
 
@@ -868,7 +863,7 @@ def create_api_server(
                             Message.from_role_and_content(item.role, item.content)
                         )
                     else:
-                        for content_item in item.content:
+                        for content_item in (item.content or []):
                             messages.append(
                                 Message.from_role_and_content(item.role, content_item.text)
                             )
@@ -881,7 +876,7 @@ def create_api_server(
                         idx > last_assistant_idx
                         and is_last_message_function_call_output
                     ):
-                        for content_item in item.content:
+                        for content_item in (item.content or []):
                             messages.append(
                                 Message.from_role_and_content(
                                     Role.ASSISTANT, content_item.text
@@ -911,7 +906,6 @@ def create_api_server(
         initial_tokens = encoding.render_conversation_for_completion(
             conversation, Role.ASSISTANT
         )
-        print(encoding.decode_utf8(initial_tokens))
         response_id = f"resp_{uuid.uuid4().hex}"
 
         def store_callback(rid: str, req: ResponsesRequest, resp: ResponseObject):
@@ -920,7 +914,7 @@ def create_api_server(
         event_stream = StreamResponsesEvents(
             initial_tokens,
             body,
-            as_sse=body.stream,
+            as_sse=bool(body.stream),
             request=request,
             response_id=response_id,
             store_callback=store_callback,
@@ -928,12 +922,20 @@ def create_api_server(
         )
 
         if body.stream:
-            return StreamingResponse(event_stream.run(), media_type="text/event-stream")
+            async def stream_generator():
+                async for event in event_stream.run():
+                    if isinstance(event, str):
+                        yield event
+                    else:
+                        # This shouldn't happen when as_sse=True, but handle gracefully
+                        yield f"data: {event.model_dump_json()}\n\n"
+            
+            return StreamingResponse(stream_generator(), media_type="text/event-stream")
         else:
             last_event = None
             async for event in event_stream.run():
                 last_event = event
 
-            return last_event.response
+            return last_event.response  # type: ignore
 
     return app

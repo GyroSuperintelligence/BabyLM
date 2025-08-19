@@ -8,9 +8,10 @@ import asyncio
 import datetime
 import os
 from pathlib import Path
+from typing import Optional
 
 try:
-    import gnureadline as readline
+    import gnureadline as readline  # type: ignore
 except ImportError:
     import readline
 
@@ -34,7 +35,6 @@ from openai_harmony import (
     StreamState,
     SystemContent,
     TextContent,
-    ToolDescription,
     load_harmony_encoding,
 )
 
@@ -47,38 +47,24 @@ REASONING_EFFORT = {
 
 
 def get_user_input():
-    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0  # type: ignore
     if rank == 0:
         user_input = input()
     else:
         user_input = ""
     user_input_list = [user_input]
     if torch.distributed.is_initialized():
-        torch.distributed.broadcast_object_list(user_input_list, 0)
+        torch.distributed.broadcast_object_list(user_input_list, 0)  # type: ignore
     return user_input_list[0]
 
 
 def main(args):
     match args.backend:
-        case "triton":
-            from gpt_oss.triton.model import TokenGenerator as TritonGenerator
-            from gpt_oss.torch.utils import init_distributed
-            device = init_distributed()
-            generator = TritonGenerator(args.checkpoint, args.context, device)
-        case "torch":
-            from gpt_oss.torch.model import TokenGenerator as TorchGenerator
-            from gpt_oss.torch.utils import init_distributed
-            device = init_distributed()
-            generator = TorchGenerator(args.checkpoint, device)
-        case "vllm":
-            from gpt_oss.vllm.token_generator import TokenGenerator as VLLMGenerator
-            generator = VLLMGenerator(args.checkpoint, tensor_parallel_size=2)
         case "gyro":
             # GyroSI backend - use responses API inference wrapper
             from baby.responses_api.inference.gyro import setup_model
             encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
             infer_next_token = setup_model(
-                checkpoint=args.checkpoint,
                 encoding=encoding,
                 config_path=getattr(args, 'config', 'baby/config.json')
             )
@@ -109,6 +95,9 @@ def main(args):
         .with_conversation_start_date(datetime.datetime.now().strftime("%Y-%m-%d"))
     )
 
+    browser_tool: Optional[SimpleBrowserTool] = None
+    python_tool: Optional[PythonTool] = None
+    
     if args.browser:
         backend = ExaBackend(
             source="web",
@@ -129,28 +118,17 @@ def main(args):
         if args.developer_message:
             developer_message = args.developer_message + "\n"
         developer_message += apply_patch_instructions.read_text()
-        developer_message_content = (
-            DeveloperContent.new()
-            .with_instructions(developer_message)
-            .with_function_tools([
-                ToolDescription.new(
-                    "apply_patch",
-                    "Patch a file",
-                    parameters={
-                        "type": "string",
-                        "description": "Formatted patch code",
-                        "default": "*** Begin Patch\n*** End Patch\n",
-                    }
-                ),
-            ])
-        )
+        developer_message_content = DeveloperContent.new(developer_message)  # type: ignore
         messages.append(Message.from_role_and_content(Role.DEVELOPER, developer_message_content))
     elif args.developer_message:
-        developer_message_content = DeveloperContent.new().with_instructions(args.developer_message)
+        developer_message_content = DeveloperContent.new(args.developer_message)  # type: ignore
         messages.append(Message.from_role_and_content(Role.DEVELOPER, developer_message_content))
     else:
         developer_message_content = None
 
+    user_message_start = None
+    user_message_end = None
+    
     if args.raw:
         conversation = Conversation.from_messages(messages)
         tokens = encoding.render_conversation(conversation)
@@ -194,7 +172,7 @@ def main(args):
                 tool_name = "Search"
                 async def run_tool():
                     results = []
-                    async for msg in browser_tool.process(last_message):
+                    async for msg in browser_tool.process(last_message):  # type: ignore
                         results.append(msg)
                     return results
 
@@ -205,7 +183,7 @@ def main(args):
                 tool_name = "Python"
                 async def run_tool():
                     results = []
-                    async for msg in python_tool.process(last_message):
+                    async for msg in python_tool.process(last_message):  # type: ignore
                         results.append(msg)
                     return results
 
@@ -214,7 +192,7 @@ def main(args):
             elif last_message.recipient == "functions.apply_patch":
                 assert args.apply_patch, "Apply patch tool is not enabled"
                 tool_name = "Apply Patch"
-                text = last_message.content[0].text
+                text = last_message.content[0].text  # type: ignore
                 tool_output = None
 
                 if text.startswith("{"):
@@ -255,11 +233,11 @@ def main(args):
                 if tool_name == "Search" and not args.show_browser_results:
                     print("[Search results fed to the model]")
                 else:
-                    print(result[0].content[0].text)
+                    print(result[0].content[0].text)  # type: ignore
 
         conversation = Conversation.from_messages(messages)
         tokens = encoding.render_conversation_for_completion(
-            conversation, Role.ASSISTANT
+            conversation, Role.ASSISTANT  # type: ignore
         )
 
         if args.raw:
@@ -270,7 +248,7 @@ def main(args):
         field_created = False
         current_output_text = ""
         output_text_delta_buffer = ""
-        for predicted_token in generator.generate(tokens, encoding.stop_tokens_for_assistant_actions()):
+        for predicted_token in generator.generate(tokens, encoding.stop_tokens_for_assistant_actions()):  # type: ignore
             parser.process(predicted_token)
             if args.raw:
                 print(encoding.decode([predicted_token]), end="", flush=True)
@@ -295,7 +273,7 @@ def main(args):
             should_send_output_text_delta = True
             output_text_delta_buffer += parser.last_content_delta
             if args.browser:
-                updated_output_text, _annotations, has_partial_citations = browser_tool.normalize_citations(current_output_text + output_text_delta_buffer)
+                updated_output_text, _annotations, has_partial_citations = browser_tool.normalize_citations(current_output_text + output_text_delta_buffer)  # type: ignore
                 output_text_delta_buffer = updated_output_text[len(current_output_text):]
                 if has_partial_citations:
                     should_send_output_text_delta = False
@@ -312,12 +290,7 @@ if __name__ == "__main__":
         description="Chat example",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "checkpoint",
-        metavar="FILE",
-        type=str,
-        help="Path to the SafeTensors checkpoint",
-    )
+
     parser.add_argument(
         "-r",
         "--reasoning-effort",
@@ -375,8 +348,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--backend",
         type=str,
-        default="triton",
-        choices=["triton", "torch", "vllm", "gyro"],
+        default="gyro",
+        choices=["gyro"],
         help="Inference backend",
     )
     parser.add_argument(
@@ -391,11 +364,11 @@ if __name__ == "__main__":
     if int(os.environ.get("WORLD_SIZE", 1)) == 1:
         histfile = os.path.join(os.path.expanduser("~"), ".chat")
         try:
-            readline.read_history_file(histfile)
-            readline.set_history_length(10000)
+            readline.read_history_file(histfile)  # type: ignore
+            readline.set_history_length(10000)  # type: ignore
         except FileNotFoundError:
             pass
 
-        atexit.register(readline.write_history_file, histfile)
+        atexit.register(readline.write_history_file, histfile)  # type: ignore
 
     main(args)

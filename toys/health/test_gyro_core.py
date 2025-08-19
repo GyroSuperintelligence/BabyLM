@@ -13,11 +13,13 @@ import numpy as np
 from pathlib import Path
 from contextlib import redirect_stdout
 import io
+from typing import List, Dict, Tuple
 
 # Add project root to path for direct import
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from baby.kernel.gyro_core import GyroEngine
 from baby.constants.frozen_channels import FROZEN_CHANNELS
+from baby.constants.harmony_tokens import ALL_CONTROL_TOKENS, END
 
 # Global shared engine instance to avoid repeated initialization
 _shared_engine = None
@@ -49,12 +51,12 @@ def create_real_engine(verbose=False):
         'passive_memory': os.path.join(temp_dir, 'passive_memory.log')
     }
     
-    runtime = {'max_nudges': 6}
+    runtime = {'max_nudges': '6'}
     
     version_info = {
-        'atlas_version': 'v1.2.0',
-        'address_version': 'v1.1.0', 
-        'config_version': 'v1.0.0'
+        'atlas_version': '1.0.0',
+        'address_version': '1.0.0', 
+        'config_version': '1.0.0'
     }
     
     # Create the engine with optional output suppression
@@ -264,7 +266,7 @@ def test_slab_integrity():
         assert isinstance(engine.SLAB_MASKS, list)
         
         # Verify each slab mask is properly bounded
-        for i, mask in enumerate(engine.SLAB_MASKS):
+        for _, mask in enumerate(engine.SLAB_MASKS):
             assert isinstance(mask, (int, np.integer))
             assert mask == (mask & engine.MASK48)  # Properly masked to 48 bits
             assert mask >= 0  # Non-negative
@@ -356,7 +358,7 @@ def test_recovery_ladder():
         candidates = engine.recover_candidates(test_state, max_nudges=2)
         
         # Verify no Harmony control tokens in results
-        harmony_tokens = {200000, 200001, 200002, 200012}
+        harmony_tokens = ALL_CONTROL_TOKENS
         for token in candidates:
             assert token not in harmony_tokens, f"Harmony token {token} found in recovery candidates"
         
@@ -416,12 +418,11 @@ def test_end_sequence_state_machine():
         
         # Verify token is valid or END
         if next_token is not None:
-            if isinstance(next_token, int):
-                assert 0 <= next_token < engine.vocab_size or next_token == 200001  # Valid token or END
-                
-                # Verify Harmony control tokens are excluded
-                harmony_tokens = {200000, 200002, 200012}  # Exclude END (200001)
-                assert next_token not in harmony_tokens
+            assert 0 <= next_token < engine.vocab_size or next_token == 200001  # Valid token or END
+            
+            # Verify Harmony control tokens are excluded
+            harmony_tokens = ALL_CONTROL_TOKENS - {END}  # Exclude END (200007)
+            assert next_token not in harmony_tokens
         
         print("[OK] End-sequence state machine test passed")
     except Exception as e:
@@ -483,15 +484,15 @@ def test_inadmissible_token_rejection():
     """Test that tokens with non-monotonic micro-paths are correctly rejected as inadmissible.
     
     FEATURE: Admissibility checks correctly reject tokens violating global monotonicity.
-    Token 300 has alignment drop 26→6, making it inadmissible from start state.
+    Token 299 has alignment drop 24→20, making it inadmissible from start state.
     """
     print("Testing inadmissible token rejection...")
-    
+
     engine = create_real_engine()
     start_state = engine.start_state()
-    
-    # Token 300 is known to have a non-monotonic micro-path
-    token_id = 300
+
+    # Token 299 is known to have a non-monotonic micro-path
+    token_id = 299
     
     # Verify it's rejected by all admissibility checks
     assert not engine.is_admissible(start_state, token_id), \
@@ -772,7 +773,7 @@ def test_recovery_ladder_behavior():
     
     # Test with a valid state
     start_state = engine.start_state()
-    max_nudges = engine.runtime.get('max_nudges', 6)
+    max_nudges = int(engine.runtime.get('max_nudges', 6))
     
     try:
         candidates = engine.recover_candidates(start_state, max_nudges)
@@ -1063,7 +1064,7 @@ def test_m_cap_enforcement():
         engine.fold_egress(state, test_token)
     
     # Verify that entries exist and M-cap was enforced
-    m_entries = []
+    m_entries: List[Tuple[Tuple[int, int], Dict[str, int]]] = []
     for key, entry in engine.passive_memory_index.items():
         _, entry_token_id = key
         if entry_token_id == test_token:

@@ -9,17 +9,12 @@ from openai_harmony import (
 )
 
 from .api_server import create_api_server
+from .inference.gyro import setup_model as gyro_setup_model
+from .inference.stub import setup_model as stub_setup_model
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Responses API server")
-    parser.add_argument(
-        "--checkpoint",
-        metavar="FILE",
-        type=str,
-        help="Path to the SafeTensors checkpoint",
-        default="~/model",
-        required=False,
-    )
+
     parser.add_argument(
         "--port",
         metavar="PORT",
@@ -44,32 +39,29 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if args.inference_backend == "gyro":
-        from .inference.gyro import setup_model
-    elif args.inference_backend == "triton":
-        from .inference.triton import setup_model
-    elif args.inference_backend == "stub":
-        from .inference.stub import setup_model
-    elif args.inference_backend == "metal":
-        from .inference.metal import setup_model
-    elif args.inference_backend == "ollama":
-        from .inference.ollama import setup_model
-    elif args.inference_backend == "vllm":
-        from .inference.vllm import setup_model
-    elif args.inference_backend == "transformers":
-        from .inference.transformers import setup_model
-    else:
-        raise ValueError(f"Invalid inference backend: {args.inference_backend}")
+    if args.inference_backend not in ["gyro", "stub"]:
+        raise ValueError(f"Invalid inference backend: {args.inference_backend}. Available backends: gyro, stub")
 
     encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
 
     # Setup model with appropriate parameters based on backend
-    if args.inference_backend == "gyro":
-        infer_next_token = setup_model(
-            checkpoint=args.checkpoint,
-            encoding=encoding,
-            config_path=args.config
-        )
+    try:
+        if args.inference_backend == "gyro":
+            infer_next_token = gyro_setup_model(
+                encoding,
+                args.config
+            )
+        elif args.inference_backend == "stub":
+            infer_next_token = stub_setup_model()
+        else:
+            raise ValueError(f"Unsupported backend: {args.inference_backend}")
+    except Exception as e:
+        print(f"FATAL: Engine initialization failed: {e}")
+        print("This is typically caused by:")
+        print("  - Version mismatch between atlas and address files")
+        print("  - Missing or corrupted model files")
+        print("  - Invalid configuration")
+        print("Please check your configuration and model files.")
+        exit(1)
 
-        
     uvicorn.run(create_api_server(infer_next_token, encoding), port=args.port)

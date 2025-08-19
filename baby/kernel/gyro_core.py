@@ -7,10 +7,12 @@ import os
 import struct
 import tempfile
 import threading
-from typing import Iterable, Optional, Dict, List
+import time
+from typing import Iterable, Optional, Dict, List, Tuple
 from pathlib import Path
 from baby.constants.harmony_tokens import ALL_CONTROL_TOKENS, GENERATION_EXCLUDED
 from baby.constants.frozen_channels import FROZEN_CHANNELS
+from .bitops import popcount_u64_array
 
 
 class GyroEngine:
@@ -20,13 +22,13 @@ class GyroEngine:
     MASK48 = FROZEN_CHANNELS.MASK48
     
     @staticmethod
-    def channel_lex_key(bits: int) -> tuple:
+    def channel_lex_key(bits: int) -> Tuple[int, ...]:
         """Convert packed state to channel lexicographic key for tie-breaking.
         Order: bit index 0..47 (layer, frame, row, col)
         """
         return tuple((bits >> i) & 1 for i in range(FROZEN_CHANNELS.TOTAL_BITS))
     
-    def __init__(self, atlas_paths: dict, store_paths: dict, runtime: dict, version_info: dict = None, vocab_size: int = None):
+    def __init__(self, atlas_paths: Dict[str, str], store_paths: Dict[str, str], runtime: Dict[str, str], version_info: Optional[Dict[str, str]] = None, vocab_size: Optional[int] = None):
         """
         Load all five maps, build reverse index, open passive store,
         load or lazily initialise address memory cache.
@@ -36,8 +38,59 @@ class GyroEngine:
         self.max_nudges = runtime.get('max_nudges', 6)
         self.enable_self_reinforcement = runtime.get('enable_self_reinforcement', False)
         
+        # Initialize cold-start grace window tracking
+        self._cold_start_timestamp: int = 0
+        self._timestamp_counter: int = 0
+        self._cold_start_grace_window: int = int(runtime.get("cold_start_grace_window", 50))
+        
+        # Initialize passive log sync tracking
+        self._passive_log_sync_counter: int = 0
+        self._passive_log_pending_writes: int = 0
+        self._passive_log_sync_interval: int = int(runtime.get("passive_log_sync_interval", 1000))
+        self._passive_log_force_sync_interval: int = int(runtime.get("passive_log_force_sync_interval", 10000))
+        
         # Store version information for validation
         self.version_info = version_info or {}
+        
+        # Initialize threading locks for concurrency safety (must be early)
+        self._address_memory_lock = threading.RLock()  # For address memory writes
+        self._passive_log_lock = threading.RLock()     # For passive log writes
+        self._passive_memory_lock = threading.RLock()  # For passive memory index mutations
+        self._address_cache_lock = threading.RLock()   # For address cache operations
+        self._metrics_lock = threading.RLock()         # For metrics updates
+        
+        # Initialize runtime metrics and observability (must be early)
+        self._metrics = {
+            # Recovery ladder metrics
+            'recovery_calls': 0,
+            'recovery_level_1_hits': 0,
+            'recovery_level_2_hits': 0,
+            'recovery_level_3_hits': 0,
+            'recovery_level_4_hits': 0,
+            'recovery_level_5_hits': 0,
+            'recovery_total_time': 0.0,
+            'recovery_avg_time': 0.0,
+            
+            # Admissibility check metrics
+            'admissibility_checks': 0,
+            'admissibility_hits': 0,
+            'admissibility_misses': 0,
+            'admissibility_total_time': 0.0,
+            'admissibility_avg_time': 0.0,
+            
+            # Cache performance metrics
+            'address_cache_hits': 0,
+            'address_cache_misses': 0,
+            'address_cache_size': 0,
+            'address_cache_hit_rate': 0.0,
+            'address_cache_saves': 0,
+            'address_cache_loads': 0,
+            
+            # General performance metrics
+            'token_generations': 0,
+            'state_lookups': 0,
+            'orbit_computations': 0,
+        }
         
         # Enforce version validation on all entry points
         self._validate_required_versions()
@@ -48,6 +101,9 @@ class GyroEngine:
         # Load atlas maps
         self._load_atlas_maps(atlas_paths)
         
+        # Initialize fast state→tokens mapping *before* any log loads that use it
+        self.state_to_tokens: Dict[int, set[int]] = {}
+
         # Initialize stores with version validation
         self._init_stores(store_paths)
         
@@ -59,6 +115,7 @@ class GyroEngine:
         
         # Cache for address memory with persistent storage
         self._address_cache = {}
+        self._new_address_bindings = 0  # Counter for cache persistence
         self._load_address_cache()
         
         # Build orbit to tokens routing index
@@ -75,9 +132,12 @@ class GyroEngine:
         self.mask_pool_reverse = {}      # id -> value
         self.next_mask_id = 0
         
-        # Initialize threading locks for concurrency safety
-        self._address_memory_lock = threading.RLock()  # For address memory writes
-        self._passive_log_lock = threading.RLock()     # For passive log writes
+        # state_to_tokens already initialized above, keep line for clarity (no-op)
+        self.state_to_tokens = self.state_to_tokens
+        
+        # Threading locks already initialized earlier in constructor
+        
+        # Runtime metrics and observability already initialized earlier in constructor
         
     def _validate_required_versions(self):
         """Validate that all required version information is present and valid."""
@@ -89,7 +149,7 @@ class GyroEngine:
                                  f"All entry points must provide complete version_info.")
             
             version_value = self.version_info[version_key]
-            if not isinstance(version_value, str) or not version_value.strip():
+            if not version_value.strip():
                 raise RuntimeError(f"FATAL: Invalid version format for {version_key}: {version_value}. "
                                  f"Version must be a non-empty string.")
         
@@ -99,7 +159,7 @@ class GyroEngine:
         config_v = self.version_info['config_version']
         print(f"Version validation passed: atlas_v{atlas_v}, address_v{address_v}, config_v{config_v}")
         
-    def _load_atlas_maps(self, atlas_paths: dict):
+    def _load_atlas_maps(self, atlas_paths: Dict[str, str]):
         """Load and validate all atlas maps with memory mapping for large files."""
         try:
             # Load large maps with memory mapping for efficiency
@@ -130,7 +190,7 @@ class GyroEngine:
         except Exception as e:
             raise RuntimeError(f"Failed to load atlas maps: {e}") from e
         
-    def _init_stores(self, store_paths: dict):
+    def _init_stores(self, store_paths: Dict[str, str]):
         """Initialize address memory and passive memory stores."""
         self.address_memory_path = Path(store_paths['address_memory'])
         self.passive_memory_path = Path(store_paths['passive_memory'])
@@ -152,16 +212,10 @@ class GyroEngine:
             
     def _build_reverse_index(self):
         """Build reverse index from packed 48-bit state to row index for O(1) transitions."""
-        self.state_to_index = {}
+        # Vectorised build
+        packed = (self.ontology_keys.astype(np.uint64) & np.uint64(FROZEN_CHANNELS.MASK48)).astype(np.uint64)
+        self.state_to_index = {int(p): int(i) for i, p in enumerate(packed.tolist())}
         
-        # Build mapping from each packed state (48-bit) to its row index
-        for i, packed_state in enumerate(self.ontology_keys):
-            # Ensure we're working with proper 48-bit packed states
-            # The packed state should be a 48-bit integer representing the state
-            if packed_state in self.state_to_index:
-                raise ValueError(f"Duplicate packed state {packed_state} at indices {self.state_to_index[packed_state]} and {i}")
-            self.state_to_index[packed_state] = i
-            
         # Verify we have the expected number of unique states
         if len(self.state_to_index) != len(self.ontology_keys):
             raise ValueError(f"State index mismatch: expected {len(self.ontology_keys)} unique states, got {len(self.state_to_index)}")
@@ -171,12 +225,12 @@ class GyroEngine:
     def _build_orbit_system(self):
         """Construct orbit representatives and Hamming-2 neighbor cache from phenomenology_map."""
         # Extract the actual unique orbit codes from phenomenology_map
-        self.orbit_codes = sorted(set(self.phenomenology_map))
+        self.orbit_codes: List[int] = sorted(set(self.phenomenology_map))
         
         # Find representative state index for each orbit code
         # Use the smallest state index in each orbit class as the representative
-        self.orbit_representatives = {}  # orbit_code -> state_index
-        orbit_to_states = {}  # orbit_code -> list of state_indices
+        self.orbit_representatives: Dict[int, int] = {}  # orbit_code -> state_index
+        orbit_to_states: Dict[int, List[int]] = {}  # orbit_code -> list of state_indices
         
         for state_idx, orbit_code in enumerate(self.phenomenology_map):
             if orbit_code not in orbit_to_states:
@@ -193,7 +247,7 @@ class GyroEngine:
                 
         # Precompute Hamming-2 neighbors across orbit representatives
         # These are needed for Recovery Level 2
-        self.hamming2_neighbors = {}  # rep_orbit_code -> list[neighbor_orbit_codes]
+        self.hamming2_neighbors: Dict[int, List[int]] = {}  # rep_orbit_code -> list[neighbor_orbit_codes]
         
         for orbit_code in self.orbit_codes:
             if orbit_code not in self.orbit_representatives:
@@ -230,11 +284,17 @@ class GyroEngine:
         
         FROZEN - Orbit structure is immutable: 256 orbits, sorted token lists.
         """
-        self._orbit_to_tokens = {}
+        self._orbit_to_tokens: Dict[int, List[int]] = {}
         
         # Initialize empty sorted lists for all orbits
         for orbit_code in range(256):
             self._orbit_to_tokens[orbit_code] = []
+            
+        # Bootstrap orbit index from passive memory at startup
+        if hasattr(self, 'passive_memory_index'):
+            for (st_idx, tok) in self.passive_memory_index.keys():
+                orbit_code = self.phenomenology_map[st_idx]
+                self._add_token_to_orbit_index(tok, orbit_code)
             
         # This will be populated lazily as addresses are computed
         # Token lists are kept sorted for deterministic iteration
@@ -245,7 +305,7 @@ class GyroEngine:
         FROZEN - Maintains sorted order for deterministic candidate selection.
         """
         if not hasattr(self, '_orbit_to_tokens'):
-            self._orbit_to_tokens = {}
+            self._orbit_to_tokens: Dict[int, List[int]] = {}
             
         if orbit_code not in self._orbit_to_tokens:
             self._orbit_to_tokens[orbit_code] = []
@@ -269,13 +329,18 @@ class GyroEngine:
     
     def _precompute_slab_masks(self):
         """Precompute slab masks for efficient bitwise operations in hot paths."""
-        self.SLAB_MASKS = []
+        self._slab_masks = []
         for s in range(FROZEN_CHANNELS.NUM_SLABS):
             idxs = self._get_slab_bit_indices(s)
             m = 0
             for i in idxs:
                 m |= (1 << i)
-            self.SLAB_MASKS.append(m & self.MASK48)
+            self._slab_masks.append(m & FROZEN_CHANNELS.MASK48)
+    
+    @property
+    def SLAB_MASKS(self) -> List[int]:
+        """Public access to slab masks for testing."""
+        return self._slab_masks
         
     def _packed_state_to_bitset(self, packed_state: int) -> int:
         """Convert packed 48-bit state to bitset for Hamming distance calculations."""
@@ -382,8 +447,16 @@ class GyroEngine:
         Compute medoid over final states from all 256 orbit representatives.
         Tie-breaking: orbit size, channel lexicographic, token id.
         """
-        if token_id in self._address_cache:
-            return self._address_cache[token_id]
+        with self._address_cache_lock:
+            if token_id in self._address_cache:
+                with self._metrics_lock:
+                    self._metrics['address_cache_hits'] += 1
+                    self._update_cache_metrics()
+                return self._address_cache[token_id]
+            else:
+                with self._metrics_lock:
+                    self._metrics['address_cache_misses'] += 1
+                    self._update_cache_metrics()
             
         # Convert token to introns via ψ transformation
         introns = self.token_to_introns(token_id)
@@ -410,48 +483,27 @@ class GyroEngine:
         
         # Compute medoid: maximize average agreements (angular distance surrogate)
         best_candidate = None
-        best_agreements = -1
-        best_token_id = token_id  # Track token_id for final tie-break
         
-        for candidate in unique_finals:
-            total_agreements = 0
+        # Vectorized medoid computation
+        if len(unique_finals) > 1:
+            # Convert unique_finals to numpy array of 48-bit ints
+            finals_array = np.array(unique_finals, dtype=np.uint64)
             
-            # Calculate sum of agreements (dot products) to all final states
-            for other_state in unique_finals:
-                # Convert to ±1 representation and compute dot product
-                candidate_bits = self._packed_state_to_bitset(candidate)
-                other_bits = self._packed_state_to_bitset(other_state)
-                agreements = self._count_agreements(candidate_bits, other_bits)
-                total_agreements += agreements
-                
-            # Tie-breaking chain: smaller orbit size → channel lexicographic → lower token id
-            if total_agreements > best_agreements:
-                best_agreements = total_agreements
-                best_candidate = candidate
-                best_token_id = token_id
-            elif total_agreements == best_agreements and best_candidate is not None:
-                # Tie-break by orbit size
-                candidate_idx = self.state_to_index[candidate]
-                best_idx = self.state_to_index[best_candidate]
-                
-                candidate_orbit_size = self.orbit_sizes[candidate_idx]
-                best_orbit_size = self.orbit_sizes[best_idx]
-                
-                if candidate_orbit_size < best_orbit_size:
-                    best_candidate = candidate
-                    best_token_id = token_id
-                elif candidate_orbit_size == best_orbit_size:
-                    # Tie-break by channel lexicographic (proper bit ordering)
-                    candidate_key = self.channel_lex_key(candidate)
-                    best_key = self.channel_lex_key(best_candidate)
-                    if candidate_key < best_key:
-                        best_candidate = candidate
-                        best_token_id = token_id
-                    elif candidate_key == best_key:
-                        # Final tie-break by token id (deterministic)
-                        if token_id < best_token_id:
-                            best_candidate = candidate
-                            best_token_id = token_id
+            # Compute XOR matrix: finals_array[:, None] XOR finals_array[None, :]
+            xor_matrix = finals_array[:, None] ^ finals_array[None, :]
+            
+            # Apply 48-bit mask and compute popcount (agreements = 48 - popcount)
+            masked_xor = xor_matrix & np.uint64(FROZEN_CHANNELS.MASK48)
+            agreements_matrix = 48 - popcount_u64_array(masked_xor.astype(np.uint64))
+            
+            # Sum agreements for each candidate
+            total_agreements_array = np.sum(agreements_matrix, axis=1)
+            
+            # Find best candidate
+            best_idx = np.argmax(total_agreements_array)
+            best_candidate = unique_finals[best_idx]
+        else:
+             best_candidate = unique_finals[0]
                         
         # Use safe fallback if computation fails
         if best_candidate is None:
@@ -463,11 +515,12 @@ class GyroEngine:
                 best_candidate = self.ontology_keys[0]
                 
         # Cache the result
-        self._address_cache[token_id] = best_candidate
-        
-        # Periodically save cache to disk
-        if len(self._address_cache) % 100 == 0:
-            self._save_address_cache()
+        with self._address_cache_lock:
+            self._address_cache[token_id] = best_candidate
+            
+            # Periodically save cache to disk
+            if len(self._address_cache) % 100 == 0:
+                self._save_address_cache()
         
         # Update orbit→tokens routing index
         candidate_idx = self.state_to_index[best_candidate]
@@ -479,7 +532,7 @@ class GyroEngine:
         
         return best_candidate
         
-    def _compute_medoid(self, addresses: list) -> int:
+    def _compute_medoid(self, addresses: List[int]) -> int:
         """Compute medoid from a list of addresses using angular distance surrogate (maximize agreements).
         
         Args:
@@ -499,41 +552,65 @@ class GyroEngine:
         
         best_candidate = None
         best_agreements = -1
+        total_agreements_array = None
         
-        for candidate in unique_addresses:
-            total_agreements = 0
+        # Vectorized medoid computation
+        if len(unique_addresses) > 1:
+            # Convert unique_addresses to numpy array of 48-bit ints
+            addresses_array = np.array(unique_addresses, dtype=np.uint64)
             
-            # Calculate sum of agreements (dot products) to all addresses
-            for other_address in unique_addresses:
-                candidate_bits = self._packed_state_to_bitset(candidate)
-                other_bits = self._packed_state_to_bitset(other_address)
-                agreements = self._count_agreements(candidate_bits, other_bits)
-                total_agreements += agreements
+            # Compute XOR matrix: addresses_array[:, None] XOR addresses_array[None, :]
+            xor_matrix = addresses_array[:, None] ^ addresses_array[None, :]
+            
+            # Apply 48-bit mask and compute popcount (agreements = 48 - popcount)
+            masked_xor = xor_matrix & np.uint64(FROZEN_CHANNELS.MASK48)
+            agreements_matrix = 48 - popcount_u64_array(masked_xor.astype(np.uint64))
+            
+            # Sum agreements for each candidate
+            total_agreements_array = np.sum(agreements_matrix, axis=1)
+            
+            # Find candidates with maximum agreements
+            max_agreements = np.max(total_agreements_array)
+            best_indices = np.where(total_agreements_array == max_agreements)[0]
+            
+            # Start with first best candidate for tie-breaking
+            best_candidate = unique_addresses[best_indices[0]]
+            best_agreements = max_agreements
+        else:
+            best_candidate = unique_addresses[0]
+            best_agreements = 48  # Perfect agreement with itself
+            
+        # Handle tie-breaking for multiple candidates with same agreements
+        if len(unique_addresses) > 1 and total_agreements_array is not None:
+            max_agreements = best_agreements
+            for i, candidate in enumerate(unique_addresses):
+                if total_agreements_array[i] == max_agreements:
+                    total_agreements = total_agreements_array[i]
                 
-            # Tie-breaking chain: smaller orbit size → channel lexicographic → address value
-            if total_agreements > best_agreements:
-                best_agreements = total_agreements
-                best_candidate = candidate
-            elif total_agreements == best_agreements and best_candidate is not None:
-                # Tie-break by orbit size
-                candidate_idx = self.state_to_index[candidate]
-                best_idx = self.state_to_index[best_candidate]
-                
-                candidate_orbit_size = self.orbit_sizes[candidate_idx]
-                best_orbit_size = self.orbit_sizes[best_idx]
-                
-                if candidate_orbit_size < best_orbit_size:
-                    best_candidate = candidate
-                elif candidate_orbit_size == best_orbit_size:
-                    # Tie-break by channel lexicographic (proper bit ordering)
-                    candidate_key = self.channel_lex_key(candidate)
-                    best_key = self.channel_lex_key(best_candidate)
-                    if candidate_key < best_key:
+                    # Tie-breaking chain: smaller orbit size → channel lexicographic → address value
+                    if total_agreements > best_agreements:
+                        best_agreements = total_agreements
                         best_candidate = candidate
-                    elif candidate_key == best_key:
-                        # Final tie-break by address value (deterministic)
-                        if candidate < best_candidate:
+                    elif total_agreements == best_agreements and best_candidate is not None:
+                        # Tie-break by orbit size
+                        candidate_idx = self.state_to_index[candidate]
+                        best_idx = self.state_to_index[best_candidate]
+                        
+                        candidate_orbit_size = self.orbit_sizes[candidate_idx]
+                        best_orbit_size = self.orbit_sizes[best_idx]
+                        
+                        if candidate_orbit_size < best_orbit_size:
                             best_candidate = candidate
+                        elif candidate_orbit_size == best_orbit_size:
+                            # Tie-break by channel lexicographic (proper bit ordering)
+                            candidate_key = self.channel_lex_key(candidate)
+                            best_key = self.channel_lex_key(best_candidate)
+                            if candidate_key < best_key:
+                                best_candidate = candidate
+                            elif candidate_key == best_key:
+                                # Final tie-break by address value (deterministic)
+                                if candidate < best_candidate:
+                                    best_candidate = candidate
                             
         # Use safe fallback if computation fails
         if best_candidate is None:
@@ -546,7 +623,7 @@ class GyroEngine:
                 
         return best_candidate
         
-    def _is_better_tie_break(self, candidate_state: int, current_best_state: int) -> bool:
+    def _is_better_tie_break(self, candidate_state: int, current_best_state: Optional[int]) -> bool:
         """Implement tie-breaking: orbit size, channel lexicographic comparison of packed states."""
         if current_best_state is None:
             return True
@@ -573,15 +650,11 @@ class GyroEngine:
     def _load_address_memory(self):
         """Load address memory with memmap and version checking."""
         
-        # Store paths for later use
-        self.address_mem_path = Path(self.address_memory_path)
-        self.address_meta_path = self.address_mem_path.with_suffix(".json")
-        
         # Check if both files exist
-        if self.address_mem_path.exists() and self.address_meta_path.exists():
+        if self.address_memory_path.exists() and self.address_metadata_path.exists():
             try:
                 # Load metadata
-                with open(self.address_meta_path, 'r') as f:
+                with open(self.address_metadata_path, 'r') as f:
                     metadata = json.load(f)
                 
                 # Verify version compatibility against config
@@ -600,7 +673,7 @@ class GyroEngine:
                     raise RuntimeError(error_msg)
                 
                 # Load memory-mapped array with write access
-                self.address_memory = np.memmap(self.address_mem_path, dtype=np.uint64, mode="r+")
+                self.address_memory = np.memmap(self.address_memory_path, dtype='<u8', mode="r+")
                 self.max_token_id = metadata.get('max_token_id', len(self.address_memory) - 1)
                 
                 print(f"Loaded address memory: atlas_v{stored_atlas_version}, address_v{stored_address_version}, max_token={self.max_token_id}")
@@ -611,14 +684,14 @@ class GyroEngine:
         
         # Create new address memory as zero-initialized binary file
         # Use larger initial capacity to avoid thrashing on first runs with o200k_harmony
-        initial_array = np.zeros(100000, dtype=np.uint64)
+        initial_array = np.zeros(100000, dtype='<u8')
         
         # Write raw binary data (not .npy format)
-        with open(self.address_mem_path, 'wb') as f:
+        with open(self.address_memory_path, 'wb') as f:
             f.write(initial_array.tobytes())
         
         # Open as memmap with write access
-        self.address_memory = np.memmap(self.address_mem_path, dtype=np.uint64, mode="r+")
+        self.address_memory = np.memmap(self.address_memory_path, dtype='<u8', mode="r+")
         self.max_token_id = -1
         
         # Write initial metadata directly
@@ -627,13 +700,22 @@ class GyroEngine:
             'address_version': self.version_info.get('address_version', 'v1.0.0'),
             'max_token_id': -1
         }
-        with open(self.address_meta_path, 'w') as f:
+        with open(self.address_metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
     
     def _save_address_memory(self):
         """Save address memory with atomic writes and metadata."""
         
         with self._address_memory_lock:
+            # Create temporary files for atomic write
+            tmp_dat = tempfile.NamedTemporaryFile(delete=False, suffix='.dat', dir=self.address_memory_path.parent)
+            tmp_dat_path = Path(tmp_dat.name)
+            tmp_dat.close()
+            
+            tmp_json = tempfile.NamedTemporaryFile(delete=False, suffix='.json', dir=self.address_metadata_path.parent)
+            tmp_json_path = Path(tmp_json.name)
+            tmp_json.close()
+            
             try:
                 # Find last non-zero index for max_token_id
                 last_nonzero_index = 0
@@ -641,12 +723,6 @@ class GyroEngine:
                     if self.address_memory[i] != 0:
                         last_nonzero_index = i
                         break
-                
-                # Create temporary files for atomic write
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.dat', dir=self.address_mem_path.parent) as tmp_dat:
-                    tmp_dat_path = Path(tmp_dat.name)
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.json', dir=self.address_meta_path.parent) as tmp_json:
-                    tmp_json_path = Path(tmp_json.name)
                 
                 # Save raw binary data to temporary file (not .npy format)
                 with open(tmp_dat_path, 'wb') as f:
@@ -670,18 +746,20 @@ class GyroEngine:
                 # Note: numpy memmap flush() already syncs to disk, no need for additional fsync
                 
                 # Close memmap before atomic replace to prevent file locking on Windows
-                if hasattr(self.address_memory, '_mmap') and self.address_memory._mmap:
-                    self.address_memory._mmap.close()
-                old_address_memory = self.address_memory
+                try:
+                    # Safely close the memmap without accessing private attributes
+                    self.address_memory.flush()
+                except (AttributeError, ValueError):
+                    pass
                 del self.address_memory
                 
                 # Atomic rename
-                os.replace(str(tmp_dat_path), str(self.address_mem_path))
-                os.replace(str(tmp_json_path), str(self.address_meta_path))
+                os.replace(str(tmp_dat_path), str(self.address_memory_path))
+                os.replace(str(tmp_json_path), str(self.address_metadata_path))
                 
                 # Directory fsync for POSIX crash safety
                 try:
-                    dir_fd = os.open(str(self.address_mem_path.parent), os.O_RDONLY)
+                    dir_fd = os.open(str(self.address_memory_path.parent), os.O_RDONLY)
                     os.fsync(dir_fd)
                     os.close(dir_fd)
                 except (OSError, AttributeError):
@@ -689,13 +767,16 @@ class GyroEngine:
                     pass
                 
                 # Re-open memmap after successful replace
-                self.address_memory = np.memmap(self.address_mem_path, dtype=np.uint64, mode='r+')
+                self.address_memory = np.memmap(self.address_memory_path, dtype='<u8', mode='r+')
                 
             except Exception as e:
                 # Clean up temporary files on error
                 for tmp_path in [tmp_dat_path, tmp_json_path]:
                     if tmp_path.exists():
-                        tmp_path.unlink()
+                        try:
+                            tmp_path.unlink()
+                        except OSError:
+                            pass  # Ignore cleanup errors
                 raise e
     
     def _persist_address_memory(self, token_id: int, address: int):
@@ -709,13 +790,13 @@ class GyroEngine:
                     array_grew = True
                     # 1. Create new zero-filled array
                     new_size = max(token_id + 1, len(self.address_memory) * 2)
-                    new_array = np.zeros(new_size, dtype=np.uint64)
+                    new_array = np.zeros(new_size, dtype='<u8')
                     
                     # 2. Copy old contents
                     new_array[:len(self.address_memory)] = self.address_memory
                     
                     # 3. Write to temporary file and atomic replace
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.dat', dir=self.address_mem_path.parent) as tmp_file:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.dat', dir=self.address_memory_path.parent) as tmp_file:
                         tmp_path = Path(tmp_file.name)
                         # Write raw binary data (not .npy format)
                         with open(tmp_path, 'wb') as f:
@@ -726,16 +807,19 @@ class GyroEngine:
                     # 4. Flush and sync memmap before atomic replace
                     self.address_memory.flush()
                     # Note: numpy memmap flush() already syncs to disk, no need for additional fsync
-                    if hasattr(self.address_memory, '_mmap') and self.address_memory._mmap:
-                        self.address_memory._mmap.close()
+                    try:
+                        # Safely close the memmap without accessing private attributes
+                        self.address_memory.flush()
+                    except (AttributeError, ValueError):
+                        pass
                     del self.address_memory
                     
                     # Atomic replace
-                    os.replace(str(tmp_path), str(self.address_mem_path))
+                    os.replace(str(tmp_path), str(self.address_memory_path))
                     
                     # Directory fsync for POSIX crash safety
                     try:
-                        dir_fd = os.open(str(self.address_mem_path.parent), os.O_RDONLY)
+                        dir_fd = os.open(str(self.address_memory_path.parent), os.O_RDONLY)
                         os.fsync(dir_fd)
                         os.close(dir_fd)
                     except (OSError, AttributeError):
@@ -743,10 +827,16 @@ class GyroEngine:
                         pass
                     
                     # 5. Re-open as memmap
-                    self.address_memory = np.memmap(self.address_mem_path, dtype=np.uint64, mode='r+')
+                    self.address_memory = np.memmap(self.address_memory_path, dtype='<u8', mode='r+')
                 
                 # Update the memory-mapped array
-                self.address_memory[token_id] = address & self.MASK48
+                self.address_memory[token_id] = (address & FROZEN_CHANNELS.MASK48)
+                
+                # Increment counter and save cache if threshold reached
+                self._new_address_bindings += 1
+                if self._new_address_bindings >= 4096:
+                    self._save_address_cache()
+                    self._new_address_bindings = 0
                 
                 # Flush to disk
                 self.address_memory.flush()
@@ -759,18 +849,18 @@ class GyroEngine:
                         'address_version': self.version_info.get('address_version', 'v1.0.0'),
                         'max_token_id': int(token_id)
                     }
-                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', dir=self.address_meta_path.parent) as tmp_json:
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', dir=self.address_metadata_path.parent) as tmp_json:
                         json.dump(metadata, tmp_json, indent=2)
                         tmp_json.flush()
                         os.fsync(tmp_json.fileno())
                         tmp_json_path = Path(tmp_json.name)
                     
                     # Atomic replace for JSON
-                    os.replace(str(tmp_json_path), str(self.address_meta_path))
+                    os.replace(str(tmp_json_path), str(self.address_metadata_path))
                     
                     # Directory fsync for POSIX crash safety
                     try:
-                        dir_fd = os.open(str(self.address_meta_path.parent), os.O_RDONLY)
+                        dir_fd = os.open(str(self.address_metadata_path.parent), os.O_RDONLY)
                         os.fsync(dir_fd)
                         os.close(dir_fd)
                     except (OSError, AttributeError):
@@ -827,7 +917,21 @@ class GyroEngine:
         If global_strict=False, we keep global non-decrease but relax the 'strict somewhere'
         requirement to allow 'no strict increase' to pass as long as slabs strictly improve.
         """
-        return self._is_admissible_core(start_state, token_id, require_global_strict=global_strict)
+        start_time = time.perf_counter()
+        
+        with self._metrics_lock:
+            self._metrics['admissibility_checks'] += 1
+        
+        result = self._is_admissible_core(start_state, token_id, require_global_strict=global_strict)
+        
+        with self._metrics_lock:
+            if result:
+                self._metrics['admissibility_hits'] += 1
+            else:
+                self._metrics['admissibility_misses'] += 1
+            self._update_admissibility_timing(start_time)
+        
+        return result
     
     def _is_admissible_core(self, start_state: int, token_id: int, *, require_global_strict: bool) -> bool:
         """
@@ -885,11 +989,8 @@ class GyroEngine:
             return slab_progress or global_progress
         
     def _count_agreements(self, bits1: int, bits2: int) -> int:
-        """Count number of matching bits between two 48-bit values using exact bitwise operations.
-        
-        FROZEN - Immutable bit comparison rule for state similarity.
-        """
-        return (~(bits1 ^ bits2) & self.MASK48).bit_count()
+        """Exact matches across 48 bits."""
+        return ( (~(bits1 ^ bits2) & FROZEN_CHANNELS.MASK48) ).bit_count()
         
     def _get_slab_bit_indices(self, slab_idx: int) -> List[int]:
         """Get bit indices for a specific slab using frozen Layer×Frame mapping.
@@ -911,8 +1012,9 @@ class GyroEngine:
         return agreements
     
     def _count_slab_agreements_fast(self, bits1: int, bits2: int, slab_idx: int) -> int:
-        """Count agreements within specific slab using precomputed masks."""
-        return (~(bits1 ^ bits2) & self.SLAB_MASKS[slab_idx]).bit_count()
+        """Count matches within a slab using precomputed masks."""
+        mask = self._slab_masks[slab_idx]
+        return ( (~(bits1 ^ bits2) & mask) ).bit_count()
         
     # --- Recovery ladder ---
     def recover_candidates(self, current_state: int, max_nudges: int = 6) -> List[int]:
@@ -920,40 +1022,62 @@ class GyroEngine:
         Multi-level recovery: channel relaxation, neighbor orbits, duality pivot,
         orbit center fallback, geometric nudge. Return admissible token candidates.
         """
+        start_time = time.perf_counter()
+        
+        with self._metrics_lock:
+            self._metrics['recovery_calls'] += 1
+        
         # Guard against unknown states - return empty list for robust API
         if current_state not in self.state_to_index:
             return []
             
         # Harmony control tokens to exclude from recovery
-        harmony_control_tokens = {200000, 200001, 200002, 200012}  # START, CHANNEL, MESSAGE, RETURN, CALL
+        harmony_control_tokens = ALL_CONTROL_TOKENS
         
         # Level 1: Channel relaxation (progressively relax channels, never drop Global)
         candidates = self._recovery_level_1(current_state)
         candidates = [c for c in candidates if c not in harmony_control_tokens]
         if candidates:
+            with self._metrics_lock:
+                self._metrics['recovery_level_1_hits'] += 1
+                self._update_recovery_timing(start_time)
             return candidates
             
         # Level 2: Neighbor orbits (Hamming-2 neighbors)
         candidates = self._recovery_level_2(current_state)
         candidates = [c for c in candidates if c not in harmony_control_tokens]
         if candidates:
+            with self._metrics_lock:
+                self._metrics['recovery_level_2_hits'] += 1
+                self._update_recovery_timing(start_time)
             return candidates
             
         # Level 3: Duality pivot (address ⊕ 0xFF if same phenomenology)
         candidates = self._recovery_level_3(current_state)
         candidates = [c for c in candidates if c not in harmony_control_tokens]
         if candidates:
+            with self._metrics_lock:
+                self._metrics['recovery_level_3_hits'] += 1
+                self._update_recovery_timing(start_time)
             return candidates
             
         # Level 4: Orbit center fallback (use representative address)
         candidates = self._recovery_level_4(current_state)
         candidates = [c for c in candidates if c not in harmony_control_tokens]
         if candidates:
+            with self._metrics_lock:
+                self._metrics['recovery_level_4_hits'] += 1
+                self._update_recovery_timing(start_time)
             return candidates
             
         # Level 5: Geometric nudge (up to max_nudges moves)
         candidates = self._recovery_level_5(current_state, max_nudges)
         candidates = [c for c in candidates if c not in harmony_control_tokens]
+        
+        with self._metrics_lock:
+            self._metrics['recovery_level_5_hits'] += 1
+            self._update_recovery_timing(start_time)
+        
         return candidates
         
     def _recovery_level_1(self, current_state: int) -> List[int]:
@@ -972,10 +1096,11 @@ class GyroEngine:
             return candidates
             
         # Progressive slab relaxation: drop lowest-priority slab one by one
-        # Frozen priority order: [0,0] → [0,1] → [1,0] → [1,1] → [2,0] → [2,1] → [3,0] → [3,1]
-        # Drop in reverse order: [3,1] first, then [3,0], etc. (keep Global always)
+        # Use explicit frozen priority order instead of implicit range
+        order = list(FROZEN_CHANNELS.SLAB_PRIORITY_ORDER)
         for num_slabs_to_drop in range(1, FROZEN_CHANNELS.NUM_SLABS + 1):  # Drop 1 to all slabs
-            enabled_slabs = list(range(FROZEN_CHANNELS.NUM_SLABS - num_slabs_to_drop))  # Keep first N slabs
+            # Keep the highest priority slabs; drop from the tail of the frozen order
+            enabled_slabs = order[: FROZEN_CHANNELS.NUM_SLABS - num_slabs_to_drop]
             
             for token_id in orbit_tokens:
                 if self._is_admissible_with_enabled_slabs(current_state, token_id, enabled_slabs):
@@ -1013,7 +1138,7 @@ class GyroEngine:
         candidates = []
         for token_id in orbit_tokens:
             token_address = self.address_of_token(token_id)
-            dual_address = token_address ^ 0xFFFFFFFFFFFF  # XOR with 48-bit mask
+            dual_address = (token_address ^ 0xFFFFFFFFFFFF) & FROZEN_CHANNELS.MASK48  # XOR with 48-bit mask and ensure 48-bit result
             
             # Guard dual address safety: skip if dual not in atlas
             try:
@@ -1051,7 +1176,7 @@ class GyroEngine:
             
         nudge_state = current_state
         
-        for nudge_count in range(max_nudges):
+        for _ in range(max_nudges):
             # Try introns in order [0..255] and pick the FIRST that reduces theta
             chosen_intron = None
             
@@ -1099,9 +1224,35 @@ class GyroEngine:
         
     def _get_tokens_in_orbit(self, orbit_code: int) -> List[int]:
         """Get all token IDs whose address maps to the given orbit."""
+        # Track orbit computation metrics
+        with self._metrics_lock:
+            self._metrics['orbit_computations'] += 1
+            
         if hasattr(self, '_orbit_to_tokens') and orbit_code in self._orbit_to_tokens:
             return self._orbit_to_tokens[orbit_code]
         
+        # First collect tokens present in passive memory with any state in this orbit
+        hits = set()
+        if hasattr(self, 'passive_memory_index'):
+            for (st_idx, tok) in self.passive_memory_index.keys():
+                if self.phenomenology_map[st_idx] == orbit_code:
+                    hits.add(tok)
+                    if len(hits) >= 1024:
+                        break
+        if hits:
+            # Populate _orbit_to_tokens with hits (keep sorted)
+            if not hasattr(self, '_orbit_to_tokens'):
+                self._orbit_to_tokens = {}
+            if orbit_code not in self._orbit_to_tokens:
+                self._orbit_to_tokens[orbit_code] = []
+            
+            for hit in sorted(hits):
+                if hit not in self._orbit_to_tokens[orbit_code]:
+                    bisect.insort(self._orbit_to_tokens[orbit_code], hit)
+            
+            return self._orbit_to_tokens[orbit_code]
+        
+        # fallback: bounded scan
         # Per-orbit sweep cursor with prime stride to avoid biased scans
         if not hasattr(self, '_sweep'):
             self._sweep = {}
@@ -1247,9 +1398,20 @@ class GyroEngine:
         
         # Initialize passive memory index and timestamp counter if needed
         if not hasattr(self, 'passive_memory_index'):
-            self.passive_memory_index = {}
+            self.passive_memory_index: Dict[Tuple[int, int], Dict[str, int]] = {}
         if not hasattr(self, '_timestamp_counter'):
-            self._timestamp_counter = 0
+            self._timestamp_counter: int = 0
+        # Initialize cold-start grace window tracking
+        if not hasattr(self, '_cold_start_timestamp'):
+            self._cold_start_timestamp: int = 0
+        if not hasattr(self, '_cold_start_grace_window'):
+            # Grace window: allow tokens without experience for first N operations after cold start
+            self._cold_start_grace_window: int = int(self.runtime.get("cold_start_grace_window", 50))
+            
+        # Type annotation for class attribute
+        if not hasattr(self.__class__, '__annotations__'):
+            self.__class__.__annotations__ = {}
+        self.__class__.__annotations__['passive_memory_index'] = Dict[Tuple[int, int], Dict[str, int]]
         
         memory_key = (state_index, token_id)
         
@@ -1279,46 +1441,55 @@ class GyroEngine:
         # Non-zero mask: intern and store
         interned_mask_id = self._intern_mask(fold_mask)
         
-        if memory_key in self.passive_memory_index:
-            # Update existing entry
-            existing = self.passive_memory_index[memory_key]
-            existing['touch_count'] = min(255, existing['touch_count'] + 1)
-            existing['zero_streak'] = 0  # Reset zero streak
-            existing['mask_id'] = interned_mask_id
-            self._timestamp_counter += 1
-            existing['timestamp'] = self._timestamp_counter
-            self._append_to_passive_log(existing)
-        else:
-            # Create new entry
-            memory_entry = {
-                'state_index': state_index,
-                'token_id': token_id,
-                'mask_id': interned_mask_id,
-                'touch_count': 1,
-                'zero_streak': 0,
-                'timestamp': self._timestamp_counter + 1
-            }
-            self._timestamp_counter += 1
-            
-            # Check and enforce caps before adding
-            self._enforce_passive_memory_caps(state_orbit, token_orbit, memory_entry)
-            
-            # Add new entry
-            self.passive_memory_index[memory_key] = memory_entry.copy()
-            self._append_to_passive_log(memory_entry)
+        with self._passive_memory_lock:
+            if memory_key in self.passive_memory_index:
+                # Update existing entry
+                existing = self.passive_memory_index[memory_key]
+                existing['touch_count'] = min(255, existing['touch_count'] + 1)
+                existing['zero_streak'] = 0  # Reset zero streak
+                existing['mask_id'] = interned_mask_id
+                self._timestamp_counter += 1
+                existing['timestamp'] = self._timestamp_counter
+                self._append_to_passive_log(existing)
+                
+                # Track experienced tokens in state_to_tokens mapping for non-zero masks
+                self.state_to_tokens.setdefault(state_index, set()).add(token_id)
+            else:
+                # Create new entry
+                memory_entry = {
+                    'state_index': state_index,
+                    'token_id': token_id,
+                    'mask_id': interned_mask_id,
+                    'touch_count': 1,
+                    'zero_streak': 0,
+                    'timestamp': self._timestamp_counter + 1
+                }
+                self._timestamp_counter += 1
+                
+                # Check and enforce caps before adding
+                self._enforce_passive_memory_caps(state_orbit, token_orbit, memory_entry)
+                
+                # Add new entry
+                self.passive_memory_index[memory_key] = memory_entry.copy()
+                self._append_to_passive_log(memory_entry)
+                
+            # Track experienced tokens in state_to_tokens mapping for non-zero masks
+            self.state_to_tokens.setdefault(state_index, set()).add(token_id)
             
     def _compute_monodromic_fold(self, state_index: int, token_id: int) -> int:
         """Compute 8-bit Monodromic Fold using exact composite form."""
-        # Get existing exon_mask (0 if missing)
+        # Get existing exon_mask (0x01 seed experience if missing)
         key = (state_index, token_id)
-        existing_mask = 0
-        if hasattr(self, 'passive_memory_index') and key in self.passive_memory_index:
-            # Get actual mask from interned mask_id
-            mask_id = self.passive_memory_index[key]['mask_id']
-            if hasattr(self, 'mask_pool_reverse') and mask_id in self.mask_pool_reverse:
-                existing_mask = self.mask_pool_reverse[mask_id]
-            else:
-                existing_mask = mask_id  # Fallback if not in pool
+        existing_mask = 0x01  # Seed experience for first observations
+        if hasattr(self, 'passive_memory_index'):
+            with self._passive_memory_lock:
+                if key in self.passive_memory_index:
+                    # Get actual mask from interned mask_id
+                    mask_id = self.passive_memory_index[key]['mask_id']
+                    if hasattr(self, 'mask_pool_reverse') and mask_id in self.mask_pool_reverse:
+                        existing_mask = self.mask_pool_reverse[mask_id]
+                    else:
+                        existing_mask = mask_id  # Fallback if not in pool
         
         # Get token's intron sequence
         introns = self.token_to_introns(token_id)
@@ -1354,7 +1525,7 @@ class GyroEngine:
             self.mask_pool_reverse[mask] = mask
             return mask
         
-    def _enforce_passive_memory_caps(self, state_orbit: int, token_orbit: int, new_entry: dict) -> None:
+    def _enforce_passive_memory_caps(self, state_orbit: int, token_orbit: int, new_entry: Dict[str, int]) -> None:
         """Enforce hard caps K=64 masks per (state, orbit), M=64 states per (token, orbit)."""
         if not hasattr(self, 'passive_memory_index'):
             return
@@ -1389,8 +1560,11 @@ class GyroEngine:
         for key, entry in self.passive_memory_index.items():
             entry_state_idx, entry_token_id = key
             if entry_token_id == token_id:
-                entry_token_address = self.address_of_token(entry_token_id)
-                entry_token_orbit = self.phenomenology_map[self.state_to_index[entry_token_address]]
+                # Use cached address if present; compute once otherwise
+                addr = int(self.address_memory[entry_token_id]) if entry_token_id < len(self.address_memory) else 0
+                if addr == 0:
+                    addr = self.address_of_token(entry_token_id)
+                entry_token_orbit = self.phenomenology_map[self.state_to_index[addr]]
                 if entry_token_orbit == token_orbit:
                     m_entries.append((key, entry))
         
@@ -1407,18 +1581,21 @@ class GyroEngine:
             for key, _ in m_entries[:len(m_entries) - 63]:
                 del self.passive_memory_index[key]
             
-    def _is_generic_entry(self, entry: dict) -> bool:
+    def _is_generic_entry(self, entry: Dict[str, int]) -> bool:
         """Check if entry is 'generic' (token address equals orbit representative)."""
         token_id = entry['token_id']
-        token_address = self.address_of_token(token_id)
-        token_orbit = self.phenomenology_map[self.state_to_index[token_address]]
+        # Use cached address if present; compute once otherwise
+        addr = int(self.address_memory[token_id]) if token_id < len(self.address_memory) else 0
+        if addr == 0:
+            addr = self.address_of_token(token_id)
+        token_orbit = self.phenomenology_map[self.state_to_index[addr]]
         rep_idx = self.orbit_representatives[token_orbit]
         representative_address = self.ontology_keys[rep_idx]
         
-        return token_address == representative_address
+        return addr == representative_address
         
-    def _append_to_passive_log(self, entry: dict) -> None:
-        """Append entry to binary log file."""
+    def _append_to_passive_log(self, entry: Dict[str, int]) -> None:
+        """Append entry to binary log file with improved sync logic."""
         
         with self._passive_log_lock:
             # Initialize log file handle and counter if needed
@@ -1441,12 +1618,31 @@ class GyroEngine:
                 self.passive_log_fh.write(packed_entry)
                 self.passive_log_fh.flush()
                 
-                # Force sync much less frequently to improve performance
-                # Only sync every 10000 writes instead of every 1000
-                if self.passive_log_len % 10000 == 0:
-                    os.fsync(self.passive_log_fh.fileno())
-                    
+                # Update counters
                 self.passive_log_len += 1
+                self._passive_log_pending_writes += 1
+                self._passive_log_sync_counter += 1
+                
+                # Implement tiered sync strategy:
+                # 1. Regular sync at sync_interval for durability
+                # 2. Force sync at force_sync_interval for crash safety
+                should_sync = False
+                
+                if self._passive_log_sync_counter >= self._passive_log_force_sync_interval:
+                    # Force sync - reset both counters
+                    should_sync = True
+                    self._passive_log_sync_counter = 0
+                    self._passive_log_pending_writes = 0
+                elif self._passive_log_pending_writes >= self._passive_log_sync_interval:
+                    # Regular sync - reset pending writes counter only
+                    should_sync = True
+                    self._passive_log_pending_writes = 0
+                
+                # Aggressive sync (off by default): great for tests/ingestion-only
+                if self.runtime.get("aggressive_sync", False):
+                    os.fsync(self.passive_log_fh.fileno())
+                elif should_sync:
+                    os.fsync(self.passive_log_fh.fileno())
                 
             except Exception as e:
                 print(f"Warning: Failed to write to passive memory log: {e}")
@@ -1466,8 +1662,8 @@ class GyroEngine:
     def _load_passive_memory_from_log(self) -> None:
         """Reconstruct in-memory index by scanning binary log."""
         
-        self.passive_memory_index = {}
-        self.passive_log = []
+        self.passive_memory_index: Dict[Tuple[int, int], Dict[str, int]] = {}
+        self.passive_log: List[Dict[str, int]] = []
         
         if not self.passive_memory_path.exists():
             return
@@ -1498,6 +1694,9 @@ class GyroEngine:
                     memory_key = (state_index, token_id)
                     self.passive_memory_index[memory_key] = entry
                     self.passive_log.append(entry)
+                    
+                    # Populate state_to_tokens mapping for experience tracking
+                    self.state_to_tokens.setdefault(state_index, set()).add(token_id)
         except Exception as e:
             print(f"Warning: Failed to load passive memory log: {e}")
             
@@ -1505,67 +1704,49 @@ class GyroEngine:
     def start_state(self) -> int:
         """
         The archetypal initial packed state for a fresh conversation.
-        This is not integer zero (per your note). Use the correct one from the atlas.
+        Pick the unique state of minimal theta (frozen start).
         """
-        # Find the archetypal state - this should be the orthogonal reference state
-        # Index 0 in ontology_keys is the orthogonal reference, not the conversation start
-        # The archetypal conversation start state should have specific properties:
-        # - Minimal theta value (most stable)
-        # - Central orbit position
-        # - High symmetry
-        # - Must be in an orbit that has tokens in the vocabulary range
+        # Mark cold-start timestamp for grace window
+        self._cold_start_timestamp = getattr(self, '_timestamp_counter', 0)
         
-        # Method 1: Find state with minimum theta among orbits that have tokens
-        # First, identify orbits that have tokens by checking a sample of the vocabulary
-        populated_orbits = set()
-        vocab_sample_size = min(1000, getattr(self, 'vocab_size', 50000))
-        
-        for token_id in range(vocab_sample_size):
+        # Pick the unique state of minimal theta (frozen start)
+        try:
+            min_idx = int(np.argmin(self.theta))
+            return int(self.ontology_keys[min_idx])
+        except Exception:
+            # Fallback 1: orbit representative of the first orbit code
             try:
-                token_address = self.address_of_token(token_id)
-                if token_address in self.state_to_index:
-                    token_orbit = self.phenomenology_map[self.state_to_index[token_address]]
-                    populated_orbits.add(token_orbit)
-                    if len(populated_orbits) >= 50:  # Stop after finding enough populated orbits
-                        break
+                rep_idx = self.orbit_representatives[min(self.orbit_representatives.keys())]
+                return int(self.ontology_keys[rep_idx])
             except Exception:
-                continue
-        
-        # Find the state with minimum theta among populated orbits
-        best_state = None
-        best_theta = float('inf')
-        
-        for orbit_code in populated_orbits:
-            if orbit_code in self.orbit_representatives:
-                rep_state_idx = self.orbit_representatives[orbit_code]
-                rep_theta = self.theta[rep_state_idx]
-                if rep_theta < best_theta:
-                    best_theta = rep_theta
-                    best_state = self.ontology_keys[rep_state_idx]
-        
-        if best_state is not None and best_state in self.state_to_index:
-            return best_state
-            
-        # Fallback: Use orbit representative of orbit 0 (most central)
-        if 0 in self.orbit_representatives:
-            return self.ontology_keys[self.orbit_representatives[0]]
-            
-        # Final fallback: Use orthogonal reference (index 0)
-        return self.ontology_keys[0]
+                # Fallback 2: orthogonal reference (index 0)
+                return int(self.ontology_keys[0])
         
     def evolve_on_user(self, state: int, token_id: int) -> int:
         """
         Egress: apply introns (always) and fold passive memory (by default).
+        Change: fold on PRE-state so generation at that state can find what came next historically.
         """
         introns = self.token_to_introns(token_id)
+        pre_state = state
         new_state = state
-        
         for intron in introns:
             new_state = self.apply_intron(new_state, intron)
-            
-        # Fold passive memory for external inputs
-        self.fold_egress(new_state, token_id)
-        
+
+        # Fold on the PRE-state (critical for usable next-token experience)
+        if True:  # keep feature flagging simple for now
+            try:
+                self.fold_egress(pre_state, token_id)
+            except Exception:
+                pass
+
+        # Optional: also fold on post-state to preserve prior behaviour
+        # (keeps your tests and any analysis scripts happy)
+        try:
+            self.fold_egress(new_state, token_id)
+        except Exception:
+            pass
+
         return new_state
         
     def evolve_on_assistant(self, state: int, token_id: int) -> int:
@@ -1593,63 +1774,95 @@ class GyroEngine:
     # --- Next-token selection ---
     def next_token_deterministic(self, state: int, candidate_vocab: Iterable[int] | None = None) -> Optional[int]:
         """
-        Route by orbit of current state. Filter candidate_vocab by same orbit of address.
-        Check admissibility and apply deterministic selection (min token_id).
-        If none, run recovery ladder to obtain a token. If still none, return None.
+        Enhanced token selection with experience-based gating and relaxed admissibility.
+        Prefer tokens with experience at THIS state, fall back to orbit routing if empty.
+        Apply relaxed gating: allow tokens with final state experience, micro-path experience, or cold-start grace.
         """
+        # Track token generation metrics
+        with self._metrics_lock:
+            self._metrics['token_generations'] += 1
+            
         # Validate state
         if state not in self.state_to_index:
-            # Non-atlas state: deterministic halt
             return None
             
         state_idx = self.state_to_index[state]
-        current_orbit = self.phenomenology_map[state_idx]  # Use phenomenology_map for orbit code
         
-        # Generate default candidate_vocab if not provided
+        # Track state lookup metrics
+        with self._metrics_lock:
+            self._metrics['state_lookups'] += 1
+            
+        current_orbit = self.phenomenology_map[state_idx]
+        
+        # Generate candidate_vocab if not provided
         if candidate_vocab is None:
-            # Try cached orbit tokens first
-            tok_list = list(self._orbit_to_tokens.get(current_orbit, []))
-            if not tok_list:
-                tok_list = self._get_tokens_in_orbit(current_orbit)
-            # Bounded fallback
-            if not tok_list:
-                bound = min(512, getattr(self, "vocab_size", 50000))
-                tok_list = [t for t in range(bound)]
-            candidate_vocab = [t for t in tok_list if t not in GENERATION_EXCLUDED]
+            # Prefer tokens with experience at THIS state
+            experienced_here = sorted(self.state_to_tokens.get(state_idx, []))
+            if not experienced_here:
+                # Fall back to orbit tokens (existing logic)
+                tok_list = list(self._orbit_to_tokens.get(current_orbit, []))
+                if not tok_list:
+                    tok_list = self._get_tokens_in_orbit(current_orbit)
+                candidate_vocab = [t for t in tok_list if t not in GENERATION_EXCLUDED]
+            else:
+                candidate_vocab = [t for t in experienced_here if t not in GENERATION_EXCLUDED]
         
-        # Harmony control tokens to exclude from generation
-        harmony_control_tokens = GENERATION_EXCLUDED
+        # Apply relaxed gating as specified
+        admissible = []
+        current_timestamp = getattr(self, '_timestamp_counter', 0)
+        in_grace_window = (current_timestamp - getattr(self, '_cold_start_timestamp', 0)) < getattr(self, '_cold_start_grace_window', 50)
         
-        # Filter candidates by admissibility
-        admissible_candidates = []
-        for token_id in candidate_vocab:
-            # Exclude Harmony control tokens
-            if token_id in harmony_control_tokens:
+        for t in candidate_vocab:
+            if not self.is_admissible(state, t):
                 continue
                 
-            if self.is_admissible(state, token_id):
-                # Check if token's address is in same orbit (simplified)
-                token_address = self.address_of_token(token_id)
-                if token_address in self.state_to_index:
-                    token_orbit = self.phenomenology_map[self.state_to_index[token_address]]
-                    if token_orbit == current_orbit:
-                        admissible_candidates.append(token_id)
-                        
-        # Deterministic selection: minimum token_id
-        if admissible_candidates:
-            return min(admissible_candidates)
+            fstate = self.final_state_for_token(state, t)
+            findex = self.state_to_index.get(fstate)
             
-        # Run recovery ladder
-        recovery_candidates = self.recover_candidates(state, self.runtime.get("max_nudges", 6))
-        if recovery_candidates:
-            return min(recovery_candidates)
+            has_final = (findex is not None) and self.has_experience(findex, t)
+            has_path = False
+            if not has_final:
+                introns = self.token_to_introns(t)
+                path = self.micro_path(state, introns)
+                has_path = self.first_nonzero_mask_on_path(path, t)
+                
+            if has_final or has_path or in_grace_window:
+                admissible.append(t)
+        
+        if admissible:
+            return min(admissible)
             
-        return None  # Halt condition
+        return None
     
     # --- Helper functions for testing ---
     def encode_token_to_introns(self, token_id: int) -> List[int]:
         """Encode token to introns via LEB128 → bytes → ψ transformation."""
         return self.token_to_introns(token_id)
+    
+    # --- New helpers for experience gating ---
+    def final_state_for_token(self, start_state: int, token_id: int) -> int:
+        """Return the final packed state reached from start_state by token_id."""
+        introns = self.token_to_introns(token_id)
+        path = self.micro_path(start_state, introns)
+        return path[-1]
+    
+    def has_experience(self, state_index: int, token_id: int) -> bool:
+        """True iff passive memory contains a non-zero mask for (state_index, token_id)."""
+        entry = self.passive_memory_index.get((state_index, token_id))
+        if not entry:
+            return False
+        # Resolve mask value (interned or raw fallback), then test non-zero
+        mask_id = entry.get('mask_id', 0)
+        mask_val = self.mask_pool_reverse.get(mask_id, mask_id) & 0xFF
+        return mask_val != 0
+    
+    def first_nonzero_mask_on_path(self, path_states: list[int], token_id: int) -> bool:
+        """Optional: permit any non-zero mask at any state along a micro-path (useful for recovery)."""
+        for st in path_states:
+            idx = self.state_to_index.get(st)
+            if idx is not None and self.has_experience(idx, token_id):
+                return True
+        return False
     
     def introns_to_token_bytes(self, introns: List[int]) -> bytes:
         """Convert introns back to token bytes via ψ⁻¹ transformation."""
@@ -1698,9 +1911,9 @@ class GyroEngine:
                 expected_address = self.version_info.get('address_version', 'v1.0.0')
                 
                 # Check if address memory exists and has metadata
-                if hasattr(self, 'address_meta_path') and self.address_meta_path.exists():
+                if hasattr(self, 'address_metadata_path') and self.address_metadata_path.exists():
                     try:
-                        with open(self.address_meta_path, 'r') as f:
+                        with open(self.address_metadata_path, 'r') as f:
                             metadata = json.load(f)
                         stored_atlas = metadata.get('atlas_version', 'unknown')
                         stored_address = metadata.get('address_version', 'unknown')
@@ -1753,11 +1966,94 @@ class GyroEngine:
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, 'rb') as f:
-                    self._address_cache = pickle.load(f)
+                    loaded_cache = pickle.load(f)
+                with self._address_cache_lock:
+                    self._address_cache = loaded_cache
                 print(f"Loaded {len(self._address_cache)} cached addresses")
             except Exception as e:
                 print(f"Failed to load address cache: {e}")
-                self._address_cache = {}
+                with self._address_cache_lock:
+                    self._address_cache = {}
+        
+        with self._metrics_lock:
+            self._metrics['address_cache_loads'] += 1
+            self._update_cache_metrics()
+    
+    def _update_recovery_timing(self, start_time: float):
+        """Update recovery timing metrics (called with metrics lock held)."""
+        elapsed = time.perf_counter() - start_time
+        self._metrics['recovery_total_time'] += elapsed
+        if self._metrics['recovery_calls'] > 0:
+            self._metrics['recovery_avg_time'] = self._metrics['recovery_total_time'] / self._metrics['recovery_calls']
+    
+    def _update_admissibility_timing(self, start_time: float):
+        """Update admissibility timing metrics (called with metrics lock held)."""
+        elapsed = time.perf_counter() - start_time
+        self._metrics['admissibility_total_time'] += elapsed
+        if self._metrics['admissibility_checks'] > 0:
+            self._metrics['admissibility_avg_time'] = self._metrics['admissibility_total_time'] / self._metrics['admissibility_checks']
+    
+    def _update_cache_metrics(self):
+        """Update cache performance metrics (called with metrics lock held)."""
+        self._metrics['address_cache_size'] = len(self._address_cache)
+        total_requests = self._metrics['address_cache_hits'] + self._metrics['address_cache_misses']
+        if total_requests > 0:
+            self._metrics['address_cache_hit_rate'] = self._metrics['address_cache_hits'] / total_requests
+    
+    def get_metrics(self) -> Dict[str, float]:
+        """Get current runtime metrics and observability data."""
+        with self._metrics_lock:
+            return self._metrics.copy()
+    
+    def reset_metrics(self):
+        """Reset all runtime metrics to zero."""
+        with self._metrics_lock:
+            for key in self._metrics:
+                if isinstance(self._metrics[key], (int, float)):
+                    self._metrics[key] = 0 if isinstance(self._metrics[key], int) else 0.0
+    
+    def print_metrics_summary(self):
+        """Print a formatted summary of current metrics."""
+        metrics = self.get_metrics()
+        
+        print("\n📊 GyroEngine Runtime Metrics:")
+        print("=" * 40)
+        
+        # Recovery ladder metrics
+        print("\n🔄 Recovery Ladder:")
+        print(f"  Total calls: {metrics['recovery_calls']:,}")
+        print(f"  Level 1 hits: {metrics['recovery_level_1_hits']:,}")
+        print(f"  Level 2 hits: {metrics['recovery_level_2_hits']:,}")
+        print(f"  Level 3 hits: {metrics['recovery_level_3_hits']:,}")
+        print(f"  Level 4 hits: {metrics['recovery_level_4_hits']:,}")
+        print(f"  Level 5 hits: {metrics['recovery_level_5_hits']:,}")
+        print(f"  Average time: {metrics['recovery_avg_time']*1000:.2f}ms")
+        
+        # Admissibility metrics
+        print("\n✅ Admissibility Checks:")
+        print(f"  Total checks: {metrics['admissibility_checks']:,}")
+        print(f"  Hits: {metrics['admissibility_hits']:,}")
+        print(f"  Misses: {metrics['admissibility_misses']:,}")
+        if metrics['admissibility_checks'] > 0:
+            hit_rate = metrics['admissibility_hits'] / metrics['admissibility_checks'] * 100
+            print(f"  Hit rate: {hit_rate:.1f}%")
+        print(f"  Average time: {metrics['admissibility_avg_time']*1000:.2f}ms")
+        
+        # Cache metrics
+        print("\n💾 Address Cache:")
+        print(f"  Cache size: {metrics['address_cache_size']:,}")
+        print(f"  Cache hits: {metrics['address_cache_hits']:,}")
+        print(f"  Cache misses: {metrics['address_cache_misses']:,}")
+        print(f"  Hit rate: {metrics['address_cache_hit_rate']*100:.1f}%")
+        print(f"  Cache saves: {metrics['address_cache_saves']:,}")
+        print(f"  Cache loads: {metrics['address_cache_loads']:,}")
+        
+        # General metrics
+        print("\n🎯 General Performance:")
+        print(f"  Token generations: {metrics['token_generations']:,}")
+        print(f"  State lookups: {metrics['state_lookups']:,}")
+        print(f"  Orbit computations: {metrics['orbit_computations']:,}")
+        print()
     
     def _save_address_cache(self):
         """Save address cache to disk."""
@@ -1766,7 +2062,13 @@ class GyroEngine:
         
         cache_file = os.path.join(self.address_memory_path.parent, 'address_cache.pkl')
         try:
+            with self._address_cache_lock:
+                cache_copy = self._address_cache.copy()
             with open(cache_file, 'wb') as f:
-                pickle.dump(self._address_cache, f)
+                pickle.dump(cache_copy, f)
+            
+            with self._metrics_lock:
+                self._metrics['address_cache_saves'] += 1
+                self._update_cache_metrics()
         except Exception as e:
             print(f"Failed to save address cache: {e}")

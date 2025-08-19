@@ -1,10 +1,11 @@
 import time
 from typing import Callable
+from baby.constants.harmony_tokens import CHANNEL, MESSAGE, END, START, CALL, RETURN
 
 fake_tokens = [
-    200005,
+    CHANNEL,
     35644,
-    200008,
+    MESSAGE,
     23483,
     316,
     1199,
@@ -12,10 +13,10 @@ fake_tokens = [
     717,
     170154,
     13,
-    200007,
-    200006,
+    END,
+    START,
     173781,
-    200005,
+    CHANNEL,
     35644,
     316,
     28,
@@ -29,19 +30,19 @@ fake_tokens = [
     91,
     29,
     4108,
-    200008,
+    MESSAGE,
     10848,
     7693,
     7534,
     28499,
     18826,
     18583,
-    200012,
+    CALL,
 ]
 fake_tokens = [
-    200005,
+    CHANNEL,
     35644,
-    200008,
+    MESSAGE,
     1844,
     31064,
     25,
@@ -60,12 +61,12 @@ fake_tokens = [
     51441,
     6052,
     13,
-    200007,
-    200006,
+    END,
+    START,
     173781,
-    200005,
+    CHANNEL,
     17196,
-    200008,
+    MESSAGE,
     17,
     659,
     220,
@@ -77,7 +78,7 @@ fake_tokens = [
     9552,
     238,
     242,
-    200002,
+    RETURN,
 ]
 # fake_tokens = [200005, 35644, 200008, 976, 1825, 31064, 25, 392, 25216, 29400, 290, 11122, 306, 52768, 2117, 16842, 1416, 1309, 316, 2281, 198, 68, 290, 2208, 11122, 13, 1416, 679, 261, 1114, 717, 170154, 484, 44390, 261, 5100, 1621, 26, 581, 1757, 2005, 198, 75, 480, 483, 5100, 392, 137956, 2117, 11, 13180, 4050, 7801, 4733, 290, 11122, 5377, 484, 290, 1114, 7377, 13, 1416, 1309, 260, 198, 78, 1199, 290, 1114, 4584, 364, 58369, 2421, 717, 170154, 483, 5100, 392, 137956, 2117, 11, 13180, 4050, 200007, 200006, 173781, 200005, 12606, 815, 260, 198, 78, 28, 117673, 3490]
 # fake_tokens = [
@@ -138,5 +139,5 @@ def stub_infer_next_token(
     return next_tok
 
 
-def setup_model(_checkpoint: str) -> Callable[[list[int], float], int]:
+def setup_model() -> Callable[[list[int], float], int]:
     return stub_infer_next_token
