@@ -2,7 +2,7 @@
 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
 
 ---
-## [v0.9.7.4-Atlas] – 2025-08-21 - Experimental
+## [v0.9.7.5-Atlas-Experimental] – 2025-08-21
 
 For the past two days, I've been expanding and contracting gyro_core.py - our main logic to understand what works and what not. It managed to reached a state of over 2500 LOC, and after not getting anywhere, I stipped it down to less than 200 LOC to discover the foundations of my architecture.
 
