@@ -13,9 +13,12 @@ from typing import Optional
 try:
     import gnureadline as readline  # type: ignore
 except ImportError:
-    import readline
+    try:
+        import readline
+    except ImportError:
+        # Windows fallback - basic input() will work
+        readline = None
 
-import torch
 import termcolor
 
 from gpt_oss.tools import apply_patch
@@ -47,15 +50,8 @@ REASONING_EFFORT = {
 
 
 def get_user_input():
-    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0  # type: ignore
-    if rank == 0:
-        user_input = input()
-    else:
-        user_input = ""
-    user_input_list = [user_input]
-    if torch.distributed.is_initialized():
-        torch.distributed.broadcast_object_list(user_input_list, 0)  # type: ignore
-    return user_input_list[0]
+    # Simplified to single-process input (no distributed training)
+    return input()
 
 
 def main(args):
@@ -63,26 +59,25 @@ def main(args):
         case "gyro":
             # GyroSI backend - use responses API inference wrapper
             from baby.responses_api.inference.gyro import setup_model
+
             encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
-            infer_next_token = setup_model(
-                encoding=encoding,
-                config_path=getattr(args, 'config', 'baby/config.json')
-            )
+            infer_next_token = setup_model(encoding=encoding, config_path=getattr(args, "config", "baby/config.json"))
+
             # Create a simple generator wrapper for GyroSI
             class GyroGenerator:
                 def __init__(self, infer_fn, encoding):
                     self.infer_fn = infer_fn
                     self.encoding = encoding
-                    
+
                 def generate(self, tokens, **kwargs):
                     current_tokens = list(tokens)
-                    while len(current_tokens) < kwargs.get('max_tokens', 1000):
-                        next_token = self.infer_fn(current_tokens, kwargs.get('temperature', 0.0))
-                        if next_token in kwargs.get('stop_tokens', []):
+                    while len(current_tokens) < kwargs.get("max_tokens", 1000):
+                        next_token = self.infer_fn(current_tokens, kwargs.get("temperature", 0.0))
+                        if next_token in kwargs.get("stop_tokens", []):
                             break
                         current_tokens.append(next_token)
                         yield next_token, 0.0  # GyroSI is deterministic, so logprob is 0
-                        
+
             generator = GyroGenerator(infer_next_token, encoding)
         case _:
             raise ValueError(f"Invalid backend: {args.backend}")
@@ -97,7 +92,7 @@ def main(args):
 
     browser_tool: Optional[SimpleBrowserTool] = None
     python_tool: Optional[PythonTool] = None
-    
+
     if args.browser:
         backend = ExaBackend(
             source="web",
@@ -128,7 +123,7 @@ def main(args):
 
     user_message_start = None
     user_message_end = None
-    
+
     if args.raw:
         conversation = Conversation.from_messages(messages)
         tokens = encoding.render_conversation(conversation)
@@ -142,11 +137,19 @@ def main(args):
         print(termcolor.colored("System Message:", "cyan"), flush=True)
         print(termcolor.colored("Model Identity:", "cyan"), system_message_content.model_identity, flush=True)
         print(termcolor.colored("Reasoning Effort:", "cyan"), system_message_content.reasoning_effort, flush=True)
-        print(termcolor.colored("Conversation Start Date:", "cyan"), system_message_content.conversation_start_date, flush=True)
+        print(
+            termcolor.colored("Conversation Start Date:", "cyan"),
+            system_message_content.conversation_start_date,
+            flush=True,
+        )
         print(termcolor.colored("Knowledge Cutoff:", "cyan"), system_message_content.knowledge_cutoff, flush=True)
         print(termcolor.colored("Browser Tool:", "cyan"), "Enabled" if args.browser else "Disabled", flush=True)
         print(termcolor.colored("Python Tool:", "cyan"), "Enabled" if args.python else "Disabled", flush=True)
-        print(termcolor.colored("Apply Patch Function:", "cyan"), "Enabled" if args.apply_patch else "Disabled", flush=True)
+        print(
+            termcolor.colored("Apply Patch Function:", "cyan"),
+            "Enabled" if args.apply_patch else "Disabled",
+            flush=True,
+        )
         if developer_message_content:
             print(termcolor.colored("Developer Message:", "yellow"), flush=True)
             print(developer_message_content.instructions, flush=True)
@@ -170,6 +173,7 @@ def main(args):
             if last_message.recipient.startswith("browser."):
                 assert args.browser, "Browser tool is not enabled"
                 tool_name = "Search"
+
                 async def run_tool():
                     results = []
                     async for msg in browser_tool.process(last_message):  # type: ignore
@@ -181,6 +185,7 @@ def main(args):
             elif last_message.recipient.startswith("python"):
                 assert args.python, "Python tool is not enabled"
                 tool_name = "Python"
+
                 async def run_tool():
                     results = []
                     async for msg in python_tool.process(last_message):  # type: ignore
@@ -198,6 +203,7 @@ def main(args):
                 if text.startswith("{"):
                     # this is json, try to extract the patch from it
                     import json
+
                     try:
                         some_dict = json.loads(text)
                         _, text = some_dict.popitem()
@@ -210,13 +216,9 @@ def main(args):
                     except Exception as e:
                         tool_output = f"Error applying patch: {e}"
 
-                message = (
-                    Message(
-                        author=Author.new(Role.TOOL, last_message.recipient),
-                        content=[TextContent(text=tool_output)]
-                    )
-                    .with_recipient("assistant")
-                )
+                message = Message(
+                    author=Author.new(Role.TOOL, last_message.recipient), content=[TextContent(text=tool_output)]
+                ).with_recipient("assistant")
                 if last_message.channel:
                     message = message.with_channel(last_message.channel)
 
@@ -236,9 +238,7 @@ def main(args):
                     print(result[0].content[0].text)  # type: ignore
 
         conversation = Conversation.from_messages(messages)
-        tokens = encoding.render_conversation_for_completion(
-            conversation, Role.ASSISTANT  # type: ignore
-        )
+        tokens = encoding.render_conversation_for_completion(conversation, Role.ASSISTANT)  # type: ignore
 
         if args.raw:
             # Print the last two tokens, which are the start of the assistant message
@@ -274,7 +274,7 @@ def main(args):
             output_text_delta_buffer += parser.last_content_delta
             if args.browser:
                 updated_output_text, _annotations, has_partial_citations = browser_tool.normalize_citations(current_output_text + output_text_delta_buffer)  # type: ignore
-                output_text_delta_buffer = updated_output_text[len(current_output_text):]
+                output_text_delta_buffer = updated_output_text[len(current_output_text) :]
                 if has_partial_citations:
                     should_send_output_text_delta = False
             if should_send_output_text_delta:
@@ -361,7 +361,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if int(os.environ.get("WORLD_SIZE", 1)) == 1:
+    # Setup readline history if available
+    if readline is not None:
         histfile = os.path.join(os.path.expanduser("~"), ".chat")
         try:
             readline.read_history_file(histfile)  # type: ignore

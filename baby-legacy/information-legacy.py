@@ -888,23 +888,23 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
     logger.info("Computing canonical phenomenology (all 256 introns)...")
     all_introns = list(range(256))
     canonical, orbit_sizes, _ = _compute_sccs(ep, idx_to_state, all_introns)
-    
+
     # Detailed statistics
     unique_reps = np.unique(canonical)
     num_orbits = len(unique_reps)
     logger.info("Found %d canonical orbits (expected 256)", num_orbits)
-    
+
     # Orbit size distribution analysis
     sizes = np.zeros(N, dtype=np.uint32)
     for i in range(N):
         rep = canonical[i]
         sizes[i] = orbit_sizes[rep]
-    
+
     orbit_size_distribution = {}
     for size in np.unique(sizes):
         count = np.sum(sizes == size)
         orbit_size_distribution[int(size)] = count
-    
+
     logger.info("Orbit size distribution:")
     total_states_check = 0
     for size in sorted(orbit_size_distribution.keys()):
@@ -912,9 +912,9 @@ def build_phenomenology_map(ep_path: str, keys_path: str, output_path: str) -> N
         num_orbits_of_size = count // size
         total_states_check += count
         logger.info("  Size %4d: %6s states (%4d orbits)", size, f"{count:,}", num_orbits_of_size)
-    
+
     logger.info("Total states verified: %s (expected %s)", f"{total_states_check:,}", f"{N:,}")
-    
+
     # Self-consistency check
     self_consistent = sum(1 for rep in unique_reps if canonical[rep] == rep)
     logger.info("Self-consistent representatives: %d/%d", self_consistent, num_orbits)

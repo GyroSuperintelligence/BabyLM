@@ -37,7 +37,7 @@ from .events import (
     ResponseWebSearchCallInProgress,
     ResponseWebSearchCallSearching,
     ResponseWebSearchCallCompleted,
-    ResponseOutputTextAnnotationAdded
+    ResponseOutputTextAnnotationAdded,
 )
 from .response_types import (
     UrlCitation,
@@ -72,9 +72,8 @@ def get_reasoning_effort(effort: Literal["low", "medium", "high"]) -> ReasoningE
 def is_not_builtin_tool(recipient: str) -> bool:
     return not recipient.startswith("browser.") and not recipient == "python" and not recipient == "assistant"
 
-def create_api_server(
-    infer_next_token: Callable[[list[int], float], int], encoding: HarmonyEncoding
-) -> FastAPI:
+
+def create_api_server(infer_next_token: Callable[..., Optional[int]], encoding: HarmonyEncoding) -> FastAPI:
     app = FastAPI()
     responses_store: dict[str, tuple[ResponsesRequest, ResponseObject]] = {}
 
@@ -94,9 +93,7 @@ def create_api_server(
         if len(output_tokens) > 0:
             if debug_mode:
                 try:
-                    entries = encoding.parse_messages_from_completion_tokens(
-                        output_tokens, Role.ASSISTANT
-                    )
+                    entries = encoding.parse_messages_from_completion_tokens(output_tokens, Role.ASSISTANT)
                 except Exception as e:
                     print(f"Error parsing tokens: {e}")
                     error = Error(
@@ -106,9 +103,7 @@ def create_api_server(
                     entries = []
             else:
                 try:
-                    entries = encoding.parse_messages_from_completion_tokens(
-                        output_tokens, Role.ASSISTANT
-                    )
+                    entries = encoding.parse_messages_from_completion_tokens(output_tokens, Role.ASSISTANT)
                 except Exception as e:
                     print(f"Error parsing tokens: {e}")
                     error = Error(
@@ -145,12 +140,16 @@ def create_api_server(
                             call_id=call_id,
                         )
                     )
-                elif len(entry_dict.get("recipient", "")) > 0 and entry_dict["recipient"].startswith("browser.") and browser_tool is not None:
+                elif (
+                    len(entry_dict.get("recipient", "")) > 0
+                    and entry_dict["recipient"].startswith("browser.")
+                    and browser_tool is not None
+                ):
                     # Mirror event-based creation of WebSearchCallItems when the browser tool is invoked
                     name = entry_dict["recipient"]
                     call = entry_dict["content"][0]
                     arguments = call["text"]
-                    function_name = name[len("browser."):]
+                    function_name = name[len("browser.") :]
 
                     # Reconstruct a Message for argument parsing
                     tool_msg = (
@@ -195,11 +194,13 @@ def create_api_server(
                                 action=action,
                             )
                         )
-                elif entry_dict["channel"] == "final":
+                elif entry_dict.get("channel") == "final":
                     content = []
-                    for content_entry in entry_dict["content"]:    
+                    for content_entry in entry_dict["content"]:
                         if browser_tool:
-                            text_content, annotation_entries, _has_partial_citations = browser_tool.normalize_citations(content_entry["text"])
+                            text_content, annotation_entries, _has_partial_citations = browser_tool.normalize_citations(
+                                content_entry["text"]
+                            )
                             annotations = [UrlCitation(**a) for a in annotation_entries]
                         else:
                             text_content = content_entry["text"]
@@ -221,7 +222,7 @@ def create_api_server(
                             status="completed",
                         )
                     )
-                elif entry_dict["channel"] == "analysis":
+                elif entry_dict.get("channel") == "analysis":
                     summary = []
                     content = [
                         ReasoningTextContentItem(
@@ -294,7 +295,6 @@ def create_api_server(
         request_body: ResponsesRequest
         request: Optional[Request]
         sequence_number: int
-    
 
         def __init__(
             self,
@@ -303,9 +303,7 @@ def create_api_server(
             as_sse: bool = False,
             request: Optional[Request] = None,
             response_id: Optional[str] = None,
-            store_callback: Optional[
-                Callable[[str, ResponsesRequest, ResponseObject], None]
-            ] = None,
+            store_callback: Optional[Callable[[str, ResponsesRequest, ResponseObject], None]] = None,
             browser_tool: Optional[SimpleBrowserTool] = None,
         ):
             self.initial_tokens = initial_tokens
@@ -313,17 +311,19 @@ def create_api_server(
             self.output_tokens = []
             self.output_text = ""
             self.request_body = request_body
-            self.parser = StreamableParser(encoding, role=Role.ASSISTANT)
+            self.parser = StreamableParser(encoding, role=Role.SYSTEM)
+            # Feed the complete initial token sequence so the parser knows the current role/channel
+            # and can correctly segment messages for streaming without emitting any events here.
+            try:
+                for _tok in self.initial_tokens:
+                    self.parser.process(_tok)
+            except Exception:
+                # Parser is best-effort; ignore parsing exceptions during warm-up
+                pass
             self.as_sse = as_sse
-            self.debug_mode = (request_body.metadata or {}).get(
-                "__debug", False
-            )  # we use this for demo purposes
+            self.debug_mode = (request_body.metadata or {}).get("__debug", False)  # we use this for demo purposes
             # Set temperature for this stream, fallback to DEFAULT_TEMPERATURE if not set
-            self.temperature = (
-                request_body.temperature
-                if request_body.temperature is not None
-                else DEFAULT_TEMPERATURE
-            )
+            self.temperature = request_body.temperature if request_body.temperature is not None else DEFAULT_TEMPERATURE
             self.request = request
             self.sequence_number = 0
             self.function_call_ids: list[tuple[str, str]] = []
@@ -343,6 +343,9 @@ def create_api_server(
                 return event
 
         async def run(self) -> AsyncGenerator[Union[str, ResponseEvent], None]:
+            print(
+                f"[DEBUG] API server run() called with {len(self.initial_tokens)} initial tokens, max_output_tokens={self.request_body.max_output_tokens}"
+            )
             browser_tool = self.browser_tool
             self.new_request = True
             initial_response = generate_response(
@@ -367,16 +370,63 @@ def create_api_server(
                 )
             )
 
-            current_content_index = (
-                0  # for this implementation we will always have one content item only
-            )
+            print(f"[DEBUG] After yield statements, about to start ingestion section")
+
+            # Ensure backend session sees the new conversation tokens and folds user bytes
+            # Use previous_response_id for session continuity, or response_id for new sessions
+            session_id = self.request_body.previous_response_id or self.response_id
+            is_new_session = self.request_body.previous_response_id is None
+
+            print(f"[DEBUG] Session setup: session_id={session_id}, is_new_session={is_new_session}")
+            print(f"[DEBUG] About to call infer_next_token for ingestion with {len(self.initial_tokens)} tokens")
+
+            # Wrap the entire ingestion section in a broad try-catch
+            try:
+                print(f"[DEBUG] Entering ingestion try block")
+                try:
+                    result = infer_next_token(
+                        self.initial_tokens,
+                        temperature=self.temperature,
+                        request_id=session_id,
+                        new_request=is_new_session,  # only new if no previous_response_id
+                        ingest_only=True,  # hint for backends; harmless if ignored
+                    )
+                    print(f"[DEBUG] Ingestion call returned: {result}")
+                except TypeError as e:
+                    print(f"[DEBUG] TypeError in ingestion call: {e}, falling back to old signature")
+                    # Older backends without kwargs support
+                    result = infer_next_token(self.initial_tokens, self.temperature)
+                    print(f"[DEBUG] Fallback ingestion call returned: {result}")
+                except Exception as e:
+                    print(f"[DEBUG] Exception in ingestion call: {e}")
+                    raise
+            except Exception as e:
+                print(f"[DEBUG] Broad exception in ingestion section: {type(e).__name__}: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+            # Exit early for ingestion-only
+            if self.request_body.max_output_tokens is not None and self.request_body.max_output_tokens <= 0:
+                # We performed ingestion above; return an empty but completed response
+                yield self._send_event(
+                    ResponseOutputTextDone(type="response.output_text.done", output_index=0, content_index=0, text="")
+                )
+                yield self._send_event(
+                    ResponseCompletedEvent(
+                        type="response.completed", response=initial_response, sequence_number=self.sequence_number
+                    )
+                )
+                return
+
+            current_content_index = 0  # for this implementation we will always have one content item only
             current_output_index = -1
             sent_output_item_added = False
 
             # we use this if the model outputs a citation to buffer until completed
-            output_delta_buffer = "" 
+            output_delta_buffer = ""
             # we use this to track the current output text content for things like providing the right indices in citations
-            current_output_text_content = "" 
+            current_output_text_content = ""
             current_annotations = []
 
             while True:
@@ -386,16 +436,45 @@ def create_api_server(
                         print("Client disconnected, stopping token generation.")
                         break
                 # Handle different backend signatures
-                next_tok = infer_next_token(
-                    self.tokens,
-                    self.temperature,
-                )
-                self.new_request = False
-                self.tokens.append(next_tok)
+                print(f"[DEBUG] About to call infer_next_token for generation with {len(self.tokens)} tokens")
                 try:
-                    self.parser.process(next_tok)
-                except Exception:
-                    pass
+                    next_tok = infer_next_token(
+                        self.tokens,
+                        temperature=self.temperature,
+                        request_id=session_id,
+                        new_request=False,  # continue existing session
+                    )
+                    print(f"[DEBUG] Generation call returned: {next_tok}")
+                except TypeError as e:
+                    print(f"[DEBUG] TypeError in generation call: {e}, falling back to old signature")
+                    # Fallback for older backends without kwargs support
+                    next_tok = infer_next_token(
+                        self.tokens,
+                        self.temperature,
+                    )
+                    print(f"[DEBUG] Fallback generation call returned: {next_tok}")
+                except Exception as e:
+                    print(f"[DEBUG] Exception in generation call: {e}")
+                    next_tok = None
+                self.new_request = False
+                if next_tok is not None:
+                    # Check if this is a control token during bootstrap
+                    from baby.constants.harmony_tokens import ALL_CONTROL_TOKENS
+
+                    is_control_token = next_tok in ALL_CONTROL_TOKENS
+
+                    # Only add non-control tokens to the token sequence to prevent state evolution
+                    # Control tokens are needed for parsing but shouldn't affect the generation state
+                    if not is_control_token:
+                        self.tokens.append(next_tok)
+
+                    try:
+                        self.parser.process(next_tok)
+                    except Exception:
+                        pass
+                else:
+                    # No more tokens available, break generation loop
+                    break
 
                 if self.parser.state == StreamState.EXPECT_START:
                     current_output_index += 1
@@ -405,10 +484,7 @@ def create_api_server(
                         previous_item = self.parser.messages[-1]
                         if previous_item.recipient is not None:
                             recipient = previous_item.recipient
-                            if (
-                                not recipient.startswith("browser.")
-                                and not recipient == "python"
-                            ):
+                            if not recipient.startswith("browser.") and not recipient == "python":
                                 fc_id = f"fc_{uuid.uuid4().hex}"
                                 call_id = f"call_{uuid.uuid4().hex}"
                                 self.function_call_ids.append((fc_id, call_id))
@@ -419,12 +495,8 @@ def create_api_server(
                                         item=FunctionCallItem(
                                             type="function_call",
                                             name=(
-                                                previous_item.recipient[
-                                                    len("functions.") :
-                                                ]
-                                                if previous_item.recipient.startswith(
-                                                    "functions."
-                                                )
+                                                previous_item.recipient[len("functions.") :]
+                                                if previous_item.recipient.startswith("functions.")
                                                 else previous_item.recipient
                                             ),
                                             arguments=previous_item.content[0].text,  # type: ignore
@@ -538,10 +610,12 @@ def create_api_server(
                     should_send_output_text_delta = True
                     if browser_tool:
                         # we normalize on the full current text to get the right indices in citations
-                        updated_output_text, annotations, has_partial_citations = browser_tool.normalize_citations(current_output_text_content + output_delta_buffer)
+                        updated_output_text, annotations, has_partial_citations = browser_tool.normalize_citations(
+                            current_output_text_content + output_delta_buffer
+                        )
                         # remove the current text to get back the delta but now normalized
-                        output_delta_buffer = updated_output_text[len(current_output_text_content):]
-                        
+                        output_delta_buffer = updated_output_text[len(current_output_text_content) :]
+
                         # Filter annotations to only include those whose start_index is not already present in current_annotations
                         # this is to avoid sending duplicate annotations as multiple annotations can't be in the same place
                         existing_start_indices = {a["start_index"] for a in current_annotations}
@@ -561,7 +635,6 @@ def create_api_server(
 
                         if has_partial_citations:
                             should_send_output_text_delta = False
-
 
                     if should_send_output_text_delta:
                         yield self._send_event(
@@ -586,9 +659,7 @@ def create_api_server(
                             ResponseOutputItemAdded(
                                 type="response.output_item.added",
                                 output_index=current_output_index,
-                                item=ReasoningItem(
-                                    type="reasoning", summary=[], content=[]
-                                ),
+                                item=ReasoningItem(type="reasoning", summary=[], content=[]),
                             )
                         )
                         yield self._send_event(
@@ -609,14 +680,9 @@ def create_api_server(
                     )
 
                 try:
-                    # purely for debugging purposes
-                    output_token_text = encoding.decode([next_tok])
-                    self.output_text += output_token_text
-                    try:
-                        print(output_token_text, end="", flush=True)
-                    except (UnicodeEncodeError, UnicodeError):
-                        # Skip printing characters that can't be encoded in console
-                        pass
+                    if next_tok is not None:  # type: ignore[reportUnnecessaryComparison]
+                        output_token_text = encoding.decode([next_tok])
+                        self.output_text += output_token_text
 
                 except RuntimeError:
                     pass
@@ -630,7 +696,7 @@ def create_api_server(
                             and last_message.recipient is not None
                             and last_message.recipient.startswith("browser.")
                         ):
-                            function_name = last_message.recipient[len("browser."):]
+                            function_name = last_message.recipient[len("browser.") :]
                             action = None
                             parsed_args = browser_tool.process_arguments(last_message)
                             if function_name == "search":
@@ -653,20 +719,22 @@ def create_api_server(
                             if action is not None:
                                 web_search_call_id = f"ws_{uuid.uuid4().hex}"
                                 self.browser_call_ids.append(web_search_call_id)
-                                yield self._send_event(ResponseOutputItemAdded(
-                                    type="response.output_item.added",
-                                    output_index=current_output_index,
-                                    item=WebSearchCallItem(
-                                        type="web_search_call",
-                                        id=web_search_call_id,
-                                        action=action,
-                                    ),
-                                ))
+                                yield self._send_event(
+                                    ResponseOutputItemAdded(
+                                        type="response.output_item.added",
+                                        output_index=current_output_index,
+                                        item=WebSearchCallItem(
+                                            type="web_search_call",
+                                            id=web_search_call_id,
+                                            action=action,
+                                        ),
+                                    )
+                                )
                                 yield self._send_event(
                                     ResponseWebSearchCallInProgress(
                                         type="response.web_search_call.in_progress",
                                         output_index=current_output_index,
-                                        item_id=web_search_call_id
+                                        item_id=web_search_call_id,
                                     )
                                 )
 
@@ -688,7 +756,7 @@ def create_api_server(
                                 new_tokens = encoding.render_conversation_for_completion(
                                     Conversation.from_messages(result), Role.ASSISTANT
                                 )
-                                
+
                                 print(encoding.decode(new_tokens))
                                 self.output_tokens.append(next_tok)
                                 # Use proper stop_tokens method from HarmonyEncoding
@@ -708,19 +776,21 @@ def create_api_server(
                                         item_id=web_search_call_id,
                                     )
                                 )
-                                yield self._send_event(ResponseOutputItemDone(
-                                    type="response.output_item.done",
-                                    output_index=current_output_index,
-                                    item=WebSearchCallItem(
-                                        type="web_search_call",
-                                        id=web_search_call_id,
-                                        action=action,
-                                    ),
-                                ))
+                                yield self._send_event(
+                                    ResponseOutputItemDone(
+                                        type="response.output_item.done",
+                                        output_index=current_output_index,
+                                        item=WebSearchCallItem(
+                                            type="web_search_call",
+                                            id=web_search_call_id,
+                                            action=action,
+                                        ),
+                                    )
+                                )
 
                                 current_output_index += 1
                                 self.new_request = True
-                                
+
                                 continue
 
                         else:
@@ -728,11 +798,15 @@ def create_api_server(
                     else:
                         # No messages parsed yet, just break gracefully
                         break
-                if self.request_body.max_output_tokens is not None and len(self.output_tokens) >= self.request_body.max_output_tokens:
+                if (
+                    self.request_body.max_output_tokens is not None
+                    and len(self.output_tokens) >= self.request_body.max_output_tokens
+                ):
                     break
 
                 # Adding in the end if we know we are not done
-                self.output_tokens.append(next_tok)
+                if next_tok is not None:  # type: ignore[reportUnnecessaryComparison]
+                    self.output_tokens.append(next_tok)
 
             if self.request is None or not await self.request.is_disconnected():
                 response = generate_response(
@@ -756,13 +830,12 @@ def create_api_server(
                 )
 
     @app.post("/v1/responses", response_model=ResponseObject)
-    async def generate_response_endpoint(body: ResponsesRequest, request: Request):  # pyright: ignore[reportUnusedFunction]
+    async def generate_response_endpoint(
+        body: ResponsesRequest, request: Request
+    ):  # pyright: ignore[reportUnusedFunction]
         print("request received")
 
-        use_browser_tool = any(
-            getattr(tool, "type", None) == "browser_search"
-            for tool in (body.tools or [])
-        )
+        use_browser_tool = any(getattr(tool, "type", None) == "browser_search" for tool in (body.tools or []))
 
         if use_browser_tool:
             backend = ExaBackend(
@@ -795,33 +868,33 @@ def create_api_server(
                     body.instructions = prev_req.instructions
                 body.input = merged_input
 
+        system_message_content = (
+            SystemContent.new()
+            .with_conversation_start_date(datetime.datetime.now().strftime("%Y-%m-%d"))
+            .with_model_identity("You are a helpful AI assistant.")
+        )
 
-        system_message_content = SystemContent.new().with_conversation_start_date(
-            datetime.datetime.now().strftime("%Y-%m-%d")
-        ).with_model_identity("You are a helpful AI assistant.")
-        
         if body.reasoning is not None:
             try:
 
                 reasoning_effort = get_reasoning_effort(body.reasoning.effort)
             except ValueError as e:
                 from fastapi import HTTPException
+
                 raise HTTPException(status_code=422, detail=str(e))
             system_message_content = system_message_content.with_reasoning_effort(reasoning_effort)
 
         if use_browser_tool and browser_tool is not None:
             system_message_content = system_message_content.with_tools(browser_tool.tool_config)
 
-        system_message = Message.from_role_and_content(
-            Role.SYSTEM, system_message_content
-        )
+        system_message = Message.from_role_and_content(Role.SYSTEM, system_message_content)
         messages = [system_message]
 
         if body.instructions or body.tools:
             developer_message_content = DeveloperContent.new(body.instructions or "")  # type: ignore
 
             tools = []
-            for tool in (body.tools or []):
+            for tool in body.tools or []:
                 if tool.type == "function":
                     tools.append(
                         ToolDescription.new(
@@ -831,13 +904,9 @@ def create_api_server(
                     )
 
             if tools:
-                developer_message_content = developer_message_content.with_function_tools(
-                    tools
-                )
+                developer_message_content = developer_message_content.with_function_tools(tools)
 
-            developer_message = Message.from_role_and_content(
-                Role.DEVELOPER, developer_message_content
-            )
+            developer_message = Message.from_role_and_content(Role.DEVELOPER, developer_message_content)
 
             messages.append(developer_message)
 
@@ -845,9 +914,7 @@ def create_api_server(
             user_message = Message.from_role_and_content(Role.USER, body.input)
             messages.append(user_message)
         else:
-            is_last_message_function_call_output = (
-                len(body.input) > 0 and body.input[-1].type == "function_call_output"
-            )
+            is_last_message_function_call_output = len(body.input) > 0 and body.input[-1].type == "function_call_output"
             function_call_map = {}
             # Find the index of the last assistant message
             last_assistant_idx = -1
@@ -859,28 +926,21 @@ def create_api_server(
                 if item.type == "message":
                     # TODO: add system prompt handling
                     if isinstance(item.content, str):
-                        messages.append(
-                            Message.from_role_and_content(item.role, item.content)
-                        )
+                        messages.append(Message.from_role_and_content(item.role, item.content))
                     else:
-                        for content_item in (item.content or []):
-                            messages.append(
-                                Message.from_role_and_content(item.role, content_item.text)
-                            )
+                        for content_item in item.content or []:
+                            messages.append(Message.from_role_and_content(item.role, content_item.text))
                     # add final channel to the last assistant message if it's from the assistant
                     if item.role == Role.ASSISTANT:
                         messages[-1] = messages[-1].with_channel("final")
                 elif item.type == "reasoning":
                     # Only include reasoning if it is after the last assistant message and we are handling a function call at the moment
-                    if (
-                        idx > last_assistant_idx
-                        and is_last_message_function_call_output
-                    ):
-                        for content_item in (item.content or []):
+                    if idx > last_assistant_idx and is_last_message_function_call_output:
+                        for content_item in item.content or []:
                             messages.append(
-                                Message.from_role_and_content(
-                                    Role.ASSISTANT, content_item.text
-                                ).with_channel("analysis")
+                                Message.from_role_and_content(Role.ASSISTANT, content_item.text).with_channel(
+                                    "analysis"
+                                )
                             )
                 elif item.type == "function_call":
                     function_call_map[item.call_id] = item
@@ -898,14 +958,14 @@ def create_api_server(
                         Message.from_author_and_content(
                             Author.new(Role.TOOL, f"functions.{function_call.name}"),
                             item.output,
-                        ).with_recipient("assistant").with_channel("commentary")
+                        )
+                        .with_recipient("assistant")
+                        .with_channel("commentary")
                     )
 
         conversation = Conversation.from_messages(messages)
 
-        initial_tokens = encoding.render_conversation_for_completion(
-            conversation, Role.ASSISTANT
-        )
+        initial_tokens = encoding.render_conversation_for_completion(conversation, Role.ASSISTANT)
         response_id = f"resp_{uuid.uuid4().hex}"
 
         def store_callback(rid: str, req: ResponsesRequest, resp: ResponseObject):
@@ -922,6 +982,7 @@ def create_api_server(
         )
 
         if body.stream:
+
             async def stream_generator():
                 async for event in event_stream.run():
                     if isinstance(event, str):
@@ -929,13 +990,28 @@ def create_api_server(
                     else:
                         # This shouldn't happen when as_sse=True, but handle gracefully
                         yield f"data: {event.model_dump_json()}\n\n"
-            
+
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
         else:
             last_event = None
             async for event in event_stream.run():
                 last_event = event
+                # Only return when we get a ResponseCompletedEvent (not the early events)
+                if isinstance(event, ResponseCompletedEvent):
+                    return event.response
 
-            return last_event.response  # type: ignore
+            # Fallback if no ResponseCompletedEvent was received
+            if last_event and isinstance(
+                last_event, (ResponseCreatedEvent, ResponseCompletedEvent, ResponseInProgressEvent)
+            ):
+                return last_event.response
+            else:
+                # Create a minimal response object as fallback
+                return ResponseObject(
+                    output=[],
+                    created_at=int(datetime.datetime.now().timestamp()),
+                    status="failed",
+                    error=Error(code="generation_failed", message="No valid response generated"),
+                )
 
     return app

@@ -5,15 +5,16 @@ Message = dict[str, Any]  # keys role, content
 MessageList = list[Message]
 
 
-
 @dataclass
 class SamplerResponse:
     """
     Response from a sampler.
     """
+
     response_text: str
     actual_queried_message_list: MessageList
     response_metadata: dict[str, Any]
+
 
 class SamplerBase:
     """
@@ -22,7 +23,7 @@ class SamplerBase:
     """
 
     def __call__(
-        self, 
+        self,
         message_list: MessageList,
     ) -> SamplerResponse:
         raise NotImplementedError
@@ -51,9 +52,7 @@ class SingleEvalResult:
     metrics: dict[str, float] = field(default_factory=dict)
     html: str | None = None
     convo: MessageList | None = None  # sampled conversation
-    example_level_metadata: dict[str, Any] | None = (
-        None  # Extra data such as rubric scores or sollen
-    )
+    example_level_metadata: dict[str, Any] | None = None  # Extra data such as rubric scores or sollen
 
 
 class Eval:
@@ -63,4 +62,3 @@ class Eval:
 
     def __call__(self, sampler: SamplerBase) -> EvalResult:
         raise NotImplementedError
-

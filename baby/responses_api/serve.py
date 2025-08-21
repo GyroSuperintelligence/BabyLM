@@ -47,10 +47,7 @@ if __name__ == "__main__":
     # Setup model with appropriate parameters based on backend
     try:
         if args.inference_backend == "gyro":
-            infer_next_token = gyro_setup_model(
-                encoding,
-                args.config
-            )
+            infer_next_token = gyro_setup_model(encoding, args.config)
         elif args.inference_backend == "stub":
             infer_next_token = stub_setup_model()
         else:
@@ -58,7 +55,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"FATAL: Engine initialization failed: {e}")
         print("This is typically caused by:")
-        print("  - Version mismatch between atlas and address files")
         print("  - Missing or corrupted model files")
         print("  - Invalid configuration")
         print("Please check your configuration and model files.")

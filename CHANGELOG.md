@@ -2,6 +2,22 @@
 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
 
 ---
+## [v0.9.7.4-Atlas] – 2025-08-21 - Experimental
+
+For the past two days, I've been expanding and contracting gyro_core.py - our main logic to understand what works and what not. It managed to reached a state of over 2500 LOC, and after not getting anywhere, I stipped it down to less than 200 LOC to discover the foundations of my architecture.
+
+Our Atlas (5 States Maps):
+Theta (CS): establishes the orthogonality ground, the π/2 chirality that defines emergence. It tells you how far any state is from the archetypal source.
+
+Ontology (UNA): defines the raw atlas of discoverable states. This is the space of all possible identities.
+
+Phenomenology (ONA): collapses states into equivalence classes (orbits). This gives the appearance of structure out of raw ontology.
+
+Epistemology (BU-Eg): governs transitions. It is the mechanism by which states are transformed by introns.
+
+Orbit sizes (BU-In): gives the scaling and weighting — how big the orbit is, which acts as the measure for how memory interacts and returns. Ingress is the active traversal back and forth between these orbits, grounded by reverse index lookup.
+
+---
 
 ## [v0.9.7.4-BabyLM] – 2025-08-19 - Alpha
 

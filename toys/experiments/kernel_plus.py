@@ -92,10 +92,10 @@ for layer in range(4):
 def fold(a: int, b: int) -> int:
     """
     The Monodromic Fold (⋄), the path-dependent learning operator.
-    
+
     Canonical Form: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
     Algebraic Normal Form: a ⋄ b = ¬a ∧ b
-    
+
     These are mathematically identical through Boolean algebra.
     Non-associative, path-dependent learning operator.
     This is the ONLY learning/integration operator in the system.
@@ -588,7 +588,9 @@ class GyroKernel:
 
         # If too small, fallback to looser tolerance
         if len(self._UNA_pool) < 10:  # Minimum viable pool size
-            self._UNA_pool = np.argwhere(np.abs(self.theta - target_theta) < fallback_tolerance).astype(np.int32).ravel()
+            self._UNA_pool = (
+                np.argwhere(np.abs(self.theta - target_theta) < fallback_tolerance).astype(np.int32).ravel()
+            )
 
         # Final fallback: use states with theta in UNA range
         if len(self._UNA_pool) == 0:
@@ -919,14 +921,14 @@ class GyroKernel:
     def _resonance_defect(self, token_id: int) -> int:
         """Calculate pure Fold resonance defect."""
         # Use weight_lens if available
-        if hasattr(self, 'weight_lens') and self.weight_lens is not None:
+        if hasattr(self, "weight_lens") and self.weight_lens is not None:
             try:
                 exon = self.weight_lens.exon_for_token(int(token_id))
                 defect = self._resonance_table[self.path_memory & 0xFF, exon & 0xFF]
                 return defect
             except Exception:
                 pass
-                
+
         # Fallback to cached exon or default
         exon = self.token_exon_cache.get(token_id, GENE_Mic_S)
         defect = self._resonance_table[self.path_memory & 0xFF, exon & 0xFF]

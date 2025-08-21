@@ -70,10 +70,10 @@ def tensor_to_int(tensor: np.ndarray) -> int:
 def fold(a: int, b: int) -> int:
     """
     The Monodromic Fold (⋄), the path-dependent learning operator.
-    
+
     Canonical Form: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
     Algebraic Normal Form: a ⋄ b = ¬a ∧ b
-    
+
     These are mathematically identical through Boolean algebra.
     """
     a &= 0xFF

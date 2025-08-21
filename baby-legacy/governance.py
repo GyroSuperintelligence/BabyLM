@@ -113,21 +113,21 @@ def tensor_to_int(tensor: NDArray[np.int8]) -> int:
 def apply_boundary_selector(intron: int) -> int:
     """
     Boundary selector π for CS handling as extra-phenomenal axiom.
-    
+
     When the active state is CS, this applies a chiral boundary reindexing
     of the intron before it enters the generic physics T.
-    
+
     Args:
         intron: 8-bit instruction mask
-        
+
     Returns:
         Reindexed intron for CS boundary transitions
     """
     intron &= 0xFF
-    
+
     # Partition introns into standing and driving classes
     has_drive = (intron & (EXON_FG_MASK | EXON_BG_MASK)) != 0
-    
+
     if not has_drive:
         # Standing intron: π(i) = i (no emergence without drive)
         return intron
@@ -136,40 +136,40 @@ def apply_boundary_selector(intron: int) -> int:
         # that lands in UNA band (nearest to π/4 from archetype)
         # For now, use a simple deterministic mapping that preserves
         # the family structure while ensuring non-zero result
-        
+
         # Preserve LI orientation, modify FG/BG to ensure UNA landing
         li_bits = intron & EXON_LI_MASK
         drive_bits = intron & (EXON_FG_MASK | EXON_BG_MASK)
-        
+
         # Simple chirality-consistent rule: if both FG and BG are set,
         # prefer FG (forward gyration) for UNA emergence
         if (drive_bits & EXON_FG_MASK) and (drive_bits & EXON_BG_MASK):
             drive_bits = EXON_FG_MASK
         elif not drive_bits:
             drive_bits = EXON_FG_MASK  # Default to forward gyration
-            
+
         return li_bits | drive_bits
 
 
 def apply_cs_boundary_transition(intron: int) -> int:
     """
     Handle CS boundary transition using the boundary selector.
-    
+
     This implements the boundary law:
     if s = CS: s' = T(s*, π(i)) with s* = GENE_Mac_S (archetypal state)
-    
+
     Args:
         intron: 8-bit instruction mask
-        
+
     Returns:
         Next state after CS boundary transition
     """
     # Apply boundary selector to get the reindexed intron
     pi_intron = apply_boundary_selector(intron)
-    
+
     # Use archetypal state as the lawful origin
     archetypal_int = tensor_to_int(GENE_Mac_S)
-    
+
     # Apply generic physics from archetypal state with reindexed intron
     return apply_gyration_and_transform(archetypal_int, pi_intron)
 
@@ -258,10 +258,10 @@ MASK = 0xFF  # 8-bit mask
 def fold(a: int, b: int) -> int:
     """
     The Monodromic Fold (⋄), the single, unified learning operator for BU.
-    
+
     Canonical Form: a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))
     Algebraic Normal Form: a ⋄ b = ¬a ∧ b
-    
+
     These are mathematically identical through Boolean algebra:
     a ⊕ (b ⊕ (a ∧ ¬b)) = b ⊕ (a ∧ b) = b ∧ ¬a = ¬a ∧ b
 

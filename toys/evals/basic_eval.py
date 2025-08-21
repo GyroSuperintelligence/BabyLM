@@ -1,22 +1,26 @@
 """
 Basic eval
 """
+
 from . import report
 
 from .types import Eval, EvalResult, SamplerBase, SingleEvalResult
 
+
 class BasicEval(Eval):
-    def __init__(self,):
-        self.examples = [{
-            "question": "hi",
-            "answer": "hi, how can i help?",
-        }]
+    def __init__(
+        self,
+    ):
+        self.examples = [
+            {
+                "question": "hi",
+                "answer": "hi, how can i help?",
+            }
+        ]
 
     def __call__(self, sampler: SamplerBase) -> EvalResult:
         def fn(row: dict):
-            sampler_response = sampler([
-                sampler._pack_message(content=row["question"], role="user")
-            ])
+            sampler_response = sampler([sampler._pack_message(content=row["question"], role="user")])
             response_text = sampler_response.response_text
             extracted_answer = response_text
             actual_queried_prompt_messages = sampler_response.actual_queried_message_list
@@ -29,10 +33,7 @@ class BasicEval(Eval):
                 extracted_answer=extracted_answer,
             )
             convo = actual_queried_prompt_messages + [dict(content=response_text, role="assistant")]
-            return SingleEvalResult(
-                html=html, score=score, convo=convo, metrics={"chars": len(response_text)}
-            )
+            return SingleEvalResult(html=html, score=score, convo=convo, metrics={"chars": len(response_text)})
 
         results = report.map_with_progress(fn, self.examples, num_threads=1)
         return report.aggregate_results(results)
-

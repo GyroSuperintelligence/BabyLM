@@ -41,9 +41,7 @@ class ChatCompletionsSampler(SamplerBase):
 
     def __call__(self, message_list: MessageList) -> SamplerResponse:
         if self.system_message:
-            message_list = [
-                self._pack_message("system", self.system_message)
-            ] + message_list
+            message_list = [self._pack_message("system", self.system_message)] + message_list
         trial = 0
         while True:
             try:
@@ -83,7 +81,7 @@ class ChatCompletionsSampler(SamplerBase):
                     actual_queried_message_list=message_list,
                 )
             except Exception as e:
-                exception_backoff = 2 ** trial  # exponential back off
+                exception_backoff = 2**trial  # exponential back off
                 print(
                     f"Rate limit exception so wait and retry {trial} after {exception_backoff} sec",
                     e,

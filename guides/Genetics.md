@@ -61,7 +61,7 @@ This pattern is mathematically unique among all 256 byte values:
 - Bit positions 1,3,5,7 contain 1 (odd positions)
 - This creates an intrinsic left-bias that aligns with CGM's Common Source asymmetry
 
-**Continuation Bit Inversion**: When any byte b is transformed by b ⊕ 0xAA, bit 7 is inverted. Since 0xAA has bit 7 = 1, the transformation flips the most significant bit. This creates the lawful inversion of LEB128 continuation bits: internal introns with bit 7 = 1 (continue) become external bytes with bit 7 = 0 (final), and vice versa.
+**Bit 7 Inversion**: When any byte b is transformed by b ⊕ 0xAA, bit 7 is inverted. Since 0xAA has bit 7 = 1, the transformation flips the most significant bit. This creates the lawful bit inversion between internal introns and external bytes.
 
 **Holographic Compression**: 0xAA is the 8-bit projection of the full 48-bit alternating pattern present in GENE_Mac_S. The larger tensor contains alternating +1/-1 patterns; 0xAA captures this alternation at the byte level.
 
@@ -255,7 +255,7 @@ Every transaction across this boundary is mediated by the holographic topology G
 
 This symmetric XOR operation ensures that the distinction between the internal physical reality and the external communicative representation is lawfully maintained.
 
-**Critical LEB128 Alignment**: A critical consequence of this XOR transformation is the lawful inversion of the LEB128 continuation bit. An internal intron with bit 7 set to 1 (signaling physical continuation) is transcribed into an external byte with bit 7 set to 0. This inversion is the key mechanism that aligns the internal physics of differentiation and closure with the external protocol of sequential encoding, making GyroSI natively compatible with variable-length integer encoding.
+**Critical Bit Alignment**: A critical consequence of this XOR transformation is the lawful inversion of bit 7. An internal intron with bit 7 set to 1 becomes an external byte with bit 7 set to 0. This inversion aligns the internal physics of differentiation and closure with external byte representation.
 
 **BU Egress: Absorption and Learning**
 
@@ -937,8 +937,8 @@ def handle_non_byte_tokenizer(token_id):
     if token_id < 256:
         bytes = [token_id]  # Single byte
     else:
-        # Use LEB128 encoding
-        bytes = encode_leb128(token_id)
+        # Direct token to bytes mapping
+        bytes = [token_id & 0xFF]
     
     # Apply ψ transformation
     introns = [b ^ 0xAA for b in bytes]
@@ -1218,9 +1218,9 @@ The following behaviors are intentional design features, not bugs:
 - **Atlas**: 788,986 states across 256 orbit representatives
 - **Verification**: Slab mapping verified with positions [0-47] across 8 slabs
 
-### LEB128 Boundary Handling
-- **Feature**: Continuation bits are inverted by ψ function for engine compatibility
-- **Mechanism**: Final intron has MSB=1 after ψ; final byte maintains MSB=0 per LEB128
+### Byte Boundary Handling
+- **Feature**: Bit 7 is inverted by ψ function for engine compatibility
+- **Mechanism**: Final intron has MSB=1 after ψ; final byte has MSB=0 after ψ
 - **Validation**: Round-trip encoding/decoding maintains data integrity
 
 **Test Coverage Note**: Current tests validate boundary transforms, global/slab admissibility, recovery ordering, nudges, bit-packing, reverse index, versioning, and address determinism. Areas not fully exercised include passive-store capacity enforcement (K/M caps and eviction) and final tie-break rules in address binding.
