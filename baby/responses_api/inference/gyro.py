@@ -5,7 +5,7 @@ import json, threading, collections
 from pathlib import Path
 from openai_harmony import StreamableParser, Role
 from baby.kernel.gyro_core import GyroEngine
-from baby.constants.harmony_tokens import MESSAGE, ROLE_USER, ALL_CONTROL_TOKENS
+from baby.constants.harmony_tokens import MESSAGE, ROLE_USER, ROLE_ASSISTANT, ALL_CONTROL_TOKENS
 
 _engine_lock = threading.RLock()
 
@@ -60,6 +60,19 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
         val = getattr(current_role, "value", None)
         return val == "user"
 
+    def _is_assistant_role(current_role) -> bool:
+        # Handle Role enum and string forms defensively
+        try:
+            if current_role == Role.ASSISTANT:
+                return True
+        except Exception:
+            pass
+        if current_role == "assistant" or current_role == ROLE_ASSISTANT:
+            return True
+        # Some enums expose .value
+        val = getattr(current_role, "value", None)
+        return val == "assistant"
+
     def _apply_new_tokens(sess: Dict[str, Any], new_tokens: list[int]) -> None:
         """
         Feed only the delta tokens to the streaming parser and update engine state.
@@ -75,21 +88,13 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 # Egress: folds on PRE-state, returns POST-state
                 new_state = engine.evolve_on_user(sess["state"], tok)
                 sess["state"] = new_state
-                # Anchor to the POST-state after K user tokens, but only if state has experienced tokens
-                if not sess.get("user_anchor_captured"):
-                    sess["user_anchor_seen"] = sess.get("user_anchor_seen", 0) + 1
-                    target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
-                    print(f"[DEBUG] Anchor progress: {sess['user_anchor_seen']}/{target_k} tokens seen")
-
-                    # Capture anchor after K tokens without checking experienced tokens
-                    if sess["user_anchor_seen"] >= target_k and sess["user_anchor_state"] is None:
-                        sess["user_anchor_state"] = (
-                            new_state  # or keep the initial state; either is fine since egress doesn't evolve
-                        )
-                        sess["user_anchor_captured"] = True
-                        print(f"[DEBUG] Anchor captured at token {sess['user_anchor_seen']} with state {new_state}")
-                else:
-                    print(f"[DEBUG] Anchor already captured, continuing learning")
+                sess["user_token_count"] = sess.get("user_token_count", 0) + 1
+                
+                # Capture anchor after K user tokens
+                target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
+                if sess["user_token_count"] == target_k:
+                    sess["user_anchor_state"] = new_state
+                    print(f"[DEBUG] Anchor captured at {sess['user_token_count']} user tokens with state {new_state}")
             else:
                 # Pure ingress (no folding unless config turns it on)
                 sess["state"] = engine.evolve_on_assistant(sess["state"], tok)
@@ -114,11 +119,10 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     "fed_len": 0,
                     "state": engine.start_state(),
                     "bootstrap_step": 0,
-                    "user_anchor_seen": 0,
-                    "user_anchor_captured": False,
+                    "user_token_count": 0,
                     "user_anchor_state": None,
                     "anchor_target_k": int(engine.runtime.get("anchor_prefix_tokens", 12)),
-                    "anchor_applied": False,
+                    "anchor_applied": False,  # Track if anchor has been applied
                 }
                 sessions[request_id] = sess
                 # Feed all tokens to parser for proper role/channel detection
@@ -133,29 +137,21 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
 
                         # Learn ONLY from user content tokens; never from system/developer/assistant
                         if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
-                            # Egress: folds on PRE-state, returns POST-state
-                            new_state = engine.evolve_on_user(sess["state"], tok)
+                            # Learn from user token: step state, register, and fold
+                            new_state = engine.learn_on_user(sess["state"], tok)
                             sess["state"] = new_state
-                            # Anchor to the POST-state after K user tokens, but only if state has experienced tokens
-                            if not sess.get("user_anchor_captured"):
-                                sess["user_anchor_seen"] = sess.get("user_anchor_seen", 0) + 1
-                                target_k = sess.get(
-                                    "anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12))
-                                )
-                                print(f"[DEBUG] Anchor progress: {sess['user_anchor_seen']}/{target_k} tokens seen")
-
-                                # Capture anchor after K tokens without checking experienced tokens
-                                if sess["user_anchor_seen"] >= target_k and sess["user_anchor_state"] is None:
-                                    sess["user_anchor_state"] = (
-                                        new_state  # or keep the initial state; either is fine since egress doesn't evolve
-                                    )
-                                    sess["user_anchor_captured"] = True
-                                    print(
-                                        f"[DEBUG] Anchor captured at POST-state after {sess['user_anchor_seen']} user tokens; state={new_state}"
-                                    )
+                            sess["user_token_count"] = sess.get("user_token_count", 0) + 1
+                            
+                            # Capture anchor after K user tokens
+                            target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
+                            if sess["user_token_count"] == target_k:
+                                sess["user_anchor_state"] = new_state
+                        elif _is_assistant_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
+                            # Assistant tokens: transit only, no learning
+                            sess["state"] = engine.transit_on_assistant(sess["state"], tok)
                         else:
-                            # Pure ingress (no folding unless config turns it on)
-                            sess["state"] = engine.evolve_on_assistant(sess["state"], tok)
+                            # Control tokens: no-op
+                            pass
                     sess["parser"] = parser
                     sess["fed_len"] = len(tokens)
                 else:
@@ -168,25 +164,20 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     print(f"[DEBUG] Feeding {len(delta)} new tokens: {delta[:10]}...")
                     _apply_new_tokens(sess, delta)
                     sess["fed_len"] = len(tokens)
-                    print(f"[DEBUG] Session fed_len now: {sess['fed_len']}")
                 else:
-                    print(f"[DEBUG] No new tokens to feed (fed_len={sess['fed_len']}, total_len={len(tokens)})")
+                    pass
 
         if ingest_only:
             print(f"[DEBUG] Ingest-only mode, returning None")
             return None
 
         # Apply anchor state once before bootstrapping the assistant channel/message
-        if (
-            not sess.get("anchor_applied")
-            and sess.get("user_anchor_captured")
-            and sess.get("user_anchor_state") is not None
-        ):
-            # Apply the anchor state (we already verified it has experienced tokens when capturing)
-            anchor_state = sess["user_anchor_state"]
+        anchor_state = sess.get("user_anchor_state")
+        if anchor_state is not None and not sess.get("anchor_applied", False):
             sess["state"] = anchor_state
             sess["anchor_applied"] = True
-            print(f"[DEBUG] Applied anchor state: {sess['state']}")
+            print(f"[DEBUG] Applied anchor state: {anchor_state}")
+        state = sess["state"]
 
         # Normal (pure) generation path
         state = sess["state"]
@@ -232,15 +223,15 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 return opener
         # ---------------------------------------------------------------------------
 
-        next_token = engine.next_token_deterministic(state)
-        print(f"[DEBUG] next_token_deterministic returned: {next_token}")
-
-        if next_token is None:
-            print(f"[DEBUG] next_token_deterministic returned None for state {sess['state']}")
+        # Use emit_next_from_state to get both token and new state
+        res = engine.emit_next_from_state(state)
+        if res is None:
             return None
-
-        # Update session state with emitted token (no self-reinforcement)
-        sess["state"] = engine.evolve_on_assistant(sess["state"], next_token)
+        
+        next_token, new_state = res
+        
+        # Advance session state along the reflexive BU-Eg
+        sess["state"] = new_state
 
         return next_token
 

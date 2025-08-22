@@ -830,9 +830,9 @@ def create_api_server(infer_next_token: Callable[..., Optional[int]], encoding: 
                 )
 
     @app.post("/v1/responses", response_model=ResponseObject)
-    async def generate_response_endpoint(
+    async def generate_response_endpoint(  # pyright: ignore[reportUnusedFunction]
         body: ResponsesRequest, request: Request
-    ):  # pyright: ignore[reportUnusedFunction]
+    ):
         print("request received")
 
         use_browser_tool = any(getattr(tool, "type", None) == "browser_search" for tool in (body.tools or []))

@@ -8,9 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 from pathlib import Path
-from functools import lru_cache
 
-from baby import governance
+import governance
 import logging
 
 logger = logging.getLogger(__name__)
@@ -43,152 +42,6 @@ Build steps:
 """
 
 
-# ---------- Tokenization & LEB128 Functions ----------
-
-
-@lru_cache(maxsize=4)
-def _cached_tokenizer(name: str, base_path_str: str) -> Any:
-    from tokenizers import Tokenizer
-
-    root = Path(base_path_str)
-    path = root / "public" / "tokenizers" / name / "tokenizer.json"
-    if not path.exists():
-        raise FileNotFoundError(f"Tokenizer not found: {path}")
-    return Tokenizer.from_file(str(path))
-
-
-def _load_tokenizer(
-    name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
-) -> Any:
-    """Load tokenizer from HuggingFace with caching."""
-    return _cached_tokenizer(name, str(base_path))
-
-
-def _id_to_bytes(idx: int) -> List[int]:
-    """Convert token ID to LEB128 bytes."""
-    if idx < 0:
-        raise ValueError("Token ID must be non-negative")
-
-    bytes_list = []
-    while True:
-        byte = idx & 0x7F
-        idx >>= 7
-        if idx == 0:
-            bytes_list.append(byte)
-            break
-        else:
-            bytes_list.append(byte | 0x80)
-    return bytes_list
-
-
-def _bytes_to_ids(blob: bytes) -> List[int]:
-    """Convert LEB128 bytes to token IDs."""
-    ids, cur, shift = [], 0, 0
-    for i, b in enumerate(blob):
-        if shift > 28:  # Prevent overflow (32-bit token ID assumption)
-            raise ValueError(f"Token ID too large at byte {i}")
-        cur |= (b & 0x7F) << shift
-        if b & 0x80:
-            shift += 7
-        else:
-            ids.append(cur)
-            cur, shift = 0, 0
-    if shift:
-        raise ValueError("Incomplete token ID sequence")
-    return ids
-
-
-def _apply_mask(buf: bytes) -> bytes:
-    """XOR every byte with 0xAA – vectorised & memory‑efficient."""
-    # bytes ↔ introns is a pure involution: f(f(x)) == x
-    return bytes(b ^ 0xAA for b in buf)
-
-
-def encode_text(
-    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
-) -> bytes:
-    """Encode text to bytes via tokenizer + LEB128 (vectorized). Uses base_path for root."""
-    # 1. text → token IDs ----------------------------------------------------
-    tokenizer = _load_tokenizer(name, base_path)
-    ids = tokenizer.encode(text).ids
-
-    # 2. IDs → pure‑LEB128 intron stream ------------------------------------
-    introns = bytearray(len(ids) * 5)  # worst‑case pre‑alloc
-    pos = 0
-    for tid in ids:
-        val = tid
-        while True:
-            byte = val & 0x7F
-            val >>= 7
-            introns[pos] = byte | (0x80 if val else 0x00)
-            pos += 1
-            if not val:
-                break
-
-    # 3. intron stream → external masked bytes ------------------------------
-    return _apply_mask(bytes(introns[:pos]))
-
-
-def decode_text(
-    blob: bytes, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
-) -> str:
-    """Decode LEB128 bytes back to text via tokenizer. Uses base_path for root."""
-    # 1. external bytes → intron stream -------------------------------------
-    introns = _apply_mask(blob)
-
-    # 2. intron stream → token IDs ------------------------------------------
-    try:
-        ids = _bytes_to_ids(introns)
-        # Trim at [SEP] if present
-        if SEP_ID in ids:
-            ids = ids[: ids.index(SEP_ID)]
-        # 3. IDs → text ------------------------------------------------------
-        tokenizer = _load_tokenizer(name, base_path)
-        return str(tokenizer.decode(ids))
-    except Exception:
-        # malformed stream fallback
-        return blob.decode("utf-8", errors="replace")
-
-
-def get_vocab_size(
-    name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
-) -> int:
-    """Get vocabulary size of a tokenizer. Uses base_path for root."""
-    tokenizer = _load_tokenizer(name, base_path)
-    return int(tokenizer.get_vocab_size())
-
-
-def token_id_to_bytes(tok_id: int) -> bytes:
-    """Convert a single token ID to bytes via LEB128 and apply the 0xAA mask."""
-    introns = bytearray(5)  # worst-case pre-alloc
-    pos = 0
-    val = tok_id
-    while True:
-        byte = val & 0x7F
-        val >>= 7
-        introns[pos] = byte | (0x80 if val else 0x00)
-        pos += 1
-        if not val:
-            break
-    return _apply_mask(bytes(introns[:pos]))
-
-
-def bytes_to_token_id(bs: bytes) -> int:
-    """Convert bytes back to a single token ID. Assumes complete token."""
-    # First unmask the bytes, then decode
-    unmasked = _apply_mask(bs)
-    ids = _bytes_to_ids(unmasked)
-    if len(ids) != 1:
-        raise ValueError(f"Expected single token ID, got {len(ids)}")
-    return ids[0]
-
-
-def bytes_to_token_ids(bs: bytes) -> List[int]:
-    """Convert bytes back to a list of token IDs."""
-    unmasked = _apply_mask(bs)
-    return _bytes_to_ids(unmasked)
-
-
 # ---------- ψ Isomorphism Functions ----------
 
 
@@ -202,187 +55,50 @@ def ψ_inv(intron: int) -> int:
     return intron ^ 0xAA
 
 
-# ---------- Token ↔ Intron Conversion ----------
+# ---------- Token ↔ Intron Conversion (Simplified) ----------
 
 
 def token_to_introns(token_id: int) -> List[int]:
-    """Convert a token ID to its LEB128 intron sequence.
-
-    This is the ψ isomorphism: token_id → LEB128 bytes → introns via XOR 0xAA.
-    Each intron is a single byte that can be fed directly to GyroSI physics.
-
+    """Convert a token ID to intron sequence via ψ isomorphism.
+    
+    Simplified version: direct byte-to-intron conversion.
+    For reference only - uses harmony tokenizer concepts.
+    
     Args:
         token_id: The token ID to convert
-
+        
     Returns:
         List of intron bytes (0-255) that represent the token
     """
-    # Convert token ID to LEB128 bytes
-    leb_bytes = _id_to_bytes(token_id)
-    # Apply ψ isomorphism (XOR with 0xAA) to get introns
-    introns = [b ^ 0xAA for b in leb_bytes]
+    # Simple conversion: token_id as bytes → introns via ψ
+    token_bytes = token_id.to_bytes((token_id.bit_length() + 7) // 8, 'big')
+    introns = [ψ(b) for b in token_bytes]
     return introns
 
 
 def introns_to_token(introns: List[int]) -> int:
     """Convert an intron sequence back to a token ID.
-
-    This is the ψ⁻¹ isomorphism: introns → LEB128 bytes → token_id.
-
+    
+    Simplified version: direct intron-to-byte conversion.
+    
     Args:
         introns: List of intron bytes (0-255)
-
+        
     Returns:
         The token ID that produced these introns
     """
-    # Apply ψ⁻¹ isomorphism (XOR with 0xAA) to get LEB128 bytes
-    leb_bytes = [i ^ 0xAA for i in introns]
-    # Convert LEB128 bytes to token ID
-    token_ids = _bytes_to_ids(bytes(leb_bytes))
-    if len(token_ids) != 1:
-        raise ValueError(f"Expected single token ID, got {len(token_ids)}")
-    return token_ids[0]
-
-
-@lru_cache(maxsize=1)
-def _get_intron_trie(
-    tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
-) -> Dict[Any, Any]:
-    """Build and cache a trie mapping intron sequences to token IDs."""
-    tokenizer = _load_tokenizer(tokenizer_name, base_path)
-    vocab_size = tokenizer.get_vocab_size()
-
-    trie: Dict[Any, Any] = {}
-    for token_id in range(vocab_size):
-        try:
-            introns = token_to_introns(token_id)
-            node = trie
-            for intron in introns:
-                if intron not in node:
-                    node[intron] = {}
-                node = node[intron]
-            if "tokens" not in node:
-                node["tokens"] = []
-            node["tokens"].append(token_id)
-        except (ValueError, IndexError):
-            continue  # Skip invalid tokens
-
-    return trie
-
-
-def find_tokens_by_intron_prefix(
-    intron_prefix: List[int],
-    tokenizer_name: str = "bert-base-uncased",
-    base_path: Path = Path(__file__).resolve().parents[1] / "memories",
-) -> List[int]:
-    """Find all tokens whose intron sequence starts with the given prefix.
-
-    This implements efficient tokenizer trie lookup for the exon product sieve.
-    Converts intron prefix to LEB128 bytes, then finds all tokens matching that prefix.
-
-    Args:
-        intron_prefix: List of intron bytes (0-255) representing the prefix
-        tokenizer_name: Name of the tokenizer to use
-        base_path: Base path for tokenizer files
-
-    Returns:
-        List of token IDs whose intron sequence starts with the given prefix
-    """
-    trie = _get_intron_trie(tokenizer_name, base_path)
-
-    node = trie
-    for intron in intron_prefix:
-        if intron in node:
-            node = node[intron]
-        else:
-            return []  # No tokens with this prefix
-
-    # Collect all tokens from this node and its children
-    matching_tokens = []
-
-    def _collect_tokens(n: Dict[Any, Any]) -> None:
-        if "tokens" in n:
-            matching_tokens.extend(n["tokens"])
-        for k, v in n.items():
-            if k != "tokens":
-                _collect_tokens(v)
-
-    _collect_tokens(node)
-
-    return matching_tokens
-
-
-@lru_cache(maxsize=1)
-def _get_reverse_intron_trie(
-    tokenizer_name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
-) -> Dict[Any, Any]:
-    """Build and cache a reverse trie mapping last introns to token IDs."""
-    tokenizer = _load_tokenizer(tokenizer_name, base_path)
-    vocab_size = tokenizer.get_vocab_size()
-
-    trie: Dict[Any, Any] = {}
-    for token_id in range(vocab_size):
-        try:
-            introns = token_to_introns(token_id)
-            if introns:
-                last_intron = introns[-1]
-                if last_intron not in trie:
-                    trie[last_intron] = []
-                trie[last_intron].append(token_id)
-        except (ValueError, IndexError):
-            continue
-
-    return trie
-
-
-def find_tokens_by_last_intron(
-    last_intron: int,
-    tokenizer_name: str = "bert-base-uncased",
-    base_path: Path = Path(__file__).resolve().parents[1] / "memories",
-) -> List[int]:
-    """Find tokens whose last intron matches the given byte.
-
-    This is the core function for the exon product sieve generation.
-    Efficiently finds tokens that could be generated from a specific exon product.
-
-    Args:
-        last_intron: Single intron byte (0-255) to match
-        tokenizer_name: Name of the tokenizer to use
-        base_path: Base path for tokenizer files
-
-    Returns:
-        List of token IDs whose last intron matches the given byte
-    """
-    trie = _get_reverse_intron_trie(tokenizer_name, base_path)
-    return trie.get(last_intron, [])  # type: ignore[no-any-return]
-
-
-# ---------- SEP Token Utilities ----------
-
-SEP_ID = 102
-
-
-def sep_bytes(count: int = 1) -> bytes:
-    """Generate SEP token bytes for sentence/article boundaries."""
-    introns = bytearray(count * 5)  # worst-case pre-alloc
-    pos = 0
-    for _ in range(count):
-        val = SEP_ID
-        while True:
-            byte = val & 0x7F
-            val >>= 7
-            introns[pos] = byte | (0x80 if val else 0x00)
-            pos += 1
-            if not val:
-                break
-    return _apply_mask(bytes(introns[:pos]))
-
-
-def encode_text_with_sep(
-    text: str, name: str = "bert-base-uncased", base_path: Path = Path(__file__).resolve().parents[1] / "memories"
-) -> bytes:
-    """Encode text and append a single SEP token."""
-    return encode_text(text, name, base_path) + sep_bytes()
+    # Apply ψ⁻¹ isomorphism to get bytes
+    bytes_list = [ψ_inv(i) for i in introns]
+    
+    # Convert bytes back to token ID
+    if not bytes_list:
+        return 0
+    
+    # Reconstruct integer from bytes
+    result = 0
+    for byte in bytes_list:
+        result = (result << 8) | byte
+    return result
 
 
 # ---------- Information Engine ----------
@@ -447,7 +163,7 @@ class InformationEngine:
         else:
             self._theta_table = None
 
-        self._v_max = 1 if self.orbit_cardinality is None else int(np.max(self.orbit_cardinality))
+        self._v_max = 1 if len(self.orbit_cardinality) == 0 else int(np.max(self.orbit_cardinality))
 
         # Early fail if theta.npy is missing or corrupt
         if self._theta_table is None:
