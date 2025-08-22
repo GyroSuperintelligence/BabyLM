@@ -1,7 +1,64 @@
 
 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
 
+Got it — you’re right. Today wasn’t just `gyro_core.py` surgery, it also touched the **Atlas itself** so that the five canonical maps line up with the pure gyration model. Let me extend the CHANGELOG properly to reflect both sides of the work:
+
 ---
+
+## [v0.9.7.6-Atlas-Experimental] – 2025-08-22
+
+**Scope:** Atlas regeneration + `baby/kernel/gyro_core.py`
+
+**Atlas Redesign**
+
+* **Phenomenology Map (ONA):**
+  Recomputed orbit representatives to ensure **canonical uniqueness**. Each orbit now maps deterministically to a single minimal representative (by state integer), eliminating the need for heuristic tie-breaks.
+
+* **Epistemology (BU-Eg):**
+  Verified all state transitions as **total over intron domain (0–255)**, ensuring no dead introns. This closed a prior gap where certain introns collapsed to trivial states, leading to emission stalls.
+
+* **Theta (CS):**
+  Normalised divergence values so that `argmin θ` is a stable, well-defined archetype used for the system start.
+
+* **Ontology Keys (UNA):**
+  Re-indexed state integers into a consistent monotone ordering aligned with the regenerated orbits. This fixed earlier mismatches where ontology and phenomenology disagreed on representatives.
+
+* **Orbit Sizes (BU-In cardinalities):**
+  Regenerated from the new phenomenology map, guaranteeing correct cardinality for every orbit and eliminating inconsistencies observed in prior tests.
+
+**Gyro Core Redesign (`gyro_core.py`)**
+
+* Reduced to the **five canonical maps only**.
+* **ψ boundary** (byte ↔ intron) remains the only encoding transformation.
+* **BU-Eg (learning):**
+
+  * User tokens folded into orbit-local buckets keyed by intron phase.
+  * Orbit phase memory updated by deterministic fold8.
+  * State advanced only via epistemology transitions.
+* **BU-In (emission):**
+
+  * Removed “scoring”, “greedy”, “dominance”, “frequency” logics.
+  * Implemented **pure monodromic unfold**.
+  * Emission phase mismatch issue solved by **orbit-local round robin counter** cycling across learned tokens.
+  * Reflexive update: token’s own phase folded back into orbit phase memory.
+* **Address binding:** canonicalised via minimal-state micro-path from orbit representatives.
+
+---
+
+**Impact**
+
+* Entire system now runs on **fold → register → unfold** cycle, with no auxiliary heuristics.
+* Eliminated pathological stuttering loops caused by mismatched registration/emission phases.
+* Knowledge test pipeline passes with **varied, non-trivial outputs**.
+* Atlas and runtime are now aligned under the same invariants:
+
+  * every state is covered,
+  * every orbit has a unique rep,
+  * transitions are total,
+  * emission is deterministic but non-stalling.
+
+---
+
 ## [v0.9.7.5-Atlas-Experimental] – 2025-08-21
 
 For the past two days, I've been expanding and contracting gyro_core.py - our main logic to understand what works and what not. It managed to reached a state of over 2500 LOC, and after not getting anywhere, I stipped it down to less than 200 LOC to discover the foundations of my architecture.
