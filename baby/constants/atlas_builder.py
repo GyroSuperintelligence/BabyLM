@@ -15,8 +15,6 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
-import os
-import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -342,7 +340,7 @@ def cmd_phenomenology(_: argparse.Namespace) -> None:
 
 
 def cmd_all(_: argparse.Namespace) -> None:
-    keys = build_ontology_and_theta(PATH_ONTOLOGY, PATH_THETA)
+    build_ontology_and_theta(PATH_ONTOLOGY, PATH_THETA)
     build_epistemology(PATH_ONTOLOGY, PATH_EPI, PATH_THETA)
     build_phenomenology_and_orbit_sizes(PATH_EPI, PATH_ONTOLOGY, PATH_PHENO, PATH_ORBITS)
     print("[INFO] All artifacts built.")

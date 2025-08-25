@@ -5,6 +5,50 @@ Got it — you’re right. Today wasn’t just `gyro_core.py` surgery, it also t
 
 ---
 
+## [v0.9.7.7-Atlas-Experimental] – 2025-08-25
+
+Today’s work completed a significant set of architectural, algorithmic, and persistence improvements to the GyroEngine, strengthening determinism, coherence, and generalisation while reducing repetition and memory corruption risks.
+
+**Core Architectural Changes**
+
+* Implemented an **8-sector toroidal routing layer**, computing toroidal addresses from 48-bit states via slab parities. This introduced a structured routing mechanism with full 8-bit signatures, preserving directional coherence without weights.
+* Added **Phase-Propagating Emission (PPE)** to the emission loop, with a fast accumulator (`omega`), deterministic bucket hopping, and deficit rotation. PPE now operates session-scoped, preventing concurrency bleed-through while preserving path-propagating behaviour.
+* Split live state into **LI/FG/BG phase components** using EXON masks, enabling richer bucket selection across all anatomical layers.
+* Replaced minimal integer selection with **geometric medoid binding**, using average angular distance and refined divergence metrics for more faithful address representation.
+* Integrated a **toroidal rotor via affine ring walks** for bucket selection, replacing ad-hoc or hash-based mechanisms. This ensures deterministic coverage of all keys and removes stochastic artefacts.
+
+**Selection & Entropy Enhancements**
+
+* Introduced LCG-based bucket key distribution with multiple entropy sources (`omega`, sector, bucket key), eliminating deterministic cycles and increasing phase key coverage.
+* Unified emission logic to fold together representative phase, LI/FG/BG decomposition, toroidal sector, and accumulator state, yielding a geometrically coherent deterministic selection.
+* Strictly bounded bucket capacity (K=64) with FIFO eviction, ensuring predictable memory scaling across all orbits.
+
+**Persistence and Concurrency Improvements**
+
+* Activated **persistent memory** for both address and passive layers (`rep_channel`, `rep_phase`, `passive_mask`), with atomic save/load, fsync, and corruption handling.
+* Switched persistence cadence to buffered writes (every 100 tokens or 30s) instead of every token, reducing overhead while preserving data integrity.
+* Added threading protection with `RLock` around shared state, eliminating race conditions in concurrent contexts.
+
+**Anchor and Generalisation Logic**
+
+* Enhanced anchor handling to track both `last_seen_k` and `target_k`, ensuring user tokens arriving later still update the anchor state rather than being dropped.
+* Improved medoid distance metric with a weighted combination of phase and theta divergence (α=0.7), yielding more consistent address binding.
+* Verified **true generalisation** via FROZEN\_CHANNELS integration: toroidal slab physics, holographic compression, monodromic fold learning, and multi-scale decomposition all contribute to structural, physics-driven generalisation rather than heuristic approximation.
+
+**Diagnostics & Results**
+
+* Added comprehensive tracing for token selection, confirming elimination of repetition cycles.
+* Verified session isolation, deterministic reproducibility, and stable toroidal sector computation.
+* Confirmed persistence works with non-zero memory files and correct restoration at engine initialisation.
+* All knowledge tests pass (✅), with system behaviour now characterised by:
+
+  * Diverse, non-repetitive token sequences
+  * Deterministic but path-propagating PPE emission
+  * Stable concurrency and persistence
+  * Physics-consistent routing and generalisation
+
+---
+
 ## [v0.9.7.6-Atlas-Experimental] – 2025-08-22
 
 **Scope:** Atlas regeneration + `baby/kernel/gyro_core.py`

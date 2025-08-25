@@ -89,6 +89,11 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
                 if sess["user_token_count"] == target_k:
                     sess["user_anchor_state"] = new_state
+                    sess["anchor_last_seen_k"] = sess["user_token_count"]
+                elif sess["user_token_count"] > target_k:
+                    # Update anchor to latest user token state if more tokens arrived
+                    sess["user_anchor_state"] = new_state
+                    sess["anchor_last_seen_k"] = sess["user_token_count"]
             else:
                 # Ingress transit for assistant content (no learning)
                 sess["state"] = engine.evolve_on_assistant(sess["state"], tok)
@@ -109,7 +114,12 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     "user_token_count": 0,
                     "user_anchor_state": None,
                     "anchor_target_k": int(engine.runtime.get("anchor_prefix_tokens", 12)),
+                    "anchor_last_seen_k": 0,
                     "anchor_applied": False,
+                    # PPE state scoped per session
+                    "omega": {},
+                    "bucket_key": {},
+                    "bucket_pos": {},
                 }
                 sessions[request_id] = sess
 
@@ -124,6 +134,11 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                             target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
                             if sess["user_token_count"] == target_k:
                                 sess["user_anchor_state"] = new_state
+                                sess["anchor_last_seen_k"] = sess["user_token_count"]
+                            elif sess["user_token_count"] > target_k:
+                                # Update anchor to latest user token state if more tokens arrived
+                                sess["user_anchor_state"] = new_state
+                                sess["anchor_last_seen_k"] = sess["user_token_count"]
                         elif _is_assistant_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
                             sess["state"] = engine.transit_on_assistant(sess["state"], tok)
                         else:
@@ -144,7 +159,14 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
         # Apply one-time anchor (if captured) just before generation
         anchor_state = sess.get("user_anchor_state")
         if anchor_state is not None and not sess.get("anchor_applied", False):
-            sess["state"] = anchor_state
+            # Use the latest anchor if more user tokens arrived after target_k
+            target_k = sess.get("anchor_target_k", 12)
+            if sess["user_token_count"] > target_k:
+                # Use latest user token state as anchor
+                sess["state"] = anchor_state
+            else:
+                # Use original K-token anchor
+                sess["state"] = anchor_state
             sess["anchor_applied"] = True
 
         # --- Channel bootstrap: open final channel/message deterministically ---
@@ -174,13 +196,21 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 return opener
 
         # Pure deterministic emission from the five-map engine
-        res = engine.emit_next_from_state(sess["state"])
+        res = engine.emit_next_from_state(
+            sess["state"], 
+            sess["omega"], 
+            sess["bucket_key"], 
+            sess["bucket_pos"]
+        )
         if res is None:
             return None
 
-        next_token, new_state = res
-        # Advance session state along ingress path (no learning)
+        next_token, new_state, omega, bucket_key, bucket_pos = res
+        # Advance session state and update PPE state
         sess["state"] = new_state
+        sess["omega"] = omega
+        sess["bucket_key"] = bucket_key
+        sess["bucket_pos"] = bucket_pos
         return next_token
 
     return infer_next_token
