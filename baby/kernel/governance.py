@@ -143,7 +143,7 @@ def apply_gyration_and_transform_all_introns(states: NDArray[np.uint64]) -> NDAr
     """
     temp = states[:, np.newaxis] ^ XFORM_MASK[np.newaxis, :]
     res = temp ^ (temp & INTRON_BROADCAST_MASKS[np.newaxis, :])
-    return cast("NDArray[np.uint64]", res.astype(np.uint64))
+    return res.astype(np.uint64)
 
 # -------------------------------------------------------------------
 # Integrity check

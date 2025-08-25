@@ -60,40 +60,40 @@ def ψ_inv(intron: int) -> int:
 
 def token_to_introns(token_id: int) -> List[int]:
     """Convert a token ID to intron sequence via ψ isomorphism.
-    
+
     Simplified version: direct byte-to-intron conversion.
     For reference only - uses harmony tokenizer concepts.
-    
+
     Args:
         token_id: The token ID to convert
-        
+
     Returns:
         List of intron bytes (0-255) that represent the token
     """
     # Simple conversion: token_id as bytes → introns via ψ
-    token_bytes = token_id.to_bytes((token_id.bit_length() + 7) // 8, 'big')
+    token_bytes = token_id.to_bytes((token_id.bit_length() + 7) // 8, "big")
     introns = [ψ(b) for b in token_bytes]
     return introns
 
 
 def introns_to_token(introns: List[int]) -> int:
     """Convert an intron sequence back to a token ID.
-    
+
     Simplified version: direct intron-to-byte conversion.
-    
+
     Args:
         introns: List of intron bytes (0-255)
-        
+
     Returns:
         The token ID that produced these introns
     """
     # Apply ψ⁻¹ isomorphism to get bytes
     bytes_list = [ψ_inv(i) for i in introns]
-    
+
     # Convert bytes back to token ID
     if not bytes_list:
         return 0
-    
+
     # Reconstruct integer from bytes
     result = 0
     for byte in bytes_list:

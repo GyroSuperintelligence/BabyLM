@@ -20,11 +20,14 @@ from typing import Dict, List, Optional, Tuple
 
 # ---------- ψ boundary ----------
 
+
 def byte_to_intron(b: int) -> int:  # ψ
     return (b & 0xFF) ^ 0xAA
 
+
 def intron_to_byte(i: int) -> int:  # ψ⁻¹
     return (i & 0xFF) ^ 0xAA
+
 
 def token_to_introns(token_id: int) -> List[int]:
     """
@@ -35,7 +38,9 @@ def token_to_introns(token_id: int) -> List[int]:
     bs = token_id.to_bytes((token_id.bit_length() + 7) // 8 or 1, "big")
     return [byte_to_intron(b) for b in bs]
 
+
 # ---------- GyroEngine with 5 maps ↔ 5 stages ----------
+
 
 class GyroEngine:
     """
@@ -56,24 +61,26 @@ class GyroEngine:
         vocab_size: int = 201_088,
     ):
         # Required five maps
-        self.theta = np.load(atlas_paths["theta"], mmap_mode="r")                    # float32[N]
-        self.keys = np.load(atlas_paths["ontology_keys"], mmap_mode="r")            # uint64[N]
-        self.ep = np.load(atlas_paths["epistemology"], mmap_mode="r")               # int32 [N,256]
-        self.pheno = np.load(atlas_paths["phenomenology_map"], mmap_mode="r")       # int32 [N]
-        self.orbit_sizes = np.load(atlas_paths["orbit_sizes"], mmap_mode="r")       # uint32[N]
+        self.theta = np.load(atlas_paths["theta"], mmap_mode="r")  # float32[N]
+        self.keys = np.load(atlas_paths["ontology_keys"], mmap_mode="r")  # uint64[N]
+        self.ep = np.load(atlas_paths["epistemology"], mmap_mode="r")  # int32 [N,256]
+        self.pheno = np.load(atlas_paths["phenomenology_map"], mmap_mode="r")  # int32 [N]
+        self.orbit_sizes = np.load(atlas_paths["orbit_sizes"], mmap_mode="r")  # uint32[N]
 
         # Reverse index: state_int → index (canonical)
         self.state_to_index: Dict[int, int] = {int(s): int(i) for i, s in enumerate(self.keys)}
 
         # Canonical orbit representatives (indices)
         reps = np.unique(self.pheno)
-        self.orbit_reps: List[int] = [int(r) for r in reps]   # typically 256
+        self.orbit_reps: List[int] = [int(r) for r in reps]  # typically 256
 
         # --- Pure monodromic BU-In state ---
         # Per-orbit phase accumulator (updated only when user speaks)
         self.rep_phase: Dict[int, int] = {}  # rep_idx -> 8-bit phase (0..255)
         # Token channels per orbit keyed by CUMULATIVE phase reached after learning
-        self.rep_channel: Dict[int, Dict[int, List[int]]] = {}  # rep_idx -> { phase_after_learning (0..255) -> [token_id, ...] }
+        self.rep_channel: Dict[int, Dict[int, List[int]]] = (
+            {}
+        )  # rep_idx -> { phase_after_learning (0..255) -> [token_id, ...] }
 
         # Passive memory (diagnostic; not used in emission)
         self.passive_mask: Dict[Tuple[int, int], int] = {}  # (addr_idx, token_id) -> 8-bit fold mask
@@ -120,7 +127,8 @@ class GyroEngine:
 
     @staticmethod
     def _fold8(a: int, b: int) -> int:
-        a &= 0xFF; b &= 0xFF
+        a &= 0xFF
+        b &= 0xFF
         return (a ^ (b ^ (a & (~b & 0xFF)))) & 0xFF
 
     def _state_phase(self, state_int: int) -> int:
@@ -266,7 +274,6 @@ class GyroEngine:
         # advance counter deterministically
         self.rep_phase[rep_idx] = (ctr + 1) & 0xFF
 
-
         # Advance state by this token's introns (ingress; no learning)
         introns = token_to_introns(token_id)
         new_idx = idx
@@ -281,12 +288,11 @@ class GyroEngine:
 
     def is_harmony_control_token(self, token_id: int) -> bool:
         from baby.constants.harmony_tokens import ALL_CONTROL_TOKENS
+
         return token_id in ALL_CONTROL_TOKENS
 
     def should_learn_from_token(self, token_id: int, role: str) -> bool:
-        return (role == "user"
-                and not self.is_harmony_control_token(token_id)
-                and 0 <= token_id < self.vocab_max)
+        return role == "user" and not self.is_harmony_control_token(token_id) and 0 <= token_id < self.vocab_max
 
     def process_harmony_message(self, tokens: List[int], roles: List[str]) -> int:
         state = self.start_state()

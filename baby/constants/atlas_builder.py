@@ -36,15 +36,16 @@ DEFAULT_META_DIR = Path("memories/public/meta")
 DEFAULT_META_DIR.mkdir(parents=True, exist_ok=True)
 
 PATH_ONTOLOGY = DEFAULT_META_DIR / "ontology_keys.npy"
-PATH_EPI      = DEFAULT_META_DIR / "epistemology.npy"
-PATH_THETA    = DEFAULT_META_DIR / "theta.npy"
-PATH_PHENO    = DEFAULT_META_DIR / "phenomenology_map.npy"
-PATH_ORBITS   = DEFAULT_META_DIR / "orbit_sizes.npy"
+PATH_EPI = DEFAULT_META_DIR / "epistemology.npy"
+PATH_THETA = DEFAULT_META_DIR / "theta.npy"
+PATH_PHENO = DEFAULT_META_DIR / "phenomenology_map.npy"
+PATH_ORBITS = DEFAULT_META_DIR / "orbit_sizes.npy"
 
 
 # -------------------------------------------------------------------
 # Utilities
 # -------------------------------------------------------------------
+
 
 class Progress:
     def __init__(self, label: str):
@@ -77,6 +78,7 @@ class Progress:
 
 def _open_memmap_int32(path: Path, shape: Tuple[int, ...]) -> NDArray[np.int32]:
     from numpy.lib.format import open_memmap
+
     mm = open_memmap(str(path), dtype=np.int32, mode="w+", shape=shape)  # type: ignore
     return mm  # type: ignore[return-value]
 
@@ -84,6 +86,7 @@ def _open_memmap_int32(path: Path, shape: Tuple[int, ...]) -> NDArray[np.int32]:
 # -------------------------------------------------------------------
 # Step 1: Ontology + θ
 # -------------------------------------------------------------------
+
 
 def build_ontology_and_theta(
     ontology_path: Path = PATH_ONTOLOGY,
@@ -151,6 +154,7 @@ def build_ontology_and_theta(
 # Step 2: Epistemology (N×256)
 # -------------------------------------------------------------------
 
+
 def build_epistemology(
     ontology_path: Path = PATH_ONTOLOGY,
     epi_path: Path = PATH_EPI,
@@ -194,6 +198,7 @@ def build_epistemology(
 # -------------------------------------------------------------------
 # Step 3: Phenomenology (SCCs over full 256 introns) + Orbit sizes
 # -------------------------------------------------------------------
+
 
 def _tarjan_scc_full(
     ep: NDArray[np.int32],
@@ -288,8 +293,8 @@ def build_phenomenology_and_orbit_sizes(
     """
     if not epi_path.exists() or not ontology_path.exists():
         raise FileNotFoundError("Missing epistemology and/or ontology")
-    ep = np.load(epi_path, mmap_mode="r")          # int32[N,256]
-    keys = np.load(ontology_path, mmap_mode="r")   # uint64[N]
+    ep = np.load(epi_path, mmap_mode="r")  # int32[N,256]
+    keys = np.load(ontology_path, mmap_mode="r")  # uint64[N]
     N = int(keys.size)
 
     print("[INFO] Computing canonical phenomenology (all 256 introns)…")
@@ -315,14 +320,17 @@ def build_phenomenology_and_orbit_sizes(
 # Orchestrator
 # -------------------------------------------------------------------
 
+
 def cmd_ontology(_: argparse.Namespace) -> None:
     build_ontology_and_theta(PATH_ONTOLOGY, PATH_THETA)
+
 
 def cmd_epistemology(_: argparse.Namespace) -> None:
     if not PATH_ONTOLOGY.exists() or not PATH_THETA.exists():
         print("[INFO] Ontology/θ missing — building them first…")
         build_ontology_and_theta(PATH_ONTOLOGY, PATH_THETA)
     build_epistemology(PATH_ONTOLOGY, PATH_EPI, PATH_THETA)
+
 
 def cmd_phenomenology(_: argparse.Namespace) -> None:
     if not PATH_EPI.exists() or not PATH_ONTOLOGY.exists():
@@ -331,6 +339,7 @@ def cmd_phenomenology(_: argparse.Namespace) -> None:
             build_ontology_and_theta(PATH_ONTOLOGY, PATH_THETA)
         build_epistemology(PATH_ONTOLOGY, PATH_EPI, PATH_THETA)
     build_phenomenology_and_orbit_sizes(PATH_EPI, PATH_ONTOLOGY, PATH_PHENO, PATH_ORBITS)
+
 
 def cmd_all(_: argparse.Namespace) -> None:
     keys = build_ontology_and_theta(PATH_ONTOLOGY, PATH_THETA)
@@ -343,19 +352,26 @@ def cmd_all(_: argparse.Namespace) -> None:
     print("       -", PATH_PHENO)
     print("       -", PATH_ORBITS)
 
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="GyroSI Atlas Builder (canonical 5 maps)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("ontology", help="Build ontology_keys.npy and theta.npy").set_defaults(func=cmd_ontology)
-    sub.add_parser("epistemology", help="Build epistemology.npy (requires ontology, theta)").set_defaults(func=cmd_epistemology)
-    sub.add_parser("phenomenology", help="Build phenomenology_map.npy and orbit_sizes.npy").set_defaults(func=cmd_phenomenology)
+    sub.add_parser("epistemology", help="Build epistemology.npy (requires ontology, theta)").set_defaults(
+        func=cmd_epistemology
+    )
+    sub.add_parser("phenomenology", help="Build phenomenology_map.npy and orbit_sizes.npy").set_defaults(
+        func=cmd_phenomenology
+    )
     sub.add_parser("all", help="Build all artifacts in order").set_defaults(func=cmd_all)
     return p.parse_args()
+
 
 def main() -> None:
     args = _parse_args()
     args.func(args)
+
 
 if __name__ == "__main__":
     main()

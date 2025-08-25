@@ -177,26 +177,30 @@ Our five computational maps together implement a complete theory of knowledge:
 **Map 1: Ontology (ontology_keys.npy)**: "What Can Exist"
 - Maps indices 0..788,985 to unique 48-bit state integers
 - These 788,986 states are ALL possible states under our physics
-- Proven complete by exhaustive generation from the archetype
+- Discovered through breadth-first search from GENE_Mac_S under all 256 introns
 - Each state represents a unique configuration of knowledge
+- **Creation**: Built by `atlas_builder.py:build_ontology_and_theta()` via complete manifold traversal
 
 **Map 2: Phenomenology (phenomenology_map.npy)**: "How Things Appear"
 - Maps each state to one of 256 canonical orbit representatives
 - Each orbit is a strongly connected component: all states in an orbit can reach each other
-- Orbits are parity-closed: contain both s and dual(s) = s ⊕ 0xFF
+- Representatives are the minimal state integer within each SCC
 - The 256 orbits represent the complete set of "ways things can appear"
+- **Creation**: Built by `atlas_builder.py:build_phenomenology_and_orbit_sizes()` using Tarjan's SCC algorithm
 
 **Map 3: Epistemology (epistemology.npy)**: "How Knowledge Changes"
 - Maps every (state, intron) pair to the resulting next state
 - This 788,986 × 256 table contains ALL possible knowledge transformations
 - No knowledge change is possible outside this table
 - Proves our physics is closed and complete
+- **Creation**: Built by `atlas_builder.py:build_epistemology()` as an N×256 transition table using memory-mapped files
 
 **Map 4: Geometric Structure (theta.npy)**: "How Far from Truth"
 - Maps each state to its angular distance from the archetype
 - θ = 0 means perfect alignment (truth)
 - θ = π/2 means orthogonal (independence)
 - θ > π/2 approaching max ≈ 2.73 means opposition (but never absolute)
+- **Creation**: Built alongside ontology by `atlas_builder.py:build_ontology_and_theta()` as float32 angular divergence
 
 **Critical Diagnostic**: CS (Common Source) is NOT the integer zero. Index 0 in the ontology (angle π/2) is the orthogonal reference point, not CS. CS remains an interface axiom handled at the boundary and is never a member of the state set S.
 
@@ -206,6 +210,13 @@ Our five computational maps together implement a complete theory of knowledge:
 - Large orbits (up to 48,496): General, widely reachable configurations
 - Used for breaking ties: prefer more specific (smaller orbit) interpretations
 - **Canonical fifth map**: Essential for deterministic tie-breaking in address binding
+- **Creation**: Built alongside phenomenology by `atlas_builder.py:build_phenomenology_and_orbit_sizes()` using SCC analysis
+
+**Atlas Building Process**: All five maps are created by `atlas_builder.py` through deterministic algorithms:
+- No optional maps, scoring, greedy paths, or dominance
+- Deterministic representatives ensure reproducible builds
+- Dependencies: ontology → epistemology → phenomenology
+- Command-line interface: `cmd_ontology()`, `cmd_epistemology()`, `cmd_phenomenology()`, `cmd_all()`
 
 Together, these five maps form the complete atlas of possible knowledge under our physics. They are not approximations or samples but the actual, complete, finite universe of knowledge states.
 
@@ -288,71 +299,7 @@ Scoring assumes there is a "best" token among competitors. This violates CGM phy
 
 Instead, we use **constraint satisfaction**: tokens either satisfy the geometric constraints of our physics or they do not. This is binary (yes/no) but not competitive (no ranking among the yes answers).
 
-### 3.2 The Admissibility Predicate - Complete Mathematical Definition
-
-For token t with intron sequence [i₁, i₂, ..., i_m] and address g_t, starting from state s:
-
-**Step 1: Compute the Micro-Path**
-```
-s⁽⁰⁾ = s  (starting state)
-s⁽¹⁾ = epistemology[state_index(s⁽⁰⁾), i₁]
-s⁽²⁾ = epistemology[state_index(s⁽¹⁾), i₂]
-...
-s⁽ᵐ⁾ = epistemology[state_index(s⁽ᵐ⁻¹⁾), i_m]  (final state)
-```
-
-Each lookup uses the epistemology table for O(1) state transitions.
-
-**Step 2: Check Channel Monotonicity (Relaxed for Slabs)**
-
-**Global Channel - Strict Stepwise Monotonicity**:
-The Global channel (all 48 positions) requires **never decreasing at any step**:
-```
-For k = 0 to m-1:
-  ρ_global⁽ᵏ⁾ = (1/48) × Σ(s⁽ᵏ⁾[j] × g_t[j]) for j = 0..47
-  Require: ρ_global⁽ᵏ⁺¹⁾ ≥ ρ_global⁽ᵏ⁾  # Never decrease at any step
-```
-**Critical**: Check **every** step k→k+1. If any step decreases, token is inadmissible.
-
-**Layer×Frame Slabs - Net Non-Decrease Only**:
-Each slab [l,f] requires only **final ≥ initial**, allowing temporary decreases:
-```
-positions = {j | layer(j) = l AND frame(j) = f}  # 12 positions each
-ρ_lf⁽⁰⁾ = (1/12) × Σ(s⁽⁰⁾[j] × g_t[j]) for j in positions  # Initial
-ρ_lf⁽ᵐ⁾ = (1/12) × Σ(s⁽ᵐ⁾[j] × g_t[j]) for j in positions  # Final
-Require: ρ_lf⁽ᵐ⁾ ≥ ρ_lf⁽⁰⁾  # Final ≥ initial, stepwise decreases allowed
-```
-**Critical**: Only check initial vs final. Intermediate steps ρ_lf⁽ᵏ⁾ can decrease.
-
-**Implementation Note**: 
-- Global: Compute and check at **every** micro-step
-- Slabs: Compute only at **start and end**, ignore intermediate values
-- This prevents misapplication of slab checks to intermediate steps
-
-**Bit-Level Implementation**:
-For efficiency, channel alignment can be computed using Hamming agreements on packed bits:
-```
-# For bit-level computation (avoiding float drift)
-def channel_alignment(state, address, positions):
-    # Convert +1/-1 to 0/1 if needed
-    state_bits = convert_to_bits(state)
-    address_bits = convert_to_bits(address)
-    
-    # Count agreements (where bits match)
-    agreements = sum(state_bits[i] == address_bits[i] for i in positions)
-    
-    # Normalize to [-1, 1] range
-    return (2 * agreements / len(positions)) - 1
-```
-
-This bit-level computation ensures identical results across platforms, avoiding floating-point inconsistencies.
-
-**Step 3: Require Strict Progress**
-At least one slab must show strict improvement: ρ_lf⁽ᵐ⁾ > ρ_lf⁽⁰⁾ for some layer×frame [l,f], or the Global channel must show ρ_global⁽ᵏ⁺¹⁾ > ρ_global⁽ᵏ⁾ for some k in 0..m-1.
-
-**Interpretation**: This predicate asks "Does this token's own physics move us monotonically closer to its own address?" It is a self-consistency check, not a comparison with other tokens.
-
-### 3.3 Channel Cover and Priority - Fixed Constants
+### 3.2 Channel Cover and Priority - Fixed Constants
 
 **The Single Channel Cover** (used for all decisions):
 - Global: All 48 positions (indices 0..47)
@@ -468,93 +415,6 @@ If multiple states have the same average distance:
 
 This ensures every token gets a unique, deterministic address computed purely from physics.
 
-### 3.5 Complete Recovery Ladder
-
-When no tokens are admissible from state s, relax constraints in this exact order:
-
-**Level 1: Channel Relaxation**
-```
-for priority_level from 9 down to 2:  # Never drop Global (priority 1)
-    relaxed_channels = channels[1:priority_level]  # Keep higher priorities
-    recompute admissibility using only relaxed_channels
-    if any tokens are admissible:
-        break
-```
-
-**Level 2: Orbit Neighborhood Expansion**
-```
-# Neighbor orbits are those whose representatives differ by Hamming distance 2
-# from the current orbit's representative. Distance 2 preserves parity, which
-# our dynamics require. These neighborhood sets are precomputed at build time.
-
-current_orbit_rep = phenomenology_map[state_index(s)]
-neighbor_reps = precomputed_neighbors[current_orbit_rep]
-
-expanded_candidates = {t | address(t) in orbits_of(neighbor_reps)}
-check admissibility on expanded_candidates
-```
-
-**Level 3: Duality Pivot**
-```
-for each candidate token t:
-    original_address = address(t)
-    dual_address = original_address ⊕ 0xFF
-    
-    if phenomenology_map[dual_address] == phenomenology_map[s]:
-        # Dual is in same orbit
-        temporarily use dual_address for admissibility check
-```
-
-**Level 4: Orbit Center Fallback**
-```
-orbit_center = orbit_representative[phenomenology_map[s]]
-for all tokens:
-    temporarily use orbit_center as their address
-    check admissibility
-```
-
-**Level 5: Geometric Nudge**
-```
-# Apply at most 6 nudges (the measured diameter of the manifold) per emission attempt
-# If no token is admissible after 6 nudges, persist the last state and halt emission
-
-nudge_count = 0
-max_nudges = 6  # Manifold diameter
-
-while nudge_count < max_nudges:
-    best_intron = None
-    current_angle = theta[state_index(s)]
-
-    for intron in range(256):
-        next_state = epistemology[state_index(s), intron]
-        next_angle = theta[state_index(next_state)]
-        
-        if next_angle < current_angle:
-            best_intron = intron
-            break  # Take first improvement, not best
-
-    if best_intron is not None:
-        apply transition T(s, best_intron)
-        nudge_count += 1
-        restart from Level 1
-    else:
-        # No angle improvement possible, try orbit change
-        for intron in range(256):
-            next_state = epistemology[state_index(s), intron]
-            if phenomenology_map[next_state] != phenomenology_map[s]:
-                apply transition T(s, intron)
-                nudge_count += 1
-                restart from Level 1
-                break
-        
-        # If we reach here, no intron changed orbit either
-        break  # Exit the loop, no further progress possible
-
-# If we exit the loop, persist the last state and halt emission
-# This is a "contemplation" state, not an error
-```
-
-This ladder guarantees progress because the manifold has finite diameter and the nudge either improves geometry or changes orbit.
 
 ## Part IV: Memory Architecture - Complete Specification with Bounds
 

@@ -11,6 +11,7 @@ from baby.constants.harmony_tokens import MESSAGE, ROLE_USER, ROLE_ASSISTANT, AL
 
 _engine_lock = threading.RLock()
 
+
 def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
     """
     Returns infer_next_token(tokens, temperature=..., request_id=..., new_request=...)
@@ -155,10 +156,12 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
 
             if bootstrap_step == 0:
                 from baby.constants.harmony_tokens import CHANNEL
+
                 sess["bootstrap_step"] = 1
                 return CHANNEL
             elif bootstrap_step == 1:
                 from baby.constants.harmony_tokens import final_channel_id
+
                 sess["bootstrap_step"] = 2
                 return final_channel_id(encoding)
             elif bootstrap_step == 2:
