@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="toys/assets/GyroSI_Baby_Cover_Image.jpg" alt="GyroSI Cover" />
+  <img src="toys/assets/GyroSI_Baby_Cover_Image.png" alt="GyroSI Cover" />
 
 <h1>💫 GyroSI Baby LM 👶</h1>
 <h3>Gyroscopic Superintelligence: Baby Language Model</h3>
