@@ -149,16 +149,6 @@ GyroSI uses three distinct memory types:
 
 ---
 
-## 🔬 Theoretical Foundation
-
-GyroSI implements the **Common Governance Model (CGM)**, where intelligence emerges through recursive structural alignment. The model derives three-dimensional space with six degrees of freedom from a single axiom, with time emerging as the memory of recursive operations.
-
-Mathematical formalism employs gyrogroup structures (generalizations of rotation groups) following Abraham Ungar's work, providing precise language for transitions from undifferentiated potential to structured reality.
-
-Gyroscopic Superintelligence is meta-language for computation, ontology, phenomenology and epistemology, enabling agents and agencies to reason about states, symmetry, and evolution economically and efficiently.
-
----
-
 ## ⚡ Performance Characteristics
 
 > **Note**: These are architectural projections, not benchmarks. The system is still in development.
@@ -189,11 +179,23 @@ The key insight: Unlike traditional AI that needs hundreds of gigabytes, GyroSI'
 
 ---
 
+## 🌐 Theoretical Foundation
+
+GyroSI implements the **Common Governance Model (CGM)**, where intelligence emerges through recursive structural alignment. The model derives three-dimensional space with six degrees of freedom from a single axiom, with time emerging as the memory of recursive operations.
+
+Mathematical formalism employs gyrogroup structures (generalizations of rotation groups) following Abraham Ungar's work, providing precise language for transitions from undifferentiated potential to structured reality.
+
+Gyroscopic Superintelligence is meta-language for computation, ontology, phenomenology and epistemology, enabling agents and agencies to reason about states, symmetry, and evolution economically and efficiently.
+
+---
+
 ## 📚 Documentation
 
 - 📖 [Genetics - Technical Specification: The complete technical specification, system constants, and build-time discovery processes.](https://github.com/GyroSuperintelligence/BabyLM/blob/main/guides/Genetics.md)
 
 - 📖 [Physics - Common Governance Model Theory: The theoretical foundations](https://korompilias.notion.site/Common-Governance-Model-Foundations-1ee9ff44f4368050af28d1c0f8aae89a)
+
+- 🔬 [Lab - Common Governance Model Experiments : Cosmology, Biology and Beyond](https://github.com/GyroSuperintelligence/CGM)
 
 ---
 
