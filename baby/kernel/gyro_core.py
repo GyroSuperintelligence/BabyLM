@@ -116,6 +116,9 @@ class GyroEngine:
         # Start = argmin θ (phenomenal archetype)
         self.start_index: int = int(np.argmin(self.theta))
         
+        # Ensure store files exist if store paths are provided (create only if missing)
+        self._ensure_store_files()
+
         # Load any existing learned data from disk
         self._load_learned_data()
 
@@ -434,23 +437,44 @@ class GyroEngine:
         current_idx = (a * base_idx + b) % n
         current_key = keys[current_idx]
         
-        # Get bucket and position
+        # Get bucket
         bucket = phase_map[current_key]
         if not bucket:
             return None
         
-        pos = bucket_pos[rep_idx].get(current_key, 0)
-        token_id = bucket[pos % len(bucket)]
+        # === THE KEY EDIT: Z₆ Rotor Selection ===
+        # Instead of round-robin, use the 120° rotor position
         
-        # Advance round-robin position
-        bucket_pos[rep_idx][current_key] = (pos + 1) % len(bucket)
+        # Compute rotor phase from accumulated omega and state geometry
+        omega_val = omega.get(rep_idx, 0)
+        state_phase = self._state_phase(int(self.keys[idx]))
+        
+        # The 120° rotor: each step advances by 2π/6 = π/3
+        # Position in Z₆ cycle determines natural resonance
+        rotor_position = (omega_val ^ state_phase) % 6
+        
+        # The rotor selects which member of the bucket resonates
+        # This is NOT scoring - it's finding geometric phase alignment
+        bucket_size = len(bucket)
+        
+        # Map Z₆ position to bucket member through golden-mean-like stepping
+        # The 2.07% aperture manifests as occasional phase slips
+        if bucket_size == 1:
+            token_id = bucket[0]
+        else:
+            # Use the rotor position to select, with natural drift
+            # The multiplication by a prime creates the "frustrated" pattern
+            selector = (rotor_position * 5) % bucket_size  # 5 is coprime with 6
+            token_id = bucket[selector]
 
         # Compute token phase for propagation
         introns = token_to_introns(token_id)
         token_phase = self.fold_sequence(introns, 0)
 
-        # Update working accumulator (fast phase)
-        omega[rep_idx] = self._fold8(omega.get(rep_idx, 0), token_phase)
+        # Update working accumulator with 120° advance (π/3 radians ≈ 60° but doubled)
+        # The key: advance by 120° equivalent in 8-bit space
+        # 256/6 ≈ 42.67, so we use 43 (maintains slight drift for aperture)
+        omega[rep_idx] = (omega.get(rep_idx, 0) + 43) & 0xFF
         
         # hop bucket key by fold, then map adjacent to existing key
         folded = self._fold8(current_key, token_phase)
@@ -609,6 +633,36 @@ class GyroEngine:
             self._token_counter = 0
             self._last_save_time = current_time
             self._pending_changes = False
+    
+    def _ensure_store_files(self) -> None:
+        """
+        Create empty knowledge store files only if they are missing.
+        Does not overwrite existing files or modify other state.
+        """
+        if not self.store_paths:
+            return
+
+        # Passive memory
+        if "passive_memory" in self.store_paths:
+            passive_path = Path(self.store_paths["passive_memory"])
+            try:
+                passive_path.parent.mkdir(parents=True, exist_ok=True)
+                if not passive_path.exists():
+                    with open(passive_path, "wb") as f:
+                        f.write(b"")
+            except Exception:
+                pass  # Non-fatal; loading path will handle errors
+
+        # Address memory
+        if "address_memory" in self.store_paths:
+            address_path = Path(self.store_paths["address_memory"])
+            try:
+                address_path.parent.mkdir(parents=True, exist_ok=True)
+                if not address_path.exists():
+                    with open(address_path, "wb") as f:
+                        f.write(b"")
+            except Exception:
+                pass  # Non-fatal; loading path will handle errors
     
     def _save_learned_data(self) -> None:
         """

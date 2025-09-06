@@ -58,6 +58,44 @@ class RobustKnowledgeTestRunner:
         print(formatted_msg)
         self.startup_logs.append(formatted_msg)
 
+    def ensure_knowledge_memory_files(self) -> None:
+        """Ensure knowledge memory files exist; create them only if missing.
+
+        This checks for `address_memory.dat` and `passive_memory.bin` under
+        `memories/public/knowledge`. If either is missing, it invokes
+        `baby.constants.recreate_memory_files.recreate_memory_files()` with the
+        working directory set to the project root so paths resolve correctly.
+        """
+        knowledge_dir = self.project_root / "memories" / "public" / "knowledge"
+        address_path = knowledge_dir / "address_memory.dat"
+        passive_path = knowledge_dir / "passive_memory.bin"
+
+        if address_path.exists() and passive_path.exists():
+            return
+
+        self.log("Creating missing knowledge memory files...")
+        try:
+            # Add project root to Python path for imports
+            import sys
+            if str(self.project_root) not in sys.path:
+                sys.path.insert(0, str(self.project_root))
+            
+            # Import lazily to avoid side effects unless needed
+            from baby.constants.recreate_memory_files import recreate_memory_files  # type: ignore
+
+            # Run with cwd as project root because the recreator uses relative paths
+            import os
+
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(self.project_root)
+                recreate_memory_files()
+            finally:
+                os.chdir(original_cwd)
+        except Exception as e:
+            self.log(f"Failed to create knowledge memory files: {e}", "ERROR")
+            # Do not raise; let validation report precise issues
+
     def validate_environment(self) -> bool:
         """Comprehensive environment validation."""
         self.log("🔍 Validating environment...")
@@ -354,6 +392,9 @@ class RobustKnowledgeTestRunner:
         self.log("🎯 Starting complete knowledge test pipeline")
 
         try:
+            # 0. Ensure knowledge memory files exist (create only if missing)
+            self.ensure_knowledge_memory_files()
+
             # 1. Environment validation
             if not self.validate_environment():
                 return False

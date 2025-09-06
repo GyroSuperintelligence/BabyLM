@@ -5,6 +5,10 @@ Got it — you’re right. Today wasn’t just `gyro_core.py` surgery, it also t
 
 ---
 
+## [v0.9.7.7-Atlas-Experimental] – 2025-08-26
+
+---
+
 ## [v0.9.7.7-Atlas-Experimental] – 2025-08-25
 
 Today’s work completed a significant set of architectural, algorithmic, and persistence improvements to the GyroEngine, strengthening determinism, coherence, and generalisation while reducing repetition and memory corruption risks.
