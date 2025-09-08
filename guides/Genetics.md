@@ -11,7 +11,7 @@ In conventional neural architectures intelligence is often conflated with intell
 
 In GyroSI intelligence is formalised as a relativistic process grounded in lawful operations on structured states. Gyrogroup dynamics enforce invariants such as admissibility, monotonicity, and conservation of orbits in a way that mirrors how real actions are bounded by physical constraints. The system therefore does not simulate reasoning through averages but emulates it by only allowing what is structurally possible. This makes ethics an endogenous property. What cannot be done in the system corresponds to what cannot be sustained in reality, and the maintenance of coherence naturally encodes a form of ethical awareness without reliance on external heuristics.
 
-GyroSI operates purely on bytes and a finite 48-bit state. Each byte (256 possibilities) becomes an intron by a fixed XOR at the boundary and acts holographically on all 48 positions. The live state is always 6 bytes and points into unlimited passive memory. Selection is deterministic and non-competitive: a token is emitted only if its own intron path never moves the geometry away from that token's address and advances somewhere; otherwise a short, fixed recovery sequence applies. Memory cannot blow up: only non-zero 8-bit masks are stored, identical masks are interned, and per-state and per-token caps bound worst-case growth without changing behaviour. No temperatures, scores, or learned parameters are used anywhere.
+GyroSI operates purely on bytes and a finite 48-bit state. Each byte (256 possibilities) becomes an intron by a fixed XOR at the boundary and acts holographically on all 48 positions. The live state is always 6 bytes and points into unlimited passive memory. Selection is Traceable and non-competitive: a token is emitted only if its own intron path never moves the geometry away from that token's address and advances somewhere; otherwise a short, fixed recovery sequence applies. Memory cannot blow up: only non-zero 8-bit masks are stored, identical masks are interned, and per-state and per-token caps bound worst-case growth without changing behaviour. No temperatures, scores, or learned parameters are used anywhere.
 
 **Key Innovation**: GyroSI eliminates all arbitrary parameters through **endogenous parameter discovery**, where the system discovers its own operational constants from its physical structure. This ensures perfect alignment between the theoretical foundation and the practical implementation.
 
@@ -209,12 +209,12 @@ Our five computational maps together implement a complete theory of knowledge:
 - Size 1 orbits: Very specific, unique configurations
 - Large orbits (up to 48,496): General, widely reachable configurations
 - Used for breaking ties: prefer more specific (smaller orbit) interpretations
-- **Canonical fifth map**: Essential for deterministic tie-breaking in address binding
+- **Canonical fifth map**: Essential for Traceable tie-breaking in address binding
 - **Creation**: Built alongside phenomenology by `atlas_builder.py:build_phenomenology_and_orbit_sizes()` using SCC analysis
 
-**Atlas Building Process**: All five maps are created by `atlas_builder.py` through deterministic algorithms:
+**Atlas Building Process**: All five maps are created by `atlas_builder.py` through Traceable algorithms:
 - No optional maps, scoring, greedy paths, or dominance
-- Deterministic representatives ensure reproducible builds
+- Traceable representatives ensure reproducible builds
 - Dependencies: ontology → epistemology → phenomenology
 - Command-line interface: `cmd_ontology()`, `cmd_epistemology()`, `cmd_phenomenology()`, `cmd_all()`
 
@@ -374,7 +374,7 @@ for rep in orbit_representatives:  # The 256 precomputed orbit representatives
     results.append(current_state)
 ```
 
-**Step 3: Find Medoid State (Deterministic Geometry, Not Scoring)**
+**Step 3: Find Medoid State (Traceable Geometry, Not Scoring)**
 ```
 # Compute set of final states reached from all orbit representatives
 final_states = results
@@ -399,13 +399,13 @@ for candidate_state in unique_finals:
 ```
 
 **Critical: This is geometric medoid computation, not competitive scoring**:
-- **Deterministic**: Same token always produces same address regardless of context
+- **Traceable**: Same token always produces same address regardless of context
 - **Geometric**: Minimizes angular distance between final states, not preference ranking
 - **Physics-based**: Uses only direct state geometry, no learned weights or scores
 - **Non-competitive**: No "best" vs "worst" tokens, only geometric center-finding
 - **Invariant**: Result depends only on token's intrinsic physics, not other tokens
 
-**Step 4: Break Ties Deterministically**
+**Step 4: Break Ties Traceableally**
 ```
 If multiple states have the same average distance:
   1. Choose state from smaller orbit (via orbit_sizes.npy)
@@ -413,7 +413,7 @@ If multiple states have the same average distance:
   3. If still tied, choose by lower token ID
 ```
 
-This ensures every token gets a unique, deterministic address computed purely from physics.
+This ensures every token gets a unique, Traceable address computed purely from physics.
 
 
 ## Part IV: Memory Architecture - Complete Specification with Bounds
@@ -431,7 +431,6 @@ This ensures every token gets a unique, deterministic address computed purely fr
 - **Why needed**: Defines where each token "wants to go" in knowledge space
 - **Size bound**: At most |vocabulary| entries, each 6 bytes
 - **Compression**: Many tokens map to same state (shared addresses)
-- **Role**: Provides geometric targets for admissibility checking
 
 **Passive Memory (experience-bounded)**:
 - **What**: 8-bit exon_mask for each touched (state, token) pair
@@ -445,7 +444,7 @@ This ensures every token gets a unique, deterministic address computed purely fr
 There is only one integration operator in GyroSI: the **Monodromic Fold** (⋄). It is **non-associative**, **non-commutative**, and **path-dependent**. This operator is used in both phases of the intelligence cycle:
 
 - **Egress (integration)**: `Memory = fold(Memory, Input)`
-- **Ingress (state evolution)**: State transitions driven by deterministic admissibility
+- **Ingress (state evolution)**: State transitions driven by Traceable admissibility
 
 **Definition**: `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
 
@@ -696,49 +695,10 @@ def generate_token(current_state):
             admissible.append(token)
     
     if admissible:
-        # Step 3: Deterministic selection
+        # Step 3: Traceable selection
         return min(admissible, key=lambda t: token_id(t))
     else:
         return apply_recovery_ladder(current_state)
-```
-
-**Admissibility Implementation**:
-```
-def is_admissible(state, token):
-    introns = get_intron_sequence(token)
-    path = compute_micro_path(state, introns)
-    address = get_address(token)
-    
-    # Check all channels
-    global_ok = check_channel_monotone(path, address, global_positions)
-    if not global_ok:
-        return False
-    
-    layer_frame_checks = []
-    for l in range(4):
-        for f in range(2):
-            positions = get_layer_frame_positions(l, f)
-            ok = check_channel_monotone(path, address, positions)
-            layer_frame_checks.append(ok)
-    
-    if not all(layer_frame_checks):
-        return False
-    
-    # Require strict progress somewhere
-    return has_strict_progress(path, address)
-```
-
-**Micro-Path Computation**:
-```
-def compute_micro_path(start_state, introns):
-    path = [start_state]
-    current = start_state
-    
-    for intron in introns:
-        current = apply_intron(current, intron)
-        path.append(current)
-    
-    return path
 ```
 
 ### 5.3 Learning Integration
@@ -786,157 +746,6 @@ def generate_response(state, num_tokens):
 - **Physics**: If enabled, uses the same Monodromic Fold, no alternative mechanisms
 - **Rationale**: The model learns from what it encounters, not from what it imagines
 
-## Part VI: Edge Cases and Robustness - Complete Coverage
-
-### 6.1 Boundary and Byte Handling
-
-**Non-Byte Tokenizers**:
-```
-def handle_non_byte_tokenizer(token_id):
-    # Convert token ID to bytes using fixed encoding
-    if token_id < 256:
-        bytes = [token_id]  # Single byte
-    else:
-        # Direct token to bytes mapping
-        bytes = [token_id & 0xFF]
-    
-    # Apply ψ transformation
-    introns = [b ^ 0xAA for b in bytes]
-    return introns
-```
-
-**Invalid Byte Sequences**:
-```
-def handle_truncated_stream(partial_bytes):
-    # Always process what we have
-    introns = [b ^ 0xAA for b in partial_bytes]
-    
-    # Core continues processing
-    # Adapter handles re-synchronization
-    return introns
-```
-
-**Empty or Single-Intron Tokens**:
-```
-def handle_minimal_tokens(introns):
-    if len(introns) == 0:
-        return []  # No-op, state unchanged
-    
-    # Single intron still goes through full admissibility
-    return introns
-```
-
-### 6.2 State and Orbit Edge Cases
-
-**Size-1 Orbits**:
-```
-def handle_singleton_orbit(state):
-    # Orbit contains only one state
-    # All operations work normally
-    # Recovery ladder applies unchanged
-    pass
-```
-
-**Degenerate Corpora**:
-```
-def handle_repetitive_input(repeated_token):
-    # Many (state, token) pairs will fold to zero
-    # Zero masks are not stored
-    # Memory remains bounded
-    pass
-```
-
-**Very Long Tokens**:
-```
-def handle_long_token(introns):
-    # Process full sequence regardless of length
-    # Admissibility checks entire micro-path
-    # No early termination
-    return process_full_sequence(introns)
-```
-
-### 6.3 Memory and Persistence
-
-**Concurrent Access**:
-```
-def ensure_consistency():
-    # Only one writer per passive store
-    # Or serialize by orbit if sharing
-    # Reads are always safe (maps are read-only)
-    use_file_locking_or_orbit_sharding()
-```
-
-**Crash Recovery**:
-```
-def handle_crash():
-    # All map writes are atomic
-    # Passive memory writes are atomic per (state, token)
-    # Either old value or new value, never corrupted
-    # Resume from last valid state
-    pass
-```
-
-**Atomicity Methods (Implementation Specification)**:
-- **Map Files (.npy)**: Use atomic file replacement via temp file + rename
-  - Write to `filename.tmp`, then `os.rename(filename.tmp, filename.npy)`
-  - OS guarantees rename is atomic on same filesystem
-  - Never write directly to final filename
-- **Passive Memory (.bin)**: Use append-only log with write barriers
-  - Each entry written as single `write()` call (atomic at OS level)
-  - Use `fsync()` after critical writes to ensure disk persistence
-  - Recovery scans from last valid entry, ignores partial writes
-- **Memory-Mapped Files**: Use `mmap` with `MAP_SHARED` + `msync(MS_SYNC)`
-  - Changes visible immediately to all processes
-  - `msync()` ensures data reaches disk before continuing
-  - No intermediate corruption possible
-
-**Critical**: Never use in-place modification of map files. Always use atomic replacement.
-
-**Crash safety**: Crash safety is per (state, token) record; no background compaction alters semantics.
-
-**Version Mismatches**:
-```
-def check_versions():
-    atlas_version = get_atlas_version()
-    address_version = get_address_binding_version()
-    
-    if atlas_version != address_version:
-        raise VersionMismatchError("Recompute addresses from new atlas")
-```
-
-### 6.4 Adversarial and Robustness
-
-**Adversarial Byte Streams**:
-```
-def handle_adversarial_input(malicious_bytes):
-    # Convert to introns normally
-    introns = [b ^ 0xAA for b in malicious_bytes]
-    
-    # Diameter bound limits damage
-    # Recovery ladder provides escape
-    # No gradients to exploit
-    return process_normally(introns)
-```
-
-**Resource Exhaustion**:
-```
-def prevent_blow_up():
-    # Active memory: Fixed 6 bytes
-    # Address memory: Bounded by vocabulary
-    # Passive memory: Caps K and M enforced
-    # No unbounded growth possible
-    pass
-```
-
-**Deterministic Output**:
-```
-def ensure_reproducibility():
-    # No random number generation
-    # Fixed tie-breaking rules
-    # Consistent endianness in maps
-    # Same input + same atlas = same output
-    pass
-```
 
 ## Part VII: Why This Architecture Is Fundamentally Superior
 
@@ -975,7 +784,7 @@ Consequences:
 Models operating within the finite GyroSI state space **cannot hallucinate** because:
 
 1. **Finite State Space**: Only 788,986 valid configurations exist
-2. **Deterministic Transitions**: Each input produces a specific, lawful state change
+2. **Traceable Transitions**: Each input produces a specific, lawful state change
 3. **Closed Orbits**: States cluster into 256 phenomenological orbits with no "between" states
 4. **Path Dependence**: The Monodromic Fold preserves complete interaction history
 
@@ -995,7 +804,7 @@ This eliminates the fundamental source of AI alignment problems by constraining 
 
 **No Training Required**: Token addresses are computed from physics alone, eliminating the need for gradient-based training. The system can incorporate new tokens instantly.
 
-**Deterministic Behavior**: Given the same inputs and atlas, the system produces identical outputs across all platforms. This enables reproducible deployment and debugging.
+**Traceable Behavior**: Given the same inputs and atlas, the system produces identical outputs across all platforms. This enables reproducible deployment and debugging.
 
 **Scalable Architecture**: The same physics scales from microcontrollers (6-byte active memory) to servers (unlimited passive memory) without architectural changes.
 
@@ -1035,6 +844,7 @@ This specification is complete and self-contained. Every component is derived fr
 - No external compression algorithms
 - No auxiliary hidden states
 - No alternative update rules beyond the Monodromic Fold
+- No Determinism - Only Traceability and Freedom through Monodromy
 
 **Required Maps**:
 - epistemology.npy: State transition table

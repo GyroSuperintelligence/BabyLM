@@ -1,6 +1,7 @@
 # baby/responses_api/inference/gyro.py
 # Streaming wrapper wired to the five-map GyroEngine.
-# No scores / greedy paths; learning only on user content; deterministic BU-In.
+# No scores / greedy paths; learning only on user content; BU-In is non-deterministic,
+# path- and time-coupled via physics (six DoF + monodromic fold), not RNG.
 
 from typing import Callable, Dict, Any, Optional
 import json, threading, collections
@@ -76,6 +77,7 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
         Feed only the delta tokens; learn only from user content.
         """
         parser = sess["parser"]
+        user_token_seen = False
         for tok in new_tokens:
             parser.process(tok)
 
@@ -84,8 +86,9 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 new_state = engine.evolve_on_user(sess["state"], tok)
                 sess["state"] = new_state
                 sess["user_token_count"] = sess.get("user_token_count", 0) + 1
+                user_token_seen = True
 
-                # Capture anchor after K user tokens (optional deterministic hook)
+                # Capture anchor after K user tokens (optional Traceable hook)
                 target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
                 if sess["user_token_count"] == target_k:
                     sess["user_anchor_state"] = new_state
@@ -97,6 +100,10 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
             else:
                 # Ingress transit for assistant content (no learning)
                 sess["state"] = engine.evolve_on_assistant(sess["state"], tok)
+
+        if user_token_seen:
+            # Ensure the latest anchor will be applied just before generation
+            sess["anchor_applied"] = False
 
     def infer_next_token(tokens: list[int], temperature: float = 0.0, **kwargs) -> Optional[int]:
         request_id: str = kwargs.get("request_id", "__singleton__")
@@ -120,6 +127,7 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     "omega": {},
                     "bucket_key": {},
                     "bucket_pos": {},
+                    "monodromy": {},  # ensure present from session birth
                 }
                 sessions[request_id] = sess
 
@@ -148,12 +156,63 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 else:
                     sess["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
             else:
-                delta = tokens[sess["fed_len"] :]
-                if delta:
-                    _apply_new_tokens(sess, delta)
+                # Session exists — handle history shrink or re-render robustly
+                if len(tokens) < sess["fed_len"]:
+                    # Conversation history shrank (likely re-rendered). Resync from scratch deterministically.
+                    parser = StreamableParser(encoding, role=Role.SYSTEM)
+
+                    # Reset conversational state while preserving configuration knobs
+                    sess["state"] = engine.start_state()
+                    sess["user_token_count"] = 0
+                    sess["user_anchor_state"] = None
+                    sess["anchor_last_seen_k"] = 0
+                    sess["anchor_applied"] = False
+
+                    # Reset per-session PPE traces (omega/bucket/monodromy)
+                    sess["omega"].clear()
+                    sess["bucket_key"].clear()
+                    sess["bucket_pos"].clear()
+                    sess["monodromy"].clear()
+
+                    # Re-apply the full token history using Harmony roles
+                    user_token_seen = False
+                    for tok in tokens:
+                        parser.process(tok)
+                        if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
+                            user_token_seen = True
+                            new_state = engine.learn_on_user(sess["state"], tok)
+                            sess["state"] = new_state
+                            sess["user_token_count"] = sess.get("user_token_count", 0) + 1
+                            target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
+                            if sess["user_token_count"] == target_k:
+                                sess["user_anchor_state"] = new_state
+                                sess["anchor_last_seen_k"] = sess["user_token_count"]
+                            elif sess["user_token_count"] > target_k:
+                                sess["user_anchor_state"] = new_state
+                                sess["anchor_last_seen_k"] = sess["user_token_count"]
+                        elif _is_assistant_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
+                            sess["state"] = engine.transit_on_assistant(sess["state"], tok)
+                        else:
+                            pass
+
+                    sess["parser"] = parser
                     sess["fed_len"] = len(tokens)
+                    if user_token_seen:
+                        sess["anchor_applied"] = False
+                else:
+                    # Normal delta-feed
+                    delta = tokens[sess["fed_len"] :]
+                    if delta:
+                        _apply_new_tokens(sess, delta)
+                        sess["fed_len"] = len(tokens)
+                    else:
+                        # No new tokens to process, but ensure parser is up to date
+                        if sess.get("parser") is None:
+                            sess["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
 
         if ingest_only:
+            # Prepare to open a fresh assistant message on next generation
+            sess["bootstrap_step"] = 0
             return None
 
         # Apply one-time anchor (if captured) just before generation
@@ -169,7 +228,7 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 sess["state"] = anchor_state
             sess["anchor_applied"] = True
 
-        # --- Channel bootstrap: open final channel/message deterministically ---
+        # --- Channel bootstrap: open final channel/message Traceableally ---
         if sess.get("parser") is None:
             sess["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
 
@@ -195,22 +254,26 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 sess["bootstrap_step"] = 3
                 return opener
 
-        # Pure deterministic emission from the five-map engine
+        # Pure Traceable emission from the five-map engine
         res = engine.emit_next_from_state(
-            sess["state"], 
-            sess["omega"], 
-            sess["bucket_key"], 
-            sess["bucket_pos"]
+            sess["state"],
+            sess["omega"],
+            sess["bucket_key"],
+            sess["bucket_pos"],
+            sess.get("monodromy")  # Add monodromy parameter
         )
         if res is None:
+            # Debug: Check if engine has learned anything
             return None
 
-        next_token, new_state, omega, bucket_key, bucket_pos = res
+        next_token, new_state, omega, bucket_key, bucket_pos, monodromy = res
         # Advance session state and update PPE state
         sess["state"] = new_state
         sess["omega"] = omega
         sess["bucket_key"] = bucket_key
         sess["bucket_pos"] = bucket_pos
+        sess["monodromy"] = monodromy  # Store monodromy for next iteration
         return next_token
 
     return infer_next_token
+

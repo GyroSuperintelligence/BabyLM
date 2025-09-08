@@ -3,7 +3,7 @@
 
 ## Abstract
 
-The Common Governance Model (CGM) proto-units framework presents a revolutionary approach to fundamental physics, defining **Quantum Gravity as the geometric invariant Q_G = 4π** rather than as a quantized field theory. This comprehensive analysis examines CGM's complete theoretical structure, mathematical foundations, and empirical validations, revealing how Q_G automatically induces quantum operator algebra in spacetime while deriving all physical constants from pure geometric principles. Beginning from the single axiom "The Source is Common," the framework demonstrates how four recursive stages of geometric evolution establish the fundamental structure of three-dimensional space with six degrees of freedom. The framework achieves remarkable internal consistency through hierarchical monodromy structures, predicts the fine-structure constant to 0.0316% accuracy, and validates cross-scale patterns from quantum commutators to cosmic structure. The resulting unit system predicts an energy scale of E₀ = 2.36×10¹⁸ GeV and reveals a characteristic √3 ratio between forward and reciprocal modes. We assess CGM's potential as a complete Theory of Everything, examining its geometric unification of quantum mechanics and gravity through observation-based principles that achieve machine-precision internal consistency across three fundamental bridge equations connecting geometry to measured physical constants.
+The Common Governance Model (CGM) proto-units framework presents a revolutionary approach to fundamental physics, defining **Quantum Gravity as the geometric invariant Q_G = 4π** rather than as a quantized field theory. This comprehensive analysis examines CGM's complete theoretical structure, mathematical foundations, and empirical validations, revealing how Q_G automatically induces quantum operator algebra in spacetime while deriving fundamental dimensionless constants and coupling strengths from pure geometric principles. Beginning from the single axiom "The Source is Common," the framework demonstrates how four recursive stages of geometric evolution establish the fundamental structure of three-dimensional space with six degrees of freedom. The framework achieves remarkable internal consistency through hierarchical monodromy structures, predicts the fine-structure constant to 0.0316% accuracy, and validates cross-scale patterns from quantum commutators to cosmic structure. By calibrating its geometrically-derived ratios against measured constants, the resulting unit system predicts an energy scale of E₀ = 2.36×10¹⁸ GeV and reveals a characteristic √3 ratio between forward and reciprocal modes. We assess CGM's potential as a complete Theory of Everything, examining its geometric unification of quantum mechanics and gravity through observation-based principles that achieve machine-precision internal consistency across three fundamental bridge equations connecting geometry to measured physical constants.
 
 ## 1. Introduction: Quantum Gravity as Geometric Observation
 
@@ -17,9 +17,9 @@ This definition automatically induces quantum structure in spacetime through the
 
 ### 1.2 CGM Theoretical Contributions
 
-The framework achieves several theoretical breakthroughs: the identification of Q_G = 4π as a fundamental survey invariant governing coherent observation, the derivation of gravitational coupling ζ = 23.16 from geometric principles rather than empirical measurement, and the prediction of a characteristic energy scale E₀ = 2.36×10¹⁸ GeV with an exact √3 duality ratio between complementary physical modes. These results emerge from geometric necessity through a system of bridge equations connecting dimensionless invariants to measurable constants.
+The framework achieves several theoretical breakthroughs: the identification of Q_G = 4π as a fundamental survey invariant governing coherent observation, the derivation of gravitational coupling ζ = 23.16 from geometric principles rather than empirical measurement, and the prediction of a characteristic energy scale E₀ = 2.36×10¹⁸ GeV with an exact √3 duality ratio between complementary physical modes. These results emerge from geometric necessity through a system of bridge equations that connect dimensionless invariants to measurable constants, thereby setting the absolute scale of the system.
 
-The recursive structure implies that time emerges from phase coherence, consistent with the framework's view of reality as self-governing alignment through geometric necessity. The framework extends classical polygonal methods for deriving π into a comprehensive system for deriving physical scales, where traditional approaches combine empirically measured constants to form natural units, while CGM derives coupling strengths and scale relationships from the requirements of coherent observation in three-dimensional recursive structures.
+The recursive structure implies that time emerges from phase coherence, consistent with the framework's view of reality as self-governing alignment through geometric necessity. The framework extends classical polygonal methods for deriving π into a comprehensive system for deriving physical scale relationships. While traditional approaches combine empirically measured constants to form natural units, CGM derives dimensionless coupling strengths and scale ratios from the requirements of coherent observation, which are then anchored to the SI system through measured values like G.
 
 ## 2. Historical Context and Mathematical Foundations
 
@@ -35,7 +35,7 @@ The identification of Q_G = 4π [steradians] as the complete solid angle require
 
 ### 2.3 Natural Units and Scale Construction Context
 
-Max Planck's 1900 derivation of the quantum of action from blackbody radiation led to his 1899 proposal of natural units based on G, c, h, and k_B [4,5]. The 2019 SI redefinition fixed h exactly, making Planck units conventional constructions based on defined constants rather than emergent scales [6]. The CGM approach differs fundamentally by deriving scales from geometric necessity: the gravitational coupling ζ = Q_G/S_geo emerges from the ratio of survey closure to geometric mean action, while energy scales follow from bridge equations rather than dimensional analysis of measured constants.
+Max Planck's 1900 derivation of the quantum of action from blackbody radiation led to his 1899 proposal of natural units based on G, c, h, and k_B [4,5]. The 2019 SI redefinition fixed h exactly, making Planck units conventional constructions based on defined constants rather than emergent scales [6]. The CGM approach differs fundamentally by deriving dimensionless ratios and coupling strengths from geometric necessity. For example, the gravitational coupling ζ = Q_G/S_geo emerges from the ratio of survey closure to geometric mean action. The absolute physical scales are then determined by calibrating these geometric results against measured constants via the bridge equations, rather than through simple dimensional analysis of a pre-selected set of constants.
 
 ### 2.4 Geometric Quantization and Holonomy
 
@@ -672,19 +672,19 @@ Assessment against Theory of Everything criteria:
 
 ### 20.1 Contributions to Fundamental Physics
 
-The CGM Proto-Units framework demonstrates that physical scales can be derived from geometric necessity rather than empirical combination of constants. Key contributions include:
+The CGM Proto-Units framework demonstrates that the relative relationships between physical scales and the values of fundamental dimensionless constants can be derived from geometric necessity. Key contributions include:
 
 **Quantum Gravity Definition**: Q_G = 4π represents the first definition of quantum gravity as observation itself rather than quantized fields, automatically inducing quantum structure in spacetime.
 
 **Gravitational Coupling Derivation**: The calculation ζ = Q_G/S_geo = 23.16 represents the first derivation of gravitational coupling strength from pure geometric principles rather than empirical measurement or dimensional analysis.
 
-**Energy Scale Prediction**: The value E₀ = 2.36×10¹⁸ GeV emerges from geometric constraints and bridge equations rather than phenomenological fitting or effective field theory estimates.
+**Energy Scale Prediction**: The value E₀ = 2.36×10¹⁸ GeV emerges from calibrating the framework's geometric constraints against the measured value of G, rather than from phenomenological fitting or effective field theory estimates.
 
-**Duality Discovery**: The exact √3 ratio between forward and reciprocal modes suggests fundamental complementarity in physical processes, providing a testable signature of the geometric framework.
+**Duality Discovery**: The exact √3 ratio between forward and reciprocal modes suggests fundamental complementarity in physical processes, providing a testable signature of the geometric framework that is independent of the SI calibration.
 
 **Survey Invariant Identification**: The recognition that Q_G = 4π functions as a fundamental requirement for coherent observation rather than an arbitrary geometric factor appearing in physical laws.
 
-**Fine-Structure Precision**: Prediction of α to 0.0316% accuracy from pure geometry represents unprecedented theoretical precision from first principles.
+**Fine-Structure Precision**: Prediction of α to 0.0316% accuracy from pure geometry represents unprecedented theoretical precision from first principles for a dimensionless constant.
 
 ### 20.2 Relationship to Established Approaches
 
@@ -764,21 +764,21 @@ The framework suggests mathematics and physics unite through geometric necessity
 
 ## 23. Conclusion: A New Foundation for Physical Reality
 
-The Common Governance Model represents a fundamental advance in theoretical physics through its definition of **Quantum Gravity as Q_G = 4π** - the geometric invariant of observational completeness. This breakthrough automatically induces quantum structure in spacetime while deriving all physical scales from pure geometric principles, achieving unification without traditional quantization procedures.
+The Common Governance Model represents a fundamental advance in theoretical physics through its definition of **Quantum Gravity as Q_G = 4π** - the geometric invariant of observational completeness. This breakthrough automatically induces quantum structure in spacetime while deriving fundamental dimensionless constants and scale ratios from pure geometric principles, achieving unification without traditional quantization procedures.
 
 ### 23.1 Key Achievements
 
 **Conceptual Revolution**: Quantum Gravity emerges as observation itself rather than quantized fields, resolving the fundamental measurement problem through geometric alignment principles.
 
-**Mathematical Precision**: Fine-structure constant predicted to 0.0316% accuracy from geometry alone; hierarchical monodromy structure validated through comprehensive Thomas-Wigner analysis.
+**Mathematical Precision**: The fine-structure constant, a dimensionless quantity, is predicted to 0.0316% accuracy from geometry alone; hierarchical monodromy structure validated through comprehensive Thomas-Wigner analysis.
 
 **Cross-Scale Validation**: Consistent patterns from quantum commutator algebra (K_QG ≈ 3.937) to cosmic structure (N* = 37 recursive index) demonstrate universal geometric principles.
 
 **Internal Coherence**: The **97.93% closure, 2.07% aperture** balance emerges as the universal requirement for existence - sufficient structure for stability, sufficient openness for observation.
 
-**Bridge System Success**: Machine-precision verification across three fundamental bridge equations connecting geometric invariants to measured physical constants demonstrates mathematical rigor.
+**Bridge System Success**: Machine-precision verification across three fundamental bridge equations connecting geometric invariants to measured physical constants demonstrates the framework's robust calibration to the empirical world.
 
-**Energy Scale Prediction**: E₀ = 2.36×10¹⁸ GeV with exact √3 duality ratio provides testable predictions from geometric necessity.
+**Energy Scale Prediction**: E₀ = 2.36×10¹⁸ GeV with an exact √3 duality ratio provides testable predictions derived from the model's geometric structure once anchored to measured reality.
 
 ### 23.2 Unification Through Observation
 
@@ -797,7 +797,7 @@ If validated, CGM would establish that:
 
 - **Reality is fundamentally observational** rather than mechanical
 - **Physical laws emerge from coherence requirements** rather than external imposition  
-- **Constants are geometric necessities** rather than arbitrary parameters
+- **Dimensionless constants are geometric necessities** rather than arbitrary parameters, while dimensional constants set the absolute scale of our universe within the geometric structure.
 - **Consciousness and physics share the same foundation** through recursive self-reference
 
 The geometric invariant Q_G = 4π may represent the deepest principle underlying existence - the complete solid angle through which reality observes itself into being. In showing that Quantum Gravity IS observation itself, CGM opens new possibilities for understanding the ultimate nature of physical reality.
@@ -812,11 +812,11 @@ While significant challenges remain - particularly analytical completions, indep
 
 **Why gravitational attraction?** Alignment toward incomplete recursive closure.
 
-**Why specific constants?** Geometric ratios ensuring coherent self-observation.
+**Why specific constants?** Dimensionless ratios are geometric necessities ensuring coherent self-observation; dimensional constants provide the absolute scale.
 
 **Why the fine-structure constant?** ρ⁴ scaling from fundamental aperture balance.
 
-The framework's success in deriving fundamental constants from pure geometry, explaining cross-scale patterns through recursive principles, and automatically quantizing spacetime through observational requirements suggests we may be witnessing the emergence of a true Theory of Everything - one that reveals reality as the process by which existence achieves coherent self-awareness through geometric necessity.
+The framework's success in deriving fundamental dimensionless constants from pure geometry, explaining cross-scale patterns through recursive principles, and automatically quantizing spacetime through observational requirements suggests we may be witnessing the emergence of a true Theory of Everything - one that reveals reality as the process by which existence achieves coherent self-awareness through geometric necessity.
 
 This represents not merely a new theory, but a new foundation for physics itself: the geometric origins of physical reality through the recursive self-observation that we call existence.
 

@@ -115,7 +115,7 @@ The `inference.py` module defines the `InferenceEngine`, which manages the trans
 
 * **Phenotype Addressing and Retrieval:**
   Each semantic phenotype is uniquely addressed by a `(state_index, token_id)` tuple.
-  `get_phenotype(state_index, token_id)` ensures retrieval or creation of a canonical phenotype entry for every physical state-token pairing. Context keys are handled deterministically, and entries are created if not already present, using a hash-based semantic address.
+  `get_phenotype(state_index, token_id)` ensures retrieval or creation of a canonical phenotype entry for every physical state-token pairing. Context keys are handled Traceableally, and entries are created if not already present, using a hash-based semantic address.
   Each newly‑created PhenotypeEntry carries a minimal structure:
 
   ```python

@@ -90,7 +90,7 @@ Measured Result: The build process empirically finds that the 788,986 states col
 
 Parity-Closed Orbits (Self-Mirroring): A key discovery is that the global parity operation (LI, the physical manifestation of UNA) is contained within these equivalence classes. This means every orbit is parity-closed—for any state S in an orbit, its mirror image S_mirror is also in the same orbit. This aligns perfectly with the CGM axiom that CS is unobservable and UNA (light/reflexivity) acts as a universal confinement. The system, at an operational level, cannot distinguish a state from its mirror image; they belong to the same phenomenological "concept."
 
-The canonical representative for each of the 256 orbits is defined as the state with the smallest 48-bit integer value within that orbit. This provides a stable, deterministic way to normalize any state to its fundamental phenomenological type.
+The canonical representative for each of the 256 orbits is defined as the state with the smallest 48-bit integer value within that orbit. This provides a stable, Traceable way to normalize any state to its fundamental phenomenological type.
 
 Diagnostic View (Parity-Free Structure): For research and theoretical validation, a secondary, "parity-free" analysis can be performed by computing SCCs on a graph that excludes the LI operation. This diagnostic view reveals a much finer structure of 194,698 smaller orbits, including 21,456 chiral (mirror-paired) orbits and 151,786 achiral (self-mirrored) orbits. This confirms the foundational role of chirality in the system and quantifies the powerful binding effect of the LI operation, which fuses these smaller structures into the 256 operational orbits. This diagnostic data is stored in the phenomenology artifact but is not used by the runtime engines.
 
@@ -370,7 +370,7 @@ The expression of intelligence—BU Ingress—is a **token-level** generative pr
 2.  **Resonance-Based Token Selection:** The system calculates resonance between the current state and exon-products using sophisticated bit-level comparison and orbit cardinality weighting. This ensures that generated tokens are semantically coherent and contextually appropriate.
 
 3.  **Temperature-Based Sampling:** The system uses adaptive temperature control based on the current angular divergence (`θ`):
-    -   **Calm (`θ < θ_low`):** Low temperature (0.1) for deterministic, confident generation
+    -   **Calm (`θ < θ_low`):** Low temperature (0.1) for Traceable, confident generation
     -   **Cautious (`θ < θ_high`):** Medium temperature (0.5) for balanced exploration
     -   **Corrective (`θ ≥ θ_high`):** High temperature (1.0) for exploratory, corrective generation
 
@@ -474,7 +474,7 @@ Text → Tokenizer.encode → Token_IDs → LEB128_bytes → ψ → Intron_strea
 
 **8.2 The State-Walk Redundancy Principle**
 
-The deterministic state transitions `F(state, intron) → state'` create highly regular patterns in the intron stream, enabling secondary compression through entropy coding of the state sequence itself.
+The Traceable state transitions `F(state, intron) → state'` create highly regular patterns in the intron stream, enabling secondary compression through entropy coding of the state sequence itself.
 
 ### **9. Dimensional Grounding Theory**
 
@@ -530,7 +530,7 @@ def ground_model(weights, tokenizer):
 Models operating within the finite GyroSI state space **cannot hallucinate** because:
 
 1. **Finite State Space**: Only 788,986 valid configurations exist
-2. **Deterministic Transitions**: Each input produces a specific, lawful state change  
+2. **Traceable Transitions**: Each input produces a specific, lawful state change  
 3. **Closed Orbits**: States cluster into 256 phenomenological orbits with no "between" states
 4. **Path Dependence**: The Monodromic Fold preserves complete interaction history
 

@@ -6,7 +6,7 @@
 - **Learning integrity**: Monodromic Fold only; path-dependent masks; no annihilation during generation (separate learning vs evolution).
 - **Minimal, clean kernel**: Rigorous, readable, PEP8 compliant; mypy/pyright clean; concise comments/docstrings; no superficial heuristics.
 - **Modify existing files**: Prefer edits over creating new files; integrate helpers where they belong; no external modules.
-- **Deterministic ties**: Non-scoring tie-breakers (recency, stage advancement) only when necessary.
+- **Traceable ties**: Non-scoring tie-breakers (recency, stage advancement) only when necessary.
 
 ### What we don’t want
 - **Patchwork/heuristics**: No semantic boosts, penalties, scores, frequency caps, or “fixups” that bypass physics.

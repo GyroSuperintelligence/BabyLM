@@ -132,7 +132,7 @@ GyroSI's intelligence operates on five pre-computed maps that completely define 
     Maps each state to its angular distance from the archetype (GENE_Mac_S). Used for geometric navigation.
 
 - **Orbit Sizes Map (`orbit_sizes.npy`): Specificity Measure**
-    Maps each state to its orbit's cardinality. Used for deterministic tie-breaking in address binding.
+    Maps each state to its orbit's cardinality. Used for Traceable tie-breaking in address binding.
 
 ---
 

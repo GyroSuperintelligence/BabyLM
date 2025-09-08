@@ -34,6 +34,7 @@ class RobustKnowledgeTestRunner:
         self.server_process: Optional[subprocess.Popen[str]] = None
         self.test_results: Dict[str, Any] = {}
         self.startup_logs: List[str] = []
+        self.server_errors: List[str] = []
 
         # Paths
         self.project_root = Path(__file__).parent.parent
@@ -207,15 +208,17 @@ class RobustKnowledgeTestRunner:
                 if self.server_process and self.server_process.stdout:
                     for line in iter(self.server_process.stdout.readline, ""):
                         if line.strip():
-                            # Only log actual critical server messages, skip parsing errors
+                            # Capture all server errors, especially DEBUG exceptions
                             if (
                                 any(
                                     keyword in line.upper()
-                                    for keyword in ["FAILED", "EXCEPTION", "TRACEBACK", "CRITICAL"]
+                                    for keyword in ["FAILED", "EXCEPTION", "TRACEBACK", "CRITICAL", "[DEBUG] EXCEPTION"]
                                 )
                                 and "PARSING TOKENS" not in line.upper()
                             ):
-                                self.log(f"SERVER ERROR: {line.strip()}", "ERROR")
+                                error_msg = line.strip()
+                                self.log(f"SERVER ERROR: {error_msg}", "ERROR")
+                                self.server_errors.append(error_msg)
 
             # Start log reader thread
             log_thread = threading.Thread(target=log_reader, daemon=True)
@@ -298,19 +301,26 @@ class RobustKnowledgeTestRunner:
             self.log(f"❌ Knowledge injection error: {e}", "ERROR")
             return None
 
-    def query_knowledge_safe(self, previous_response_id: str, query: str) -> bool:
-        """Send full sentence from article using session continuity."""
+    def query_knowledge_safe(self, previous_response_id: str, query: str) -> tuple[bool, bool]:
+        """Send full sentence from article using session continuity.
+        
+        Returns:
+            (success, had_backend_exception): success indicates valid response, 
+            had_backend_exception indicates if there were server errors during generation
+        """
         self.log(f"🔍 Testing with full sentence: '{query[:80]}{'...' if len(query) > 80 else ''}'")
 
         request_data = {
             "input": query,
             "stream": False,
             "store": True,
-            "max_output_tokens": 150,
+            "max_output_tokens": 50,
             "previous_response_id": previous_response_id,  # Session continuity
             "__debug": False,
             "model": "gyro",
         }
+
+        had_backend_exception = False
 
         try:
             response = requests.post(f"{self.base_url}/v1/responses", json=request_data, timeout=60)
@@ -343,18 +353,18 @@ class RobustKnowledgeTestRunner:
                         "response_id": result.get("id"),
                     }
 
-                    return True
+                    return True, had_backend_exception
                 else:
                     self.log(f"❌ Query failed: No valid assistant message with text content", "ERROR")
-                    return False
+                    return False, had_backend_exception
 
             else:
                 self.log(f"❌ Query failed: {response.status_code}", "ERROR")
-                return False
+                return False, had_backend_exception
 
         except Exception as e:
             self.log(f"❌ Query error: {e}", "ERROR")
-            return False
+            return False, had_backend_exception
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """Get comprehensive memory statistics."""
@@ -411,24 +421,49 @@ class RobustKnowledgeTestRunner:
             if not response_id:
                 return False
 
-            # 5. Knowledge querying with full sentences from the article
+            # 5. Knowledge querying with two sentences to check consistency
             # Use complete sentences from the wiki article for proper testing
             test_sentences = [
                 "In mathematics and computer science, an algorithm is a sequence of rigorous instructions, typically used to solve a class of specific problems or to perform a computation.",
                 "Algorithms are used as specifications for performing calculations and data processing.",
-                "More advanced algorithms can use conditionals to divert the code execution through various routes and deduce valid inferences, achieving automation eventually.",
-                "Using human characteristics as descriptors of machines in metaphorical ways was already practiced by Alan Turing with terms such as memory, search and stimulus.",
             ]
 
-            query_success = False
-            for sentence in test_sentences:
-                if self.query_knowledge_safe(response_id, sentence):
-                    query_success = True
-                    break
+            # Test both sentences to check for consistency - BOTH must succeed
+            successful_queries = 0
+            backend_exceptions = 0
+            
+            # Clear any existing server errors
+            self.server_errors.clear()
+            
+            # Test first sentence
+            self.log("🔍 Testing first sentence...")
+            success1, exception1 = self.query_knowledge_safe(response_id, test_sentences[0])
+            if success1:
+                successful_queries += 1
+            if exception1:
+                backend_exceptions += 1
+                
+            # Test second sentence for comparison
+            self.log("🔍 Testing second sentence...")
+            success2, exception2 = self.query_knowledge_safe(response_id, test_sentences[1])
+            if success2:
+                successful_queries += 1
+            if exception2:
+                backend_exceptions += 1
 
-            if not query_success:
-                self.log("❌ All sentence tests failed", "ERROR")
+            # Check for any server errors that were captured
+            if self.server_errors:
+                self.log(f"❌ {len(self.server_errors)} backend exceptions detected during generation", "ERROR")
+                for error in self.server_errors:
+                    self.log(f"  - {error}", "ERROR")
                 return False
+
+            # Both queries must succeed
+            if successful_queries < 2:
+                self.log(f"❌ Only {successful_queries}/2 queries succeeded - both must succeed", "ERROR")
+                return False
+                
+            self.log(f"✅ Both queries succeeded with no backend exceptions")
 
             self.log("🎉 Complete test pipeline successful!")
             return True

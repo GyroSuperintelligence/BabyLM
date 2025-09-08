@@ -284,7 +284,7 @@ class FROZEN_CHANNELS:
         Returns:
             SHA-256 hash of all channel definitions for integrity verification
         """
-        # Collect all critical definitions in deterministic order
+        # Collect all critical definitions in Traceable order
         definition_data = {
             "constants": {
                 "TOTAL_BITS": TOTAL_BITS,
@@ -301,7 +301,7 @@ class FROZEN_CHANNELS:
             "global_channel": FROZEN_CHANNELS.GLOBAL,
         }
 
-        # Convert to deterministic string representation
+        # Convert to Traceable string representation
         definition_str = str(sorted(definition_data.items()))
 
         # Generate SHA-256 hash

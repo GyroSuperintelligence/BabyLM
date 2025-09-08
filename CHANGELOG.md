@@ -5,26 +5,26 @@ Got it — you’re right. Today wasn’t just `gyro_core.py` surgery, it also t
 
 ---
 
-## [v0.9.7.7-Atlas-Experimental] – 2025-08-26
+## [v0.9.7.7-Baby-Experimental] – 2025-09-08
 
 ---
 
 ## [v0.9.7.7-Atlas-Experimental] – 2025-08-25
 
-Today’s work completed a significant set of architectural, algorithmic, and persistence improvements to the GyroEngine, strengthening determinism, coherence, and generalisation while reducing repetition and memory corruption risks.
+Today’s work completed a significant set of architectural, algorithmic, and persistence improvements to the GyroEngine, strengthening traceability, coherence, and generalisation while reducing repetition and memory corruption risks.
 
 **Core Architectural Changes**
 
 * Implemented an **8-sector toroidal routing layer**, computing toroidal addresses from 48-bit states via slab parities. This introduced a structured routing mechanism with full 8-bit signatures, preserving directional coherence without weights.
-* Added **Phase-Propagating Emission (PPE)** to the emission loop, with a fast accumulator (`omega`), deterministic bucket hopping, and deficit rotation. PPE now operates session-scoped, preventing concurrency bleed-through while preserving path-propagating behaviour.
+* Added **Phase-Propagating Emission (PPE)** to the emission loop, with a fast accumulator (`omega`), Traceable bucket hopping, and deficit rotation. PPE now operates session-scoped, preventing concurrency bleed-through while preserving path-propagating behaviour.
 * Split live state into **LI/FG/BG phase components** using EXON masks, enabling richer bucket selection across all anatomical layers.
 * Replaced minimal integer selection with **geometric medoid binding**, using average angular distance and refined divergence metrics for more faithful address representation.
-* Integrated a **toroidal rotor via affine ring walks** for bucket selection, replacing ad-hoc or hash-based mechanisms. This ensures deterministic coverage of all keys and removes stochastic artefacts.
+* Integrated a **toroidal rotor via affine ring walks** for bucket selection, replacing ad-hoc or hash-based mechanisms. This ensures Traceable coverage of all keys and removes stochastic artefacts.
 
 **Selection & Entropy Enhancements**
 
-* Introduced LCG-based bucket key distribution with multiple entropy sources (`omega`, sector, bucket key), eliminating deterministic cycles and increasing phase key coverage.
-* Unified emission logic to fold together representative phase, LI/FG/BG decomposition, toroidal sector, and accumulator state, yielding a geometrically coherent deterministic selection.
+* Introduced LCG-based bucket key distribution with multiple entropy sources (`omega`, sector, bucket key), eliminating Traceable cycles and increasing phase key coverage.
+* Unified emission logic to fold together representative phase, LI/FG/BG decomposition, toroidal sector, and accumulator state, yielding a geometrically coherent Traceable selection.
 * Strictly bounded bucket capacity (K=64) with FIFO eviction, ensuring predictable memory scaling across all orbits.
 
 **Persistence and Concurrency Improvements**
@@ -42,12 +42,12 @@ Today’s work completed a significant set of architectural, algorithmic, and pe
 **Diagnostics & Results**
 
 * Added comprehensive tracing for token selection, confirming elimination of repetition cycles.
-* Verified session isolation, deterministic reproducibility, and stable toroidal sector computation.
+* Verified session isolation, Traceable reproducibility, and stable toroidal sector computation.
 * Confirmed persistence works with non-zero memory files and correct restoration at engine initialisation.
 * All knowledge tests pass (✅), with system behaviour now characterised by:
 
   * Diverse, non-repetitive token sequences
-  * Deterministic but path-propagating PPE emission
+  * Traceable but path-propagating PPE emission
   * Stable concurrency and persistence
   * Physics-consistent routing and generalisation
 
@@ -60,7 +60,7 @@ Today’s work completed a significant set of architectural, algorithmic, and pe
 **Atlas Redesign**
 
 * **Phenomenology Map (ONA):**
-  Recomputed orbit representatives to ensure **canonical uniqueness**. Each orbit now maps deterministically to a single minimal representative (by state integer), eliminating the need for heuristic tie-breaks.
+  Recomputed orbit representatives to ensure **canonical uniqueness**. Each orbit now maps Traceableally to a single minimal representative (by state integer), eliminating the need for heuristic tie-breaks.
 
 * **Epistemology (BU-Eg):**
   Verified all state transitions as **total over intron domain (0–255)**, ensuring no dead introns. This closed a prior gap where certain introns collapsed to trivial states, leading to emission stalls.
@@ -81,7 +81,7 @@ Today’s work completed a significant set of architectural, algorithmic, and pe
 * **BU-Eg (learning):**
 
   * User tokens folded into orbit-local buckets keyed by intron phase.
-  * Orbit phase memory updated by deterministic fold8.
+  * Orbit phase memory updated by Traceable fold8.
   * State advanced only via epistemology transitions.
 * **BU-In (emission):**
 
@@ -103,7 +103,7 @@ Today’s work completed a significant set of architectural, algorithmic, and pe
   * every state is covered,
   * every orbit has a unique rep,
   * transitions are total,
-  * emission is deterministic but non-stalling.
+  * emission is Traceable but non-stalling.
 
 ---
 
@@ -165,9 +165,9 @@ This release implements the BabyLM architecture over the forked GPT-OSS infrastr
 * Implemented `GyroEngine` end-to-end with:
 
   * Correct ψ/LEB128 intron transform at byte boundaries (`byte_to_intron` / `intron_to_byte`).
-  * Deterministic 48-bit address computation, medoid binding, and slab/channel agreement functions.
+  * Traceable 48-bit address computation, medoid binding, and slab/channel agreement functions.
   * Enforced global channel monotonicity (strict at every micro-step) and slab admissibility (start–end only).
-  * Recovery ladder (Levels 1–5) with deterministic nudge selection and ≤6 transitions.
+  * Recovery ladder (Levels 1–5) with Traceable nudge selection and ≤6 transitions.
   * O(1) reverse index, no linear search.
   * Self-reinforcement disabled by default (Ingress vs. Egress separation).
 
@@ -191,9 +191,9 @@ This release implements the BabyLM architecture over the forked GPT-OSS infrastr
 
   * Engine initialisation with real atlas files.
   * ψ/LEB128 encoding/decoding round-trip correctness.
-  * Vocab bounds, orbit-to-tokens initialisation, and address determinism.
+  * Vocab bounds, orbit-to-tokens initialisation, and address traceability.
   * Recovery ladder progression and control-token exclusion.
-  * Slab integrity, state transitions, admissibility strictness, and tie-breaking determinism.
+  * Slab integrity, state transitions, admissibility strictness, and tie-breaking traceability.
   * Passive store persistence and caps enforcement.
   * End-sequence state machine handling.
 * All tests pass successfully on current build.
@@ -407,7 +407,7 @@ This release implements a complete CPU-only chat system for OpenAI's gpt-oss-20b
 
 *   **Minimal harmony sequence**: Generates `&lt;|channel|&gt;final&lt;|message|&gt;<content>&lt;|return|&gt;` structure.
 *   **Proper tensor shapes**: Returns 2D logits tensor `(seq_len, vocab_size)` as expected by TokenGenerator.
-*   **Deterministic generation**: Uses temperature=0.0 for predictable token selection.
+*   **Traceable generation**: Uses temperature=0.0 for predictable token selection.
 *   **Runtime token discovery**: Automatically discovers "final" and content token IDs from the tokenizer.
 
 **4\. Model Loading & Infrastructure**
@@ -422,7 +422,7 @@ This release implements a complete CPU-only chat system for OpenAI's gpt-oss-20b
 *   `**--fake/--gyro**` **flags**: Control which head type to use (fake transformer vs future gyro head).
 *   **Environment variables**: `GYRO_FAKE=1` and `GYRO_HEAD=1` for head selection.
 *   **Shim verification**: Startup verification that our kernel modules are active.
-*   **Default constraints**: 64-token max generation, temperature=0.0 for deterministic behavior.
+*   **Default constraints**: 64-token max generation, temperature=0.0 for Traceable behavior.
 
 **6\. Technical Achievements**
 
@@ -710,7 +710,7 @@ Implemented A1's proposal for Common Source behavior aligned with CGM theory:
 
 This release implements several breakthrough insights:
 
-1.  **Physics-Pure Generation**: Eliminated all heuristics, randomness, and "patches" in favor of deterministic physics-based token selection.
+1.  **Physics-Pure Generation**: Eliminated all heuristics, randomness, and "patches" in favor of Traceable physics-based token selection.
 2.  **Memory-State Alignment**: Aligned learning and retrieval processes with CGM's temporal evolution principles.
 3.  **Common Source Behavior**: Transformed CS from a problematic sink into a theoretically correct partial absorber and UNA ring generator.
 4.  **Spectral Neighborhoods**: Implemented true θ-distance based pattern retrieval for learned associations.
@@ -759,7 +759,7 @@ Applied explicit state buffer zeroing before use to guarantee valid state transi
 
 *   Corrected the learning pipeline so the system does not learn from its own generated output.
 *   Removed redundant calls and corrected logic in `respond_stream` (lines 990–1000) so SEP tokens and output generation do not trigger further learning.
-*   The agent state is now properly reset before each ingestion, ensuring deterministic state progression for identical input.
+*   The agent state is now properly reset before each ingestion, ensuring Traceable state progression for identical input.
 *   Confirmed: repeated input no longer produces duplicate knowledge entries; Monodromic Fold and learning logic remain correct.
 
 **3\. Verified Outcomes**
@@ -791,9 +791,9 @@ Applied explicit state buffer zeroing before use to guarantee valid state transi
 *   Integrated full cycle detection (tracking cycle step history) and emit SEP boundaries on cycle closure.
 *   Provides structural segmentation at semantically meaningful points.
 
-**5\. Deterministic Temperature Function**
+**5\. Traceable Temperature Function**
 
-Replaced sigmoid-based sampling with deterministic function:
+Replaced sigmoid-based sampling with Traceable function:
 
 *   Low or high θ values produce low temperature, stabilising output and preventing random, repetitive output loops.
 
@@ -827,7 +827,7 @@ Confirmed: model now explores state space and does not get stuck in loops.
 
 **Working:**
 
-*   State tracking, cycle step detection, deterministic temperature, bit family prioritisation, Monodromic Fold integration, state transition logic, and sink-avoidance are all functional.
+*   State tracking, cycle step detection, Traceable temperature, bit family prioritisation, Monodromic Fold integration, state transition logic, and sink-avoidance are all functional.
 *   System generates meaningful words and terminates generation properly.
 *   No more infinite loops or repetitive placeholders.
 
@@ -1849,7 +1849,7 @@ Integrated **Numba JIT** acceleration for hot learning loop:
 *   Added `_jit_batch` method (Numba-compiled) to replace the slow Python loop.
 *   Automatically invoked when the STT (epistemology map) is loaded.
 *   Performance improved from **1–2 KB/sec → 40–60 MB/sec** on Intel Mac.
-*   Training now behaves as originally theorized: a **fast, deterministic converter** from text to internal knowledge.
+*   Training now behaves as originally theorized: a **fast, Traceable converter** from text to internal knowledge.
 
 #### ✅ **Compiler Compatibility (macOS‑specific)**
 
@@ -2037,7 +2037,7 @@ Provides a scaffolding for training custom WordPiece tokenizers on domain-specif
 *   All text encoding is now strictly via the tokenizer bridge; UTF-8 fallback is removed from orchestration and adapter layers.
 *   All test and adapter data is isolated using fixtures and temporary directories to prevent data litter.
 *   Public tokenizers are shared under `memories/public/tokenizers/` and can be reused by any agent.
-*   The system retains full deterministic replay and physics compliance.
+*   The system retains full Traceable replay and physics compliance.
 
 ## \[0.9.6.2\] – 2025-07-20
 
@@ -2385,12 +2385,12 @@ Fixed TypedDict access warnings for optional keys.
 
 ### Added
 
-*   **Sharded Storage:** Replaced monolithic JSON with two-level hex sharding for all agent, thread, key, and format objects. Deterministic O(1) path computation for reads
+*   **Sharded Storage:** Replaced monolithic JSON with two-level hex sharding for all agent, thread, key, and format objects. Traceable O(1) path computation for reads
 *   **Registry Files:** Each shard now maintains a `registry.json` index for immediate children, with automatic updates and crash recovery helpers
 *   **Atomic, Concurrent Writes:** All writes use atomic temp files and `flock`\-protected registries for safe concurrent access
 *   **Agent, Thread, and Key Management:**
     *   Automatic RFC 4122 agent UUID generation and sharding
-    *   Per-thread metadata JSONs and encrypted payloads/keys, with deterministic lookup
+    *   Per-thread metadata JSONs and encrypted payloads/keys, with Traceable lookup
 *   **Format Management:**
     *   Public, sharded formats with support for pattern-distance matrices and recursive listing/loading helpers
 *   **Module Boundaries:**
@@ -2415,7 +2415,7 @@ Fixed TypedDict access warnings for optional keys.
 🔧 **Canonical tensor-to-byte conversion system**
 
 *   Implemented spec-compliant `tensor_to_output_byte` function
-*   Pattern matching approach for deterministic output generation
+*   Pattern matching approach for Traceable output generation
 *   Removed non-canonical conversion methods
 
 🧪 **Comprehensive test suite**

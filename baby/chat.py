@@ -76,7 +76,7 @@ def main(args):
                         if next_token in kwargs.get("stop_tokens", []):
                             break
                         current_tokens.append(next_token)
-                        yield next_token, 0.0  # GyroSI is deterministic, so logprob is 0
+                        yield next_token, 0.0  # GyroSI is Traceable, so logprob is 0
 
             generator = GyroGenerator(infer_next_token, encoding)
         case _:

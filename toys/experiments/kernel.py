@@ -126,7 +126,7 @@ def token_to_introns(token_id: int) -> List[int]:
 # Precompute intron broadcast masks for CS emission
 INTRON_BROADCAST_MASKS = np.zeros(256, dtype=np.uint64)
 for intron in range(256):
-    # Simple deterministic mapping for CS emission
+    # Simple Traceable mapping for CS emission
     # Each intron creates a unique state pattern
     mask = (intron * 0x9E3779B97F4A7C15) & ((1 << 48) - 1)
     INTRON_BROADCAST_MASKS[intron] = mask

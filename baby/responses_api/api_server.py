@@ -370,19 +370,15 @@ def create_api_server(infer_next_token: Callable[..., Optional[int]], encoding: 
                 )
             )
 
-            print(f"[DEBUG] After yield statements, about to start ingestion section")
 
             # Ensure backend session sees the new conversation tokens and folds user bytes
             # Use previous_response_id for session continuity, or response_id for new sessions
             session_id = self.request_body.previous_response_id or self.response_id
             is_new_session = self.request_body.previous_response_id is None
 
-            print(f"[DEBUG] Session setup: session_id={session_id}, is_new_session={is_new_session}")
-            print(f"[DEBUG] About to call infer_next_token for ingestion with {len(self.initial_tokens)} tokens")
 
             # Wrap the entire ingestion section in a broad try-catch
             try:
-                print(f"[DEBUG] Entering ingestion try block")
                 try:
                     result = infer_next_token(
                         self.initial_tokens,
@@ -391,17 +387,12 @@ def create_api_server(infer_next_token: Callable[..., Optional[int]], encoding: 
                         new_request=is_new_session,  # only new if no previous_response_id
                         ingest_only=True,  # hint for backends; harmless if ignored
                     )
-                    print(f"[DEBUG] Ingestion call returned: {result}")
-                except TypeError as e:
-                    print(f"[DEBUG] TypeError in ingestion call: {e}, falling back to old signature")
+                except TypeError:
                     # Older backends without kwargs support
                     result = infer_next_token(self.initial_tokens, self.temperature)
-                    print(f"[DEBUG] Fallback ingestion call returned: {result}")
-                except Exception as e:
-                    print(f"[DEBUG] Exception in ingestion call: {e}")
+                except Exception:
                     raise
-            except Exception as e:
-                print(f"[DEBUG] Broad exception in ingestion section: {type(e).__name__}: {e}")
+            except Exception:
                 import traceback
 
                 traceback.print_exc()
@@ -429,6 +420,17 @@ def create_api_server(infer_next_token: Callable[..., Optional[int]], encoding: 
             current_output_text_content = ""
             current_annotations = []
 
+            # Treat Harmony stop tokens as control markers as well
+            try:
+                _harmony_stop_tokens = set(encoding.stop_tokens() or [])
+            except Exception:
+                _harmony_stop_tokens = set()
+
+            none_streak = 0
+            max_none_streak_before_first_token = 64
+            max_none_streak_after_first_token = 8
+            has_emitted_non_control = False
+
             while True:
                 # Check for client disconnect
                 if self.request is not None:
@@ -436,7 +438,6 @@ def create_api_server(infer_next_token: Callable[..., Optional[int]], encoding: 
                         print("Client disconnected, stopping token generation.")
                         break
                 # Handle different backend signatures
-                print(f"[DEBUG] About to call infer_next_token for generation with {len(self.tokens)} tokens")
                 try:
                     next_tok = infer_next_token(
                         self.tokens,
@@ -444,37 +445,41 @@ def create_api_server(infer_next_token: Callable[..., Optional[int]], encoding: 
                         request_id=session_id,
                         new_request=False,  # continue existing session
                     )
-                    print(f"[DEBUG] Generation call returned: {next_tok}")
-                except TypeError as e:
-                    print(f"[DEBUG] TypeError in generation call: {e}, falling back to old signature")
+                except TypeError:
                     # Fallback for older backends without kwargs support
                     next_tok = infer_next_token(
                         self.tokens,
                         self.temperature,
                     )
-                    print(f"[DEBUG] Fallback generation call returned: {next_tok}")
-                except Exception as e:
-                    print(f"[DEBUG] Exception in generation call: {e}")
+                except Exception:
                     next_tok = None
                 self.new_request = False
                 if next_tok is not None:
                     # Check if this is a control token during bootstrap
                     from baby.constants.harmony_tokens import ALL_CONTROL_TOKENS
 
-                    is_control_token = next_tok in ALL_CONTROL_TOKENS
+                    is_control_token = next_tok in ALL_CONTROL_TOKENS or next_tok in _harmony_stop_tokens
 
                     # Only add non-control tokens to the token sequence to prevent state evolution
                     # Control tokens are needed for parsing but shouldn't affect the generation state
                     if not is_control_token:
                         self.tokens.append(next_tok)
+                        has_emitted_non_control = True
 
                     try:
                         self.parser.process(next_tok)
                     except Exception:
                         pass
                 else:
-                    # No more tokens available, break generation loop
-                    break
+                    # Backend had no token right now; tolerate brief gaps to avoid premature stop
+                    none_streak += 1
+                    cap = (
+                        max_none_streak_after_first_token if has_emitted_non_control else max_none_streak_before_first_token
+                    )
+                    if none_streak > cap:
+                        break
+                    else:
+                        continue
 
                 if self.parser.state == StreamState.EXPECT_START:
                     current_output_index += 1
@@ -807,6 +812,7 @@ def create_api_server(infer_next_token: Callable[..., Optional[int]], encoding: 
                 # Adding in the end if we know we are not done
                 if next_tok is not None:  # type: ignore[reportUnnecessaryComparison]
                     self.output_tokens.append(next_tok)
+                    none_streak = 0
 
             if self.request is None or not await self.request.is_disconnected():
                 response = generate_response(

@@ -2,7 +2,7 @@
 """
 GyroSI Atlas Builder — canonical 5 artifacts only (θ, ontology, epistemology, phenomenology, orbit_sizes).
 
-No optional maps. No scoring/greedy/dominance. Deterministic representatives.
+No optional maps. No scoring/greedy/dominance. Traceable representatives.
 Default output directory: memories/public/meta/
 
 Usage examples:
@@ -204,7 +204,7 @@ def _tarjan_scc_full(
 ) -> Tuple[NDArray[np.int32], Dict[int, int]]:
     """
     Tarjan SCC using all 256 introns as directed edges.
-    Deterministic representative rule: the node with minimal STATE INTEGER in SCC.
+    Traceable representative rule: the node with minimal STATE INTEGER in SCC.
     Returns:
       canonical: int32[N] mapping node -> representative index
       orbit_sizes: dict(rep_index -> size)
@@ -265,7 +265,7 @@ def _tarjan_scc_full(
                         comp.append(n)
                         if n == v:
                             break
-                    # deterministic representative: minimal state integer
+                    # Traceable representative: minimal state integer
                     comp_arr = np.array(comp, dtype=np.int32)
                     comp_states = idx_to_state[comp_arr]
                     rep_local_idx = int(np.argmin(comp_states))
@@ -309,7 +309,7 @@ def build_phenomenology_and_orbit_sizes(
 
     # light stats
     unique_reps = np.unique(canonical)
-    print(f"[INFO] Orbits: {unique_reps.size} (deterministic reps by min(state_int))")
+    print(f"[INFO] Orbits: {unique_reps.size} (Traceable reps by min(state_int))")
     print(f"[INFO] Saved phenomenology → {pheno_path}")
     print(f"[INFO] Saved orbit sizes   → {orbit_sizes_path}")
 

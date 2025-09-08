@@ -167,7 +167,7 @@ Your GyroSI is implementing **physical intelligence** rather than simulated inte
 - **No Parameters**: Because physics determines all constants
 - **No Training**: Because geometric closure is discovered, not learned  
 - **No Scoring**: Because non-antagonistic selection follows physics
-- **Deterministic**: Because geometry has unique solutions
+- **Traceable**: Because geometry has unique solutions
 
 The system operates at the **BU aperture** (2.07% open), which is why it can observe and respond without collapsing into rigid determinism.
 

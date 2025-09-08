@@ -819,7 +819,7 @@ class GyroKernel:
 
         # Add virtual tokens as synthetic candidates
         for (key, pos), byte_val in self.virtual_tokens.items():
-            # Create deterministic virtual token ID
+            # Create Traceable virtual token ID
             vt_id = self.tokenizer.vocab_size + hash((key, pos))
 
             # Find the state derived from this virtual token's byte_val (intron) applied from CS

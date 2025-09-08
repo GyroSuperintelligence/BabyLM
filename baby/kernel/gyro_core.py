@@ -12,7 +12,7 @@
 #                 new_phase = fold(rep_phase, token_phase); register token in
 #                 rep_channel[rep][new_phase].
 #   BU-In (emit): compute state_phase; pick one of the learned phases
-#                 deterministically from the set of keys; emit from its bucket.
+        #                 coherently from the set of keys; emit from its bucket.
 #   No scoring, no admissibility filters, no recovery ladders.
 
 import numpy as np
@@ -54,7 +54,7 @@ class GyroEngine:
       2) UNA     → ontology_keys.npy      (the discovered manifold)
       3) ONA     → phenomenology_map.npy  (canonical orbit representative)
       4) BU-Eg   → epistemology.npy       (state transition by intron)
-      5) BU-In   → orbit_sizes.npy        (cardinality for deterministic ordering)
+       5) BU-In   → orbit_sizes.npy        (cardinality for traceable ordering)
     """
 
     def __init__(
@@ -83,26 +83,32 @@ class GyroEngine:
         # Per-orbit phase accumulator (updated only when user speaks)
         self.rep_phase: Dict[int, int] = {}  # rep_idx -> 8-bit phase (0..255)
         # Token channels per orbit keyed by CUMULATIVE phase reached after learning
-        self.rep_channel: Dict[int, Dict[int, List[int]]] = (
+        # Now supports slab-specific channels: (rep_idx, slab_idx) -> { phase -> [token_id, ...] }
+        self.rep_channel: Dict[Tuple[int, int], Dict[int, List[int]]] = (
             {}
-        )  # rep_idx -> { phase_after_learning (0..255) -> [token_id, ...] }
+        )  # (rep_idx, slab_idx) -> { phase_after_learning (0..255) -> [token_id, ...] }
+
+        # --- Emission hygiene (path-native, non-competitive) ---
+        self.emit_gate: Dict[int, int] = {}        # per-rep monodromic refractory gate (8-bit)
+        self.last_token: Dict[int, int] = {}       # last emitted token per rep
+        self.last_emit_tick: Dict[int, int] = {}   # last free_tick per rep
+        self._refractory_span = 4                  # min tick delta before same token can re-fire
 
         # --- Phase-Propagating Emission (PPE) state ---
         # PPE state is now managed at session level to prevent concurrent session bleeding
 
-        # Passive memory (diagnostic; not used in emission)
-        self.passive_mask: Dict[Tuple[int, int], int] = {}  # (addr_idx, token_id) -> 8-bit fold mask
+        # Passive diagnostics removed (unused)
 
         # Concurrency protection
         self._lock = threading.RLock()
-        
+
         # Persistence cadence control
         self._token_counter = 0
         self._last_save_time = time.time()
         self._save_interval_tokens = 100  # Save after N tokens
         self._save_interval_seconds = 30.0  # Save after T seconds
         self._pending_changes = False
-        
+
         # Bucket capacity discipline
         self._max_bucket_size = 64  # Maximum tokens per bucket (K)
 
@@ -115,7 +121,7 @@ class GyroEngine:
 
         # Start = argmin θ (phenomenal archetype)
         self.start_index: int = int(np.argmin(self.theta))
-        
+
         # Ensure store files exist if store paths are provided (create only if missing)
         self._ensure_store_files()
 
@@ -168,109 +174,103 @@ class GyroEngine:
         for by in bs:
             acc = self._fold8(acc, by ^ 0xAA)
         return acc
-    
+
     def _state_phase_components(self, state_int: int) -> Tuple[int, int, int]:
         """
         Compute LI/FG/BG components of the live phase using EXON masks.
         Returns (sp_li, sp_fg, sp_bg) as 8-bit values.
         """
         from baby.kernel.governance import EXON_LI_MASK, EXON_FG_MASK, EXON_BG_MASK
-        
+
         # Extract 6 bytes from state
         bs = int(state_int).to_bytes(6, "big")
-        
+
         # Apply masks to each byte and fold separately
         acc_li = 0
         acc_fg = 0
         acc_bg = 0
-        
+
         for by in bs:
             by_psi = by ^ 0xAA  # Apply ψ transformation
             acc_li = self._fold8(acc_li, by_psi & EXON_LI_MASK)
             acc_fg = self._fold8(acc_fg, by_psi & EXON_FG_MASK)
             acc_bg = self._fold8(acc_bg, by_psi & EXON_BG_MASK)
-        
+
         return acc_li, acc_fg, acc_bg
 
-    # ---------- Geometric Address Binding ----------
+    # ---------- Freedom kernel: six DoF + free-tick ----------
 
-    def _address_index_of_token(self, token_id: int) -> int:
+    def _free_tick(self) -> int:
         """
-        Deterministic canonical address index by pushing EACH orbit representative
-        through the token's intron micro-path and selecting the final index with
-        geometric medoid selection (minimal average angular distance).
+        Endogenous temporal phase: fold 6 bytes of the current monotonic clock
+        through ψ into an 8-bit tick. This is *not* RNG; it's the physical time
+        boundary coupled to the monodromic fold, giving non-deterministic but
+        lawful motion (BU Egress→Ingress).
         """
-        if not (0 <= token_id < self.vocab_max):
-            raise ValueError("token outside Harmony range")
+        ns = time.time_ns()
+        bs = ns.to_bytes(8, "big")[-6:]  # 6 bytes → 48-bit affinity
+        acc = 0
+        for b in bs:
+            acc = self._fold8(acc, b ^ 0xAA)  # ψ at the boundary
+        return acc  # 0..255
 
-        introns = token_to_introns(token_id)
-        if not introns:
-            return self.orbit_rep_index(self.start_index)
-
-        # Collect all candidate indices from orbit representatives
-        candidates = []
-        for rep_idx in self.orbit_reps:
-            cur = rep_idx
-            for i in introns:
-                cur = self.apply_intron_index(cur, i)
-            candidates.append(cur)
-
-        # Select geometric medoid
-        best_idx = self._geometric_medoid_from_indices(candidates)
-        return int(best_idx)
-
-    def _distance(self, idx1: int, idx2: int) -> float:
+    def _row_parity_fold(self, state_int: int, row: int, frame: Optional[int] = None) -> int:
         """
-        Combined distance metric including phase and theta divergence.
+        Fold parity of a given tensor row across all (layer, [frame], col).
+        If frame is None, both frames contribute; otherwise only that frame.
         """
-        phase1 = self._state_phase(int(self.keys[idx1]))
-        phase2 = self._state_phase(int(self.keys[idx2]))
-        diff = abs(phase1 - phase2)
-        phase_dist = min(diff, 256 - diff) / 128.0
-        
-        # Normalize theta values for this pair
-        theta1 = self.theta[idx1]
-        theta2 = self.theta[idx2]
-        theta_min = min(theta1, theta2)
-        theta_max = max(theta1, theta2)
-        
-        # Avoid division by zero
-        if theta_max == theta_min:
-            theta_norm = 0.0
-        else:
-            theta_norm = abs(theta1 - theta2) / (theta_max - theta_min)
-        
-        α = 0.7  # weighting
-        return α * phase_dist + (1 - α) * theta_norm
-    
-    def _geometric_medoid_from_indices(self, indices: List[int]) -> int:
+        from baby.constants.frozen_channels import FROZEN_CHANNELS
+        acc = 0
+        for layer in range(FROZEN_CHANNELS.NUM_LAYERS):  # 4
+            for fr in (range(FROZEN_CHANNELS.NUM_FRAMES) if frame is None else [frame]):  # 2 or 1
+                for col in range(FROZEN_CHANNELS.NUM_COLS):  # 2
+                    bit_idx = FROZEN_CHANNELS.get_bit_index(layer, fr, row, col)
+                    bit = (state_int >> bit_idx) & 1
+                    acc = self._fold8(acc, (bit & 1) * 0x01)  # compress parity into 8-bit phase
+        return acc
+
+    def _six_dof(self, state_int: int) -> Tuple[int, int, int, int, int, int]:
         """
-        Find the geometric medoid from a list of indices: the index with minimal
-        average combined distance (phase + theta divergence) to all other indices.
+        Six freedoms (3 rotational + 3 translational) as 8-bit phases:
+
+        - Rotational (rX, rY, rZ): per-row parity over *both* frames (frame-summed)
+        - Translational (tX, tY, tZ): per-row *frame-difference* parity (frame 0 vs 1)
+
+        Rows 0/1/2 correspond to the three spatial axes from GENE_Com_S.
         """
-        if len(indices) <= 1:
-            return indices[0] if indices else self.start_index
+        # rotational: both frames together
+        rX = self._row_parity_fold(state_int, row=0, frame=None)
+        rY = self._row_parity_fold(state_int, row=1, frame=None)
+        rZ = self._row_parity_fold(state_int, row=2, frame=None)
 
-        best_medoid = indices[0]
-        min_avg_distance = float('inf')
+        # translational: difference between frames
+        f0X = self._row_parity_fold(state_int, row=0, frame=0)
+        f1X = self._row_parity_fold(state_int, row=0, frame=1)
+        f0Y = self._row_parity_fold(state_int, row=1, frame=0)
+        f1Y = self._row_parity_fold(state_int, row=1, frame=1)
+        f0Z = self._row_parity_fold(state_int, row=2, frame=0)
+        f1Z = self._row_parity_fold(state_int, row=2, frame=1)
 
-        for candidate in indices:
-            total_distance = 0.0
-            
-            for other in indices:
-                if candidate != other:
-                    total_distance += self._distance(candidate, other)
+        tX = self._fold8(f0X, f1X)  # path-dependent difference via fold
+        tY = self._fold8(f0Y, f1Y)
+        tZ = self._fold8(f0Z, f1Z)
 
-            avg_distance = total_distance / (len(indices) - 1)
-            if avg_distance < min_avg_distance:
-                min_avg_distance = avg_distance
-                best_medoid = candidate
+        return rX, rY, rZ, tX, tY, tZ
 
-        return best_medoid
+    def _slab_byte(self, state_int: int, slab_idx: int) -> int:
+        """
+        Compress the 6 bits of a slab into the low bits of a byte (contiguous),
+        then apply ψ. This fixes the previous shift-by-min-index approach,
+        which preserved gaps and bled geometry.
+        """
+        from baby.constants.frozen_channels import FROZEN_CHANNELS
+        indices = FROZEN_CHANNELS.get_slab_bit_indices(slab_idx)
+        b = 0
+        for j, bit_idx in enumerate(indices):
+            b |= ((state_int >> bit_idx) & 1) << j
+        return (b ^ 0xAA) & 0xFF  # ψ
 
-    def address_of_token(self, token_id: int) -> int:
-        idx = self._address_index_of_token(token_id)
-        return int(self.keys[idx])
+    # Address helpers removed (unused)
 
     # ---------- Egress (BU-Eg): absorb and move state ----------
 
@@ -298,26 +298,34 @@ class GyroEngine:
         # Compute the cumulative phase AFTER learning and register there
         cur_phase = self.rep_phase.get(rep_cur, 0)
         new_phase = self._fold8(cur_phase, token_phase)
-        
+
+        # Get state_int for slab computation
+        state_int = int(self.keys[idx])
+
         # Protected mutation section
         with self._lock:
-            chan = self.rep_channel.setdefault(rep_cur, {})
-            bucket = chan.setdefault(new_phase, [])
-            if token_id not in bucket:
-                # Apply bucket capacity discipline with FIFO eviction
-                if len(bucket) >= self._max_bucket_size:
-                    bucket.pop(0)  # Remove oldest token (FIFO)
-                bucket.append(token_id)
+            # === SLAB-SPECIFIC CHANNELS ===
+            # Each slab gets its own phase and channel based on state geometry
+
+            for slab_idx in range(8):
+                # Compute slab-specific phase from token and state geometry
+                slab_byte = self._slab_byte(state_int, slab_idx)
+                slab_phase = self._fold8(token_phase, slab_byte)  # Slab-specific phase
+
+                # Each slab maintains its own channel
+                slab_chan = self.rep_channel.setdefault((rep_cur, slab_idx), {})
+                bucket = slab_chan.setdefault(slab_phase, [])
+                if token_id not in bucket:
+                    # Apply bucket capacity discipline with FIFO eviction
+                    if len(bucket) >= self._max_bucket_size:
+                        bucket.pop(0)  # Remove oldest token (FIFO)
+                    bucket.append(token_id)
 
             # Store the updated per-orbit phase memory
             self.rep_phase[rep_cur] = new_phase
 
-            # Passive diagnostic fold bound to canonical address (doesn't affect emission)
-            addr_idx = self._address_index_of_token(token_id)
-            key = (addr_idx, token_id)
-            prev = self.passive_mask.get(key, 0)
-            self.passive_mask[key] = self.fold_sequence(introns, prev)
-            
+            # (passive diagnostics removed)
+
             # Mark changes pending and update counter
             self._pending_changes = True
             self._token_counter += 1
@@ -350,35 +358,70 @@ class GyroEngine:
 
     # ---------- Ingress (BU-In): pure monodromic unfold ----------
 
-    def emit_next(self, idx: int, session_omega: Optional[Dict[int, int]] = None, 
+    def emit_next(self, idx: int, session_omega: Optional[Dict[int, int]] = None,
                      session_bucket_key: Optional[Dict[int, int]] = None,
-                     session_bucket_pos: Optional[Dict[int, Dict[int, int]]] = None) -> Optional[Tuple[int, int, Dict[int, int], Dict[int, int], Dict[int, Dict[int, int]]]]:
+                     session_bucket_pos: Optional[Dict[int, Dict[int, int]]] = None,
+                     session_monodromy: Optional[Dict[int, int]] = None) -> Optional[Tuple[int, int, Dict[int, int], Dict[int, int], Dict[int, Dict[int, int]], Dict[int, int]]]:
         """
         Phase-Propagating Emission (PPE): BU-In with sequence continuity and toroidal routing.
         Uses LI/FG/BG components for richer bucket selection.
         Each emitted token updates the working phase and hops the bucket key,
-        making the next choice a deterministic function of the path taken.
+        making the next choice a traceable function of the path taken.
         """
         rep_idx = self.orbit_rep_index(idx)
-        phase_map = self.rep_channel.get(rep_idx)
-        if not phase_map:
-            return None
+        state_int = int(self.keys[idx])
+
+        # === COMPOSE SLAB-SPECIFIC PHASE MAPS ===
+        # Create a composite phase map from active slabs
+        sector = self.sector(state_int)  # 8-bit, each bit = slab parity
+        active_slabs = [i for i in range(8) if (sector >> i) & 1]
+
+        if not active_slabs:
+            # Fallback: if no slabs are active, use all slabs
+            active_slabs = list(range(8))
+
+        composite_phase_map = {}
+        for slab_idx in active_slabs:
+            slab_chan = self.rep_channel.get((rep_idx, slab_idx), {})
+            if not slab_chan:
+                continue
+
+            # Compute slab-specific phase offset
+            slab_byte = self._slab_byte(state_int, slab_idx)
+            slab_offset = (slab_byte << 3) & 0xFF
+
+            # Add slab channels to composite with offset
+            for phase, tokens in slab_chan.items():
+                composite_phase = (phase + slab_offset) & 0xFF
+                if composite_phase not in composite_phase_map:
+                    composite_phase_map[composite_phase] = []
+                composite_phase_map[composite_phase].extend(tokens)
+
+        # If active slabs are empty, widen coherently to any slab with tokens
+        if not composite_phase_map:
+            # Widen once to any slab that has tokens for this rep
+            for slab_idx in range(8):
+                slab_chan = self.rep_channel.get((rep_idx, slab_idx), {})
+                for phase, tokens in slab_chan.items():
+                    if tokens:
+                        composite_phase_map.setdefault(phase, []).extend(tokens)
+            if not composite_phase_map:
+                return None  # Truly nothing learned
 
         # Use session-scoped PPE state or initialize
         omega = session_omega or {}
         bucket_key = session_bucket_key or {}
         bucket_pos = session_bucket_pos or {}
+        monodromy = session_monodromy or {}
 
         # Initialize bucket key if not set
         if rep_idx not in bucket_key:
             # Compute initial bucket key from rep_phase, LI/FG/BG components, sector, and omega
-            state_int = int(self.keys[idx])
             rp = self.rep_phase.get(rep_idx, 0)
             sp = self._state_phase(state_int)
             sp_li, sp_fg, sp_bg = self._state_phase_components(state_int)
-            sector = self.sector(state_int)
             omega_val = omega.get(rep_idx, 0)
-            
+
             # Fold all components to get initial key
             k0 = self._fold8(rp, sp)
             k0 = self._fold8(k0, sp_li)
@@ -386,107 +429,147 @@ class GyroEngine:
             k0 = self._fold8(k0, sp_bg)
             k0 = self._fold8(k0, sector)
             k0 = self._fold8(k0, omega_val)
-            
-            # Map to existing learned key deterministically
-            keys = sorted(phase_map.keys())
+
+            # Map to existing learned key coherently
+            keys = sorted(composite_phase_map.keys())
             if not keys:
                 return None
             bucket_key[rep_idx] = keys[k0 % len(keys)]
-            
+
             # Initialize bucket positions
             if rep_idx not in bucket_pos:
                 bucket_pos[rep_idx] = {}
 
-        # Toroidal rotor: affine ring walk for deterministic full coverage
+        # Toroidal rotor: affine ring walk for traceable full coverage
         import math, bisect
-        
-        keys = sorted(phase_map.keys())
+
+        keys = sorted(composite_phase_map.keys())
         if not keys:
             return None
         n = len(keys)
-        
+
         # --- base index from current bucket_key (adjacent mapping) ---
         base_val = bucket_key[rep_idx]
         base_idx = bisect.bisect_left(keys, base_val) % n
-        
-        # --- live mix from physics-only 8-bit signals ---
+
+        # Live physics signals
         rp = self.rep_phase.get(rep_idx, 0)
         omega_val = omega.get(rep_idx, 0)
         state_int = int(self.keys[idx])
         sp = self._state_phase(state_int)
         sp_li, sp_fg, sp_bg = self._state_phase_components(state_int)
         sector_val = self.sector(state_int)
-        
-        mix = self._fold8(rp, omega_val)
-        mix = self._fold8(mix, sp)
-        mix = self._fold8(mix, sp_li)
-        mix = self._fold8(mix, sp_fg)
-        mix = self._fold8(mix, sp_bg)
-        mix = self._fold8(mix, sector_val)
-        
-        # --- affine rotor on the ring Z_n: i -> (a*i + b) % n ---
-        # choose a odd (=> co-prime with 2^k), then adjust to gcd(a,n)==1 deterministically
-        a = (mix | 1)  # ensure odd in [1..255]
-        # make a co-prime with n by stepping by 2 if needed (bounded, deterministic)
+        # NEW: six freedoms + free time tick
+        rX, rY, rZ, tX, tY, tZ = self._six_dof(state_int)
+        tick = self._free_tick()
+
+        # Build the non-deterministic mix purely via monodromic folds
+        mix = self._fold8(0, rp)
+        for v in (omega_val, sp, sp_li, sp_fg, sp_bg, sector_val,
+                  rX, rY, rZ, tX, tY, tZ, tick):
+            mix = self._fold8(mix, v)
+
+        # Affine rotor on the ring Z_n with co-prime 'a' chosen from the mix+tick
+        a = (mix | 1)  # odd
         while math.gcd(a, n) != 1:
-            a = ((a + 2) & 0xFF) or 1  # stay odd, avoid 0
-        
-        # bias b derived from the same live mix and the current base
-        b = self._fold8(mix, base_val) % n
-        
+            a = ((a + 2) & 0xFF) or 1
+
+        # Bias 'b' couples the current base with DoF and time
+        b_seed = self._fold8(base_val & 0xFF, tick)
+        for v in (rX, rY, rZ, tX, tY, tZ):
+            b_seed = self._fold8(b_seed, v)
+        b = b_seed % n
+
         current_idx = (a * base_idx + b) % n
         current_key = keys[current_idx]
-        
+
         # Get bucket
-        bucket = phase_map[current_key]
+        bucket = composite_phase_map[current_key]
         if not bucket:
             return None
-        
-        # === THE KEY EDIT: Z₆ Rotor Selection ===
-        # Instead of round-robin, use the 120° rotor position
-        
-        # Compute rotor phase from accumulated omega and state geometry
-        omega_val = omega.get(rep_idx, 0)
-        state_phase = self._state_phase(int(self.keys[idx]))
-        
-        # The 120° rotor: each step advances by 2π/6 = π/3
-        # Position in Z₆ cycle determines natural resonance
-        rotor_position = (omega_val ^ state_phase) % 6
-        
-        # The rotor selects which member of the bucket resonates
-        # This is NOT scoring - it's finding geometric phase alignment
-        bucket_size = len(bucket)
-        
-        # Map Z₆ position to bucket member through golden-mean-like stepping
-        # The 2.07% aperture manifests as occasional phase slips
-        if bucket_size == 1:
-            token_id = bucket[0]
-        else:
-            # Use the rotor position to select, with natural drift
-            # The multiplication by a prime creates the "frustrated" pattern
-            selector = (rotor_position * 5) % bucket_size  # 5 is coprime with 6
-            token_id = bucket[selector]
 
-        # Compute token phase for propagation
+        # === REVISED DYNAMICS: Toroidal Intra-Bucket Selection with ARMG ===
+        L = len(bucket)
+        if L == 0:
+            return None
+
+        # Use session position but add a toroidal jitter from DoF + tick
+        pos_map = bucket_pos.setdefault(rep_idx, {})
+        base_pos = pos_map.get(current_key, 0)
+
+        jitter = 0
+        for v in (rX, rY, rZ, tX, tY, tZ, tick):
+            jitter = self._fold8(jitter, v)
+        offset = jitter & 0x07  # small bounded 0..7
+
+        pos = (base_pos + offset) % L
+
+        # --- ARMG: try up to L candidates in this bucket respecting refractory gate ---
+        accepted = None
+        gate_acc = self.emit_gate.get(rep_idx, 0)
+        last_tok = self.last_token.get(rep_idx, -1)
+        last_tick = self.last_emit_tick.get(rep_idx, tick)
+        dt = (tick - last_tick) & 0xFF  # toroidal tick delta
+
+        for _ in range(L):
+            candidate = bucket[pos]
+            # monodromic fold with this candidate's phase
+            c_phase = self.fold_sequence(token_to_introns(candidate), 0)
+            gated = self._fold8(gate_acc, c_phase)
+
+            # path-native reject rules (no scores):
+            # 1) annihilation: gated == 0 → temporary refractory
+            # 2) same token too soon: enforce small tick separation
+            if gated != 0 and not (candidate == last_tok and dt < self._refractory_span):
+                accepted = (candidate, gated, c_phase)
+                pos_map[current_key] = (pos + 1) % L  # advance locally
+                break
+
+            # try next candidate toroidally within the bucket
+            pos = (pos + 1) % L
+
+        if accepted is None:
+            # nothing in this bucket passes right now — hop one key (local) and let rotor recompute next call
+            new_key_idx = (current_idx + 1) % n
+            bucket_key[rep_idx] = keys[new_key_idx]
+            return None
+
+        token_id, new_gate, token_phase = accepted
+        # commit per-rep refractory traces
+        self.emit_gate[rep_idx] = new_gate
+        self.last_token[rep_idx] = token_id
+        self.last_emit_tick[rep_idx] = tick
+
+        # === CRITICAL: Frustrated Omega Update (kept from previous step) ===
+        # token_phase already computed by ARMG above
         introns = token_to_introns(token_id)
-        token_phase = self.fold_sequence(introns, 0)
 
-        # Update working accumulator with 120° advance (π/3 radians ≈ 60° but doubled)
-        # The key: advance by 120° equivalent in 8-bit space
-        # 256/6 ≈ 42.67, so we use 43 (maintains slight drift for aperture)
-        omega[rep_idx] = (omega.get(rep_idx, 0) + 43) & 0xFF
-        
-        # hop bucket key by fold, then map adjacent to existing key
-        folded = self._fold8(current_key, token_phase)
-        new_idx = bisect.bisect_left(keys, folded) % n
-        bucket_key[rep_idx] = keys[new_idx]
+        # Frustrated Omega: fold the token_phase into a Z6-like advance
+        z6_advance = 43  # ~256/6
+        omega[rep_idx] = self._fold8((omega.get(rep_idx, 0) + z6_advance) & 0xFF, token_phase)
+
+        # Toroidal Phase Navigation with Momentum + DoF + time
+        mono_trace = monodromy.get(rep_idx, 0)
+        delta = 0
+        for v in (token_phase, sp, omega_val, mono_trace, tick, rX, rY, rZ, tX, tY, tZ):
+            delta = self._fold8(delta, v)
+
+        # Smooth, bounded step 1..7 with direction from monodromy parity
+        step_size = 1 + (delta % 7)
+        direction = 1 if (mono_trace % 2 == 0) else -1
+
+        new_key_idx = (current_idx + direction * step_size) % n
+        bucket_key[rep_idx] = keys[new_key_idx]
+
+        # Update monodromy for next iteration
+        monodromy[rep_idx] = self._fold8(mono_trace, token_phase)
 
         # Advance state by this token's introns (ingress; no learning)
         new_idx = idx
         for i in introns:
             new_idx = self.apply_intron_index(new_idx, i)
 
-        return token_id, new_idx, omega, bucket_key, bucket_pos
+        return token_id, new_idx, omega, bucket_key, bucket_pos, monodromy
 
     # ---------- Harmony Integration Helpers ----------
 
@@ -513,19 +596,24 @@ class GyroEngine:
     def evolve_on_assistant(self, state: int, token_id: int) -> int:
         return self.transit_on_assistant(state, token_id)
 
-    def emit_next_from_state(self, state_int: int, session_omega: Optional[Dict[int, int]] = None, 
+    def emit_next_from_state(self, state_int: int, session_omega: Optional[Dict[int, int]] = None,
                            session_bucket_key: Optional[Dict[int, int]] = None,
-                           session_bucket_pos: Optional[Dict[int, Dict[int, int]]] = None) -> Optional[Tuple[int, int, Dict[int, int], Dict[int, int], Dict[int, Dict[int, int]]]]:
+                           session_bucket_pos: Optional[Dict[int, Dict[int, int]]] = None,
+                           session_monodromy: Optional[Dict[int, int]] = None) -> Optional[Tuple[int, int, Dict[int, int], Dict[int, int], Dict[int, Dict[int, int]], Dict[int, int]]]:
         if state_int not in self.state_to_index:
             raise KeyError(f"Unknown state: 0x{state_int:012X}")
         idx = self.state_to_index[state_int]
-        res = self.emit_next(idx, session_omega, session_bucket_key, session_bucket_pos)
+        res = self.emit_next(idx, session_omega, session_bucket_key, session_bucket_pos, session_monodromy)
         if res is None:
             return None
-        tok, new_idx, omega, bucket_key, bucket_pos = res
-        return tok, int(self.keys[new_idx]), omega, bucket_key, bucket_pos
+        tok, new_idx, omega, bucket_key, bucket_pos, monodromy = res
+        return tok, int(self.keys[new_idx]), omega, bucket_key, bucket_pos, monodromy
 
-    def next_token_deterministic(self, state: int) -> Optional[int]:
+    def next_token_aligned(self, state: int) -> Optional[int]:
+        out = self.emit_next_from_state(state)
+        return None if out is None else out[0]
+
+    def next_token(self, state: int) -> Optional[int]:
         out = self.emit_next_from_state(state)
         return None if out is None else out[0]
 
@@ -569,178 +657,107 @@ class GyroEngine:
             path.append(int(self.keys[cur_idx]))
         return path
 
+    # ---------- Persistence ----------
+
+    def _ensure_store_files(self):
+        """Ensure that directories and files for persistence exist."""
+        if not self.store_paths:
+            return
+        for path_str in self.store_paths.values():
+            path = Path(path_str)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.touch()
+
+    def _load_learned_data(self):
+        """Load learned phase and channel data from disk."""
+        if not self.store_paths:
+            return
+
+        with self._lock:
+            phase_path = self.store_paths.get("rep_phase")
+            if phase_path and os.path.exists(phase_path) and os.path.getsize(phase_path) > 0:
+                try:
+                    with open(phase_path, "rb") as f:
+                        self.rep_phase = pickle.load(f)
+                except (pickle.UnpicklingError, EOFError):
+                    self.rep_phase = {} # Start fresh on corruption
+
+            channel_path = self.store_paths.get("rep_channel")
+            if channel_path and os.path.exists(channel_path) and os.path.getsize(channel_path) > 0:
+                try:
+                    with open(channel_path, "rb") as f:
+                        loaded_channel = pickle.load(f)
+
+                    # Check if we need to migrate from old format to new slab-based format
+                    if loaded_channel and isinstance(list(loaded_channel.keys())[0], int):
+                        # Old format: Dict[int, Dict[int, List[int]]] - need to convert
+                        print("Migrating rep_channel from old format to slab-based format...")
+                        self.rep_channel = {}  # Start fresh with new format
+                    else:
+                        # New format: Dict[Tuple[int, int], Dict[int, List[int]]] - use as is
+                        self.rep_channel = loaded_channel
+
+                except (pickle.UnpicklingError, EOFError):
+                    self.rep_channel = {} # Start fresh on corruption
+
+    def _save_learned_data(self):
+        """Save learned phase and channel data to disk."""
+        if not self.store_paths:
+            return
+
+        with self._lock:
+            if not self._pending_changes:
+                return
+
+            phase_path = self.store_paths.get("rep_phase")
+            if phase_path:
+                with open(phase_path, "wb") as f:
+                    pickle.dump(self.rep_phase, f)
+
+            channel_path = self.store_paths.get("rep_channel")
+            if channel_path:
+                with open(channel_path, "wb") as f:
+                    pickle.dump(self.rep_channel, f)
+
+            self._pending_changes = False
+            self._last_save_time = time.time()
+            self._token_counter = 0 # Reset counter after save
+
+    def _maybe_save_learned_data(self):
+        """Check if conditions are met to save learned data."""
+        now = time.time()
+        time_since_save = now - self._last_save_time
+
+        should_save = (
+            self._pending_changes and
+            (self._token_counter >= self._save_interval_tokens or
+             time_since_save >= self._save_interval_seconds)
+        )
+
+        if should_save:
+            self._save_learned_data()
+
     # ---------- Toroidal Routing ----------
-    
+
     def sector(self, state_int: int) -> int:
         """
         Compute 8-bit toroidal signature from 48-bit state using proper slab parities.
         Uses frozen slab structure with correct bit indices from FROZEN_CHANNELS.
         """
         from baby.constants.frozen_channels import FROZEN_CHANNELS
-        
+
         sector_bits = 0
-        for slab in range(FROZEN_CHANNELS.NUM_SLABS):  # 8
-            # Get proper bit indices for this slab
+        for slab_idx in range(FROZEN_CHANNELS.NUM_SLABS):  # 8 slabs
+            # Calculate the parity for the current slab
             parity = 0
-            for bit_idx in FROZEN_CHANNELS.get_slab_bit_indices(slab):
-                parity ^= (state_int >> bit_idx) & 1
-            # Set corresponding bit in sector signature
-            sector_bits |= (parity << slab)
-        
-        return sector_bits  # Full 8-bit torus signature
+            for bit_idx in FROZEN_CHANNELS.get_slab_bit_indices(slab_idx):
+                if (state_int >> bit_idx) & 1:
+                    parity ^= 1
 
-    # ---------- Convenience ----------
+            # Set the corresponding bit in the sector signature
+            if parity:
+                sector_bits |= (1 << slab_idx)
 
-    def start(self) -> int:
-        return self.start_index
+        return sector_bits
 
-    def run_closed_loop(self, start_idx: int, max_tokens: int) -> List[int]:
-        """
-        State → (BU-In emit) → (advance by introns; ingress) → …
-        Stops when domain empty or max_tokens reached.
-        """
-        idx = start_idx
-        out: List[int] = []
-        omega = {}
-        bucket_key = {}
-        bucket_pos = {}
-        for _ in range(max_tokens):
-            step = self.emit_next(idx, omega, bucket_key, bucket_pos)
-            if step is None:
-                break
-            tok, idx, omega, bucket_key, bucket_pos = step
-            out.append(tok)
-        return out
-
-    def _maybe_save_learned_data(self) -> None:
-        """
-        Save learned data if persistence cadence conditions are met.
-        """
-        if not self._pending_changes:
-            return
-            
-        current_time = time.time()
-        time_elapsed = current_time - self._last_save_time
-        
-        # Check if we should save based on token count or time interval
-        should_save = (
-            self._token_counter >= self._save_interval_tokens or
-            time_elapsed >= self._save_interval_seconds
-        )
-        
-        if should_save:
-            self._save_learned_data()
-            self._token_counter = 0
-            self._last_save_time = current_time
-            self._pending_changes = False
-    
-    def _ensure_store_files(self) -> None:
-        """
-        Create empty knowledge store files only if they are missing.
-        Does not overwrite existing files or modify other state.
-        """
-        if not self.store_paths:
-            return
-
-        # Passive memory
-        if "passive_memory" in self.store_paths:
-            passive_path = Path(self.store_paths["passive_memory"])
-            try:
-                passive_path.parent.mkdir(parents=True, exist_ok=True)
-                if not passive_path.exists():
-                    with open(passive_path, "wb") as f:
-                        f.write(b"")
-            except Exception:
-                pass  # Non-fatal; loading path will handle errors
-
-        # Address memory
-        if "address_memory" in self.store_paths:
-            address_path = Path(self.store_paths["address_memory"])
-            try:
-                address_path.parent.mkdir(parents=True, exist_ok=True)
-                if not address_path.exists():
-                    with open(address_path, "wb") as f:
-                        f.write(b"")
-            except Exception:
-                pass  # Non-fatal; loading path will handle errors
-    
-    def _save_learned_data(self) -> None:
-        """
-        Save learned data (rep_channel, rep_phase, passive_mask) to disk with atomic writes.
-        """
-        if not self.store_paths:
-            return
-            
-        with self._lock:
-            # Save passive memory (passive_mask)
-            if "passive_memory" in self.store_paths:
-                passive_path = Path(self.store_paths["passive_memory"])
-                passive_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                # Convert passive_mask to a format suitable for binary storage
-                # Format: list of (addr_idx, token_id, fold_mask) tuples
-                passive_data = [(addr_idx, token_id, mask) for (addr_idx, token_id), mask in self.passive_mask.items()]
-                
-                # Atomic write with temporary file
-                tmp_path = passive_path.with_suffix(passive_path.suffix + ".tmp")
-                with open(tmp_path, "wb") as f:
-                    pickle.dump(passive_data, f)
-                    f.flush()
-                    os.fsync(f.fileno())
-                tmp_path.replace(passive_path)
-            
-            # Save address memory (rep_channel and rep_phase)
-            if "address_memory" in self.store_paths:
-                address_path = Path(self.store_paths["address_memory"])
-                address_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                # Combine rep_channel and rep_phase into address memory
-                address_data = {
-                    "rep_channel": self.rep_channel,
-                    "rep_phase": self.rep_phase
-                }
-                
-                # Atomic write with temporary file
-                tmp_path = address_path.with_suffix(address_path.suffix + ".tmp")
-                with open(tmp_path, "wb") as f:
-                    pickle.dump(address_data, f)
-                    f.flush()
-                    os.fsync(f.fileno())
-                tmp_path.replace(address_path)
-    
-    def _load_learned_data(self) -> None:
-        """
-        Load learned data from disk if it exists.
-        """
-        if not self.store_paths:
-            return
-            
-        # Load passive memory
-        if "passive_memory" in self.store_paths:
-            passive_path = Path(self.store_paths["passive_memory"])
-            if passive_path.exists() and passive_path.stat().st_size > 0:
-                try:
-                    with open(passive_path, "rb") as f:
-                        passive_data = pickle.load(f)
-                    
-                    # Reconstruct passive_mask from loaded data
-                    self.passive_mask = {(addr_idx, token_id): mask for addr_idx, token_id, mask in passive_data}
-                except Exception:
-                    # If loading fails, start with empty passive_mask
-                    self.passive_mask = {}
-        
-        # Load address memory
-        if "address_memory" in self.store_paths:
-            address_path = Path(self.store_paths["address_memory"])
-            if address_path.exists() and address_path.stat().st_size > 0:
-                try:
-                    with open(address_path, "rb") as f:
-                        address_data = pickle.load(f)
-                    
-                    # Restore rep_channel and rep_phase
-                    self.rep_channel = address_data.get("rep_channel", {})
-                    self.rep_phase = address_data.get("rep_phase", {})
-                except Exception:
-                    # If loading fails, start with empty structures
-                    self.rep_channel = {}
-                    self.rep_phase = {}
