@@ -39,6 +39,7 @@ class RobustKnowledgeTestRunner:
         # Paths
         self.project_root = Path(__file__).parent.parent
         self.wiki_test_path = self.project_root / "toys" / "training" / "wiki_test.txt"
+        self.conversation_bootstrap_path = self.project_root / "toys" / "training" / "conversation_boostrap.txt"
         self.passive_memory_path = self.project_root / "memories" / "public" / "knowledge" / "passive_memory.bin"
         self.config_full_path = self.project_root / self.config_path
 
@@ -58,6 +59,16 @@ class RobustKnowledgeTestRunner:
         formatted_msg = f"[{timestamp}] [{level:5}] {message}"
         print(formatted_msg)
         self.startup_logs.append(formatted_msg)
+    
+    def log_clean(self, message: str):
+        """Clean logging without timestamps for test results."""
+        print(message)
+    
+    def log_critical(self, message: str):
+        """Critical logging with timestamps for important stages."""
+        timestamp = time.strftime("%H:%M:%S")
+        print(f"[{timestamp}] {message}")
+        self.startup_logs.append(f"[{timestamp}] {message}")
 
     def ensure_knowledge_memory_files(self) -> None:
         """Ensure knowledge memory files exist; create them only if missing.
@@ -117,9 +128,11 @@ class RobustKnowledgeTestRunner:
             except Exception as e:
                 issues.append(f"Config file invalid: {e}")
 
-        # Check wiki test file
+        # Check test files
         if not self.wiki_test_path.exists():
             issues.append(f"Wiki test file missing: {self.wiki_test_path}")
+        if not self.conversation_bootstrap_path.exists():
+            issues.append(f"Conversation bootstrap file missing: {self.conversation_bootstrap_path}")
         # Removed verbose file size logging
 
         # Check memory files (silent check)
@@ -162,7 +175,7 @@ class RobustKnowledgeTestRunner:
                 self.log(f"  - {issue}", "ERROR")
             return False
 
-        self.log("✅ Environment validation passed")
+        self.log_clean("✅ Environment validation passed")
         return True
 
     def start_server_robust(self) -> bool:
@@ -239,7 +252,7 @@ class RobustKnowledgeTestRunner:
                     response = requests.post(f"{self.base_url}/v1/responses", json=test_request, timeout=3)
 
                     if response.status_code == 200:
-                        self.log("✅ Server ready")
+                        self.log_clean("✅ Server ready")
                         startup_success = True
                         break
 
@@ -290,7 +303,7 @@ class RobustKnowledgeTestRunner:
                 after_stats = self.get_memory_stats()
                 self.test_results["memory_after_injection"] = after_stats
 
-                self.log(f"✅ Knowledge injected")
+                self.log_clean("✅ Knowledge injected")
                 return response_id
 
             else:
@@ -308,7 +321,7 @@ class RobustKnowledgeTestRunner:
             (success, had_backend_exception): success indicates valid response, 
             had_backend_exception indicates if there were server errors during generation
         """
-        self.log(f"🔍 Testing with full sentence: '{query[:80]}{'...' if len(query) > 80 else ''}'")
+        self.log_clean(f"🔍 '{query[:50]}{'...' if len(query) > 50 else ''}'")
 
         request_data = {
             "input": query,
@@ -341,10 +354,19 @@ class RobustKnowledgeTestRunner:
                     )
                     for it in text_items
                 )
-                self.log(f"response: {output}")
 
                 if ok:
-                    self.log(f"✅ Query successful with valid assistant message")
+                    # Extract clean response text
+                    response_text = ""
+                    for item in text_items:
+                        for content in item.get("content", []):
+                            if isinstance(content, dict) and content.get("type") in ("text", "output_text"):
+                                response_text = content.get("text", "").strip()
+                                break
+                        if response_text:
+                            break
+                    
+                    self.log_clean(f"  → '{response_text}'")
 
                     self.test_results["query_response"] = {
                         "query": query,
@@ -389,17 +411,25 @@ class RobustKnowledgeTestRunner:
         return stats
 
     def load_test_article(self) -> str:
-        """Load the wiki test article."""
+        """Load both the wiki test article and conversation bootstrap data."""
         if not self.wiki_test_path.exists():
             raise FileNotFoundError(f"Wiki test file not found: {self.wiki_test_path}")
+        if not self.conversation_bootstrap_path.exists():
+            raise FileNotFoundError(f"Conversation bootstrap file not found: {self.conversation_bootstrap_path}")
 
-        content = self.wiki_test_path.read_text(encoding="utf-8")
-        self.log(f"📖 Loaded test article: {len(content)} chars")
-        return content
+        # Load both files
+        wiki_content = self.wiki_test_path.read_text(encoding="utf-8")
+        conversation_content = self.conversation_bootstrap_path.read_text(encoding="utf-8")
+        
+        # Combine with a separator
+        combined_content = f"{wiki_content}\n\n{conversation_content}"
+        
+        self.log_clean(f"📖 Loaded: wiki={len(wiki_content)} chars, conversation={len(conversation_content)} chars, total={len(combined_content)} chars")
+        return combined_content
 
     def run_complete_test(self) -> bool:
         """Run the complete knowledge test pipeline."""
-        self.log("🎯 Starting complete knowledge test pipeline")
+        self.log_critical("🎯 Starting complete knowledge test pipeline")
 
         try:
             # 0. Ensure knowledge memory files exist (create only if missing)
@@ -421,35 +451,30 @@ class RobustKnowledgeTestRunner:
             if not response_id:
                 return False
 
-            # 5. Knowledge querying with two sentences to check consistency
-            # Use complete sentences from the wiki article for proper testing
+            # 5. Knowledge querying with multiple test cases to check consistency
+            # Test both wiki content and conversation patterns
             test_sentences = [
                 "In mathematics and computer science, an algorithm is a sequence of rigorous instructions, typically used to solve a class of specific problems or to perform a computation.",
                 "Algorithms are used as specifications for performing calculations and data processing.",
+                "Hello, how are you today?",
+                "What do you like to talk about?",
             ]
 
-            # Test both sentences to check for consistency - BOTH must succeed
+            # Test all sentences to check for consistency - ALL must succeed
             successful_queries = 0
             backend_exceptions = 0
             
             # Clear any existing server errors
             self.server_errors.clear()
             
-            # Test first sentence
-            self.log("🔍 Testing first sentence...")
-            success1, exception1 = self.query_knowledge_safe(response_id, test_sentences[0])
-            if success1:
-                successful_queries += 1
-            if exception1:
-                backend_exceptions += 1
-                
-            # Test second sentence for comparison
-            self.log("🔍 Testing second sentence...")
-            success2, exception2 = self.query_knowledge_safe(response_id, test_sentences[1])
-            if success2:
-                successful_queries += 1
-            if exception2:
-                backend_exceptions += 1
+            # Test all sentences
+            self.log_clean(f"\n🧪 Testing {len(test_sentences)} queries:")
+            for sentence in test_sentences:
+                success, exception = self.query_knowledge_safe(response_id, sentence)
+                if success:
+                    successful_queries += 1
+                if exception:
+                    backend_exceptions += 1
 
             # Check for any server errors that were captured
             if self.server_errors:
@@ -458,14 +483,12 @@ class RobustKnowledgeTestRunner:
                     self.log(f"  - {error}", "ERROR")
                 return False
 
-            # Both queries must succeed
-            if successful_queries < 2:
-                self.log(f"❌ Only {successful_queries}/2 queries succeeded - both must succeed", "ERROR")
+            # All queries must succeed
+            if successful_queries < len(test_sentences):
+                self.log(f"❌ Only {successful_queries}/{len(test_sentences)} queries succeeded - all must succeed", "ERROR")
                 return False
-                
-            self.log(f"✅ Both queries succeeded with no backend exceptions")
 
-            self.log("🎉 Complete test pipeline successful!")
+            self.log_critical("🎉 Complete test pipeline successful!")
             return True
 
         except Exception as e:
@@ -494,28 +517,29 @@ class RobustKnowledgeTestRunner:
 
     def print_summary(self):
         """Print test summary and results."""
-        self.log("\n" + "=" * 60)
-        self.log("📊 KNOWLEDGE TEST SUMMARY")
-        self.log("=" * 60)
+        self.log_clean("\n" + "=" * 50)
+        self.log_clean("📊 KNOWLEDGE TEST SUMMARY")
+        self.log_clean("=" * 50)
 
         if self.test_results:
-            for key, value in self.test_results.items():
-                if isinstance(value, dict):
-                    self.log(f"{key}:")
-                    for k, v in value.items():
-                        self.log(f"  {k}: {v}")
-                else:
-                    self.log(f"{key}: {value}")
+            # Memory stats
+            before = self.test_results.get("memory_before_injection", {})
+            after = self.test_results.get("memory_after_injection", {})
+            if before and after:
+                before_mb = before.get("passive_memory_mb", 0)
+                after_mb = after.get("passive_memory_mb", 0)
+                growth = after_mb - before_mb
+                self.log_clean(f"💾 Memory: {before_mb:.3f}MB → {after_mb:.3f}MB (+{growth:.3f}MB)")
         else:
-            self.log("No test results available")
+            self.log_clean("No test results available")
 
-        self.log("=" * 60)
+        self.log_clean("=" * 50)
 
 
 def main():
     """Main entry point."""
-    print("🧪 Robust BabyLM Knowledge Test")
-    print("================================")
+    print("🧪 BabyLM Knowledge Test")
+    print("========================")
 
     runner = RobustKnowledgeTestRunner()
 

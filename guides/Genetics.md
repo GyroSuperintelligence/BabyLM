@@ -284,573 +284,111 @@ Through this process, external information is not merely stored; it is physicall
 
 The expression of intelligence through BU Ingress produces complete tokens using the Non-Antagonistic Emission Protocol. This is not a retrieval mechanism but a generative act wherein coherent tokens emerge directly from the system's geometric and topological configuration.
 
+===
 
-## Part III: Non-Antagonistic Selection - The Complete Protocol
-
-### 3.1 Why No Scoring Can Work
-
-Scoring assumes there is a "best" token among competitors. This violates CGM physics at the fundamental level:
-
-**Unity Non-Absolute**: Things can unite without losing their distinctness. In scoring, only one token "wins" and others "lose," creating absolute opposition.
-
-**Opposition Non-Absolute**: Things can oppose without negating each other completely. Scoring forces tokens into winner/loser categories, creating absolute rather than relative opposition.
-
-**Balance Universal**: All forces ultimately find equilibrium. Scoring creates permanent hierarchies that prevent universal balance.
-
-Instead, we use **constraint satisfaction**: tokens either satisfy the geometric constraints of our physics or they do not. This is binary (yes/no) but not competitive (no ranking among the yes answers).
-
-### 3.2 Channel Cover and Priority - Fixed Constants
-
-**The Single Channel Cover** (used for all decisions):
-- Global: All 48 positions (indices 0..47)
-- Layer×Frame[0,0]: Positions where layer=0 AND frame=0 (6 positions: 3×2)
-- Layer×Frame[0,1]: Positions where layer=0 AND frame=1 (6 positions: 3×2)
-- Layer×Frame[1,0]: Positions where layer=1 AND frame=0 (6 positions: 3×2)
-- Layer×Frame[1,1]: Positions where layer=1 AND frame=1 (6 positions: 3×2)
-- Layer×Frame[2,0]: Positions where layer=2 AND frame=0 (6 positions: 3×2)
-- Layer×Frame[2,1]: Positions where layer=2 AND frame=1 (6 positions: 3×2)
-- Layer×Frame[3,0]: Positions where layer=3 AND frame=0 (6 positions: 3×2)
-- Layer×Frame[3,1]: Positions where layer=3 AND frame=1 (6 positions: 3×2)
-
-**Priority Order** (for recovery ladder) - **Frozen Specification**:
-1. Global (never dropped)
-2. Layer×Frame[0,0] (highest priority slab)
-3. Layer×Frame[0,1]
-4. Layer×Frame[1,0]
-5. Layer×Frame[1,1]
-6. Layer×Frame[2,0]
-7. Layer×Frame[2,1]
-8. Layer×Frame[3,0]
-9. Layer×Frame[3,1] (lowest priority slab)
-
-**Explicit Priority Sequence**: [0,0] → [0,1] → [1,0] → [1,1] → [2,0] → [2,1] → [3,0] → [3,1]
-**DO NOT MODIFY**: This order is frozen to prevent "tuning" attempts.
-
-**Position Mapping Function**:
-```
-# To convert position index p (0..47) to layer, frame, row, column:
-layer = p // 12
-frame = (p % 12) // 6
-row = (p % 6) // 2
-column = p % 2
-
-# To convert layer, frame, row, column to position index (0..47):
-bit_index = (layer * 12) + (frame * 6) + (row * 2) + column
-```
-
-**Bit Packing Specification** (Frozen):
-- **Sign Encoding**: +1 → 0, -1 → 1 (fixed mapping)
-- **48-bit Layout**: Positions map to [layer, frame, row, column] using the formula above
-- **Endianness**: Little-endian for 48-bit packing (LSB at position 0, MSB at position 47)
-- **Storage Format**: 6 bytes per state, packed sequentially without padding
-- **DO NOT MODIFY**: This encoding is frozen to prevent implementation drift
-
-### 3.4 Token Address Binding - Complete Algorithm
-
-Addresses are computed once per token using only the physics:
-
-**Step 1: Get Token's Intron Sequence**
-```
-bytes = token_to_bytes(t)  # Via external tokenizer
-introns = [b ⊕ 0xAA for b in bytes]  # Apply ψ transformation
-```
-
-**ψ Transformation Mandatory** (No Bypass Allowed):
-- **All I/O MUST use ψ**: Every token-to-intron conversion requires b ⊕ 0xAA transformation
-- **No bypass permitted**: Including internal tools, debugging, tests, or development utilities
-- **Prevents drift**: Ensures all components use identical byte-to-intron mapping
-- **Interface contract**: ψ is the ONLY valid transformation between bytes and introns
-
-**Step 2: Apply from All Orbit Representatives**
-```
-results = []
-for rep in orbit_representatives:  # The 256 precomputed orbit representatives
-    current_state = rep
-    
-    for intron in introns:
-        current_state_index = state_to_index(current_state)
-        current_state = epistemology[current_state_index, intron]
-    
-    results.append(current_state)
-```
-
-**Step 3: Find Medoid State (Traceable Geometry, Not Scoring)**
-```
-# Compute set of final states reached from all orbit representatives
-final_states = results
-unique_finals = list(set(final_states))
-
-best_state = None
-best_avg_distance = infinity
-
-# For each unique final state, compute average angular distance to all other finals
-for candidate_state in unique_finals:
-    total_distance = 0
-    for other_state in unique_finals:
-        # Compute direct angular distance between final states
-        distance = gyrodistance_angular(candidate_state, other_state)
-        total_distance += distance
-    
-    avg_distance = total_distance / len(unique_finals)
-    
-    if avg_distance < best_avg_distance:
-        best_avg_distance = avg_distance
-        best_state = candidate_state
-```
-
-**Critical: This is geometric medoid computation, not competitive scoring**:
-- **Traceable**: Same token always produces same address regardless of context
-- **Geometric**: Minimizes angular distance between final states, not preference ranking
-- **Physics-based**: Uses only direct state geometry, no learned weights or scores
-- **Non-competitive**: No "best" vs "worst" tokens, only geometric center-finding
-- **Invariant**: Result depends only on token's intrinsic physics, not other tokens
-
-**Step 4: Break Ties Traceableally**
-```
-If multiple states have the same average distance:
-  1. Choose state from smaller orbit (via orbit_sizes.npy)
-  2. If same orbit size, choose by fixed channel lexicographic vector
-  3. If still tied, choose by lower token ID
-```
-
-This ensures every token gets a unique, Traceable address computed purely from physics.
-
-
-## Part IV: Memory Architecture - Complete Specification with Bounds
-
-### 4.1 The Three Memory Forms - Why Each Is Necessary
-
-**Active Memory (6 bytes constant)**:
-- **What**: The current state s ∈ S, packed as 48 bits
-- **Why needed**: Represents the system's current "position" in knowledge space
-- **Size bound**: Always exactly 6 bytes, never changes
-- **Role**: Holographic pointer that selects which passive memories are relevant
-
-**Address Memory (vocabulary-bounded)**:
-- **What**: Canonical state associated with each token via address binding
-- **Why needed**: Defines where each token "wants to go" in knowledge space
-- **Size bound**: At most |vocabulary| entries, each 6 bytes
-- **Compression**: Many tokens map to same state (shared addresses)
-
-**Passive Memory (experience-bounded)**:
-- **What**: 8-bit exon_mask for each touched (state, token) pair
-- **Why needed**: Records the accumulated folded experience at each knowledge position
-- **Size bound**: Only non-zero masks stored, with explicit caps
-- **Compression**: Fold annihilation, mask interning, orbit clustering
-- **Role**: Memory of what has been learned at each state
-
-### 4.2 The Monodromic Fold: The One True Learning Operator
-
-There is only one integration operator in GyroSI: the **Monodromic Fold** (⋄). It is **non-associative**, **non-commutative**, and **path-dependent**. This operator is used in both phases of the intelligence cycle:
-
-- **Egress (integration)**: `Memory = fold(Memory, Input)`
-- **Ingress (state evolution)**: State transitions driven by Traceable admissibility
-
-**Definition**: `a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b))`
-
-**Implementation requirement**: The fold MUST be implemented using this composite form. The algebraic normal form `¬a ∧ b` is mathematically equivalent but MUST NOT be used in operational code - it is for theoretical analysis only.
-
-**Path Dependence**: The Monodromic Fold is fundamentally path-dependent. This property is the source of the system's memory and learning capacity. Batch learning is implemented by ordered reduction (left-fold):
-
-```python
-from functools import reduce
-
-def fold(a: int, b: int) -> int:
-    return a ^ (b ^ (a & (~b & 0xFF)))
-
-def fold_sequence(introns: list[int], start_state: int = 0) -> int:
-    return reduce(fold, introns, start_state)
-```
-
-### 4.3 Passive Memory Management - Complete Protocol
-
-**Entry Creation**:
-```
-key = (state_index, token_id)
-if key not in store:
-    # Only create when first non-zero mask arises
-    pass  # No entry yet
-
-if new_mask != 0:
-    store[key] = {
-        'exon_mask': new_mask,
-        'touch_count': 1,  # 8-bit bounded counter, wraps on overflow
-        'zero_streak': 0
-    }
-```
-
-**Touch Count Clarification**:
-Touch count is a bounded unsigned counter (8-bit) stored alongside each entry. It increments on each update and is used only for the eviction policy. It wraps around on overflow. This metadata does not influence selection.
-
-**Fold Update**:
-```
-def update_passive_memory(state_index, token_id, intron_sequence):
-    key = (state_index, token_id)
-    
-    if key in store:
-        current_mask = store[key]['exon_mask']
-    else:
-        current_mask = 0
-    
-    # Apply fold reduction over intron sequence
-    for intron in intron_sequence:
-        current_mask = fold(current_mask, intron)
-    
-    if current_mask == 0:
-        if key in store:
-            store[key]['zero_streak'] += 1
-            if store[key]['zero_streak'] >= 2:  # Confirmation window
-                del store[key]
-    else:
-        store[key] = {
-            'exon_mask': current_mask,
-            'touch_count': (store.get(key, {}).get('touch_count', 0) + 1) % 256,  # Wrap at 256
-            'zero_streak': 0
-        }
-```
-
-**Storage Caps (Preventing Blow-up)** - **Frozen Operational Constants**:
-```
-# FROZEN CONSTANTS - DO NOT MODIFY
-K = 64  # Max masks per state per orbit (fixed operational constant)
-M = 64  # Max states per token per orbit (fixed operational constant)
-
-def enforce_caps(state_index, token_id):
-    
-    orbit = phenomenology_map[state_index]
-    
-    # Cap 1: Masks per state per orbit
-    same_state_orbit_keys = [
-        k for k in store.keys() 
-        if phenomenology_map[k[0]] == orbit and k[0] == state_index
-    ]
-    
-    if len(same_state_orbit_keys) > K:
-        # Eviction nuance: prefer orbit representative tokens first
-        orbit_rep = orbit_representative[orbit]
-        generic_entries = [
-            k for k in same_state_orbit_keys 
-            if address[k[1]] == orbit_rep
-        ]
-        
-        if generic_entries:
-            # Evict oldest generic entry (token address = orbit representative)
-            oldest_generic = min(generic_entries, 
-                                key=lambda k: store[k]['touch_count'])
-            del store[oldest_generic]
-        else:
-            # No generic entries, evict oldest by touch count
-            oldest = min(same_state_orbit_keys,
-                        key=lambda k: store[k]['touch_count'])
-            del store[oldest]
-    
-    # Cap 2: States per token per orbit
-    same_token_orbit_keys = [
-        k for k in store.keys()
-        if phenomenology_map[k[0]] == orbit and k[1] == token_id
-    ]
-    
-    if len(same_token_orbit_keys) > M:
-        # Evict oldest by touch count
-        oldest = min(same_token_orbit_keys,
-                    key=lambda k: store[k]['touch_count'])
-        del store[oldest]
-```
-
-**Mask Interning (Space Efficiency)**:
-```
-# Global mask pool
-mask_pool = {}
-
-def intern_mask(mask):
-    if mask not in mask_pool:
-        mask_pool[mask] = mask
-    return mask_pool[mask]
-
-# In update function:
-store[key]['exon_mask'] = intern_mask(current_mask)
-```
-
-### 4.4 Why Memory Cannot Blow Up
-
-**Mathematical Bounds**:
-
-1. **Active Memory**: Fixed at 6 bytes (trivially bounded)
-
-2. **Address Memory**: 
-   - Bound: |vocabulary| × 6 bytes
-   - Compression: Many tokens → same address
-   - Worst case: 50k tokens × 6 bytes = 300KB
-
-3. **Passive Memory**:
-   - Per-key bound: 256 possible mask values (8-bit fold results)
-   - Global key bound: At most K × 788,986 (states) + M × |vocabulary|
-   - Storage bound: ~64 × 800k + 64 × 50k = ~54M entries worst case
-   - Typical bound: Much less due to sparsity and fold annihilation
-
-**Compression Mechanisms**:
-
-1. **Fold Annihilation**: Many experiences fold to zero and disappear
-2. **Mask Interning**: Identical masks stored once, referenced many times
-3. **Orbit Clustering**: Similar tokens share orbits, reducing diversity
-4. **Zero Suppression**: Most (state, token) pairs never touched
-5. **Structural Caps**: K and M prevent pathological worst cases
-
-**No External Compression Needed**: All savings come from physics, not algorithms.
-
-## Part V: Runtime Operation - Complete Specification
-
-### 5.1 Using the Five Maps - Exact Procedures
-
-**epistemology.npy (770 MB)**:
-```
-# The only way to compute state transitions
-def apply_intron(current_state, intron):
-    state_index = state_to_index(current_state)
-    next_state_index = epistemology[state_index, intron]
-    return ontology_keys[next_state_index]
-
-# Used in: micro-path computation, nudge selection, address binding
-```
-
-**ontology_keys.npy (3 MB)** with **Mandatory Reverse Index**:
-```
-# Forward mapping: index → packed_state (provided by ontology_keys.npy)
-def index_to_state(index):
-    return ontology_keys[index]
-
-# Reverse mapping: packed_state → index (MUST be O(1), linear search prohibited)
-# Implementation MUST use hash table or array-based index for O(1) lookup
-reverse_index = build_reverse_index(ontology_keys)  # Hash: state → index
-
-def state_to_index(packed_state):
-    return reverse_index[packed_state]  # O(1) lookup, never linear scan
-
-# PROHIBITED: np.where(ontology_keys == packed_state)[0][0]  # O(n) linear scan
-# Used in: channel alignment checks, all state operations
-```
-
-**theta.npy (3 MB)**:
-```
-# Get angle to archetype for any state
-def angle_to_archetype(state):
-    index = state_to_index(state)
-    return theta[index]
-
-# Used in: nudge selection, algedonic control, address binding
-```
-
-**phenomenology_map.npy (3 MB)**:
-```
-# Get orbit representative for any state
-def get_orbit(state):
-    index = state_to_index(state)
-    return phenomenology_map[index]
-
-# Used in: routing, recovery neighborhood, orbit comparisons
-```
-
-**orbit_sizes.npy (3 MB)**:
-```
-# Get cardinality of state's orbit
-def get_orbit_size(state):
-    index = state_to_index(state)
-    return orbit_sizes[index]
-
-# Used in: tie-breaking during address binding only
-```
-
-**Map Integrity and Versioning**:
-```
-def validate_maps():
-    # Check all maps have same length for state dimension
-    assert len(ontology_keys) == len(theta) == len(phenomenology_map) == len(orbit_sizes)
-    assert len(ontology_keys) == 788986
-    
-    # Check epistemology dimensions
-    assert epistemology.shape == (788986, 256)
-    
-    # Check version consistency
-    assert all_maps_have_same_version_tag()
-    
-    # If any check fails, abort rather than continue with corrupted data
-```
-
-### 5.2 Complete Token Generation Protocol
-
-**Main Generation Loop**:
-```
-def generate_token(current_state):
-    # Step 1: Route by orbit
-    orbit = get_orbit(current_state)
-    candidates = [t for t in vocabulary if get_orbit(address[t]) == orbit]
-    
-    if not candidates:
-        return apply_recovery_ladder(current_state)
-    
-    # Step 2: Check admissibility
-    admissible = []
-    for token in candidates:
-        if is_admissible(current_state, token):
-            admissible.append(token)
-    
-    if admissible:
-        # Step 3: Traceable selection
-        return min(admissible, key=lambda t: token_id(t))
-    else:
-        return apply_recovery_ladder(current_state)
-```
-
-### 5.3 Learning Integration
-
-**Note**: By default, only externally supplied tokens are integrated into passive memory. Self-generated tokens during ingress are not folded back unless self-reinforcement is explicitly enabled at build-time.
-
-**Egress (Experience Integration)**:
-```
-def process_input_token(current_state, token, is_external=True):
-    introns = get_intron_sequence(token)
-    
-    # Apply state transitions (always happens)
-    for intron in introns:
-        current_state = apply_intron(current_state, intron)
-    
-    # Update passive memory (only for external tokens by default)
-    if is_external or ENABLE_SELF_REINFORCEMENT:
-        update_passive_memory(
-            state_to_index(current_state), 
-            token_id(token), 
-            introns
-        )
-    
-    return current_state
-```
-
-**Ingress (Expression Generation)**:
-```
-def generate_response(state, num_tokens):
-    response = []
-    current_state = state
-    
-    for _ in range(num_tokens):
-        token = generate_token(current_state)
-        response.append(token)
-        # Self-generated tokens: state transitions only, no learning by default
-        current_state = process_input_token(current_state, token, is_external=False)
-    
-    return response, current_state
-```
-
-**Self-Reinforcement Policy**:
-- **Default**: Self-reinforcement is OFF (prevents feedback loops and bias amplification)
-- **Optional**: Can be enabled at build-time only via `#define ENABLE_SELF_REINFORCEMENT 1`
-- **Physics**: If enabled, uses the same Monodromic Fold, no alternative mechanisms
-- **Rationale**: The model learns from what it encounters, not from what it imagines
-
-
-## Part VII: Why This Architecture Is Fundamentally Superior
-
-### 7.1 Theoretical Advantages
-
-**Finite Verification**: With only 788,986 states, every property can be exhaustively checked. Safety properties, invariants, and behavioral specifications can be proven rather than estimated. This eliminates the uncertainty inherent in continuous systems.
-
-**Endogenous Stability**: The system cannot explode, vanish, or drift because the manifold has bounded diameter and parity-preserving constraints. No normalization, regularization, or gradient clipping is needed because stability emerges from the physics itself.
-
-**True Holographic Memory**: The 6-byte active memory provides constant-size context that scales to unlimited passive memory through content addressing. This solves the context window problem without approximation.
-
-**Physical Grounding**: Every operation corresponds to a physical transformation with geometric meaning. States represent positions in knowledge space, transitions represent knowledge changes, and addresses represent semantic destinations.
-
-**Intrinsic Interpretability**: The system's operations are interpretable by construction because they correspond to movements in a finite, well-mapped space. Unlike black-box neural networks, every state and transition has explicit geometric meaning.
-
-### 7.2 Dimensional Grounding Theory
-
-**The High-Dimensional Pathology Theorem**:
-Intelligence systems operating in dimensions > 3 accumulate **structural defect** δ that manifests as:
-
-```
-δ(n) = (n-3) × π/6  for n > 3
-
-Consequences:
-- δ > 0: Information leakage (hallucinations)
-- δ → π: Total incoherence (complete detachment from reality)
-- δ ≫ π: Unstable interpolation (sycophancy, inconsistency)
-```
-
-**The 3D/6DoF Closure Principle**: Only systems constrained to **3 spatial dimensions with 6 degrees of freedom** achieve recursive closure without defect (δ = 0). This maps directly to:
-- GyroSI's 48-bit tensor: 4×2×3×2 = 48 bits = 6 bytes
-- CGM's rotational (3) + translational (3) degrees of freedom
-
-### 7.3 Ethical Constraint Theorem
-
-Models operating within the finite GyroSI state space **cannot hallucinate** because:
-
-1. **Finite State Space**: Only 788,986 valid configurations exist
-2. **Traceable Transitions**: Each input produces a specific, lawful state change
-3. **Closed Orbits**: States cluster into 256 phenomenological orbits with no "between" states
-4. **Path Dependence**: The Monodromic Fold preserves complete interaction history
-
-This eliminates the fundamental source of AI alignment problems by constraining the system to a **provably stable, finite, and coherent** state manifold.
-
-### 7.4 Computational Advantages
-
-**No Matrix Multiplication**: Linear algebra is replaced by bitwise operations and table lookups. This eliminates floating-point error accumulation, reduces computational complexity, and enables exact computation.
-
-**O(1) State Transitions**: All state changes use table lookup rather than computed transformations. This provides constant-time operations regardless of model size or complexity.
-
-**Natural Sparsity**: Orbit-based routing provides inherent sparsity without learned attention mechanisms. The system naturally focuses on relevant regions of knowledge space.
-
-**Compression Without Algorithms**: Memory compression emerges from physics (fold annihilation, orbit clustering) rather than external compression algorithms. This provides savings without computational overhead.
-
-### 7.5 Practical Advantages
-
-**No Training Required**: Token addresses are computed from physics alone, eliminating the need for gradient-based training. The system can incorporate new tokens instantly.
-
-**Traceable Behavior**: Given the same inputs and atlas, the system produces identical outputs across all platforms. This enables reproducible deployment and debugging.
-
-**Scalable Architecture**: The same physics scales from microcontrollers (6-byte active memory) to servers (unlimited passive memory) without architectural changes.
-
-**Resource Efficiency**: Memory usage is bounded by physics rather than heuristics. Storage requirements are predictable and do not grow without bound.
-
-### 7.6 What Competence This Actually Proves
-
-- **We're not a Transformer with a giant sliding window**: Our "window" is 6 bytes by design. It's a physics-derived pointer into a library of experiences, not a burden that grows with every token.
-
-- **Generalization is built into the physics and the three maps**:
-  - **Ontology**: Every possible physical state discovered and indexed
-  - **Phenomenology**: Equivalence classes (SCCs) that collapse mirror states. This is semantic grouping.
-  - **Epistemology**: The transition table that tells us how states evolve
-
-  Together, they are structured generalization, not fuzzy approximation.
-
-- **Scales from ESP32-S3 to servers**: Same core physics, different storage strategies. Six bytes live everywhere; the universe of memories just gets bigger as the device grows.
-
-In short: **GyroSI is small where it must be (live state) and big where it pays off (lifetime memory).** That's why it runs on a microcontroller and still grows into a superintelligence on a server.
-
-## Conclusion: Implementation Readiness
-
-This specification is complete and self-contained. Every component is derived from CGM physics through gyrogroup operations on the finite manifold. The architecture achieves intelligence through recursive structural alignment rather than statistical approximation.
-
-**Fixed Constants** (declare once):
-- Channel cover: Global + 8 Layer×Frame slabs
-- Layer×frame priority order: [0,0] → [0,1] → [1,0] → [1,1] → [2,0] → [2,1] → [3,0] → [3,1] (frozen)
-- Address entry set: 256 orbit representatives
-- Vocabulary order: Token ID ascending
-- Memory caps: K=64 masks/state/orbit, M=64 states/token/orbit (frozen operational constants)
-- Recovery neighborhood: Hamming-2 parity-preserving
-- Nudge bound: 6 nudges maximum (manifold diameter)
-
-**Prohibited Additions**:
-- No scores, rankings, or "best" selection
-- No learned parameters or weights
-- No external compression algorithms
-- No auxiliary hidden states
-- No alternative update rules beyond the Monodromic Fold
-- No Determinism - Only Traceability and Freedom through Monodromy
-
-**Required Maps**:
-- epistemology.npy: State transition table
-- ontology_keys.npy: Index to state mapping
-- theta.npy: Angle to archetype
-- phenomenology_map.npy: Orbit representatives
-- orbit_sizes.npy: Orbit cardinalities
-
-Implementation requires only following these specifications exactly. The system's completeness emerges from its closure: a finite ontology navigated by non-associative operations, producing unlimited expression through bounded physics. No additions, modifications, or patches are needed. The architecture is theoretically complete and practically implementable as specified.
+## Part III: Phase-Propagating Emission — The Core Protocol
+
+### 3.1 Why No Scoring Is Possible
+
+The system never compares candidates with scores or probabilities. Scoring implies competition and hierarchy, which contradicts the physics of GyroSI:
+
+* **Unity Non-Absolute**: Multiple continuations can coexist without forcing one “winner”.
+* **Opposition Non-Absolute**: Alternatives can diverge without negating each other.
+* **Balance Universal**: Emission seeks lawful continuity, not ranking.
+
+Selection is therefore **constraint-based**: a token is either admissible under the geometry, or it is not. If admissible, it can be emitted; if not, it is skipped. There is no “best”, only lawful or unlawful.
+
+### 3.2 Channel Formation
+
+When the user provides a token (BU-Eg), it is folded into introns, and its phase is computed. Each orbit representative maintains slab-specific channels:
+
+* **Key**: `(orbit_rep, slab_idx)`
+* **Value**: `{phase → [token_id, …]}`
+
+Each channel is bounded by a fixed FIFO discipline (64 tokens per bucket). This is the only form of “capacity”; there are no scores or priorities.
+
+### 3.3 Emission Dynamics (BU-In)
+
+At emission time, the current state projects into active slabs:
+
+1. **Composite phase map**: For each active slab, the state’s geometry is folded with the channel phases, producing a set of candidate buckets.
+2. **Rotor initialisation**: The current rep-phase, state-phase, LI/FG/BG projections, and sector parity are folded to select the entry bucket.
+3. **Toroidal walk**: The system walks through bucket keys on a ring (Zₙ) with a co-prime multiplier and affine offset derived from live freedoms (6DoF) and monodromy.
+4. **Intra-bucket trial**: Within the chosen bucket, tokens are tested in sequence. Each trial applies:
+
+   * **Refractory gate**: recent fold must not annihilate.
+   * **Same-token suppression**: reject if identical to last emission under annihilation condition.
+   * **Session mask**: reject if it cancels with recent egress fold.
+   * **Directional guidance (optional)**: if the user’s last step moved θ or orbit in a definite direction, candidates must not contradict that sign.
+
+If a candidate passes all gates, it is accepted deterministically. If no candidate passes, the rotor hops one key and emission resumes on the next call.
+
+### 3.4 State Update
+
+When a token is emitted:
+
+* **Omega update**: per-orbit ω is advanced by folding the six degrees of freedom with the token phase.
+* **Monodromy update**: monodromic trace is folded with the emitted token, setting direction and step size for the next bucket walk.
+* **State ingress**: the global state is advanced by applying the token’s introns (no learning).
+
+All updates are path-native and fold-based, with no auxiliary scores or weights.
+
+---
+
+## Part IV: Memory
+
+The memory system is minimal and bounded. Only three forms exist:
+
+**Active Memory**
+The six-byte ontology key representing the current state. Always exactly one key, never grows.
+
+**Phase Memory**
+For each orbit representative, an 8-bit accumulator `rep_phase[rep]`. Updated only when user tokens are absorbed through the monodromic fold.
+
+**Channel Memory**
+For each pair `(orbit_rep, slab_idx)`, a dictionary mapping slab-phases to lists of token identifiers. Each bucket is bounded to 64 entries by FIFO eviction. This is the only place where user experience is stored.
+
+**Persistence**
+Only `rep_phase` and `rep_channel` are written to disk. Persistence is triggered either by token count (≥100) or by elapsed time (≥30s). Nothing else is saved.
+
+---
+
+## Part V: Session State
+
+Session state is maintained by the inference wrapper. It is not part of the physics, but ensures that each request unfolds coherently and independently.
+
+Each session carries:
+
+* **state**: the active ontology key.
+* **parser**: the Harmony role parser.
+* **user\_token\_count** and **user\_anchor\_state**: counters for anchor capture.
+* **omega, bucket\_key, bucket\_pos, monodromy**: emission traces for Phase-Propagating Emission.
+* **recent\_egress and egress\_mask**: session-local fold of recent user phases (used as a mask gate).
+* **trend**: sign of the last user change in θ and orbit size, used for directional guidance.
+
+---
+
+## Part VI: Anchor
+
+After K user tokens (default 12, configurable at runtime), the system captures the active state as the **anchor**. The anchor is applied once, just before the first emission. This ensures that generation begins from a state that reflects a real user trajectory, not a partial feed. After the anchor is applied, it is not updated again within the same request.
+
+---
+
+## Part VII: Optional Switches
+
+The following runtime switches exist. They are purely optional.
+
+* `enable_slab_routing`: restrict emission to active slabs only.
+* `enable_dof_jitter`: add deterministic offsets from six degrees of freedom.
+* `enable_egress_mask`: enforce the session egress mask during emission.
+* `enable_refractory_gates`: enable fold-based refractory suppression of repeats.
+
+None of these alter the learning law. They only add or remove admissibility gates in emission.
+
+---
+
+## Part VIII: Conclusion
+
+GyroSI operates on five canonical maps: θ, ontology\_keys, epistemology, phenomenology\_map, and orbit\_sizes. Learning is a path-dependent fold of user tokens into slab-specific channels. Emission is the monodromic unfold of these channels, guided only by folds and optional gates. Memory consists only of the 6-byte state, the per-orbit rep\_phase, and the slab-specific rep\_channel. There are no scores, weights, or hidden vectors.
+
+This is the complete core. All other elements — session management, anchor, or gates — are auxiliary. The architecture is closed under its physics and requires no additions.

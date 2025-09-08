@@ -64,6 +64,11 @@ class GyroEngine:
         runtime: Optional[Dict[str, str]] = None,
         version_info: Optional[Dict[str, str]] = None,
         vocab_size: int = 201_088,
+        # Core physics switches - disable all secondary heuristics for testing
+        enable_slab_routing: bool = False,
+        enable_dof_jitter: bool = False,
+        enable_egress_mask: bool = False,
+        enable_refractory_gates: bool = False,
     ):
         # Required five maps
         self.theta = np.load(atlas_paths["theta"], mmap_mode="r")  # float32[N]
@@ -92,7 +97,6 @@ class GyroEngine:
         self.emit_gate: Dict[int, int] = {}        # per-rep monodromic refractory gate (8-bit)
         self.last_token: Dict[int, int] = {}       # last emitted token per rep
         self.last_emit_tick: Dict[int, int] = {}   # last free_tick per rep
-        self._refractory_span = 4                  # min tick delta before same token can re-fire
 
         # --- Phase-Propagating Emission (PPE) state ---
         # PPE state is now managed at session level to prevent concurrent session bleeding
@@ -118,6 +122,15 @@ class GyroEngine:
 
         self.vocab_size = vocab_size
         self.vocab_max = vocab_size
+
+        # Core physics switches
+        self.enable_slab_routing = enable_slab_routing
+        self.enable_dof_jitter = enable_dof_jitter
+        self.enable_egress_mask = enable_egress_mask
+        self.enable_refractory_gates = enable_refractory_gates
+
+        # Optional debug for slab/global path selection
+        self.debug_slab = bool((self.runtime or {}).get("debug_slab", False))
 
         # Start = argmin θ (phenomenal archetype)
         self.start_index: int = int(np.argmin(self.theta))
@@ -145,35 +158,45 @@ class GyroEngine:
 
     @staticmethod
     def fold(acc: int, intron: int) -> int:
+        """Legacy fold operation for backward compatibility."""
         # a ⋄ b = a ⊕ (b ⊕ (a ∧ ¬b)) over 8-bit
         a = acc & 0xFF
         b = intron & 0xFF
         return (a ^ (b ^ (a & (~b & 0xFF)))) & 0xFF
 
-    def fold_sequence(self, introns: List[int], acc: int = 0) -> int:
+    def fold_sequence(self, introns: List[int], acc: int = 0) -> Tuple[int, int]:
+        """Fold sequence returning (phase, amplitude) for interference analysis."""
         m = acc & 0xFF
+        amp = 0
         for i in introns:
-            m = self.fold(m, i)
-        return m
+            m, amp = self._fold8(m, i)
+        return m, amp
 
     # ---------- Pure monodromic unfold helpers ----------
 
     @staticmethod
-    def _fold8(a: int, b: int) -> int:
+    def _fold8(a: int, b: int) -> Tuple[int, int]:
+        """Fold operation returning (phase, amplitude) for interference analysis."""
         a &= 0xFF
         b &= 0xFF
-        return (a ^ (b ^ (a & (~b & 0xFF)))) & 0xFF
+        res = (a ^ (b ^ (a & (~b & 0xFF)))) & 0xFF
+        amp = bin(res).count('1')  # Non-zero bits as "coherence strength"
+        return res, amp
 
-    def _state_phase(self, state_int: int) -> int:
+    def _state_phase(self, state_int: int) -> Tuple[int, int]:
         """
-        Project the 48-bit state into an 8-bit phase by folding its 6 bytes
-        after ψ (XOR 0xAA). This is the live channel component.
+        Project the 48-bit state into an 8-bit phase and velocity by folding its 6 bytes
+        after ψ (XOR 0xAA). Returns (phase, velocity) for interference analysis.
         """
         bs = int(state_int).to_bytes(6, "big")
         acc = 0
+        prev_acc = 0
+        velocity = 0
         for by in bs:
-            acc = self._fold8(acc, by ^ 0xAA)
-        return acc
+            prev_acc = acc
+            acc, _ = self._fold8(acc, by ^ 0xAA)
+            velocity, _ = self._fold8(velocity, acc ^ prev_acc)  # Delta as "speed"
+        return acc, velocity
 
     def _state_phase_components(self, state_int: int) -> Tuple[int, int, int]:
         """
@@ -192,11 +215,15 @@ class GyroEngine:
 
         for by in bs:
             by_psi = by ^ 0xAA  # Apply ψ transformation
-            acc_li = self._fold8(acc_li, by_psi & EXON_LI_MASK)
-            acc_fg = self._fold8(acc_fg, by_psi & EXON_FG_MASK)
-            acc_bg = self._fold8(acc_bg, by_psi & EXON_BG_MASK)
+            acc_li, _ = self._fold8(acc_li, by_psi & EXON_LI_MASK)
+            acc_fg, _ = self._fold8(acc_fg, by_psi & EXON_FG_MASK)
+            acc_bg, _ = self._fold8(acc_bg, by_psi & EXON_BG_MASK)
 
         return acc_li, acc_fg, acc_bg
+
+    def token_phase(self, token_id: int) -> Tuple[int, int]:
+        """Compute token phase and amplitude for interference analysis."""
+        return self.fold_sequence(token_to_introns(token_id), 0)
 
     # ---------- Freedom kernel: six DoF + free-tick ----------
 
@@ -211,7 +238,7 @@ class GyroEngine:
         bs = ns.to_bytes(8, "big")[-6:]  # 6 bytes → 48-bit affinity
         acc = 0
         for b in bs:
-            acc = self._fold8(acc, b ^ 0xAA)  # ψ at the boundary
+            acc, _ = self._fold8(acc, b ^ 0xAA)  # ψ at the boundary
         return acc  # 0..255
 
     def _row_parity_fold(self, state_int: int, row: int, frame: Optional[int] = None) -> int:
@@ -226,7 +253,7 @@ class GyroEngine:
                 for col in range(FROZEN_CHANNELS.NUM_COLS):  # 2
                     bit_idx = FROZEN_CHANNELS.get_bit_index(layer, fr, row, col)
                     bit = (state_int >> bit_idx) & 1
-                    acc = self._fold8(acc, (bit & 1) * 0x01)  # compress parity into 8-bit phase
+                    acc, _ = self._fold8(acc, (bit & 1) * 0x01)  # compress parity into 8-bit phase
         return acc
 
     def _six_dof(self, state_int: int) -> Tuple[int, int, int, int, int, int]:
@@ -251,9 +278,9 @@ class GyroEngine:
         f0Z = self._row_parity_fold(state_int, row=2, frame=0)
         f1Z = self._row_parity_fold(state_int, row=2, frame=1)
 
-        tX = self._fold8(f0X, f1X)  # path-dependent difference via fold
-        tY = self._fold8(f0Y, f1Y)
-        tZ = self._fold8(f0Z, f1Z)
+        tX, _ = self._fold8(f0X, f1X)  # path-dependent difference via fold
+        tY, _ = self._fold8(f0Y, f1Y)
+        tZ, _ = self._fold8(f0Z, f1Z)
 
         return rX, rY, rZ, tX, tY, tZ
 
@@ -293,11 +320,11 @@ class GyroEngine:
 
         # Token intron micro-path and phase
         introns = token_to_introns(token_id)
-        token_phase = self.fold_sequence(introns, 0)
+        token_phase, _ = self.fold_sequence(introns, 0)
 
         # Compute the cumulative phase AFTER learning and register there
         cur_phase = self.rep_phase.get(rep_cur, 0)
-        new_phase = self._fold8(cur_phase, token_phase)
+        new_phase, _ = self._fold8(cur_phase, token_phase)
 
         # Get state_int for slab computation
         state_int = int(self.keys[idx])
@@ -310,7 +337,7 @@ class GyroEngine:
             for slab_idx in range(8):
                 # Compute slab-specific phase from token and state geometry
                 slab_byte = self._slab_byte(state_int, slab_idx)
-                slab_phase = self._fold8(token_phase, slab_byte)  # Slab-specific phase
+                slab_phase, _ = self._fold8(token_phase, slab_byte)  # Slab-specific phase
 
                 # Each slab maintains its own channel
                 slab_chan = self.rep_channel.setdefault((rep_cur, slab_idx), {})
@@ -358,218 +385,286 @@ class GyroEngine:
 
     # ---------- Ingress (BU-In): pure monodromic unfold ----------
 
-    def emit_next(self, idx: int, session_omega: Optional[Dict[int, int]] = None,
-                     session_bucket_key: Optional[Dict[int, int]] = None,
-                     session_bucket_pos: Optional[Dict[int, Dict[int, int]]] = None,
-                     session_monodromy: Optional[Dict[int, int]] = None) -> Optional[Tuple[int, int, Dict[int, int], Dict[int, int], Dict[int, Dict[int, int]], Dict[int, int]]]:
+    def emit_next(self, idx: int,
+                  session_omega: Optional[Dict[Tuple[int,int], int]] = None,
+                  session_bucket_key: Optional[Dict[Tuple[int,int], int]] = None,
+                  session_bucket_pos: Optional[Dict[Tuple[int,int], Dict[int, int]]] = None,
+                  session_monodromy: Optional[Dict[Tuple[int,int], int]] = None,
+                  session_mask: Optional[int] = None,
+                  session_slab_cursor: Optional[Dict[int, int]] = None
+) -> Optional[Tuple[int, int, Dict[Tuple[int,int], int], Dict[Tuple[int,int], int], Dict[Tuple[int,int], Dict[int, int]], Dict[Tuple[int,int], int], Dict[int,int]]]:
         """
-        Phase-Propagating Emission (PPE): BU-In with sequence continuity and toroidal routing.
-        Uses LI/FG/BG components for richer bucket selection.
-        Each emitted token updates the working phase and hops the bucket key,
-        making the next choice a traceable function of the path taken.
+        Slab-first PPE: pick one active slab (head), route inside that slab only.
+        Returns (token_id, new_idx, omega, bucket_key, bucket_pos, monodromy, slab_cursor)
         """
         rep_idx = self.orbit_rep_index(idx)
         state_int = int(self.keys[idx])
 
-        # === COMPOSE SLAB-SPECIFIC PHASE MAPS ===
-        # Create a composite phase map from active slabs
-        sector = self.sector(state_int)  # 8-bit, each bit = slab parity
-        active_slabs = [i for i in range(8) if (sector >> i) & 1]
-
-        if not active_slabs:
-            # Fallback: if no slabs are active, use all slabs
-            active_slabs = list(range(8))
-
-        composite_phase_map = {}
-        for slab_idx in active_slabs:
-            slab_chan = self.rep_channel.get((rep_idx, slab_idx), {})
-            if not slab_chan:
-                continue
-
-            # Compute slab-specific phase offset
-            slab_byte = self._slab_byte(state_int, slab_idx)
-            slab_offset = (slab_byte << 3) & 0xFF
-
-            # Add slab channels to composite with offset
-            for phase, tokens in slab_chan.items():
-                composite_phase = (phase + slab_offset) & 0xFF
-                if composite_phase not in composite_phase_map:
-                    composite_phase_map[composite_phase] = []
-                composite_phase_map[composite_phase].extend(tokens)
-
-        # If active slabs are empty, widen coherently to any slab with tokens
-        if not composite_phase_map:
-            # Widen once to any slab that has tokens for this rep
-            for slab_idx in range(8):
-                slab_chan = self.rep_channel.get((rep_idx, slab_idx), {})
-                for phase, tokens in slab_chan.items():
-                    if tokens:
-                        composite_phase_map.setdefault(phase, []).extend(tokens)
-            if not composite_phase_map:
-                return None  # Truly nothing learned
-
-        # Use session-scoped PPE state or initialize
+        # Session state (now keyed by (rep, slab))
         omega = session_omega or {}
         bucket_key = session_bucket_key or {}
         bucket_pos = session_bucket_pos or {}
         monodromy = session_monodromy or {}
+        slab_cursor = session_slab_cursor or {}
 
-        # Initialize bucket key if not set
-        if rep_idx not in bucket_key:
-            # Compute initial bucket key from rep_phase, LI/FG/BG components, sector, and omega
-            rp = self.rep_phase.get(rep_idx, 0)
-            sp = self._state_phase(state_int)
-            sp_li, sp_fg, sp_bg = self._state_phase_components(state_int)
-            omega_val = omega.get(rep_idx, 0)
+        # If slab routing is disabled, use a flattened/global path keyed by (rep,-1)
+        if not self.enable_slab_routing:
+            # Build a global phase map across all slabs
+            phase_map: Dict[int, List[int]] = {}
+            for s in range(8):
+                slab_chan = self.rep_channel.get((rep_idx, s), {})
+                if not slab_chan:
+                    continue
+                for phase, toks in slab_chan.items():
+                    if not toks:
+                        continue
+                    if phase not in phase_map:
+                        phase_map[phase] = []
+                    # extend and deduplicate order-preserving
+                    seen = set(phase_map[phase])
+                    for t in toks:
+                        if t not in seen:
+                            phase_map[phase].append(t)
+                            seen.add(t)
 
-            # Fold all components to get initial key
-            k0 = self._fold8(rp, sp)
-            k0 = self._fold8(k0, sp_li)
-            k0 = self._fold8(k0, sp_fg)
-            k0 = self._fold8(k0, sp_bg)
-            k0 = self._fold8(k0, sector)
-            k0 = self._fold8(k0, omega_val)
-
-            # Map to existing learned key coherently
-            keys = sorted(composite_phase_map.keys())
-            if not keys:
+            if not phase_map:
                 return None
-            bucket_key[rep_idx] = keys[k0 % len(keys)]
 
-            # Initialize bucket positions
-            if rep_idx not in bucket_pos:
-                bucket_pos[rep_idx] = {}
+            # Use per-rep global key
+            key = (rep_idx, -1)
 
-        # Toroidal rotor: affine ring walk for traceable full coverage
-        import math, bisect
+            keys = sorted(phase_map.keys())
+            n = len(keys)
 
-        keys = sorted(composite_phase_map.keys())
-        if not keys:
+            rp = self.rep_phase.get(rep_idx, 0)
+            sp, sp_vel = self._state_phase(state_int)
+
+            if key not in bucket_key:
+                k0, _ = self._fold8(rp, sp)
+                k0, _ = self._fold8(k0, omega.get(key, 0))
+                bucket_key[key] = keys[k0 % n]
+                if key not in bucket_pos:
+                    bucket_pos[key] = {}
+
+            import bisect
+            base_val = bucket_key[key]
+            base_idx = bisect.bisect_left(keys, base_val) % n
+
+            # DoF jitter wiring (affects ring index and intra-bucket pos)
+            rotor_seed = 0
+            pos_jitter = 0
+            tick = 0
+            if self.enable_dof_jitter:
+                rX, rY, rZ, tX, tY, tZ = self._six_dof(state_int)
+                tick = self._free_tick()
+                for v in (rX, rY, rZ, tX, tY, tZ, tick):
+                    rotor_seed, _ = self._fold8(rotor_seed, v)
+                pos_jitter = rotor_seed & 0x07
+
+            current_idx = (base_idx + ((sp ^ rotor_seed) % n)) % n
+            current_key = keys[current_idx]
+
+            bucket = phase_map[current_key]
+            if not bucket:
+                # hop locally and try next time
+                bucket_key[key] = keys[(current_idx + 1) % n]
+                return None
+
+            L = len(bucket)
+            pos_map = bucket_pos.setdefault(key, {})
+            base_pos = pos_map.get(current_key, 0)
+            pos = (base_pos + pos_jitter) % L
+
+            gate_acc = self.emit_gate.get(rep_idx, 0)
+            last_tok = self.last_token.get(rep_idx, -1)
+            last_tick = self.last_emit_tick.get(rep_idx, tick)
+            dt = (tick - last_tick) & 0xFF
+
+            for _ in range(L):
+                candidate = bucket[pos]
+                c_phase, c_amp = self.fold_sequence(token_to_introns(candidate), 0)
+                gated, _ = self._fold8(gate_acc, c_phase)
+
+                # Interference-based boundary detection: reject if amplitude too low
+                if c_amp < 2:  # Destructive interference = boundary
+                    pos = (pos + 1) % L
+                    continue
+
+                # Phase velocity matching for relevance
+                out_vel, _ = self._fold8(sp_vel, c_phase ^ sp)
+                vel_match = abs(out_vel - sp_vel) < 16  # Close velocity = relevant
+
+                if self.enable_egress_mask and session_mask is not None:
+                    if self._fold8(c_phase, session_mask)[0] == 0:
+                        pos = (pos + 1) % L
+                        continue
+
+                if self.enable_refractory_gates:
+                    same_too_soon = (candidate == last_tok) and (self._fold8(dt, c_phase)[0] == 0)
+                    ok = (gated != 0) and (not same_too_soon) and vel_match
+                else:
+                    ok = (gated != 0) and vel_match
+
+                if ok:
+                    token_id = candidate
+                    self.emit_gate[rep_idx] = gated
+                    self.last_token[rep_idx] = token_id
+                    self.last_emit_tick[rep_idx] = tick
+
+                    omega[key], _ = self._fold8((omega.get(key, 0) + 1) & 0xFF, c_phase)
+                    mono = monodromy.get(key, 0)
+                    monodromy[key], _ = self._fold8(mono, c_phase)
+                    bucket_key[key] = keys[(current_idx + 1) % n]
+                    pos_map[current_key] = (pos + 1) % L
+
+                    new_idx = idx
+                    for i in token_to_introns(token_id):
+                        new_idx = self.apply_intron_index(new_idx, i)
+
+                    if self.debug_slab:
+                        print(f"[FLAT] rep={rep_idx} phases={len(keys)} bucket_len={len(bucket)} amp={c_amp} vel_match={vel_match}")
+
+                    return token_id, new_idx, omega, bucket_key, bucket_pos, monodromy, slab_cursor
+
+                pos = (pos + 1) % L
+
+            # no accept, hop and return None
+            bucket_key[key] = keys[(current_idx + 1) % n]
             return None
-        n = len(keys)
 
-        # --- base index from current bucket_key (adjacent mapping) ---
-        base_val = bucket_key[rep_idx]
-        base_idx = bisect.bisect_left(keys, base_val) % n
+        # Active slabs by sector; if none, use all (slab-enabled path)
+        sector_bits = self.sector(state_int)
+        active_slabs = [s for s in range(8) if (sector_bits >> s) & 1]
+        if not active_slabs:
+            active_slabs = list(range(8))
 
-        # Live physics signals
-        rp = self.rep_phase.get(rep_idx, 0)
-        omega_val = omega.get(rep_idx, 0)
-        state_int = int(self.keys[idx])
-        sp = self._state_phase(state_int)
-        sp_li, sp_fg, sp_bg = self._state_phase_components(state_int)
-        sector_val = self.sector(state_int)
-        # NEW: six freedoms + free time tick
-        rX, rY, rZ, tX, tY, tZ = self._six_dof(state_int)
-        tick = self._free_tick()
+        # Start slab index for this rep (round-robin)
+        start = slab_cursor.get(rep_idx, 0) % len(active_slabs)
 
-        # Build the non-deterministic mix purely via monodromic folds
-        mix = self._fold8(0, rp)
-        for v in (omega_val, sp, sp_li, sp_fg, sp_bg, sector_val,
-                  rX, rY, rZ, tX, tY, tZ, tick):
-            mix = self._fold8(mix, v)
+        # Try active slabs in round-robin order once
+        for hop in range(len(active_slabs)):
+            slab_idx = active_slabs[(start + hop) % len(active_slabs)]
+            key = (rep_idx, slab_idx)
 
-        # Affine rotor on the ring Z_n with co-prime 'a' chosen from the mix+tick
-        a = (mix | 1)  # odd
-        while math.gcd(a, n) != 1:
-            a = ((a + 2) & 0xFF) or 1
+            slab_chan = self.rep_channel.get((rep_idx, slab_idx), {})
+            if not slab_chan:
+                continue  # nothing learned in this slab
 
-        # Bias 'b' couples the current base with DoF and time
-        b_seed = self._fold8(base_val & 0xFF, tick)
-        for v in (rX, rY, rZ, tX, tY, tZ):
-            b_seed = self._fold8(b_seed, v)
-        b = b_seed % n
+            # Phase keys for this slab only
+            keys = sorted(slab_chan.keys())
+            n = len(keys)
+            if n == 0:
+                continue
 
-        current_idx = (a * base_idx + b) % n
-        current_key = keys[current_idx]
+            # Initialize rotor for this slab if needed
+            rp = self.rep_phase.get(rep_idx, 0)
+            sp, sp_vel = self._state_phase(state_int)
+            slab_byte = self._slab_byte(state_int, slab_idx)
 
-        # Get bucket
-        bucket = composite_phase_map[current_key]
-        if not bucket:
-            return None
+            if key not in bucket_key:
+                k0, _ = self._fold8(rp, sp)
+                k0, _ = self._fold8(k0, slab_byte)  # slab-specific seed
+                omega_val = omega.get(key, 0)
+                k0, _ = self._fold8(k0, omega_val)
+                bucket_key[key] = keys[k0 % n]
+                if key not in bucket_pos:
+                    bucket_pos[key] = {}
 
-        # === REVISED DYNAMICS: Toroidal Intra-Bucket Selection with ARMG ===
-        L = len(bucket)
-        if L == 0:
-            return None
+            # Position on the ring for this slab
+            import bisect
+            base_val = bucket_key[key]
+            base_idx = bisect.bisect_left(keys, base_val) % n
 
-        # Use session position but add a toroidal jitter from DoF + tick
-        pos_map = bucket_pos.setdefault(rep_idx, {})
-        base_pos = pos_map.get(current_key, 0)
+            # Rotor with optional DoF jitter: depend on state phase, slab byte, jitter
+            rotor_seed = 0
+            pos_jitter = 0
+            tick = 0
+            if self.enable_dof_jitter:
+                rX, rY, rZ, tX, tY, tZ = self._six_dof(state_int)
+                tick = self._free_tick()
+                for v in (rX, rY, rZ, tX, tY, tZ, tick):
+                    rotor_seed, _ = self._fold8(rotor_seed, v)
+                pos_jitter = rotor_seed & 0x07
 
-        jitter = 0
-        for v in (rX, rY, rZ, tX, tY, tZ, tick):
-            jitter = self._fold8(jitter, v)
-        offset = jitter & 0x07  # small bounded 0..7
+            current_idx = (base_idx + ((sp ^ slab_byte ^ rotor_seed) % n)) % n
+            current_key = keys[current_idx]
 
-        pos = (base_pos + offset) % L
+            # Intra-bucket position (per slab)
+            bucket = slab_chan[current_key]
+            if not bucket:
+                continue
+            L = len(bucket)
+            pos_map = bucket_pos.setdefault(key, {})
+            base_pos = pos_map.get(current_key, 0)
+            
+            # Orbit-based attractor strength to avoid center traps
+            orbit_size = self.orbit_sizes[idx]
+            attractor_pull = orbit_size // 100  # Scale by orbit size
+            pos = (base_pos + pos_jitter + attractor_pull) % L
 
-        # --- ARMG: try up to L candidates in this bucket respecting refractory gate ---
-        accepted = None
-        gate_acc = self.emit_gate.get(rep_idx, 0)
-        last_tok = self.last_token.get(rep_idx, -1)
-        last_tick = self.last_emit_tick.get(rep_idx, tick)
-        dt = (tick - last_tick) & 0xFF  # toroidal tick delta
+            # Try L candidates in this single slab bucket
+            gate_acc = self.emit_gate.get(rep_idx, 0)
+            last_tok = self.last_token.get(rep_idx, -1)
+            last_tick = self.last_emit_tick.get(rep_idx, tick)
+            dt = (tick - last_tick) & 0xFF
 
-        for _ in range(L):
-            candidate = bucket[pos]
-            # monodromic fold with this candidate's phase
-            c_phase = self.fold_sequence(token_to_introns(candidate), 0)
-            gated = self._fold8(gate_acc, c_phase)
+            for _ in range(L):
+                candidate = bucket[pos]
+                c_phase, c_amp = self.fold_sequence(token_to_introns(candidate), 0)
+                gated, _ = self._fold8(gate_acc, c_phase)
 
-            # path-native reject rules (no scores):
-            # 1) annihilation: gated == 0 → temporary refractory
-            # 2) same token too soon: enforce small tick separation
-            if gated != 0 and not (candidate == last_tok and dt < self._refractory_span):
-                accepted = (candidate, gated, c_phase)
-                pos_map[current_key] = (pos + 1) % L  # advance locally
-                break
+                # Interference-based boundary detection: reject if amplitude too low
+                if c_amp < 2:  # Destructive interference = boundary
+                    pos = (pos + 1) % L
+                    continue
 
-            # try next candidate toroidally within the bucket
-            pos = (pos + 1) % L
+                # Phase velocity matching for relevance
+                out_vel, _ = self._fold8(sp_vel, c_phase ^ sp)
+                vel_match = abs(out_vel - sp_vel) < 16  # Close velocity = relevant
 
-        if accepted is None:
-            # nothing in this bucket passes right now — hop one key (local) and let rotor recompute next call
-            new_key_idx = (current_idx + 1) % n
-            bucket_key[rep_idx] = keys[new_key_idx]
-            return None
+                if self.enable_egress_mask and session_mask is not None:
+                    if self._fold8(c_phase, session_mask)[0] == 0:
+                        pos = (pos + 1) % L
+                        continue
 
-        token_id, new_gate, token_phase = accepted
-        # commit per-rep refractory traces
-        self.emit_gate[rep_idx] = new_gate
-        self.last_token[rep_idx] = token_id
-        self.last_emit_tick[rep_idx] = tick
+                if self.enable_refractory_gates:
+                    same_too_soon = (candidate == last_tok) and (self._fold8(dt, c_phase)[0] == 0)
+                    ok = (gated != 0) and (not same_too_soon) and vel_match
+                else:
+                    ok = (gated != 0) and vel_match
 
-        # === CRITICAL: Frustrated Omega Update (kept from previous step) ===
-        # token_phase already computed by ARMG above
-        introns = token_to_introns(token_id)
+                if ok:
+                    # Accept from THIS slab; commit per-slab/per-rep traces
+                    token_id = candidate
+                    self.emit_gate[rep_idx] = gated
+                    self.last_token[rep_idx] = token_id
+                    self.last_emit_tick[rep_idx] = tick
 
-        # Frustrated Omega: fold the token_phase into a Z6-like advance
-        z6_advance = 43  # ~256/6
-        omega[rep_idx] = self._fold8((omega.get(rep_idx, 0) + z6_advance) & 0xFF, token_phase)
+                    # Update per-slab omega/monodromy and hop one key locally
+                    omega[key], _ = self._fold8((omega.get(key, 0) + 1) & 0xFF, c_phase)
+                    mono = monodromy.get(key, 0)
+                    monodromy[key], _ = self._fold8(mono, c_phase)
+                    new_key_idx = (current_idx + 1) % n
+                    bucket_key[key] = keys[new_key_idx]
+                    pos_map[current_key] = (pos + 1) % L
 
-        # Toroidal Phase Navigation with Momentum + DoF + time
-        mono_trace = monodromy.get(rep_idx, 0)
-        delta = 0
-        for v in (token_phase, sp, omega_val, mono_trace, tick, rX, rY, rZ, tX, tY, tZ):
-            delta = self._fold8(delta, v)
+                    # Advance canonical state by this token introns
+                    new_idx = idx
+                    for i in token_to_introns(token_id):
+                        new_idx = self.apply_intron_index(new_idx, i)
 
-        # Smooth, bounded step 1..7 with direction from monodromy parity
-        step_size = 1 + (delta % 7)
-        direction = 1 if (mono_trace % 2 == 0) else -1
+                    # Round-robin to next active slab next time
+                    slab_cursor[rep_idx] = (start + hop + 1) % len(active_slabs)
 
-        new_key_idx = (current_idx + direction * step_size) % n
-        bucket_key[rep_idx] = keys[new_key_idx]
+                    if self.debug_slab:
+                        print(f"[SLAB] rep={rep_idx} sector=0b{sector_bits:08b} act={active_slabs} pick={slab_idx} phases={len(keys)} bucket_len={len(bucket)} amp={c_amp} vel_match={vel_match}")
 
-        # Update monodromy for next iteration
-        monodromy[rep_idx] = self._fold8(mono_trace, token_phase)
+                    return token_id, new_idx, omega, bucket_key, bucket_pos, monodromy, slab_cursor
 
-        # Advance state by this token's introns (ingress; no learning)
-        new_idx = idx
-        for i in introns:
-            new_idx = self.apply_intron_index(new_idx, i)
+                pos = (pos + 1) % L
 
-        return token_id, new_idx, omega, bucket_key, bucket_pos, monodromy
+        # No slab accepted this round; do not collapse to global fallback
+        return None
 
     # ---------- Harmony Integration Helpers ----------
 
@@ -596,18 +691,22 @@ class GyroEngine:
     def evolve_on_assistant(self, state: int, token_id: int) -> int:
         return self.transit_on_assistant(state, token_id)
 
-    def emit_next_from_state(self, state_int: int, session_omega: Optional[Dict[int, int]] = None,
-                           session_bucket_key: Optional[Dict[int, int]] = None,
-                           session_bucket_pos: Optional[Dict[int, Dict[int, int]]] = None,
-                           session_monodromy: Optional[Dict[int, int]] = None) -> Optional[Tuple[int, int, Dict[int, int], Dict[int, int], Dict[int, Dict[int, int]], Dict[int, int]]]:
+    def emit_next_from_state(self, state_int: int,
+                            session_omega: Optional[Dict[Tuple[int,int], int]] = None,
+                            session_bucket_key: Optional[Dict[Tuple[int,int], int]] = None,
+                            session_bucket_pos: Optional[Dict[Tuple[int,int], Dict[int, int]]] = None,
+                            session_monodromy: Optional[Dict[Tuple[int,int], int]] = None,
+                            session_mask: Optional[int] = None,
+                            session_slab_cursor: Optional[Dict[int, int]] = None
+) -> Optional[Tuple[int, int, Dict[Tuple[int,int], int], Dict[Tuple[int,int], int], Dict[Tuple[int,int], Dict[int, int]], Dict[Tuple[int,int], int], Dict[int,int]]]:
         if state_int not in self.state_to_index:
             raise KeyError(f"Unknown state: 0x{state_int:012X}")
         idx = self.state_to_index[state_int]
-        res = self.emit_next(idx, session_omega, session_bucket_key, session_bucket_pos, session_monodromy)
+        res = self.emit_next(idx, session_omega, session_bucket_key, session_bucket_pos, session_monodromy, session_mask, session_slab_cursor)
         if res is None:
             return None
-        tok, new_idx, omega, bucket_key, bucket_pos, monodromy = res
-        return tok, int(self.keys[new_idx]), omega, bucket_key, bucket_pos, monodromy
+        tok, new_idx, omega, bucket_key, bucket_pos, monodromy, slab_cursor = res
+        return tok, int(self.keys[new_idx]), omega, bucket_key, bucket_pos, monodromy, slab_cursor
 
     def next_token_aligned(self, state: int) -> Optional[int]:
         out = self.emit_next_from_state(state)

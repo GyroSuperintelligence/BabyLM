@@ -5,6 +5,7 @@ import sys
 import time
 import signal
 import socket
+import json
 from pathlib import Path
 
 
@@ -33,10 +34,38 @@ class GyroChat:
         except:
             return False
 
+    def display_config_flags(self):
+        """Display the current configuration flags."""
+        try:
+            config_path = self.project_root / "baby" / "config.json"
+            with open(config_path) as f:
+                config = json.load(f)
+            
+            runtime = config.get("runtime", {})
+            print("🔧 Configuration Flags:")
+            
+            # Core physics switches
+            flags = [
+                ("Slab routing", runtime.get("enable_slab_routing", "not set")),
+                ("DoF jitter", runtime.get("enable_dof_jitter", "not set")),
+                ("Egress mask", runtime.get("enable_egress_mask", "not set")),
+                ("Refractory gates", runtime.get("enable_refractory_gates", "not set")),
+            ]
+            
+            for flag_name, value in flags:
+                status = "✅ ENABLED" if value else "❌ DISABLED"
+                print(f"  {flag_name}: {status}")
+            
+            print()
+        except Exception as e:
+            print(f"⚠️  Could not load config flags: {e}")
+            print()
+
     def start_server(self):
         """Start the server if not already running."""
         if self.is_server_running():
             print("✓ Server already running")
+            self.display_config_flags()
             return True
 
         print("🚀 Starting server...")
@@ -77,6 +106,7 @@ class GyroChat:
                     response = requests.post(self.url, json=test_request, timeout=3)
                     if response.status_code == 200:
                         print("✅ Server ready")
+                        self.display_config_flags()
                         return True
                 except requests.exceptions.RequestException:
                     pass  # Expected during startup

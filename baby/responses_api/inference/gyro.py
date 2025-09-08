@@ -42,6 +42,11 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
             runtime=runtime,
             version_info=version,
             vocab_size=201_088,  # o200k_harmony upper bound; safe cap
+            # Core physics switches - configure via runtime settings
+            enable_slab_routing=runtime.get("enable_slab_routing", True),
+            enable_dof_jitter=runtime.get("enable_dof_jitter", False),
+            enable_egress_mask=runtime.get("enable_egress_mask", False),
+            enable_refractory_gates=runtime.get("enable_refractory_gates", False),
         )
 
     # Per-request session state
@@ -83,10 +88,30 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
 
             if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
                 # Egress: fold & step on user tokens
-                new_state = engine.evolve_on_user(sess["state"], tok)
+                prev_state = sess["state"]
+                new_state = engine.evolve_on_user(prev_state, tok)
                 sess["state"] = new_state
                 sess["user_token_count"] = sess.get("user_token_count", 0) + 1
                 user_token_seen = True
+
+
+                # --- session-local egress mask (geometry-sized) ---
+                # adapt deque length to active slab count of the *new* state
+                sector = engine.sector(sess["state"])
+                A = max(1, bin(sector).count("1"))
+                rq = sess["recent_egress"]
+                if rq.maxlen != A:
+                    prior = list(rq)
+                    rq = collections.deque(prior[-A:], maxlen=A)
+                    sess["recent_egress"] = rq
+
+                # push token phase and recompute mask via monodromic fold
+                tphase, _ = engine.token_phase(tok)
+                rq.append(tphase)
+                mask = 0
+                for p in rq:
+                    mask, _ = engine._fold8(mask, p)
+                sess["egress_mask"] = mask
 
                 # Capture anchor after K user tokens (optional Traceable hook)
                 target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
@@ -123,11 +148,14 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     "anchor_target_k": int(engine.runtime.get("anchor_prefix_tokens", 12)),
                     "anchor_last_seen_k": 0,
                     "anchor_applied": False,
-                    # PPE state scoped per session
+                    # PPE state scoped per session (now keyed by (rep, slab))
                     "omega": {},
                     "bucket_key": {},
                     "bucket_pos": {},
-                    "monodromy": {},  # ensure present from session birth
+                    "monodromy": {},
+                    "slab_cursor": {},  # NEW: per-rep round-robin index
+                    "recent_egress": collections.deque(maxlen=1),  # size will be set on first user token
+                    "egress_mask": 0,
                 }
                 sessions[request_id] = sess
 
@@ -136,9 +164,30 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     for tok in tokens:
                         parser.process(tok)
                         if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
-                            new_state = engine.learn_on_user(sess["state"], tok)
+                            prev_state = sess["state"]
+                            new_state = engine.learn_on_user(prev_state, tok)
                             sess["state"] = new_state
                             sess["user_token_count"] = sess.get("user_token_count", 0) + 1
+                            
+                            
+                            # --- session-local egress mask (geometry-sized) ---
+                            # adapt deque length to active slab count of the *new* state
+                            sector = engine.sector(sess["state"])
+                            A = max(1, bin(sector).count("1"))
+                            rq = sess["recent_egress"]
+                            if rq.maxlen != A:
+                                prior = list(rq)
+                                rq = collections.deque(prior[-A:], maxlen=A)
+                                sess["recent_egress"] = rq
+
+                            # push token phase and recompute mask via monodromic fold
+                            tphase, _ = engine.token_phase(tok)
+                            rq.append(tphase)
+                            mask = 0
+                            for p in rq:
+                                mask, _ = engine._fold8(mask, p)
+                            sess["egress_mask"] = mask
+                            
                             target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
                             if sess["user_token_count"] == target_k:
                                 sess["user_anchor_state"] = new_state
@@ -173,6 +222,11 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     sess["bucket_key"].clear()
                     sess["bucket_pos"].clear()
                     sess["monodromy"].clear()
+                    sess["slab_cursor"].clear()
+                    
+                    # Reset session egress tracking
+                    sess["recent_egress"] = collections.deque(maxlen=1)
+                    sess["egress_mask"] = 0
 
                     # Re-apply the full token history using Harmony roles
                     user_token_seen = False
@@ -180,9 +234,30 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                         parser.process(tok)
                         if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
                             user_token_seen = True
-                            new_state = engine.learn_on_user(sess["state"], tok)
+                            prev_state = sess["state"]
+                            new_state = engine.learn_on_user(prev_state, tok)
                             sess["state"] = new_state
                             sess["user_token_count"] = sess.get("user_token_count", 0) + 1
+                            
+                            
+                            # --- session-local egress mask (geometry-sized) ---
+                            # adapt deque length to active slab count of the *new* state
+                            sector = engine.sector(sess["state"])
+                            A = max(1, bin(sector).count("1"))
+                            rq = sess["recent_egress"]
+                            if rq.maxlen != A:
+                                prior = list(rq)
+                                rq = collections.deque(prior[-A:], maxlen=A)
+                                sess["recent_egress"] = rq
+
+                            # push token phase and recompute mask via monodromic fold
+                            tphase, _ = engine.token_phase(tok)
+                            rq.append(tphase)
+                            mask = 0
+                            for p in rq:
+                                mask, _ = engine._fold8(mask, p)
+                            sess["egress_mask"] = mask
+                            
                             target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
                             if sess["user_token_count"] == target_k:
                                 sess["user_anchor_state"] = new_state
@@ -260,19 +335,22 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
             sess["omega"],
             sess["bucket_key"],
             sess["bucket_pos"],
-            sess.get("monodromy")  # Add monodromy parameter
+            sess.get("monodromy"),
+            sess.get("egress_mask"),
+            sess.get("slab_cursor")
         )
         if res is None:
             # Debug: Check if engine has learned anything
             return None
 
-        next_token, new_state, omega, bucket_key, bucket_pos, monodromy = res
+        next_token, new_state, omega, bucket_key, bucket_pos, monodromy, slab_cursor = res
         # Advance session state and update PPE state
         sess["state"] = new_state
         sess["omega"] = omega
         sess["bucket_key"] = bucket_key
         sess["bucket_pos"] = bucket_pos
-        sess["monodromy"] = monodromy  # Store monodromy for next iteration
+        sess["monodromy"] = monodromy
+        sess["slab_cursor"] = slab_cursor
         return next_token
 
     return infer_next_token
