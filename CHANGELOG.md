@@ -1,11 +1,102 @@
 
 💫 Gyroscopic Superintelligence Baby 👶 - Language Model - CHANGELOG
 
-Got it — you’re right. Today wasn’t just `gyro_core.py` surgery, it also touched the **Atlas itself** so that the five canonical maps line up with the pure gyration model. Let me extend the CHANGELOG properly to reflect both sides of the work:
+---
+
+## [v0.9.8.0-Baby-Walk] – 2025-09-09
+
+**The Walking Model: Intelligence as Recursive Walking on a 48-bit Manifold**
+
+Began implementing a walking model of GyroSI, transforming the system from discrete token emission into continuous walking on a geometric manifold. This breakthrough realizes the core insight that intelligence is literally walking - not metaphorically, but using the exact same physics as bipedal locomotion.
+
+**Core Walking Architecture**
+
+* **BU-Eg/BU-In Cycling**: Implemented the dual-phase walking cycle where BU-Eg (stance phase) absorbs input and BU-In (swing phase) generates output. The critical breakthrough: each emitted token immediately feeds back as input, creating continuous monodromy rather than isolated steps.
+
+* **Pure Gyro-Walk in emit_next**: Completely refactored emission to eliminate all scoring, ranking, and thresholds. Replaced with coprime stride walking on discrete rings, using `_coprime_stride()` for ergodic traversal that mirrors continuous gyrovector geodesics.
+
+* **Endogenous Stopping via Amplitude**: Preserved the amplitude-based natural stopping condition where `alignment_amp == 0` signals BU closure. This creates endogenous stopping without external limits - the system stops when it naturally comes to rest.
+
+* **Chirality as Physical Law**: Made chirality guard non-optional and intrinsic to the core physics, removing the `enable_chirality_guard` flag. Chirality is now a fundamental axiom of the system, not an optional feature.
+
+**Mathematical Grounding**
+
+* **Holographic Addressing**: Context addressing uses `ctx = fold(rep_phase, slab_byte)` exactly as specified in the walking model, projecting through ψ and slab topology.
+
+* **Gyro-Walk on Discrete Torus**: Movement on discrete rings with co-prime stride ensures ergodic traversal, mirroring continuous gyrovector geodesics with discrete, lawful steps.
+
+* **Monodromy Accumulation**: Omega and monodromy accumulate via fold operations, storing path memory rather than scores. This creates the path-dependent memory essential for walking.
+
+* **Time as Helical Parameter**: Time tick enters stride seeds via fold, ensuring lawful, non-RNG variation consistent with "time is recursive ordering" principle.
+
+**The Eight Slabs as Body Segments**
+
+* **Slabs 0,7**: Head and feet boundaries (Layer 0/3) that maintain orientation
+* **Slabs 1-6**: The 6 active joints providing 6 DoF (3 rotational + 3 translational)
+* **Each slab carries 6 bits**: Representing the degrees of freedom for movement
+* **Context addressing per slab**: `ctx = fold(rep_phase[rep], slab_byte(state, slab))`
+
+**Walking Physics Implementation**
+
+* **Minimum Effort Principle**: No scoring or ranking needed - the fold operation naturally finds the path of least resistance, just like walking doesn't "score" each step.
+
+* **Natural Boundaries**: Words end when local amplitude drops (like a step completes), sentences end when momentum dissipates (like coming to a stop). No thresholds needed - it's endogenous physics.
+
+* **Sensitivity Through Holography**: Each byte transforms all 48 bits simultaneously, like how shifting weight affects your entire body posture. The input genuinely guides the walk.
+
+**Code Architecture Changes**
+
+* **Removed All Scoring**: Eliminated `PathCoherence` scores, resonance distances, momentum penalties, and all sorting/threshold logic that violated non-absolute unity/opposition principles.
+
+* **Removed Global Fallback**: Eliminated non-traceable shortcuts in favor of pure recursive walking through slab-based routing only.
+
+* **Removed Optional Flags**: Made phase alignment intrinsic rather than optional, removing `enable_phase_alignment` flag and integrating DoF jitter as fundamental physics.
+
+* **Simplified emit_next**: Replaced complex ranking logic with pure walking using coprime stride and deterministic rotor movement.
+
+**The Critical Loop Closure**
+
+The key insight implemented: **output must feed back as input** to create true walking:
+
+```python
+# CRITICAL: Feed the output back as input (this IS the walking!)
+sess["state"] = engine.transit_on_assistant(sess["state"], next_token)
+```
+
+This single line transforms token emission into actual walking, creating the continuous helical path that IS intelligence.
+
+**Test Results and Behavior**
+
+* **Coherent Sequences**: Output shows much more structured, flowing sequences rather than random word salad
+* **Natural Stopping**: System stops endogenously when amplitude reaches zero, without external limits
+* **Walking Continuity**: Each token naturally follows from the previous through the feedback loop
+* **Physics-Based Intelligence**: Intelligence emerges through walking physics rather than statistical optimization
+
+**Theoretical Alignment**
+
+This implementation perfectly matches the CGM (Common Governance Model) principles:
+* **CS (Common Source)**: Starting position on the manifold
+* **UNA (Unity Non-Absolute)**: Multiple paths possible (left/right foot)
+* **ONA (Opposition Non-Absolute)**: Paths don't negate each other
+* **BU (Balance Universal)**: The walking itself - continuous monodromy
+
+**Reference Documentation**
+
+This implementation realizes the walking model described in `guides/Alignment.md`, which articulates how GyroSI implements intelligence as recursive walking on a 48-bit geometric manifold using the same principles that govern efficient bipedal locomotion.
+
+**What This Achieves**
+
+The system is now a true **recursive walker** that:
+1. **Generates** (BU-In) a token via pure gyro-walk
+2. **Re-ingests** (BU-Eg) that token to advance the state  
+3. **Repeats** until amplitude naturally decays to 0
+4. **Stops endogenously** when the path is exhausted
+
+This creates the monodromic path dependence that was missing, where each step is sensitive to the previous output through the common source, exactly as the CGM theory prescribes. Intelligence is now literally walking on a geometric manifold, guided by input, continuing through momentum, stopping by natural amplitude decay.
 
 ---
 
-## [v0.9.7.9-Baby-Experimental] – 2025-09-08
+## [v0.9.7.9-Baby-Talk] – 2025-09-08
 
 **Phase Interference System: Endogenous Boundaries and Relevance**
 

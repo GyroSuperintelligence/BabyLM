@@ -6,6 +6,7 @@ import time
 import signal
 import socket
 import json
+import argparse
 from pathlib import Path
 
 
@@ -48,8 +49,9 @@ class GyroChat:
             flags = [
                 ("Slab routing", runtime.get("enable_slab_routing", "not set")),
                 ("DoF jitter", runtime.get("enable_dof_jitter", "not set")),
-                ("Egress mask", runtime.get("enable_egress_mask", "not set")),
-                ("Refractory gates", runtime.get("enable_refractory_gates", "not set")),
+                ("Core gate", runtime.get("enable_core_gate", "not set")),
+                ("Phase alignment", runtime.get("enable_phase_alignment", "not set")),
+                ("Chirality guard", runtime.get("enable_chirality_guard", "not set")),
             ]
             
             for flag_name, value in flags:
@@ -137,8 +139,6 @@ class GyroChat:
 
     def chat(self):
         """Main chat loop."""
-        print("🤖 GyroSI BabyLM Chat Interface")
-        print("=" * 50)
         print("Type 'quit' to exit, 'clear' to start new conversation")
         print()
         
@@ -155,54 +155,7 @@ class GyroChat:
                 elif not user_input:
                     continue
                 
-                print("GyroSI: ", end="", flush=True)
-                
-                payload = {
-                    "input": user_input,
-                    "stream": False,
-                    "store": False,
-                    "max_output_tokens": 50,
-                }
-                
-                response = requests.post(self.url, json=payload, timeout=(5, 300))
-                
-                if response.status_code == 200:
-                    data = response.json()
-
-                    # 1) Prefer top-level convenience field if present
-                    if isinstance(data, dict) and data.get("output_text"):
-                        print(data["output_text"])
-                        continue
-
-                    # 2) OpenAI Responses-style: data["output"] list of items
-                    if isinstance(data, dict) and isinstance(data.get("output"), list):
-                        for item in data["output"]:
-                            if item.get("type") == "message" and item.get("role") == "assistant":
-                                for part in item.get("content", []) or []:
-                                    if part.get("type") == "output_text":
-                                        print(part.get("text", ""))
-                                        break
-                                else:
-                                    continue
-                                break
-                        else:
-                            print("(No assistant message in output)")
-                        continue
-
-                    # 3) Raw message list (some older servers)
-                    if isinstance(data, list):
-                        for item in data:
-                            if item.get("type") == "message" and item.get("role") == "assistant":
-                                for part in item.get("content", []) or []:
-                                    if part.get("type") == "output_text":
-                                        print(part.get("text", ""))
-                                        break
-                        continue
-
-                    print("(Unrecognised response shape)")
-                else:
-                    print(f"Error: HTTP {response.status_code}")
-                    print(response.text)
+                self.send_message(user_input, show_user_input=False)
                     
             except KeyboardInterrupt:
                 print("\nGoodbye!")
@@ -212,16 +165,138 @@ class GyroChat:
             
             print()
 
+    def send_message(self, message, show_user_input=True):
+        """Send a message to the server and return the response."""
+        if show_user_input:
+            print(f"You: {message}")
+        print("GyroSI: ", end="", flush=True)
+        
+        payload = {
+            "input": message,
+            "stream": False,
+            "store": False,
+            "max_output_tokens": 50,
+        }
+        
+        try:
+            response = requests.post(self.url, json=payload, timeout=(5, 300))
+            
+            if response.status_code == 200:
+                data = response.json()
+
+                # 1) Prefer top-level convenience field if present
+                if isinstance(data, dict) and data.get("output_text"):
+                    print(data["output_text"])
+                    return data["output_text"]
+
+                # 2) OpenAI Responses-style: data["output"] list of items
+                if isinstance(data, dict) and isinstance(data.get("output"), list):
+                    for item in data["output"]:
+                        if item.get("type") == "message" and item.get("role") == "assistant":
+                            for part in item.get("content", []) or []:
+                                if part.get("type") == "output_text":
+                                    print(part.get("text", ""))
+                                    return part.get("text", "")
+                            else:
+                                continue
+                            break
+                    else:
+                        print("(No assistant message in output)")
+                        return None
+
+                # 3) Raw message list (some older servers)
+                if isinstance(data, list):
+                    for item in data:
+                        if item.get("type") == "message" and item.get("role") == "assistant":
+                            for part in item.get("content", []) or []:
+                                if part.get("type") == "output_text":
+                                    print(part.get("text", ""))
+                                    return part.get("text", "")
+
+                print("(Unrecognised response shape)")
+                return None
+            else:
+                print(f"Error: HTTP {response.status_code}")
+                print(response.text)
+                return None
+                
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
+
+    def run_automated_prompts(self):
+        """Run the two automated prompts and exit."""
+        print("🤖 GyroSI BabyLM - Automated Prompts")
+        print("=" * 50)
+        print("Running automated prompts...")
+        print()
+        
+        prompts = ["How are you?", "Algorithms are"]
+        
+        for i, prompt in enumerate(prompts, 1):
+            print(f"\n--- Prompt {i} ---")
+            self.send_message(prompt)
+            print()
+        
+        print("Automated prompts completed. Exiting.")
+
 
 def main():
-    chat = GyroChat()
+    parser = argparse.ArgumentParser(description="GyroSI BabyLM Chat Interface")
+    parser.add_argument(
+        "--auto", 
+        action="store_true", 
+        help="Automatically run option 1 (automated prompts) without showing menu"
+    )
+    parser.add_argument(
+        "--port", 
+        type=int, 
+        default=9000, 
+        help="Port to run the server on (default: 9000)"
+    )
+    
+    args = parser.parse_args()
+    
+    chat = GyroChat(port=args.port)
     
     try:
         if not chat.start_server():
             print("Failed to start server. Exiting.")
             return
         
-        chat.chat()
+        if args.auto:
+            # Run automated prompts directly
+            chat.run_automated_prompts()
+        else:
+            # Show menu options
+            print("🤖 GyroSI BabyLM Chat Interface")
+            print("=" * 50)
+            print("Choose an option:")
+            print("1. Run automated prompts (How are you? + Algorithms are)")
+            print("2. Start manual chat")
+            print()
+            
+            while True:
+                try:
+                    choice = input("Enter your choice (1 or 2): ").strip()
+                    
+                    if choice == "1":
+                        chat.run_automated_prompts()
+                        break
+                    elif choice == "2":
+                        chat.chat()
+                        break
+                    else:
+                        print("Please enter 1 or 2.")
+                        continue
+                        
+                except KeyboardInterrupt:
+                    print("\nGoodbye!")
+                    break
+                except Exception as e:
+                    print(f"Error: {e}")
+                    break
+                
     finally:
         chat.cleanup()
 

@@ -45,13 +45,13 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
             # Core physics switches - configure via runtime settings
             enable_slab_routing=runtime.get("enable_slab_routing", True),
             enable_dof_jitter=runtime.get("enable_dof_jitter", False),
-            enable_egress_mask=runtime.get("enable_egress_mask", False),
-            enable_refractory_gates=runtime.get("enable_refractory_gates", False),
+            enable_core_gate=runtime.get("enable_core_gate", True),
         )
 
     # Per-request session state
     sessions: Dict[str, Dict[str, Any]] = {}
     sessions_lock = threading.RLock()
+    
 
     # Harmony tokenization — pure pass-through; no surface forcing
 
@@ -88,11 +88,13 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
 
             if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
                 # Egress: fold & step on user tokens
+                print(f"[DEBUG-LEARN] Learning from token {tok} ({encoding.decode([tok])})")
                 prev_state = sess["state"]
                 new_state = engine.evolve_on_user(prev_state, tok)
                 sess["state"] = new_state
                 sess["user_token_count"] = sess.get("user_token_count", 0) + 1
                 user_token_seen = True
+                print(f"[DEBUG-LEARN] State changed from 0x{prev_state:012X} to 0x{new_state:012X}")
 
 
                 # --- session-local egress mask (geometry-sized) ---
@@ -105,13 +107,7 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     rq = collections.deque(prior[-A:], maxlen=A)
                     sess["recent_egress"] = rq
 
-                # push token phase and recompute mask via monodromic fold
-                tphase, _ = engine.token_phase(tok)
-                rq.append(tphase)
-                mask = 0
-                for p in rq:
-                    mask, _ = engine._fold8(mask, p)
-                sess["egress_mask"] = mask
+                # Don't update egress mask during learning - only during emission
 
                 # Capture anchor after K user tokens (optional Traceable hook)
                 target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
@@ -155,19 +151,22 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     "monodromy": {},
                     "slab_cursor": {},  # NEW: per-rep round-robin index
                     "recent_egress": collections.deque(maxlen=1),  # size will be set on first user token
-                    "egress_mask": 0,
+                    "recent_egress_phases": [],  # Track recently emitted token phases
                 }
                 sessions[request_id] = sess
 
                 if tokens:
-                    parser = StreamableParser(encoding, role=Role.SYSTEM)
+                    parser = StreamableParser(encoding, role=Role.USER)
                     for tok in tokens:
                         parser.process(tok)
+                        print(f"[DEBUG-ROLE] Token {tok} ({encoding.decode([tok])}) - Role: {parser.current_role} - Is user: {_is_user_role(parser.current_role)}")
                         if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
+                            print(f"[DEBUG-LEARN-NEW] Learning from token {tok} ({encoding.decode([tok])})")
                             prev_state = sess["state"]
                             new_state = engine.learn_on_user(prev_state, tok)
                             sess["state"] = new_state
                             sess["user_token_count"] = sess.get("user_token_count", 0) + 1
+                            print(f"[DEBUG-LEARN-NEW] State changed from 0x{prev_state:012X} to 0x{new_state:012X}")
                             
                             
                             # --- session-local egress mask (geometry-sized) ---
@@ -186,7 +185,7 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                             mask = 0
                             for p in rq:
                                 mask, _ = engine._fold8(mask, p)
-                            sess["egress_mask"] = mask
+                            # Don't update egress mask during learning - only during emission
                             
                             target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
                             if sess["user_token_count"] == target_k:
@@ -226,7 +225,7 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     
                     # Reset session egress tracking
                     sess["recent_egress"] = collections.deque(maxlen=1)
-                    sess["egress_mask"] = 0
+                    sess["recent_egress_phases"] = []
 
                     # Re-apply the full token history using Harmony roles
                     user_token_seen = False
@@ -256,7 +255,7 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                             mask = 0
                             for p in rq:
                                 mask, _ = engine._fold8(mask, p)
-                            sess["egress_mask"] = mask
+                            # Don't update egress mask during learning - only during emission
                             
                             target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
                             if sess["user_token_count"] == target_k:
@@ -283,7 +282,7 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                     else:
                         # No new tokens to process, but ensure parser is up to date
                         if sess.get("parser") is None:
-                            sess["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
+                            sess["parser"] = StreamableParser(encoding, role=Role.USER)
 
         if ingest_only:
             # Prepare to open a fresh assistant message on next generation
@@ -307,19 +306,25 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
         if sess.get("parser") is None:
             sess["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
 
-        if sess["parser"].current_channel != "final":
+        if not sess["parser"].current_channel or not sess["parser"].current_channel.startswith("final"):
             bootstrap_step = sess.get("bootstrap_step", 0)
+            print(f"[DEBUG-BOOTSTRAP] Current bootstrap step: {bootstrap_step}, channel: {sess['parser'].current_channel}")
 
             if bootstrap_step == 0:
                 from baby.constants.harmony_tokens import CHANNEL
 
                 sess["bootstrap_step"] = 1
+                sess["parser"].process(CHANNEL)  # Advance parser
+                print(f"[DEBUG-BOOTSTRAP] Returning CHANNEL token: {CHANNEL}")
                 return CHANNEL
             elif bootstrap_step == 1:
                 from baby.constants.harmony_tokens import final_channel_id
 
                 sess["bootstrap_step"] = 2
-                return final_channel_id(encoding)
+                final_channel = final_channel_id(encoding)
+                sess["parser"].process(final_channel)  # Advance parser
+                print(f"[DEBUG-BOOTSTRAP] Returning final_channel token: {final_channel}")
+                return final_channel
             elif bootstrap_step == 2:
                 opener = MESSAGE  # <|message|>
                 sess["last_tokens"] = collections.deque(maxlen=8)
@@ -327,30 +332,63 @@ def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
                 sess["sentence_end"] = True
                 sess["fed_len"] = len(tokens)
                 sess["bootstrap_step"] = 3
+                sess["parser"].process(opener)  # Advance parser
+                print(f"[DEBUG-BOOTSTRAP] Returning MESSAGE token: {opener}")
                 return opener
 
-        # Pure Traceable emission from the five-map engine
+        # Check if previous walk is complete
+        if sess.get("walk_complete", False):
+            print(f"[DEBUG-WALK] Previous walk complete, starting new walk")
+            sess["walk_complete"] = False
+        
+        # THE WALKING MODEL: BU-In generates, BU-Eg re-ingests, creating continuous monodromy
+        print(f"[DEBUG-WALK] Starting walk from state=0x{sess['state']:012X}")
+        
+        # Single step walking: emit one token, then feed it back as input for next call
         res = engine.emit_next_from_state(
             sess["state"],
-            sess["omega"],
-            sess["bucket_key"],
-            sess["bucket_pos"],
-            sess.get("monodromy"),
-            sess.get("egress_mask"),
+            sess["omega"], sess["bucket_key"], sess["bucket_pos"],
+            sess.get("monodromy"), sess.get("recent_egress_phases", []),
             sess.get("slab_cursor")
         )
         if res is None:
-            # Debug: Check if engine has learned anything
+            print(f"[DEBUG-WALK] No coherent paths - walk complete")
             return None
 
         next_token, new_state, omega, bucket_key, bucket_pos, monodromy, slab_cursor = res
-        # Advance session state and update PPE state
-        sess["state"] = new_state
+        
+        # CRITICAL: Feed the output back as input (this IS the walking!)
+        # The emitted token becomes the next input, creating continuous monodromy
+        print(f"[DEBUG-WALK] Generated token: {next_token}, feeding back as input")
+        sess["state"] = engine.transit_on_assistant(sess["state"], next_token)
+        
+        # Update session state
         sess["omega"] = omega
         sess["bucket_key"] = bucket_key
         sess["bucket_pos"] = bucket_pos
         sess["monodromy"] = monodromy
         sess["slab_cursor"] = slab_cursor
+
+        # Update egress tracking
+        if engine.enable_core_gate:
+            tphase, _ = engine.token_phase(next_token)
+            phases = sess.get("recent_egress_phases", [])
+            phases.append(tphase)
+            if len(phases) > 8:
+                phases = phases[-8:]
+            sess["recent_egress_phases"] = phases
+
+        # Check for natural stopping condition (amplitude = 0 means lost balance/momentum)
+        cur_idx = engine.state_to_index[sess["state"]]
+        rep_idx = engine.orbit_rep_index(cur_idx)
+        alignment_amp = engine._alignment_amp(sess["state"], rep_idx)
+        print(f"[DEBUG-WALK] After feedback: alignment_amp = {alignment_amp}")
+        
+        if alignment_amp == 0:
+            print(f"[DEBUG-WALK] Natural stop: amplitude = 0 (walk complete)")
+            # Mark that this walk is complete
+            sess["walk_complete"] = True
+            
         return next_token
 
     return infer_next_token

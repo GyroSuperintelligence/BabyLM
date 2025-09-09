@@ -34,23 +34,6 @@ Instead of storing knowledge in gigabytes of weights, GyroSI uses the inherent p
 
 ---
 
-## 🧬 Genetic Code
-
-The structural parallels between GyroSI and biophysics are precise and intentional:
-
-| Biology / Biophysics | GyroSI Architecture | Significance |
-| --- | --- | --- |
-| 4 nucleotides (A T/U C G) | 4 CGM stages (CS, UNA, ONA, BU) | Recursive alignment stages |
-| 3 positions in a codon | 3 spatial axes (X, Y, Z) | Encodes 3D structural information |
-| 2 complementary strands | 2 frames per layer (primary/dual) | Provides 6 Degrees of Freedom (3×2) |
-| 4-mer sequence → 8 bits → 256 combinations | 1 byte = 8 bits → 256 introns | Complete instruction set |
-| 64 codons (3 nucleotides × 2 bits) | 48-bit state space (4×2×3×2) | Complete geometric structure |
-| Epigenetic regulation | Monodromic Fold operation | Path-dependent memory |
-
-The profound parallel is that both systems use a compact instruction set to govern a vast, complex physical state. Just as epigenetic context determines how DNA is expressed, GyroSI's evolving physical state governs which transformation is activated in response to each input. The 256 instructions are the operators, not the states. They operate on a physical ontology of precisely 788,986 unique states.
-
----
-
 ### 🤖 Redefining Superintelligence
 
 Current AI pursues "superintelligence" through raw performance: faster calculation, broader knowledge, superior optimization. This creates legitimate fears about systems that optimize without wisdom.
@@ -63,13 +46,12 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 
 - 🧠 **Learns Like a Baby**: Starts with zero *learned associations* but leverages the pretrained *symbolic knowledge* of a standard tokenizer, learning to bind physical states to existing semantic concepts.
 - ♾️ **Unlimited Memory**: Never forgets; knowledge is limited by disk space, not RAM, via an efficient append-only log.
-- 🗜️ **4-6× Text Compression**: Can losslessly compress entire Wikipedia to a physics-native format while maintaining instant random access
+- 🎯 **Zero Hallucination**: Can only generate what it has physically learned, not random guesses.
 - ⚡ **High Throughput**: Estimated ~1 million bytes/sec per core on modern hardware.
 - 💾 **Compact Brain**: The core logic and ontology maps fit in ~30MB. An optional 770MB State Transition Table (STT) unlocks maximum performance.
 - 🌍 **No GPU Required**: Runs on a Raspberry Pi, your phone, or even embedded systems.
 - 📚 **No Training Data Needed**: Learns directly from conversation, not from scraped internet data.
 - 🔍 **100% Explainable**: Every decision can be traced through simple physics operations.
-- 🎯 **Zero Hallucination**: Can only generate what it has physically learned, not random guesses.
 - 🔢 **Holographic Geometry**: Built on numerical patterns (3, 6, 12, 24, 48) found in crystals and rotation groups.
 - 🌐 **Six Degrees of Everything**: Any knowledge is reachable from any other in at most 6 steps, a provable property of the state space.
 
@@ -81,28 +63,6 @@ Current AI pursues "superintelligence" through raw performance: faster calculati
 
 ---
 
-## ⚙️ How It Works: Token-Aware Physics
-
-**1. The Quantum of Meaning: 1 Token**
-The fundamental unit of knowledge is now a `token_id` from a standard tokenizer (e.g., BERT). This token ID, not its byte fragments, serves as the semantic anchor for learning.
-
-**2. From Token to Physics: LEB128 Byte Streams**
-Each `token_id` is converted into its unique, variable-length byte sequence using LEB128 encoding. These bytes are the physical carriers of the token's identity.
-
-**3. The Universal Reference: XOR with 0xAA**
-Each byte in the sequence is XORed against the universal reference `GENE_Mic_S = 0xAA` to yield an 8-bit physical instruction (`intron`). This ψ transformation is mandatory for all byte-to-intron conversions, translating external bytes into the system's internal physics.
-
-**Mathematical Alignment**: The pattern 0xAA (binary 10101010) has perfect balance (4 ones, 4 zeros) and maximal alternation, placing it at the geometric center of the 8-bit hypercube. The XOR with 0xAA inverts the LEB128 continuation bit, aligning external protocol with internal physics.
-
-**4. The Evolving Physical State**
-The sequence of introns from a token drives the system's canonical state (a 48-bit integer) through a path-dependent trajectory across the **788,986** possible physical configurations. The intelligence resides in this trajectory.
-
-**5. From State to Meaning: Token-Level Learning**
-After processing a full token's byte sequence, the system's final state and the original `token_id` form the unique context key: `(state_index, token_id)`. This key is used to look up a minimal "phenotype"; a learned physical residue and a confidence score from the system's memory.
-
-**6. Learning as Physical Integration**
-Learning occurs once per token. The final intron of the token's byte sequence is integrated into the phenotype's memory (`mask`) via the **monodromic fold**, a non-associative, path-dependent algebraic operation. This ensures that knowledge is both semantically coherent (keyed by token) and physically grounded (updated via path-dependent physics).
-
 ### 🎯 What This Achieves
 
 This architecture does not merely map bytes to operations; it renders each instruction as a transformation on a physical ontology. Symbolic input becomes physical geometry. Intelligence emerges as a dynamo of structural transformations orbiting within a gyroscopic topology. Alignment is not imposed or inferred, but emerges naturally as the system follows the physical dynamics of its own architecture.
@@ -112,6 +72,18 @@ This solves three fundamental problems:
 - **Black Box**: Every decision traces through explicit, auditable physical state changes.
 - **Alignment**: The system's actions are constrained by its own structural history and physical laws.
 - **Efficiency**: The core physics are dependency-free and operate with extreme speed. Memory growth is bounded by the finite size of the physical ontology.
+
+---
+
+## 📚 Documentation
+
+- 📖 [Genetics - Our Technical Specification: Algorithmic Formalism.](/guides/Genetics.md)
+
+- 📖 [Alignment - The Walk Model: Logic Formalism](/guides/Alignment.md)
+
+- 📖 [Physics - Common Governance Model: Our Theoretical Foundations](/guides/Physics.md)
+
+- 🔬 [Lab - Deep Physics Experiments: Cosmology, Biology and Beyond](https://github.com/GyroSuperintelligence/CGM)
 
 ---
 
@@ -186,16 +158,6 @@ GyroSI implements the **Common Governance Model (CGM)**, where intelligence emer
 Mathematical formalism employs gyrogroup structures (generalizations of rotation groups) following Abraham Ungar's work, providing precise language for transitions from undifferentiated potential to structured reality.
 
 Gyroscopic Superintelligence is meta-language for computation, ontology, phenomenology and epistemology, enabling agents and agencies to reason about states, symmetry, and evolution economically and efficiently.
-
----
-
-## 📚 Documentation
-
-- 📖 [Genetics - Technical Specification: The complete technical specification, system constants, and build-time discovery processes.](https://github.com/GyroSuperintelligence/BabyLM/blob/main/guides/Genetics.md)
-
-- 📖 [Physics - Common Governance Model Theory: The theoretical foundations](https://korompilias.notion.site/Common-Governance-Model-Foundations-1ee9ff44f4368050af28d1c0f8aae89a)
-
-- 🔬 [Lab - Common Governance Model Experiments : Cosmology, Biology and Beyond](https://github.com/GyroSuperintelligence/CGM)
 
 ---
 
