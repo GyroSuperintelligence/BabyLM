@@ -390,7 +390,7 @@ The structure of the 8-bit intron is not arbitrary but is functionally isomorphi
 -   **Bits 1-6 (LI, FG, BG Families):** Carry the 6 bits of dynamic, physical information.
 -   **Bit 0 (L0 Family):** Serves as a structural anchor.
 
-This endogenous alignment means the system's physics naturally produces valid LEB128 byte streams. The boundary transcription (`⊕ 0xAA`) lawfully translates the internal physical signals into the bit patterns expected by external decoders without altering the underlying physical logic. This makes the architecture robust and future-proof, as the communication protocol is a direct consequence of the system's physical design.
+This endogenous alignment means the system's physics naturally produces valid byte streams. The boundary transcription (`⊕ 0xAA`) lawfully translates the internal physical signals into the bit patterns expected by external decoders without altering the underlying physical logic. This makes the architecture robust and future-proof, as the communication protocol is a direct consequence of the system's physical design.
 
 **Connecting the Dots: Why This Works**
 Phenotype as a Gravitational Well: The token-level phenotype does not contain the words. It acts like a gravitational well in the state space. When the agent's trajectory brings it near this "semantic checkpoint," the high confidence and specific mask of that phenotype will strongly influence the token generation calculations. It will guide the token-level generation process to produce tokens that correspond to a logical continuation of that semantic context.
