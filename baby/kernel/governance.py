@@ -95,6 +95,17 @@ def tensor_to_int(tensor: NDArray[np.int8]) -> int:
     packed = np.packbits(bits, bitorder="big")
     return int.from_bytes(packed.tobytes(), "big")
 
+def int_to_tensor(state: int) -> NDArray[np.int8]:
+    """Convert 48-bit integer back to tensor [4,2,3,2]."""
+    # Convert to 48-bit binary representation
+    bits = [(state >> i) & 1 for i in range(47, -1, -1)]
+    
+    # Convert bits to tensor values: 0→+1, 1→-1
+    tensor_flat = np.array([1 if bit == 0 else -1 for bit in bits], dtype=np.int8)
+    
+    # Reshape to [4,2,3,2] using C order
+    return tensor_flat.reshape((4, 2, 3, 2), order="C")
+
 def transcribe_byte(byte: int) -> int:
     """ψ: byte → intron via XOR with GENE_Mic_S."""
     return (byte & 0xFF) ^ GENE_Mic_S

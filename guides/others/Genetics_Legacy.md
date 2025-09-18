@@ -347,10 +347,6 @@ Every transaction across this boundary is mediated by the holographic topology `
 
 This symmetric XOR operation ensures that the distinction between the internal physical reality and the external communicative representation is lawfully maintained.
 
-A critical consequence of this XOR transformation is the lawful inversion of the LEB128 continuation bit. An internal `intron` with bit 7 set to `1` (signaling physical continuation) is transcribed into an external `byte` with bit 7 set to `0`. The protocol adapter, which is aware of this law, correctly interprets this as the 'continue' flag required by the LEB128 standard. This inversion is the key mechanism that aligns the internal physics of differentiation and closure with the external protocol of sequential encoding.
-
-This boundary law is strict. All masking and unmasking operations are the exclusive responsibility of the protocol adapter layer (e.g., `toys.communication.tokenizer.py`). The core physics and intelligence engines remain pure, operating exclusively in the intron-space, entirely unaware of the external byte representation.
-
 #### 5.5.2 BU Egress: Absorption and Learning
 
 The process of learning begins when an external byte enters the system and undergoes BU Egress. This is the mechanism by which experience is absorbed and integrated into the system's memory structure.
@@ -365,7 +361,7 @@ Through this process, external information is not merely stored; it is physicall
 
 The expression of intelligence—BU Ingress—is a **token-level** generative process that produces complete LEB128-encoded tokens using learned phenotypes and LEB128 physics. This is not a retrieval mechanism but a generative act wherein coherent tokens emerge directly from the system's physical and topological configuration. Each token generation involves the following physical operations:
 
-1.  **Exon-Product Generation:** The system computes exon-products from phenotype metadata using `exon_product_from_metadata()`, which converts the phenotype's governance signature, confidence, and orbit cardinality into physically meaningful 8-bit operators. These exon-products are then associated with LEB128 token patterns.
+1.  **Exon-Product Generation:** The system computes exon-products from phenotype metadata using `exon_product_from_metadata()`, which converts the phenotype's governance signature, confidence, and orbit cardinality into physically meaningful 8-bit operators. These exon-products are then associated with token patterns.
 
 2.  **Resonance-Based Token Selection:** The system calculates resonance between the current state and exon-products using sophisticated bit-level comparison and orbit cardinality weighting. This ensures that generated tokens are semantically coherent and contextually appropriate.
 

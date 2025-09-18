@@ -47,16 +47,21 @@ class GyroChat:
             
             # Core physics switches
             flags = [
-                ("Slab routing", runtime.get("enable_slab_routing", "not set")),
-                ("DoF jitter", runtime.get("enable_dof_jitter", "not set")),
                 ("Core gate", runtime.get("enable_core_gate", "not set")),
-                ("Phase alignment", runtime.get("enable_phase_alignment", "not set")),
-                ("Chirality guard", runtime.get("enable_chirality_guard", "not set")),
+            ]
+            
+            # Configuration values
+            config_values = [
+                ("Anchor prefix tokens", runtime.get("anchor_prefix_tokens", "not set")),
             ]
             
             for flag_name, value in flags:
                 status = "✅ ENABLED" if value else "❌ DISABLED"
                 print(f"  {flag_name}: {status}")
+            
+            print("\n🔧 Configuration Values:")
+            for config_name, value in config_values:
+                print(f"  {config_name}: {value}")
             
             print()
         except Exception as e:

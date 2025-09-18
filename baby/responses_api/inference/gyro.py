@@ -1,395 +1,378 @@
-# baby/responses_api/inference/gyro.py
-# Streaming wrapper wired to the five-map GyroEngine.
-# No scores / greedy paths; learning only on user content; BU-In is non-deterministic,
-# path- and time-coupled via physics (six DoF + monodromic fold), not RNG.
+"""
+GyroSI Streaming Inference: Walking Model Implementation
+
+This module provides the streaming wrapper for the GyroSI walking engine,
+implementing the complete walking cycle where each emitted token feeds back
+as input to create continuous monodromic navigation through state space.
+
+The walking model implements two primary phases:
+- BU-Egress (Stance): Absorbing and learning from user input
+- BU-Ingress (Swing): Generating output through phase-propagating emission
+
+Walking continues until natural amplitude decay (balance achieved).
+"""
 
 from typing import Callable, Dict, Any, Optional
-import json, threading, collections
+import json
+import threading
+import collections
 from pathlib import Path
 from openai_harmony import StreamableParser, Role
 from baby.kernel.gyro_core import GyroEngine
 from baby.constants.harmony_tokens import MESSAGE, ROLE_USER, ROLE_ASSISTANT, ALL_CONTROL_TOKENS
 
-_engine_lock = threading.RLock()
-
 
 def setup_model(encoding, config_path: str) -> Callable[..., Optional[int]]:
     """
-    Returns infer_next_token(tokens, temperature=..., request_id=..., new_request=...)
-    Engine and sessions are closed over; no module-level globals required.
+    Initialize the GyroSI walking model and return inference function.
+    
+    The returned function implements the complete walking cycle:
+    1. Absorb new tokens (BU-Egress/stance phase)
+    2. Generate next token (BU-Ingress/swing phase) 
+    3. Feed generated token back as input (continuous walking)
+    4. Repeat until natural stopping condition (amplitude = 0)
+    
+    Args:
+        encoding: Tokenizer encoding
+        config_path: Path to configuration file
+        
+    Returns:
+        Inference function that takes tokens and returns next token
     """
-    cfg_path = Path(config_path).resolve()
-    cfg = json.loads(cfg_path.read_text())
-    base = cfg_path.parent
+    # Load configuration
+    config_file = Path(config_path).resolve()
+    config = json.loads(config_file.read_text())
+    base_path = config_file.parent
 
-    def _abs(p: str) -> str:
-        pth = Path(p)
-        cand = (base / pth).resolve()
-        if cand.exists() or cand.parent.exists():
-            return str(cand)
-        alt = (base.parent / pth).resolve()
-        return str(alt)
+    def resolve_path(path: str) -> str:
+        """Resolve relative paths against config file location."""
+        path_obj = Path(path)
+        candidate = (base_path / path_obj).resolve()
+        if candidate.exists() or candidate.parent.exists():
+            return str(candidate)
+        alternative = (base_path.parent / path_obj).resolve()
+        return str(alternative)
 
-    atlas_paths = {k: _abs(v) for k, v in cfg["atlas"].items()}
-    store_paths = {k: _abs(v) for k, v in cfg.get("stores", {}).items()}
-    runtime = cfg.get("runtime", {})
-    version = cfg.get("version", {})
+    # Resolve all paths
+    atlas_paths = {key: resolve_path(value) for key, value in config["atlas"].items()}
+    store_paths = {key: resolve_path(value) for key, value in config.get("stores", {}).items()}
+    runtime_config = config.get("runtime", {})
+    version_info = config.get("version", {})
 
-    with _engine_lock:
-        engine = GyroEngine(
+    # Initialize walking engine
+    engine_lock = threading.RLock()
+    with engine_lock:
+        walking_engine = GyroEngine(
             atlas_paths=atlas_paths,
             store_paths=store_paths,
-            runtime=runtime,
-            version_info=version,
-            vocab_size=201_088,  # o200k_harmony upper bound; safe cap
-            # Core physics switches - configure via runtime settings
-            enable_slab_routing=runtime.get("enable_slab_routing", True),
-            enable_dof_jitter=runtime.get("enable_dof_jitter", False),
-            enable_core_gate=runtime.get("enable_core_gate", True),
+            runtime=runtime_config,
+            version_info=version_info,
+            vocab_size=201_088,  # Harmony tokenizer upper bound
+            enable_core_gate=runtime_config.get("enable_core_gate", True),
         )
 
-    # Per-request session state
-    sessions: Dict[str, Dict[str, Any]] = {}
+    # Session management
+    walking_sessions: Dict[str, Dict[str, Any]] = {}
     sessions_lock = threading.RLock()
-    
 
-    # Harmony tokenization — pure pass-through; no surface forcing
-
-    def _is_user_role(current_role) -> bool:
+    def is_user_role(role) -> bool:
+        """Check if current role is user for learning purposes."""
         try:
-            if current_role == Role.USER:
+            if role == Role.USER:
                 return True
         except Exception:
             pass
-        if current_role == "user" or current_role == ROLE_USER:
+        if role == "user" or role == ROLE_USER:
             return True
-        val = getattr(current_role, "value", None)
-        return val == "user"
+        role_value = getattr(role, "value", None)
+        return role_value == "user"
 
-    def _is_assistant_role(current_role) -> bool:
+    def is_assistant_role(role) -> bool:
+        """Check if current role is assistant for transit purposes."""
         try:
-            if current_role == Role.ASSISTANT:
+            if role == Role.ASSISTANT:
                 return True
         except Exception:
             pass
-        if current_role == "assistant" or current_role == ROLE_ASSISTANT:
+        if role == "assistant" or role == ROLE_ASSISTANT:
             return True
-        val = getattr(current_role, "value", None)
-        return val == "assistant"
+        role_value = getattr(role, "value", None)
+        return role_value == "assistant"
 
-    def _apply_new_tokens(sess: Dict[str, Any], new_tokens: list[int]) -> None:
+    def process_new_tokens(session: Dict[str, Any], new_tokens: list[int]) -> None:
         """
-        Feed only the delta tokens; learn only from user content.
+        Process delta tokens with role-based learning.
+        
+        User tokens trigger learning (BU-Egress), assistant tokens only transit.
         """
-        parser = sess["parser"]
-        user_token_seen = False
-        for tok in new_tokens:
-            parser.process(tok)
+        parser = session["parser"]
+        user_token_encountered = False
+        
+        for token in new_tokens:
+            parser.process(token)
 
-            if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
-                # Egress: fold & step on user tokens
-                print(f"[DEBUG-LEARN] Learning from token {tok} ({encoding.decode([tok])})")
-                prev_state = sess["state"]
-                new_state = engine.evolve_on_user(prev_state, tok)
-                sess["state"] = new_state
-                sess["user_token_count"] = sess.get("user_token_count", 0) + 1
-                user_token_seen = True
-                print(f"[DEBUG-LEARN] State changed from 0x{prev_state:012X} to 0x{new_state:012X}")
+            if is_user_role(parser.current_role) and token not in ALL_CONTROL_TOKENS:
+                # BU-Egress: Learn from user token (stance phase)
+                previous_state = session["state"]
+                new_state = walking_engine.evolve_on_user(previous_state, token)
+                session["state"] = new_state
+                session["user_token_count"] = session.get("user_token_count", 0) + 1
+                user_token_encountered = True
 
+                # Update session-local egress tracking
+                update_egress_tracking(session, token)
 
-                # --- session-local egress mask (geometry-sized) ---
-                # adapt deque length to active slab count of the *new* state
-                sector = engine.sector(sess["state"])
-                A = max(1, bin(sector).count("1"))
-                rq = sess["recent_egress"]
-                if rq.maxlen != A:
-                    prior = list(rq)
-                    rq = collections.deque(prior[-A:], maxlen=A)
-                    sess["recent_egress"] = rq
+                # Capture anchor state at target threshold
+                update_anchor_state(session, new_state)
 
-                # Don't update egress mask during learning - only during emission
+            elif is_assistant_role(parser.current_role) and token not in ALL_CONTROL_TOKENS:
+                # Transit only for assistant tokens (no learning)
+                session["state"] = walking_engine.evolve_on_assistant(session["state"], token)
 
-                # Capture anchor after K user tokens (optional Traceable hook)
-                target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
-                if sess["user_token_count"] == target_k:
-                    sess["user_anchor_state"] = new_state
-                    sess["anchor_last_seen_k"] = sess["user_token_count"]
-                elif sess["user_token_count"] > target_k:
-                    # Update anchor to latest user token state if more tokens arrived
-                    sess["user_anchor_state"] = new_state
-                    sess["anchor_last_seen_k"] = sess["user_token_count"]
-            else:
-                # Ingress transit for assistant content (no learning)
-                sess["state"] = engine.evolve_on_assistant(sess["state"], tok)
+        if user_token_encountered:
+            # Reset anchor application flag when new user content arrives
+            session["anchor_applied"] = False
 
-        if user_token_seen:
-            # Ensure the latest anchor will be applied just before generation
-            sess["anchor_applied"] = False
+    def update_egress_tracking(session: Dict[str, Any], token: int) -> None:
+        """Update session egress tracking with geometry-adaptive sizing."""
+        # Adapt deque size to active slab count
+        sector_signature = walking_engine.compute_sector_signature(session["state"])
+        active_slab_count = max(1, bin(sector_signature).count("1"))
+        
+        current_deque = session["recent_egress"]
+        if current_deque.maxlen != active_slab_count:
+            prior_items = list(current_deque)
+            session["recent_egress"] = collections.deque(
+                prior_items[-active_slab_count:], 
+                maxlen=active_slab_count
+            )
+
+    def update_anchor_state(session: Dict[str, Any], new_state: int) -> None:
+        """Update anchor state based on user token count."""
+        target_threshold = session.get("anchor_target_threshold", 
+                                     int(walking_engine.runtime.get("anchor_prefix_tokens", 12)))
+        
+        if session["user_token_count"] >= target_threshold:
+            session["user_anchor_state"] = new_state
+            session["anchor_last_seen_count"] = session["user_token_count"]
+
+    def initialize_session_for_tokens(session: Dict[str, Any], tokens: list[int]) -> None:
+        """Initialize session with full token history using role parsing."""
+        parser = StreamableParser(encoding, role=Role.USER)
+        
+        for token in tokens:
+            parser.process(token)
+            
+            if is_user_role(parser.current_role) and token not in ALL_CONTROL_TOKENS:
+                previous_state = session["state"]
+                new_state = walking_engine.learn_from_user_token(previous_state, token)
+                session["state"] = new_state
+                session["user_token_count"] = session.get("user_token_count", 0) + 1
+                session["last_user_token"] = token  # Track last user token for adjacency seeding
+                
+                update_egress_tracking(session, token)
+                update_anchor_state(session, new_state)
+                
+            elif is_assistant_role(parser.current_role) and token not in ALL_CONTROL_TOKENS:
+                session["state"] = walking_engine.transit_on_assistant_token(session["state"], token)
+
+        session["parser"] = parser
+        session["fed_length"] = len(tokens)
+
+    def reset_session_state(session: Dict[str, Any]) -> None:
+        """Reset session to initial walking state."""
+        session["state"] = walking_engine.start_state()
+        session["user_token_count"] = 0
+        session["user_anchor_state"] = None
+        session["anchor_last_seen_count"] = 0
+        session["anchor_applied"] = False
+
+        # Reset walking traces
+        session["omega"].clear()
+        session["bucket_key"].clear()
+        session["bucket_position"].clear()
+        session["monodromy"].clear()
+        session["slab_cursor"].clear()
+        
+        # Reset egress tracking
+        session["recent_egress"] = collections.deque(maxlen=1)
+        session["recent_egress_phases"] = []
+        session["walk_phase"] = 0  # NEW: Reset walk momentum
 
     def infer_next_token(tokens: list[int], temperature: float = 0.0, **kwargs) -> Optional[int]:
+        """
+        Main inference function implementing the walking model.
+        
+        Args:
+            tokens: Input token sequence
+            temperature: Ignored (no probabilistic sampling)
+            **kwargs: Additional parameters including request_id, new_request, ingest_only
+            
+        Returns:
+            Next token in the walk, or None if walk is complete
+        """
         request_id: str = kwargs.get("request_id", "__singleton__")
         new_request: bool = kwargs.get("new_request", False)
         ingest_only: bool = kwargs.get("ingest_only", False)
 
         with sessions_lock:
-            sess = sessions.get(request_id)
-            if new_request or sess is None:
-                sess = {
+            session = walking_sessions.get(request_id)
+            
+            if new_request or session is None:
+                # Initialize new walking session
+                session = {
                     "parser": StreamableParser(encoding, role=Role.SYSTEM),
-                    "fed_len": 0,
-                    "state": engine.start_state(),
+                    "fed_length": 0,
+                    "state": walking_engine.start_state(),
                     "bootstrap_step": 0,
                     "user_token_count": 0,
                     "user_anchor_state": None,
-                    "anchor_target_k": int(engine.runtime.get("anchor_prefix_tokens", 12)),
-                    "anchor_last_seen_k": 0,
+                    "anchor_target_threshold": int(walking_engine.runtime.get("anchor_prefix_tokens", 12)),
+                    "anchor_last_seen_count": 0,
                     "anchor_applied": False,
-                    # PPE state scoped per session (now keyed by (rep, slab))
+                    # Walking state (session-scoped to prevent interference)
                     "omega": {},
                     "bucket_key": {},
-                    "bucket_pos": {},
+                    "bucket_position": {},
                     "monodromy": {},
-                    "slab_cursor": {},  # NEW: per-rep round-robin index
-                    "recent_egress": collections.deque(maxlen=1),  # size will be set on first user token
-                    "recent_egress_phases": [],  # Track recently emitted token phases
+                    "slab_cursor": {},
+                    "recent_egress": collections.deque(maxlen=1),
+                    "recent_egress_phases": [],
+                    "walk_phase": 0,  # NEW: Tracks momentum of the current walk
+                    "prev_by_ctx": {},  # Context-scoped predecessor tracking
+                    "last_user_token": None,  # Last user token for adjacency seeding
                 }
-                sessions[request_id] = sess
+                walking_sessions[request_id] = session
 
                 if tokens:
-                    parser = StreamableParser(encoding, role=Role.USER)
-                    for tok in tokens:
-                        parser.process(tok)
-                        print(f"[DEBUG-ROLE] Token {tok} ({encoding.decode([tok])}) - Role: {parser.current_role} - Is user: {_is_user_role(parser.current_role)}")
-                        if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
-                            print(f"[DEBUG-LEARN-NEW] Learning from token {tok} ({encoding.decode([tok])})")
-                            prev_state = sess["state"]
-                            new_state = engine.learn_on_user(prev_state, tok)
-                            sess["state"] = new_state
-                            sess["user_token_count"] = sess.get("user_token_count", 0) + 1
-                            print(f"[DEBUG-LEARN-NEW] State changed from 0x{prev_state:012X} to 0x{new_state:012X}")
-                            
-                            
-                            # --- session-local egress mask (geometry-sized) ---
-                            # adapt deque length to active slab count of the *new* state
-                            sector = engine.sector(sess["state"])
-                            A = max(1, bin(sector).count("1"))
-                            rq = sess["recent_egress"]
-                            if rq.maxlen != A:
-                                prior = list(rq)
-                                rq = collections.deque(prior[-A:], maxlen=A)
-                                sess["recent_egress"] = rq
-
-                            # push token phase and recompute mask via monodromic fold
-                            tphase, _ = engine.token_phase(tok)
-                            rq.append(tphase)
-                            mask = 0
-                            for p in rq:
-                                mask, _ = engine._fold8(mask, p)
-                            # Don't update egress mask during learning - only during emission
-                            
-                            target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
-                            if sess["user_token_count"] == target_k:
-                                sess["user_anchor_state"] = new_state
-                                sess["anchor_last_seen_k"] = sess["user_token_count"]
-                            elif sess["user_token_count"] > target_k:
-                                # Update anchor to latest user token state if more tokens arrived
-                                sess["user_anchor_state"] = new_state
-                                sess["anchor_last_seen_k"] = sess["user_token_count"]
-                        elif _is_assistant_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
-                            sess["state"] = engine.transit_on_assistant(sess["state"], tok)
-                        else:
-                            pass
-                    sess["parser"] = parser
-                    sess["fed_len"] = len(tokens)
+                    initialize_session_for_tokens(session, tokens)
                 else:
-                    sess["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
+                    session["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
             else:
-                # Session exists — handle history shrink or re-render robustly
-                if len(tokens) < sess["fed_len"]:
-                    # Conversation history shrank (likely re-rendered). Resync from scratch deterministically.
+                # Handle existing session
+                if len(tokens) < session["fed_length"]:
+                    # Conversation history shrank - resync from scratch
+                    reset_session_state(session)
                     parser = StreamableParser(encoding, role=Role.SYSTEM)
-
-                    # Reset conversational state while preserving configuration knobs
-                    sess["state"] = engine.start_state()
-                    sess["user_token_count"] = 0
-                    sess["user_anchor_state"] = None
-                    sess["anchor_last_seen_k"] = 0
-                    sess["anchor_applied"] = False
-
-                    # Reset per-session PPE traces (omega/bucket/monodromy)
-                    sess["omega"].clear()
-                    sess["bucket_key"].clear()
-                    sess["bucket_pos"].clear()
-                    sess["monodromy"].clear()
-                    sess["slab_cursor"].clear()
                     
-                    # Reset session egress tracking
-                    sess["recent_egress"] = collections.deque(maxlen=1)
-                    sess["recent_egress_phases"] = []
-
-                    # Re-apply the full token history using Harmony roles
-                    user_token_seen = False
-                    for tok in tokens:
-                        parser.process(tok)
-                        if _is_user_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
-                            user_token_seen = True
-                            prev_state = sess["state"]
-                            new_state = engine.learn_on_user(prev_state, tok)
-                            sess["state"] = new_state
-                            sess["user_token_count"] = sess.get("user_token_count", 0) + 1
-                            
-                            
-                            # --- session-local egress mask (geometry-sized) ---
-                            # adapt deque length to active slab count of the *new* state
-                            sector = engine.sector(sess["state"])
-                            A = max(1, bin(sector).count("1"))
-                            rq = sess["recent_egress"]
-                            if rq.maxlen != A:
-                                prior = list(rq)
-                                rq = collections.deque(prior[-A:], maxlen=A)
-                                sess["recent_egress"] = rq
-
-                            # push token phase and recompute mask via monodromic fold
-                            tphase, _ = engine.token_phase(tok)
-                            rq.append(tphase)
-                            mask = 0
-                            for p in rq:
-                                mask, _ = engine._fold8(mask, p)
-                            # Don't update egress mask during learning - only during emission
-                            
-                            target_k = sess.get("anchor_target_k", int(engine.runtime.get("anchor_prefix_tokens", 12)))
-                            if sess["user_token_count"] == target_k:
-                                sess["user_anchor_state"] = new_state
-                                sess["anchor_last_seen_k"] = sess["user_token_count"]
-                            elif sess["user_token_count"] > target_k:
-                                sess["user_anchor_state"] = new_state
-                                sess["anchor_last_seen_k"] = sess["user_token_count"]
-                        elif _is_assistant_role(parser.current_role) and tok not in ALL_CONTROL_TOKENS:
-                            sess["state"] = engine.transit_on_assistant(sess["state"], tok)
-                        else:
-                            pass
-
-                    sess["parser"] = parser
-                    sess["fed_len"] = len(tokens)
-                    if user_token_seen:
-                        sess["anchor_applied"] = False
-                else:
-                    # Normal delta-feed
-                    delta = tokens[sess["fed_len"] :]
-                    if delta:
-                        _apply_new_tokens(sess, delta)
-                        sess["fed_len"] = len(tokens)
+                    if tokens:
+                        initialize_session_for_tokens(session, tokens)
                     else:
-                        # No new tokens to process, but ensure parser is up to date
-                        if sess.get("parser") is None:
-                            sess["parser"] = StreamableParser(encoding, role=Role.USER)
+                        session["parser"] = parser
+                        session["fed_length"] = 0
+                else:
+                    # Process delta tokens
+                    delta_tokens = tokens[session["fed_length"]:]
+                    if delta_tokens:
+                        process_new_tokens(session, delta_tokens)
+                        session["fed_length"] = len(tokens)
+                    elif session.get("parser") is None:
+                        session["parser"] = StreamableParser(encoding, role=Role.USER)
 
         if ingest_only:
-            # Prepare to open a fresh assistant message on next generation
-            sess["bootstrap_step"] = 0
+            # Prepare for fresh generation
+            session["bootstrap_step"] = 0
             return None
 
-        # Apply one-time anchor (if captured) just before generation
-        anchor_state = sess.get("user_anchor_state")
-        if anchor_state is not None and not sess.get("anchor_applied", False):
-            # Use the latest anchor if more user tokens arrived after target_k
-            target_k = sess.get("anchor_target_k", 12)
-            if sess["user_token_count"] > target_k:
-                # Use latest user token state as anchor
-                sess["state"] = anchor_state
-            else:
-                # Use original K-token anchor
-                sess["state"] = anchor_state
-            sess["anchor_applied"] = True
+        # Apply anchor state before generation (one-time)
+        anchor_state = session.get("user_anchor_state")
+        if anchor_state is not None and not session.get("anchor_applied", False):
+            session["state"] = anchor_state
+            session["anchor_applied"] = True
+            session["walk_phase"] = 0  # NEW: fresh walk from anchor
+            
+            # Seed adjacency with last user token at anchor contexts
+            if session["last_user_token"] is not None:
+                rep = walking_engine.get_orbit_representative(walking_engine.state_to_index[anchor_state])
+                for slab in range(1, 7):  # Exclude boundary slabs 0 and 7
+                    ctx6 = walking_engine._slab_ctx6(anchor_state, slab)
+                    session["prev_by_ctx"][(rep, slab, ctx6)] = session["last_user_token"]
 
-        # --- Channel bootstrap: open final channel/message Traceableally ---
-        if sess.get("parser") is None:
-            sess["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
+        # Handle channel bootstrap sequence
+        if session.get("parser") is None:
+            session["parser"] = StreamableParser(encoding, role=Role.SYSTEM)
 
-        if not sess["parser"].current_channel or not sess["parser"].current_channel.startswith("final"):
-            bootstrap_step = sess.get("bootstrap_step", 0)
-            print(f"[DEBUG-BOOTSTRAP] Current bootstrap step: {bootstrap_step}, channel: {sess['parser'].current_channel}")
+        if not session["parser"].current_channel or not session["parser"].current_channel.startswith("final"):
+            bootstrap_step = session.get("bootstrap_step", 0)
 
             if bootstrap_step == 0:
                 from baby.constants.harmony_tokens import CHANNEL
-
-                sess["bootstrap_step"] = 1
-                sess["parser"].process(CHANNEL)  # Advance parser
-                print(f"[DEBUG-BOOTSTRAP] Returning CHANNEL token: {CHANNEL}")
+                session["bootstrap_step"] = 1
+                session["parser"].process(CHANNEL)
                 return CHANNEL
             elif bootstrap_step == 1:
                 from baby.constants.harmony_tokens import final_channel_id
-
-                sess["bootstrap_step"] = 2
+                session["bootstrap_step"] = 2
                 final_channel = final_channel_id(encoding)
-                sess["parser"].process(final_channel)  # Advance parser
-                print(f"[DEBUG-BOOTSTRAP] Returning final_channel token: {final_channel}")
+                session["parser"].process(final_channel)
                 return final_channel
             elif bootstrap_step == 2:
-                opener = MESSAGE  # <|message|>
-                sess["last_tokens"] = collections.deque(maxlen=8)
-                sess["out_text"] = ""
-                sess["sentence_end"] = True
-                sess["fed_len"] = len(tokens)
-                sess["bootstrap_step"] = 3
-                sess["parser"].process(opener)  # Advance parser
-                print(f"[DEBUG-BOOTSTRAP] Returning MESSAGE token: {opener}")
-                return opener
+                session["bootstrap_step"] = 3
+                session["parser"].process(MESSAGE)
+                return MESSAGE
 
-        # Check if previous walk is complete
-        if sess.get("walk_complete", False):
-            print(f"[DEBUG-WALK] Previous walk complete, starting new walk")
-            sess["walk_complete"] = False
-        
-        # THE WALKING MODEL: BU-In generates, BU-Eg re-ingests, creating continuous monodromy
-        print(f"[DEBUG-WALK] Starting walk from state=0x{sess['state']:012X}")
-        
-        # Single step walking: emit one token, then feed it back as input for next call
-        res = engine.emit_next_from_state(
-            sess["state"],
-            sess["omega"], sess["bucket_key"], sess["bucket_pos"],
-            sess.get("monodromy"), sess.get("recent_egress_phases", []),
-            sess.get("slab_cursor")
+        # Check for previous walk completion
+        if session.get("walk_complete", False):
+            session["walk_complete"] = False
+
+        # THE WALKING MODEL: Single step with feedback
+        # BU-Ingress: Generate next token (swing phase)
+        emission_result = walking_engine.emit_next_from_state(
+            session["state"],
+            session_omega=session["omega"], 
+            session_bucket_key=session["bucket_key"], 
+            session_bucket_position=session["bucket_position"],
+            session_monodromy=session.get("monodromy"), 
+            recent_egress_phases=session.get("recent_egress_phases", []),
+            session_slab_cursor=session.get("slab_cursor"),
+            session_walk_phase=session.get("walk_phase", 0),  # NEW
+            session_prev_by_ctx=session.get("prev_by_ctx"),  # NEW: Context-scoped predecessor
         )
-        if res is None:
-            print(f"[DEBUG-WALK] No coherent paths - walk complete")
+        
+        if emission_result is None:
+            # Natural stopping condition reached
             return None
 
-        next_token, new_state, omega, bucket_key, bucket_pos, monodromy, slab_cursor = res
+        (next_token, _, omega, bucket_key, bucket_position, 
+         monodromy, slab_cursor) = emission_result
         
-        # CRITICAL: Feed the output back as input (this IS the walking!)
-        # The emitted token becomes the next input, creating continuous monodromy
-        print(f"[DEBUG-WALK] Generated token: {next_token}, feeding back as input")
-        sess["state"] = engine.transit_on_assistant(sess["state"], next_token)
+        # CRITICAL: Feed generated token back as input (continuous walking)
+        session["state"] = walking_engine.transit_on_assistant_token(session["state"], next_token)
         
-        # Update session state
-        sess["omega"] = omega
-        sess["bucket_key"] = bucket_key
-        sess["bucket_pos"] = bucket_pos
-        sess["monodromy"] = monodromy
-        sess["slab_cursor"] = slab_cursor
+        # NEW: Update the walk's own momentum
+        token_phase, _ = walking_engine.compute_token_phase(next_token)
+        session["walk_phase"] = walking_engine.monodromic_fold(session["walk_phase"], token_phase)
+        
+        # Walk momentum is used in strides and amplitude checks, not applied to state
+        # This preserves traceability and keeps ctx6 in populated regions
+        
+        # Update session walking state
+        session["omega"] = omega
+        session["bucket_key"] = bucket_key
+        session["bucket_position"] = bucket_position
+        session["monodromy"] = monodromy
+        session["slab_cursor"] = slab_cursor
 
-        # Update egress tracking
-        if engine.enable_core_gate:
-            tphase, _ = engine.token_phase(next_token)
-            phases = sess.get("recent_egress_phases", [])
-            phases.append(tphase)
+        # Update egress phase tracking for refractory gating
+        if walking_engine.enable_core_gate:
+            token_phase, _ = walking_engine.compute_token_phase(next_token)
+            phases = session.get("recent_egress_phases", [])
+            phases.append(token_phase)
             if len(phases) > 8:
                 phases = phases[-8:]
-            sess["recent_egress_phases"] = phases
+            session["recent_egress_phases"] = phases
 
-        # Check for natural stopping condition (amplitude = 0 means lost balance/momentum)
-        cur_idx = engine.state_to_index[sess["state"]]
-        rep_idx = engine.orbit_rep_index(cur_idx)
-        alignment_amp = engine._alignment_amp(sess["state"], rep_idx)
-        print(f"[DEBUG-WALK] After feedback: alignment_amp = {alignment_amp}")
+        # Check for natural stopping condition
+        current_index = walking_engine.state_to_index[session["state"]]
+        representative_index = walking_engine.get_orbit_representative(current_index)
+        alignment_amplitude = walking_engine.compute_alignment_amplitude(
+            session["state"], representative_index, session["walk_phase"]
+        )
         
-        if alignment_amp == 0:
-            print(f"[DEBUG-WALK] Natural stop: amplitude = 0 (walk complete)")
-            # Mark that this walk is complete
-            sess["walk_complete"] = True
+        if alignment_amplitude == 0:
+            # Walk complete - natural balance achieved
+            session["walk_complete"] = True
             
         return next_token
 
     return infer_next_token
-

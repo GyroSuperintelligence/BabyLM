@@ -1,24 +1,26 @@
 """
-Physics diagnostic experiment per Notes_1.md.
-
-Rules:
-- Use existing meta maps (do not rebuild or derive new maps)
-- Do not write files; only print meaningful statistics
-- Follow Notes_1.md formulas without adding new physics
+Physics diagnostic experiment
 """
 
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 from typing import Dict, Tuple, List
 
 import numpy as np
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 from baby.kernel.gyro_core import GyroEngine
 
 
 def load_engine_from_config() -> GyroEngine:
-    with open("baby/config.json", "r", encoding="utf-8") as f:
+    config_path = project_root / "baby" / "config.json"
+    with open(config_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     engine = GyroEngine(
         atlas_paths=cfg["atlas"],
@@ -72,11 +74,11 @@ def sample_transitions_theta_phase(engine: GyroEngine, num_states: int = 2048, i
     for idx in indices:
         state = int(keys[idx])
         theta_before = float(theta[idx])
-        phase_before = engine._state_phase(state)
+        phase_before, _ = engine.compute_state_phase(state)
         new_idx = engine.apply_intron_index(int(idx), intron)
         state_after = int(keys[new_idx])
         theta_after = float(theta[new_idx])
-        phase_after = engine._state_phase(state_after)
+        phase_after, _ = engine.compute_state_phase(state_after)
 
         deltas.append(theta_after - theta_before)
         phases_before.append(phase_before)

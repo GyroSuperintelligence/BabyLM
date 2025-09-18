@@ -75,7 +75,7 @@ This corresponds to the stance phase in walking - absorbing ground reaction forc
 When generating output:
 1. Compute current phase and active slabs
 2. Access stored tokens via context addressing
-3. Walk the ring of available contexts using deterministic rotor
+3. Walk the ring of available contexts using Self-Aligning rotor
 4. Select token that maintains momentum (no scoring)
 5. Update state with selected token
 
@@ -117,7 +117,7 @@ This is endogenous - no external thresholds or limits. The system stops when it 
 From CGM's non-absolute principles:
 - No "best" token exists
 - Selection is constraint-based admissibility
-- Deterministic rotor walk, not optimization
+- Self-Aligning rotor walk, not optimization
 
 ### 6.2 Holographic Sensitivity
 - Each byte transforms entire state
